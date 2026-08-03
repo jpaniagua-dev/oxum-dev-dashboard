@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <!--
+      Locked-down CSP: the renderer only runs code bundled at build time. No remote origin can be
+      reached, so branch names, error text and pull request titles coming from outside cannot
+      trigger a network request.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'"
+    />
+    <title>Oxum Dev Dashboard</title>
+    <link rel="stylesheet" href="./styles/app.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <span class="topbar__title">
+          <span class="topbar__mark" aria-hidden="true"></span>
+          Dev Dashboard
+        </span>
+        <div class="topbar__actions">
+          <span id="last-refresh" class="topbar__meta"></span>
+          <button type="button" id="refresh-button" class="button">Rafraîchir</button>
+          <button
+            type="button"
+            id="terminal-toggle"
+            class="button"
+            aria-pressed="true"
+            title="Afficher ou masquer le terminal"
+          >
+            Terminal
+          </button>
+          <button
+            type="button"
+            id="theme-button"
+            class="icon-button"
+            title="Thème"
+            aria-label="Changer de thème"
+          >
+            <svg id="theme-icon" viewBox="0 0 16 16" aria-hidden="true"></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="panel">
+          <h2 class="panel__title">Projets front</h2>
+          <div class="table-wrap">
+            <table class="table" id="project-table">
+              <thead>
+                <tr>
+                  <th scope="col">Projet</th>
+                  <th scope="col">Serveur</th>
+                  <th scope="col">Fichiers</th>
+                  <th scope="col">Branche</th>
+                  <th scope="col">Checks</th>
+                  <th scope="col" class="table__actions-head">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="project-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel__title">
+            Sessions Claude Code
+            <span id="sessions-count" class="panel__badge"></span>
+          </h2>
+          <div id="session-list" class="session-list"></div>
+        </section>
+      </main>
+
+      <section class="terminal" id="terminal-pane">
+        <div class="terminal__header">
+          <div class="terminal__tabs" id="terminal-tabs"></div>
+          <button type="button" id="terminal-clear" class="button button--quiet">Vider</button>
+        </div>
+        <div class="terminal__surface" id="terminal-surface"></div>
+      </section>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,149 @@
+/*
+ * Design tokens.
+ *
+ * Two complete sets: a light one on `:root` and a dark one under `[data-theme='dark']`. The
+ * main process resolves which is active (including "follow the OS") and stamps the attribute,
+ * so the window background and the page can never disagree.
+ *
+ * Every colour below is a brand palette value. The dark set is not invented: it reuses the
+ * palette's own lighter tints, because the saturated red that anchors the light theme vibrates
+ * against near-black and loses legibility. Same family, appropriate weight for the background.
+ */
+
+:root {
+  /* --- brand ramp, identical in both themes ------------------------------ */
+  --brand-primary: #e61e3c;
+  --brand-primary-light: #ea515b;
+  --brand-primary-medium-light: #f08480;
+  --brand-primary-low-light: #f6b1aa;
+  --brand-primary-extra-light: #fbdad5;
+  --brand-primary-faint: #fdedea;
+
+  --brand-info: #001c99;
+  --brand-success: #469900;
+  --brand-success-light: #8cbe64;
+  --brand-warning: #e75100;
+  --brand-warning-light: #f19c71;
+  --brand-error: #99001c;
+  --brand-error-light: #e2bbc3;
+  --brand-accent: #e2c700;
+
+  --grey-900: #000000;
+  --grey-700: #575757;
+  --grey-500: #878787;
+  --grey-400: #b2b2b2;
+  --grey-200: #dadada;
+  --grey-100: #ededed;
+  --white: #ffffff;
+
+  /* --- light theme (default) -------------------------------------------- */
+  --surface: var(--white);
+  --surface-raised: #fafafa;
+  --surface-inset: var(--grey-100);
+  --surface-hover: #f2f2f2;
+  --border: var(--grey-200);
+  --border-strong: var(--grey-400);
+
+  --text: #1f1f1f;
+  --text-dim: var(--grey-700);
+  --text-faint: var(--grey-500);
+  --text-on-primary: var(--white);
+
+  --primary: var(--brand-primary);
+  --primary-hover: var(--brand-primary-light);
+  --primary-soft: var(--brand-primary-faint);
+  --primary-border: var(--brand-primary-low-light);
+
+  --success: var(--brand-success);
+  --warning: var(--brand-warning);
+  --danger: var(--brand-error);
+  --info: var(--brand-info);
+
+  --selection: var(--brand-primary-extra-light);
+  --active-line: #00000005;
+  --shadow: 0 3px 5px #0000000a, 0 0 2px #0000000d, 0 1px 4px #00000014;
+
+  /* Markdown syntax colours, consumed by the CodeMirror highlight style. Declared as tokens so
+     one highlight definition serves both themes. */
+  --md-heading: #101010;
+  --md-marker: var(--grey-500);
+  --md-strong: var(--brand-primary);
+  --md-emphasis: var(--brand-info);
+  --md-strike: var(--grey-400);
+  --md-link: var(--brand-info);
+  --md-mono: #0a6b52;
+  --md-quote: var(--grey-700);
+  --md-list: var(--brand-primary);
+
+  --code-keyword: #7c2d91;
+  --code-string: #0a6b52;
+  --code-number: var(--brand-warning);
+  --code-comment: var(--grey-500);
+  --code-type: #0b5a8a;
+  --code-property: #1f5ba8;
+  --code-function: #6b3fa0;
+  --code-operator: #0b5a8a;
+  --code-punctuation: var(--grey-700);
+
+  /* --- typography ------------------------------------------------------- */
+  /* Barlow is the intended UI face; it is not a Windows default, so the stack falls back
+     cleanly rather than shipping a font file. */
+  --font-ui: 'Barlow', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+}
+
+:root[data-theme='dark'] {
+  --surface: #131313;
+  --surface-raised: #1b1b1b;
+  --surface-inset: #0e0e0e;
+  --surface-hover: #242424;
+  --border: #2e2e2e;
+  --border-strong: #3d3d3d;
+
+  --text: var(--grey-100);
+  --text-dim: var(--grey-400);
+  --text-faint: var(--grey-500);
+  /* Dark text on the lighter red keeps the button readable; white on it would be too low. */
+  --text-on-primary: #16090b;
+
+  /* The saturated primary is replaced by the palette's own light tint: on near-black, #e61e3c
+     haloes and drops below comfortable contrast, while #ea515b stays on-brand and legible. */
+  --primary: var(--brand-primary-light);
+  --primary-hover: var(--brand-primary-medium-light);
+  --primary-soft: #2a1418;
+  --primary-border: #5c2830;
+
+  /* Same reasoning for the status colours: the dark palette values are unreadable on dark, so
+     each one steps up to its lighter sibling in the ramp. */
+  --success: var(--brand-success-light);
+  --warning: var(--brand-warning-light);
+  --danger: var(--brand-error-light);
+  --info: #b8bfe7;
+
+  --selection: #3a1f26;
+  --active-line: #ffffff06;
+  --shadow: 0 6px 20px #00000066;
+
+  --md-heading: #f2f2f2;
+  --md-marker: var(--grey-500);
+  --md-strong: var(--brand-primary-medium-light);
+  --md-emphasis: #b8bfe7;
+  --md-strike: var(--grey-500);
+  --md-link: #9fb2f0;
+  --md-mono: #7fd6b5;
+  --md-quote: var(--grey-400);
+  --md-list: var(--brand-primary-light);
+
+  --code-keyword: #c792ea;
+  --code-string: #a5d6a7;
+  --code-number: var(--brand-warning-light);
+  --code-comment: #6b7486;
+  --code-type: #8ad3f0;
+  --code-property: #9fc6f5;
+  --code-function: #82c8f8;
+  --code-operator: #89ddff;
+  --code-punctuation: #a7b0c0;
+}

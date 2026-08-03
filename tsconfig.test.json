@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": ["test/**/*.ts", "src/**/*.ts"],
+  "compilerOptions": {
+    // Tests legitimately span both worlds: Vitest runs on Node, yet the suites import renderer
+    // modules. Giving the test project both libs keeps `tsconfig.node.json` DOM-free, so a
+    // main-process file still cannot reach for `document` by accident.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "outDir": "./node_modules/.tmp/tsc-test"
+  }
+}

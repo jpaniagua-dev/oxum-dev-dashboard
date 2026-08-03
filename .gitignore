@@ -1,0 +1,15 @@
+node_modules/
+out/
+release/
+dist/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Local scratch: never commit prompt content.
+*.local.md
+scratch/

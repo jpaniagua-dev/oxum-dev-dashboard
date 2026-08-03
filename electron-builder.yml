@@ -1,0 +1,31 @@
+appId: dev.jpaniagua.oxum-dev-dashboard
+productName: Oxum Dev Dashboard
+copyright: Copyright (c) 2026 Julio Paniagua
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - out/**
+  - '!**/*.map'
+
+# The pty is a native Node-API addon: a `.node` inside the asar cannot be loaded by the OS, so it
+# has to stay unpacked.
+asarUnpack:
+  - '**/*.node'
+  - '**/node_modules/@lydell/**'
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Oxum Dev Dashboard
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}

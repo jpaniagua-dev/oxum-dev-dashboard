@@ -1,0 +1,460 @@
+@import './tokens.css';
+@import '@xterm/xterm/css/xterm.css';
+
+/*
+ * Layout and components. Every colour comes from a token, so switching theme is one attribute on
+ * the root element and nothing here needs to know which theme is active.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  user-select: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ----------------------------------------------------------------- topbar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.topbar__mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar__meta {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- content */
+
+.content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.panel__badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--text-dim);
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+/* ------------------------------------------------------------------ table */
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.table th {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.table__actions-head,
+.table__actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cell-project {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cell-project__name {
+  font-weight: 600;
+}
+
+.cell-project__hint {
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.cell-branch {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-error {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* -------------------------------------------------------------- status pill */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* Neutral, healthy, transitional and broken. Four families rather than a colour per phase, so the
+   table reads at a glance instead of becoming a legend to memorise. */
+.pill--neutral {
+  background: var(--surface-inset);
+  border-color: var(--border);
+  color: var(--text-faint);
+}
+
+.pill--ok {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--success);
+}
+
+.pill--busy {
+  background: var(--surface-inset);
+  border-color: var(--border-strong);
+  color: var(--warning);
+}
+
+.pill--error {
+  background: var(--primary-soft);
+  border-color: var(--primary-border);
+  color: var(--danger);
+}
+
+.pill--info {
+  background: var(--surface-inset);
+  border-color: var(--border-strong);
+  color: var(--info);
+}
+
+/* Something is running that the dashboard did not start: healthy, but not controllable. */
+.pill--external {
+  background: var(--surface-inset);
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.counts {
+  display: inline-flex;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.counts__item {
+  color: var(--text-dim);
+}
+
+.counts__item--dirty {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.counts__item--clean {
+  color: var(--text-faint);
+}
+
+.badge-warn {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- buttons */
+
+.button {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+
+.button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.button--primary {
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--text-on-primary);
+  font-weight: 600;
+}
+
+.button--primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+  color: var(--text-on-primary);
+}
+
+.button--quiet {
+  border-color: transparent;
+  color: var(--text-faint);
+}
+
+.button + .button {
+  margin-left: 4px;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.icon-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* --------------------------------------------------------------- sessions */
+
+.session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session {
+  display: grid;
+  grid-template-columns: 120px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  font-size: 12px;
+}
+
+.session__project {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session__branch {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session__meta {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.empty {
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* --------------------------------------------------------------- terminal */
+
+.terminal {
+  display: flex;
+  flex-direction: column;
+  height: 300px;
+  min-height: 120px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+.terminal[hidden] {
+  display: none;
+}
+
+.terminal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal__tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.terminal__tab {
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.terminal__tab:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.terminal__tab[aria-selected='true'] {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.terminal__surface {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  overflow: hidden;
+  user-select: text;
+}
+
+.terminal__surface .xterm {
+  height: 100%;
+}
