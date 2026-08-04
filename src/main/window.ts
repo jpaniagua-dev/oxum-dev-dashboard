@@ -1,4 +1,5 @@
-import { BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WindowBounds } from '@shared/contracts.js';
 import type { WindowStateStore } from './store/window-state.js';
@@ -29,6 +30,7 @@ export class DashboardWindow {
       minHeight: 560,
       show: false,
       title: 'Oxum Dev Dashboard',
+      ...windowIcon(),
       // Matches the resolved theme: this is the colour painted before the page renders.
       backgroundColor: options.backgroundColor,
       webPreferences: {
@@ -43,6 +45,7 @@ export class DashboardWindow {
     });
 
     window.setMenuBarVisibility(false);
+    forwardConsole(window, 'renderer');
 
     // Any link opens in the real browser rather than hijacking the dashboard.
     window.webContents.setWindowOpenHandler(({ url }) => {
@@ -98,6 +101,55 @@ export class DashboardWindow {
 /** Resolves the preload script path for both dev and packaged runs. */
 export function preloadPath(): string {
   return join(__dirname, '../preload/index.js');
+}
+
+/**
+ * Window icon, and only in development.
+ *
+ * A packaged Windows app takes its icon from the executable, which electron-builder stamps from
+ * `resources/icon.ico`; passing it here as well would be redundant, and the file is not inside the
+ * bundle anyway. Running from source has no executable of its own, so without this the taskbar shows
+ * the default Electron icon all day long.
+ */
+export function windowIcon(): { icon: string } | Record<string, never> {
+  if (app.isPackaged) {
+    return {};
+  }
+  // `__dirname` is `out/main` in development, so the project root is two levels up.
+  const icon = join(__dirname, '../../resources/icon.ico');
+  return existsSync(icon) ? { icon } : {};
+}
+
+/**
+ * Loads one of the renderer pages, from the dev server when there is one and from disk otherwise.
+ *
+ * Shared by both windows: the app now ships two HTML entry points, and duplicating the dev-server
+ * branch is how one of them ends up loading from disk in development and silently missing hot
+ * reload.
+ */
+export async function loadRendererPage(
+  window: BrowserWindow,
+  page: 'index.html' | 'settings.html',
+): Promise<void> {
+  const devServerUrl = process.env.ELECTRON_RENDERER_URL;
+  if (devServerUrl !== undefined && devServerUrl.length > 0) {
+    await window.loadURL(`${devServerUrl.replace(/\/$/, '')}/${page}`);
+    return;
+  }
+  await window.loadFile(join(__dirname, '../renderer', page));
+}
+
+/**
+ * Forwards renderer console output to the main process log.
+ *
+ * Without this, an exception in a renderer is invisible from the terminal running the app: the
+ * window simply behaves oddly with no trace anywhere, which cost real debugging time.
+ */
+export function forwardConsole(window: BrowserWindow, label: string): void {
+  window.webContents.on('console-message', (event) => {
+    const level = event.level === 'error' || event.level === 'warning' ? event.level : 'info';
+    console.log(`[${label}:${level}] ${event.message} (${event.sourceId}:${event.lineNumber})`);
+  });
 }
 
 /** `-1/-1` means "never positioned yet": let Electron centre the window. */

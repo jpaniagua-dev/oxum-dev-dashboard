@@ -70,23 +70,31 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ---------------------------------------------------------------- content */
+/* --------------------------------------------------------------- projects */
 
-.content {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
+/*
+ * The projects list is a status strip, not the main surface: it has a stored height, scrolls when it
+ * grows past that, and yields every remaining pixel to the terminal below.
+ */
+.projects {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  flex: none;
+  height: 250px;
+  min-height: 90px;
+  background: var(--surface);
 }
 
-.panel__title {
+.projects__header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin: 0 0 8px;
+  padding: 7px 12px 5px;
+}
+
+.projects__title {
+  margin: 0;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -94,23 +102,17 @@ body {
   color: var(--text-faint);
 }
 
-.panel__badge {
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--surface-inset);
-  color: var(--text-dim);
-  font-size: 10px;
-  letter-spacing: 0;
-}
-
-/* ------------------------------------------------------------------ table */
-
-.table-wrap {
-  overflow-x: auto;
+.projects__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0 12px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-raised);
 }
+
+/* ------------------------------------------------------------------ table */
 
 .table {
   width: 100%;
@@ -131,7 +133,8 @@ body {
 }
 
 .table td {
-  padding: 8px 10px;
+  /* Compact on purpose: this is a status strip, so fitting more projects beats airy rows. */
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -157,12 +160,35 @@ body {
 }
 
 .cell-project__name {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cell-project__name:hover {
+  color: var(--primary);
+}
+
+/* Sized like the label it replaces, so renaming does not shift the row. */
+.cell-project__input {
+  width: 130px;
+  padding: 2px 5px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
   font-weight: 600;
 }
 
-.cell-project__hint {
-  color: var(--text-faint);
-  font-size: 10.5px;
+.cell-project__input:focus {
+  outline: none;
 }
 
 .cell-branch {
@@ -237,14 +263,6 @@ body {
   background: var(--surface-inset);
   border-color: var(--border-strong);
   color: var(--info);
-}
-
-/* Something is running that the dashboard did not start: healthy, but not controllable. */
-.pill--external {
-  background: var(--surface-inset);
-  border-color: var(--border-strong);
-  color: var(--text-dim);
-  font-style: italic;
 }
 
 .counts {
@@ -343,51 +361,80 @@ body {
   height: 14px;
 }
 
-/* --------------------------------------------------------------- sessions */
+/* --------------------------------------------------------------- settings */
 
-.session-list {
+/*
+ * The settings window's own layout: header and footer pinned, body scrolling.
+ *
+ * This used to be a centred panel over a dimmed backdrop. It is a real window now, so it fills the
+ * frame: no border, no shadow, and the content column simply centred once the window is wide.
+ */
+.settings-page {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  height: 100%;
+  background: var(--surface);
 }
 
-.session {
-  display: grid;
-  grid-template-columns: 120px 1fr auto auto;
+.settings__header {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
   background: var(--surface-raised);
-  font-size: 12px;
 }
 
-.session__project {
-  font-family: var(--font-mono);
-  font-size: 11px;
+.settings__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.session__branch {
+.settings__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Centred with a ceiling: cards stretched across a maximised window would put the label and the
+     Supprimer button a screen apart. */
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.settings__section {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.settings__section-title {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.settings__note {
+  margin: 0 0 10px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.settings__note code {
   font-family: var(--font-mono);
   font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.session__meta {
-  color: var(--text-faint);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.empty {
+.settings__empty {
+  margin: 0 0 10px;
   padding: 10px;
   border: 1px dashed var(--border);
   border-radius: var(--radius);
@@ -395,19 +442,279 @@ body {
   font-size: 12px;
 }
 
-/* --------------------------------------------------------------- terminal */
+.settings__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-raised);
+}
 
-.terminal {
+.settings__status {
+  margin-right: auto;
+  color: var(--warning);
+  font-size: 11.5px;
+}
+
+/* A save confirmation is not a warning, and reusing the amber would read as one. */
+.settings__status--ok {
+  color: var(--text-faint);
+}
+
+.settings__row-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* ------------------------------------------------------------ settings card */
+
+.settings-card {
   display: flex;
   flex-direction: column;
-  height: 300px;
-  min-height: 120px;
-  border-top: 1px solid var(--border);
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+}
+
+/* A configuration with a broken path cannot produce a working row, so it is marked, not hidden. */
+.settings-card--error {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+}
+
+.settings-card__header {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.settings-card__header .settings-field {
+  flex: 1;
+}
+
+.settings-card__title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.settings-card__badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.settings-card__path {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.settings-card__path .settings-field {
+  flex: 1;
+}
+
+/* ------------------------------------------------------- actions per project */
+
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.settings-actions__title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.settings-actions__empty {
+  margin: 0;
+  color: var(--warning);
+  font-size: 11.5px;
+}
+
+/*
+ * One row per action. The command takes the space that is left because it is the field that actually
+ * gets long; the label, the shell and the role are all short and fixed.
+ */
+.settings-action {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 130px 110px auto;
+  align-items: end;
+  gap: 8px;
+  width: 100%;
+}
+
+.settings-action .settings-field {
+  min-width: 0;
+}
+
+.settings-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.settings-card__issues {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.issue {
+  font-size: 11.5px;
+}
+
+.issue--error {
+  color: var(--danger);
+}
+
+.issue--warning {
+  color: var(--warning);
+}
+
+.settings-card__hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ fields */
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/*
+ * Fields that stand on their own above a list of cards rather than inside one.
+ * Cards carry their own bottom margin, so without this they sat glued to the first of them.
+ */
+.settings-field--section {
+  margin-bottom: 14px;
+}
+
+/* The profile picker takes the width it needs; the font size is two digits and asks for no more. */
+.settings-terminal-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 130px;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.settings-terminal-row .settings-field--section {
+  margin-bottom: 0;
+}
+
+.settings-field__label {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-field__input {
+  padding: 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.settings-field__input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/* -------------------------------------------------------------- candidates */
+
+.settings-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--surface-inset);
 }
 
-.terminal[hidden] {
+.settings-candidate {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.settings-candidate__label {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.settings-candidate__meta {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* ---------------------------------------------------------------- resizer */
+
+/*
+ * A 5px grab strip with a wider invisible hit area: a real terminal needs to be resizable, and a
+ * 1px border is impossible to grab reliably.
+ */
+.resizer {
+  height: 5px;
+  flex: none;
+  background: var(--border);
+  cursor: ns-resize;
+}
+
+.resizer:hover,
+.resizer:focus-visible {
+  background: var(--primary);
+  outline: none;
+}
+
+.resizer[hidden] {
   display: none;
+}
+
+/* --------------------------------------------------------------- terminal */
+
+/* The terminal takes every pixel the projects strip does not need. */
+.terminal {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 120px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-inset);
 }
 
 .terminal__header {
@@ -421,18 +728,20 @@ body {
 
 .terminal__tabs {
   display: flex;
+  align-items: center;
   gap: 2px;
+  flex-wrap: wrap;
 }
 
 .terminal__tab {
-  padding: 3px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background: transparent;
   color: var(--text-faint);
-  font-family: inherit;
   font-size: 11.5px;
-  cursor: pointer;
 }
 
 .terminal__tab:hover {
@@ -440,14 +749,168 @@ body {
   color: var(--text);
 }
 
-.terminal__tab[aria-selected='true'] {
+.terminal__tab--active {
   background: var(--surface);
   border-color: var(--border);
   color: var(--primary);
   font-weight: 600;
 }
 
+/* --------------------------------------------------------- tab reordering */
+
+.terminal__tab-label {
+  cursor: grab;
+}
+
+/* A row opens its repository's terminal, so it has to look like it does something. */
+.table__row {
+  cursor: pointer;
+}
+
+.terminal__tab--dragging {
+  opacity: 0.45;
+}
+
+/*
+ * The insertion marker is an inset shadow rather than a border: a border would change the tab's box
+ * and shift the whole strip sideways on every dragover, which reads as the tabs fleeing the cursor.
+ */
+.terminal__tab--drop-before {
+  box-shadow: inset 2px 0 0 0 var(--primary);
+}
+
+.terminal__tab--drop-after {
+  box-shadow: inset -2px 0 0 0 var(--primary);
+}
+
+.terminal__tab-label {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 1px 2px;
+  cursor: pointer;
+}
+
+/* Sized to the tab it replaces, so renaming does not make the strip jump. */
+.terminal__tab-input {
+  width: 110px;
+  padding: 1px 4px;
+  border: 1px solid var(--primary);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.terminal__tab-input:focus {
+  outline: none;
+}
+
+/* Marks a live process, so a finished tab is visibly inert rather than looking active. */
+.terminal__tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex: none;
+}
+
+.terminal__tab-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.terminal__tab-close:hover {
+  background: var(--primary-soft);
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------- new tab control */
+
+.terminal__new {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+}
+
+.terminal__new-button,
+.terminal__new-caret {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+/* Grid so the drawn chevron sits on the same optical line as the `+` beside it. */
+.terminal__new-caret {
+  display: grid;
+  place-items: center;
+  padding: 3px 4px;
+}
+
+.terminal__new-caret svg {
+  width: 11px;
+  height: 11px;
+}
+
+.terminal__new-button:hover,
+.terminal__new-caret:hover {
+  background: var(--surface-hover);
+  color: var(--primary);
+}
+
+.terminal__menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  min-width: 150px;
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+
+.terminal__menu-item {
+  padding: 5px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.terminal__menu-item:hover {
+  background: var(--surface-hover);
+  color: var(--primary);
+}
+
 .terminal__surface {
+  position: relative;
   flex: 1;
   min-height: 0;
   padding: 6px 8px;
@@ -455,6 +918,20 @@ body {
   user-select: text;
 }
 
-.terminal__surface .xterm {
+/*
+ * One permanent container per project. They are stacked and toggled with `hidden` rather than being
+ * added and removed: xterm's `open()` refuses to re-attach a terminal that already has an element,
+ * so detaching one leaves it alive but invisible forever.
+ */
+.terminal__view {
+  position: absolute;
+  inset: 6px 8px;
+}
+
+.terminal__view[hidden] {
+  display: none;
+}
+
+.terminal__view .xterm {
   height: 100%;
 }

@@ -1,4 +1,4 @@
-import type { ChecksState, GitState, ServerState, SessionStatus } from '@shared/contracts.js';
+import type { ChecksState, GitState, ServerState } from '@shared/contracts.js';
 
 /**
  * Turns domain state into what the table shows.
@@ -8,7 +8,7 @@ import type { ChecksState, GitState, ServerState, SessionStatus } from '@shared/
  * tested for that reason.
  */
 
-export type PillTone = 'neutral' | 'ok' | 'busy' | 'error' | 'info' | 'external';
+export type PillTone = 'neutral' | 'ok' | 'busy' | 'error' | 'info';
 
 export interface Pill {
   readonly label: string;
@@ -52,12 +52,6 @@ export function presentServer(server: ServerState): Pill {
       };
     case 'crashed':
       return { label: 'crash', tone: 'error', title: 'Le processus s’est arrêté seul' };
-    case 'external':
-      return {
-        label: server.port === null ? 'externe' : `externe :${server.port}`,
-        tone: 'external',
-        title: 'Lancé hors du dashboard, non contrôlable ici',
-      };
   }
 }
 
@@ -66,9 +60,16 @@ export function canStop(server: ServerState): boolean {
   return server.owned && server.phase !== 'stopped' && server.phase !== 'crashed';
 }
 
-/** True when starting makes sense: nothing of ours is running and nobody else holds the port. */
+/**
+ * True when starting makes sense: nothing of ours is already running.
+ *
+ * Deliberately says nothing about who else might hold the port. The dashboard used to detect servers
+ * started elsewhere and disable the button; now that every launch goes through its own terminal, that
+ * detection was noise. The trade-off is explicit: if something outside still holds the port, the
+ * action starts and fails with the address already in use, visibly, in its own tab.
+ */
 export function canStart(server: ServerState): boolean {
-  return !server.owned && server.phase !== 'external';
+  return !server.owned;
 }
 
 /** Label and tone for the checks column. */
@@ -112,21 +113,6 @@ export function presentChecks(checks: ChecksState | null, git: GitState | null):
       };
     case 'unknown':
       return { label: '?', tone: 'neutral', title: checks.error ?? 'État inconnu' };
-  }
-}
-
-/** Label and tone for a Claude Code session. */
-export function presentSession(status: SessionStatus): Pill {
-  switch (status) {
-    case 'working':
-      return { label: 'travaille', tone: 'busy', title: 'Tour en cours' };
-    case 'waiting':
-      return { label: 'attend', tone: 'ok', title: 'En attente de ta réponse' };
-    case 'idle':
-      // Sessions stay open for days; without this they would all read as active forever.
-      return { label: 'dormante', tone: 'neutral', title: 'Ouverte mais inactive' };
-    case 'ended':
-      return { label: 'terminée', tone: 'neutral', title: 'Plus aucun processus' };
   }
 }
 
@@ -175,17 +161,3 @@ export function presentGit(git: GitState | null): GitSummary {
   return { parts, warning: flags.length > 0 ? flags.join(' ') : null };
 }
 
-/** Compact relative time for the session list. */
-export function formatIdle(minutes: number): string {
-  if (minutes < 1) {
-    return 'à l’instant';
-  }
-  if (minutes < 60) {
-    return `il y a ${Math.round(minutes)} min`;
-  }
-  const hours = minutes / 60;
-  if (hours < 48) {
-    return `il y a ${Math.round(hours)} h`;
-  }
-  return `il y a ${Math.round(hours / 24)} j`;
-}

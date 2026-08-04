@@ -11,4 +11,6 @@ export const AppPaths = {
   userData: (): string => app.getPath('userData'),
   settings: (): string => join(app.getPath('userData'), 'settings.json'),
   windowState: (): string => join(app.getPath('userData'), 'window-state.json'),
+  settingsWindowState: (): string =>
+    join(app.getPath('userData'), 'settings-window-state.json'),
 } as const;

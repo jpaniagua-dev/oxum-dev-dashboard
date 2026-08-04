@@ -28,4 +28,19 @@ win:
   target:
     - target: nsis
       arch: [x64]
+    - target: portable
+      arch: [x64]
+    # Measured on this machine: the single-file portable unpacks ~100 MB into `%TEMP%` on *every*
+    # launch and takes about 26 s to show a window, against 9,6 s once unpacked. The zip is the
+    # install-free option that does not pay that price: unpack it once, run the exe inside.
+    - target: zip
+      arch: [x64]
   artifactName: ${productName}-${version}-${arch}.${ext}
+
+# The portable build needs a name of its own: both targets produce a `.exe`, so leaving them on the
+# shared pattern above would have them fight over the same file name.
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+  # Same identity as the installed build, so both read the settings in `AppData\Roaming`: the point of
+  # the portable build here is not to be isolated, it is not to require an install.
+  requestExecutionLevel: user

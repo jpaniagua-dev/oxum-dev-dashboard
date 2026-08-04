@@ -1,7 +1,7 @@
 {
   "name": "oxum-dev-dashboard",
-  "version": "0.1.0",
-  "description": "One window telling you the state of your front-end projects: dev servers, git, GitHub checks and Claude Code sessions.",
+  "version": "1.0.0",
+  "description": "A terminal with a status strip above it: dev servers, git and GitHub checks for your front-end projects, every action running in a tab of that terminal.",
   "author": "Julio Paniagua",
   "license": "UNLICENSED",
   "private": true,
@@ -10,7 +10,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev --watch",
     "start": "electron-vite preview",
     "build": "npm run typecheck && electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.test.json",

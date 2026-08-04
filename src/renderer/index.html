@@ -15,6 +15,11 @@
     <link rel="stylesheet" href="./styles/app.css" />
   </head>
   <body>
+    <!--
+      The terminal is the centre of this window, not a drawer at the bottom. The projects list sits
+      above it as a compact status strip whose actions all land in a terminal tab, so nothing ever
+      sends the user to an external console.
+    -->
     <div class="app">
       <header class="topbar">
         <span class="topbar__title">
@@ -26,12 +31,23 @@
           <button type="button" id="refresh-button" class="button">Rafraîchir</button>
           <button
             type="button"
-            id="terminal-toggle"
-            class="button"
-            aria-pressed="true"
-            title="Afficher ou masquer le terminal"
+            id="settings-button"
+            class="icon-button"
+            title="Réglages"
+            aria-label="Ouvrir les réglages"
           >
-            Terminal
+            <!--
+              A solid eight-tooth gear with the hub punched out by `evenodd`.
+              The previous icon drew its teeth at 28% opacity, which at 14px read as a faint smudge
+              rather than a gear. One shape at full contrast is what makes it legible at this size.
+            -->
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path
+                fill="currentColor"
+                fill-rule="evenodd"
+                d="M6.53 2.7L6.91 0.73L9.09 0.73L9.47 2.7L10.71 3.21L12.37 2.09L13.91 3.63L12.79 5.29L13.3 6.53L15.27 6.91L15.27 9.09L13.3 9.47L12.79 10.71L13.91 12.37L12.37 13.91L10.71 12.79L9.47 13.3L9.09 15.27L6.91 15.27L6.53 13.3L5.29 12.79L3.63 13.91L2.09 12.37L3.21 10.71L2.7 9.47L0.73 9.09L0.73 6.91L2.7 6.53L3.21 5.29L2.09 3.63L3.63 2.09L5.29 3.21ZM8 5.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0 -4.5Z"
+              />
+            </svg>
           </button>
           <button
             type="button"
@@ -45,34 +61,38 @@
         </div>
       </header>
 
-      <main class="content">
-        <section class="panel">
-          <h2 class="panel__title">Projets front</h2>
-          <div class="table-wrap">
-            <table class="table" id="project-table">
-              <thead>
-                <tr>
-                  <th scope="col">Projet</th>
-                  <th scope="col">Serveur</th>
-                  <th scope="col">Fichiers</th>
-                  <th scope="col">Branche</th>
-                  <th scope="col">Checks</th>
-                  <th scope="col" class="table__actions-head">Actions</th>
-                </tr>
-              </thead>
-              <tbody id="project-tbody"></tbody>
-            </table>
-          </div>
-        </section>
+      <section class="projects" id="projects-pane">
+        <div class="projects__header">
+          <h2 class="projects__title">Projets</h2>
+          <button type="button" id="add-project" class="button" title="Ajouter un dossier de projet">
+            + Projet
+          </button>
+        </div>
+        <div class="projects__scroll">
+          <table class="table" id="project-table">
+            <thead>
+              <tr>
+                <th scope="col">Projet</th>
+                <th scope="col">Serveur</th>
+                <th scope="col">Fichiers</th>
+                <th scope="col">Branche</th>
+                <th scope="col">Checks</th>
+                <th scope="col" class="table__actions-head">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="project-tbody"></tbody>
+          </table>
+        </div>
+      </section>
 
-        <section class="panel">
-          <h2 class="panel__title">
-            Sessions Claude Code
-            <span id="sessions-count" class="panel__badge"></span>
-          </h2>
-          <div id="session-list" class="session-list"></div>
-        </section>
-      </main>
+      <div
+        class="resizer"
+        id="projects-resizer"
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Redimensionner la liste des projets"
+        tabindex="0"
+      ></div>
 
       <section class="terminal" id="terminal-pane">
         <div class="terminal__header">

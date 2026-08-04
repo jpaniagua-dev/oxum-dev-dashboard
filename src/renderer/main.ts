@@ -1,15 +1,15 @@
 import type {
   AppSettings,
-  ClaudeSession,
   Project,
   ProjectId,
   ProjectRow,
+  ShellProfile,
   ThemeMode,
   ThemeState,
 } from '@shared/contracts.js';
 import { requireElement } from './ui/dom.js';
+import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
-import { renderSessionList } from './ui/session-list.js';
 import { TerminalPane } from './ui/terminal-pane.js';
 
 /**
@@ -21,45 +21,90 @@ import { TerminalPane } from './ui/terminal-pane.js';
 class App {
   private projects: readonly Project[] = [];
   private rows: readonly ProjectRow[] = [];
-  private sessions: readonly ClaudeSession[] = [];
+  private profiles: readonly ShellProfile[] = [];
   private settings: AppSettings | null = null;
   private theme: ThemeState = { mode: 'system', resolved: 'light' };
   private terminal: TerminalPane | null = null;
-  /** Projects whose buffered output has already been replayed into their terminal. */
-  private readonly replayed = new Set<ProjectId>();
+  /** Terminals whose buffered output has already been replayed, so it is not duplicated. */
+  private readonly replayed = new Set<string>();
+  /**
+   * True while an inline rename is open in the table.
+   *
+   * The table is rebuilt on every git poll, which is every ten seconds. Without this guard a refresh
+   * landing mid-typing would replace the input and throw the half-typed name away.
+   */
+  private editingRow = false;
 
   async start(): Promise<void> {
     const bootstrap = await window.api.bootstrap();
     this.projects = bootstrap.projects;
     this.settings = bootstrap.settings;
+    this.profiles = bootstrap.shellProfiles;
     this.applyTheme(bootstrap.theme);
 
-    this.terminal = new TerminalPane(
-      requireElement('terminal-tabs'),
-      requireElement('terminal-surface'),
-      this.projects,
-      (projectId, data) => window.api.sendPtyInput(projectId, data),
-      (projectId, cols, rows) => window.api.resizePty(projectId, { cols, rows }),
-    );
-    this.terminal.mount(this.theme.resolved);
-    this.setTerminalVisible(bootstrap.settings.showTerminal);
+    this.terminal = new TerminalPane(requireElement('terminal-tabs'), requireElement('terminal-surface'), {
+      onInput: (terminalId, data) => window.api.sendPtyInput(terminalId, data),
+      onResize: (terminalId, cols, rows) => window.api.resizePty(terminalId, { cols, rows }),
+      onClose: (terminalId) => void window.api.closeTerminal(terminalId),
+      onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
+      onNewShell: (profileId) => void this.openShell(profileId),
+      // Reported rather than dropped: an `invoke` on a channel the main process does not know rejects,
+      // and a bare `void` would turn that into an unhandled rejection nobody sees. That is precisely
+      // how a stale main process makes a gesture look inert instead of broken.
+      onReorder: (orderedIds) => {
+        window.api.reorderTerminals(orderedIds).catch((error: unknown) => {
+          console.error('[terminal] reordonnancement refuse:', error);
+        });
+      },
+    });
+    this.terminal.setTheme(this.theme.resolved);
+    this.terminal.setFontSize(bootstrap.settings.terminalFontSize);
+    this.terminal.setProfiles(this.profiles);
+    // Adopt whatever is already running before deciding to open anything.
+    this.terminal.setSessions(bootstrap.terminals);
 
     this.bindChrome();
+    this.bindResizer(bootstrap.settings.projectsHeight);
     this.renderTable();
-    this.renderSessions();
 
     window.api.onRowsChanged((rows) => {
       this.rows = rows;
       this.renderTable();
       this.stampRefresh();
     });
-    window.api.onSessionsChanged((sessions) => {
-      this.sessions = sessions;
-      this.renderSessions();
-    });
-    window.api.onPtyOutput(({ projectId, data }) => this.terminal?.write(projectId, data));
+    window.api.onTerminalsChanged((sessions) => this.terminal?.setSessions(sessions));
+    window.api.onPtyOutput(({ terminalId, data }) => this.terminal?.write(terminalId, data));
     window.api.onThemeChanged((state) => this.applyTheme(state));
 
+    this.rows = await window.api.refreshNow();
+    this.renderTable();
+    this.stampRefresh();
+
+    // Open a shell straight away, but only when there is none: the pane should be usable as a
+    // terminal immediately, without stacking a new tab on every renderer reload.
+    if (bootstrap.terminals.length === 0) {
+      const preferred = this.settings?.defaultShellProfileId ?? '';
+      const profile = this.profiles.find((entry) => entry.id === preferred) ?? this.profiles[0];
+      if (profile !== undefined) {
+        await this.openShell(profile.id);
+      }
+    }
+  }
+
+  /**
+   * Re-reads everything after a settings change.
+   *
+   * Refetching the whole bootstrap rather than patching each field: the project list, the profiles
+   * and the tab strip all derive from it, and the change may come from the settings window, where no
+   * local knowledge of what changed is available.
+   */
+  private async reloadAfterSettings(): Promise<void> {
+    const bootstrap = await window.api.bootstrap();
+    this.projects = bootstrap.projects;
+    this.settings = bootstrap.settings;
+    this.profiles = bootstrap.shellProfiles;
+    this.terminal?.setProfiles(this.profiles);
+    this.terminal?.setFontSize(bootstrap.settings.terminalFontSize);
     this.rows = await window.api.refreshNow();
     this.renderTable();
     this.stampRefresh();
@@ -68,27 +113,26 @@ class App {
   /* ---------------------------------------------------------------- render */
 
   private renderTable(): void {
+    if (this.editingRow) {
+      // A rename is open: the refresh is dropped rather than queued, since the next poll is seconds
+      // away and will show the same data.
+      return;
+    }
     renderProjectTable(requireElement('project-tbody'), this.rows, {
-      onStart: (projectId) => void this.startProject(projectId),
-      onStop: (projectId) => void window.api.stopPty(projectId),
-      onCommit: (projectId) => void this.runCommit(projectId),
+      onRunAction: (projectId, actionId) => void this.runAction(projectId, actionId),
+      onRename: (projectId, label) => void this.renameProject(projectId, label),
+      onEditingChange: (editing) => {
+        this.editingRow = editing;
+      },
+      onStop: (projectId) => void this.stopProject(projectId),
       onOpenPr: (url) => void window.api.openExternal(url),
       onOpenFolder: (projectId) => void window.api.openFolder(projectId),
+      onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
     });
   }
 
-  private renderSessions(): void {
-    renderSessionList(requireElement('session-list'), this.sessions);
-    const active = this.sessions.filter(
-      (session) => session.status === 'working' || session.status === 'waiting',
-    ).length;
-    requireElement('sessions-count').textContent =
-      this.sessions.length === 0 ? '' : `${active} active(s) / ${this.sessions.length}`;
-  }
-
   private stampRefresh(): void {
-    const now = new Date();
-    requireElement('last-refresh').textContent = `maj ${now.toLocaleTimeString('fr-CH', {
+    requireElement('last-refresh').textContent = `maj ${new Date().toLocaleTimeString('fr-CH', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -97,35 +141,100 @@ class App {
 
   /* --------------------------------------------------------------- actions */
 
+  /** Runs one of a project's actions and brings its tab forward. */
+  private async runAction(projectId: ProjectId, actionId: string): Promise<void> {
+    const terminalId = await window.api.runAction(projectId, actionId);
+    if (terminalId !== null) {
+      await this.focusTerminal(terminalId);
+    }
+  }
+
   /**
-   * Starts a project and brings its terminal forward.
+   * Stops the project's server action.
    *
-   * Switching tabs matters: the user clicked Run to watch something happen, and leaving another
-   * project's terminal visible would look like nothing did.
+   * One call naming the project, no session hunting here. The renderer used to look up the server
+   * action and then the session carrying its id, and both hops returned nothing without a word when
+   * the two sides disagreed about the shape of a session: `Stop` became a button that did nothing.
+   * The main process holds the sessions and the roles, so it answers the question.
    */
-  private async startProject(projectId: ProjectId): Promise<void> {
-    this.setTerminalVisible(true);
-    this.terminal?.select(projectId);
-    await this.replayBuffer(projectId);
-    await window.api.runPty(projectId, 'start');
+  private async stopProject(projectId: ProjectId): Promise<void> {
+    const stopped = await window.api.stopProjectServer(projectId);
+    if (!stopped) {
+      console.warn(`[stop] rien à arrêter pour ${projectId}`);
+    }
   }
 
-  private async runCommit(projectId: ProjectId): Promise<void> {
-    this.setTerminalVisible(true);
-    this.terminal?.select(projectId);
-    await this.replayBuffer(projectId);
-    await window.api.runPty(projectId, 'commit');
+  private async openShell(profileId: string): Promise<void> {
+    const terminalId = await window.api.openShell({ profileId });
+    if (terminalId !== null) {
+      await this.focusTerminal(terminalId);
+    }
   }
 
-  /** Replays output produced before this terminal was first shown, once per project. */
-  private async replayBuffer(projectId: ProjectId): Promise<void> {
-    if (this.replayed.has(projectId)) {
+  /**
+   * Opens the repository's shell, or brings back the one already open there.
+   *
+   * Triggered by a click anywhere on the row, and by the `>_` button. The main process resolves the
+   * project, the profile and the existing tab: doing it here meant three lookups the renderer had no
+   * authority over, and reuse could not be decided at all.
+   */
+  private async openShellInProject(projectId: ProjectId): Promise<void> {
+    const terminalId = await window.api.openProjectShell(projectId);
+    if (terminalId !== null) {
+      await this.focusTerminal(terminalId);
+    }
+  }
+
+  /**
+   * Renames a project.
+   *
+   * Only the label changes; the id stays derived from the folder, which is what keeps a running
+   * terminal attached to the row it belongs to.
+   */
+  private async renameProject(projectId: ProjectId, label: string): Promise<void> {
+    if (this.settings === null) {
       return;
     }
-    this.replayed.add(projectId);
-    const buffer = await window.api.readPtyBuffer(projectId);
-    if (buffer.length > 0) {
-      this.terminal?.reset(projectId, buffer);
+    // No explicit reload: saving makes the main process rebuild and broadcast, and the handler for
+    // that event refreshes the view.
+    await window.api.saveProjects(
+      this.settings.projects.map((project) =>
+        project.id === projectId ? { ...project, label } : project,
+      ),
+    );
+  }
+
+  /**
+   * Adds a project straight from the main view.
+   *
+   * A folder is all the dashboard needs: the type and the port come from the repository's own
+   * `package.json`, so the fast path is a picker rather than the settings window. The entry itself is
+   * built by the main process, which is the single definition of what a new project looks like.
+   */
+  private async addProject(): Promise<void> {
+    const picked = await window.api.pickFolder('Dossier du projet à ajouter');
+    if (picked === null || this.settings === null) {
+      return;
+    }
+
+    const config = await window.api.buildProjectConfig(picked);
+    if (this.settings.projects.some((project) => project.id === config.id)) {
+      // Already watched: switching to its terminal is more useful than a duplicate row.
+      void this.openShellInProject(config.id);
+      return;
+    }
+
+    await window.api.saveProjects([...this.settings.projects, config]);
+  }
+
+  private async focusTerminal(terminalId: string): Promise<void> {
+    this.terminal?.select(terminalId);
+    if (!this.replayed.has(terminalId)) {
+      this.replayed.add(terminalId);
+      const buffer = await window.api.readPtyBuffer(terminalId);
+      if (buffer.length > 0) {
+        this.terminal?.reset(terminalId, buffer);
+      }
     }
   }
 
@@ -140,12 +249,6 @@ class App {
       });
     });
 
-    requireElement<HTMLButtonElement>('terminal-toggle').addEventListener('click', () => {
-      const next = !(this.settings?.showTerminal ?? true);
-      this.setTerminalVisible(next);
-      void window.api.updateSettings({ showTerminal: next });
-    });
-
     requireElement<HTMLButtonElement>('terminal-clear').addEventListener('click', () => {
       this.terminal?.clearActive();
     });
@@ -153,24 +256,40 @@ class App {
     requireElement<HTMLButtonElement>('theme-button').addEventListener('click', () => {
       void this.cycleTheme();
     });
+
+    requireElement<HTMLButtonElement>('add-project').addEventListener('click', () => {
+      void this.addProject();
+    });
+
+    requireElement<HTMLButtonElement>('settings-button').addEventListener('click', () => {
+      void window.api.openSettings();
+    });
+
+    /*
+     * Settings now change from another window, so this event is the only signal that anything moved.
+     * The whole view is rebuilt from it rather than patching the local copy: the project list, the
+     * table and the new-tab menu all derive from settings, and guessing which ones changed is how
+     * they drift apart.
+     */
+    window.api.onSettingsChanged((settings) => {
+      this.settings = settings;
+      void this.reloadAfterSettings();
+    });
   }
 
-  private setTerminalVisible(visible: boolean): void {
-    if (this.settings !== null) {
-      this.settings = { ...this.settings, showTerminal: visible };
-    }
-    requireElement('terminal-pane').hidden = !visible;
-    requireElement<HTMLButtonElement>('terminal-toggle').setAttribute(
-      'aria-pressed',
-      String(visible),
-    );
-    if (visible) {
-      const active = this.terminal?.activeProject ?? this.projects[0]?.id;
-      if (active !== undefined) {
-        // Re-selecting re-fits: xterm cannot measure itself while its container is hidden.
-        this.terminal?.select(active);
-      }
-    }
+  private bindResizer(initialHeight: number): void {
+    attachPaneResizer({
+      handle: requireElement('projects-resizer'),
+      pane: requireElement('projects-pane'),
+      initialHeight,
+      onResize: () => this.terminal?.refit(),
+      onCommit: (height) => {
+        if (this.settings !== null) {
+          this.settings = { ...this.settings, projectsHeight: Math.round(height) };
+        }
+        void window.api.updateSettings({ projectsHeight: Math.round(height) });
+      },
+    });
   }
 
   /* ------------------------------------------------------------------ theme */
@@ -178,13 +297,12 @@ class App {
   private applyTheme(state: ThemeState): void {
     this.theme = state;
     document.documentElement.dataset.theme = state.resolved;
-    this.terminal?.applyTheme(state.resolved);
+    this.terminal?.setTheme(state.resolved);
     this.renderThemeIcon();
   }
 
   private async cycleTheme(): Promise<void> {
-    const next = nextThemeMode(this.theme.mode);
-    this.applyTheme(await window.api.setThemeMode(next));
+    this.applyTheme(await window.api.setThemeMode(nextThemeMode(this.theme.mode)));
   }
 
   private renderThemeIcon(): void {
@@ -250,4 +368,8 @@ function describeThemeMode(mode: ThemeMode): string {
   }
 }
 
-void new App().start();
+// A rejected bootstrap used to fail silently, leaving the window up but half-initialised with no
+// trace anywhere. Reporting it is what makes such a failure findable.
+void new App().start().catch((error: unknown) => {
+  console.error('[bootstrap] echec du demarrage du renderer:', error);
+});

@@ -3,11 +3,17 @@ import { clearChildren, createElement } from './dom.js';
 import { canStart, canStop, presentChecks, presentGit, presentServer, type Pill } from './presenters.js';
 
 export interface TableActions {
-  onStart: (projectId: ProjectId) => void;
+  /** Runs one of the project's configured actions. */
+  onRunAction: (projectId: ProjectId, actionId: string) => void;
+  /** Commits a new label for the project. */
+  onRename: (projectId: ProjectId, label: string) => void;
+  /** Called when an inline edit opens or closes, so the caller can pause re-rendering. */
+  onEditingChange: (editing: boolean) => void;
   onStop: (projectId: ProjectId) => void;
-  onCommit: (projectId: ProjectId) => void;
   onOpenPr: (url: string) => void;
   onOpenFolder: (projectId: ProjectId) => void;
+  /** Opens a shell already sitting in the repository. */
+  onOpenTerminal: (projectId: ProjectId) => void;
 }
 
 /**
@@ -40,21 +46,32 @@ export function renderProjectTable(
   }
 }
 
+/**
+ * Controls that own their click, so the row must not act on it too.
+ *
+ * Matched with `closest` rather than by comparing to a list of known elements: it keeps working when a
+ * control is added later, and it covers the two conflicts that matter. A click on any action button
+ * would otherwise both run the action and open a shell; and double-clicking the project name to rename
+ * it fires two clicks, so the row would open a terminal and steal the focus from the input that just
+ * appeared.
+ */
+const INTERACTIVE = 'button, input, select, a, textarea';
+
 function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
   const tr = createElement('tr');
+  tr.className = 'table__row';
+  tr.title = 'Clic : ouvrir le terminal de ce dépôt';
+  tr.addEventListener('click', (event) => {
+    if (!(event.target instanceof Element) || event.target.closest(INTERACTIVE) !== null) {
+      return;
+    }
+    actions.onOpenTerminal(row.project.id);
+  });
 
-  // Project
+  // Project. The port is deliberately not repeated here: the server pill already shows it as
+  // `sert :4201` when it matters, and a static "port 4200" said nothing the pill did not.
   const projectCell = createElement('td');
-  const projectBox = createElement('div', { className: 'cell-project' });
-  projectBox.append(
-    createElement('span', { className: 'cell-project__name', text: row.project.label }),
-    createElement('span', {
-      className: 'cell-project__hint',
-      // Says out loud why this row has no port, instead of leaving an unexplained blank.
-      text: row.project.kind === 'watch' ? 'build --watch, sans port' : `port ${row.project.expectedPort ?? '?'}`,
-    }),
-  );
-  projectCell.append(projectBox);
+  projectCell.append(buildProjectName(row, actions));
   tr.append(projectCell);
 
   // Server
@@ -128,31 +145,49 @@ function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
   return tr;
 }
 
+/**
+ * The action buttons of one row.
+ *
+ * The list comes from the project's configuration, in its declared order. Only the `server` action is
+ * special: while it runs it is replaced by `Stop`, because a second click on it would do nothing
+ * useful and the row needs a way to end what it started. Everything after the configured actions is a
+ * built-in that opens something rather than running a command, so it is not part of the editable list.
+ */
 function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment {
   const fragment = document.createDocumentFragment();
 
-  if (canStop(row.server)) {
-    const stop = createElement('button', { className: 'button', text: 'Stop' });
-    stop.type = 'button';
-    stop.addEventListener('click', () => actions.onStop(row.project.id));
-    fragment.append(stop);
-  } else {
-    const start = createElement('button', { className: 'button button--primary', text: 'Run' });
+  for (const action of row.project.actions) {
+    if (action.role !== 'server') {
+      const button = createElement('button', { className: 'button', text: action.label });
+      button.type = 'button';
+      button.title = action.command;
+      button.addEventListener('click', () => actions.onRunAction(row.project.id, action.id));
+      fragment.append(button);
+      continue;
+    }
+
+    if (canStop(row.server)) {
+      const stop = createElement('button', { className: 'button', text: 'Stop' });
+      stop.type = 'button';
+      stop.title = `Arrête « ${action.label} »`;
+      stop.addEventListener('click', () => actions.onStop(row.project.id));
+      fragment.append(stop);
+      continue;
+    }
+
+    const start = createElement('button', {
+      className: 'button button--primary',
+      text: action.label,
+    });
     start.type = 'button';
     start.disabled = !canStart(row.server);
-    if (!canStart(row.server)) {
-      // Explains the disabled button instead of leaving the user guessing.
-      start.title = 'Un serveur tourne déjà hors du dashboard';
-    }
-    start.addEventListener('click', () => actions.onStart(row.project.id));
+    // Explains the disabled button instead of leaving the user guessing.
+    start.title = canStart(row.server)
+      ? action.command
+      : 'Un serveur tourne déjà hors du dashboard';
+    start.addEventListener('click', () => actions.onRunAction(row.project.id, action.id));
     fragment.append(start);
   }
-
-  const commit = createElement('button', { className: 'button', text: 'Commit' });
-  commit.type = 'button';
-  commit.title = 'Lance ton alias commit dans le terminal';
-  commit.addEventListener('click', () => actions.onCommit(row.project.id));
-  fragment.append(commit);
 
   const prUrl = row.checks?.prUrl ?? null;
   const pr = createElement('button', { className: 'button', text: 'PR' });
@@ -164,6 +199,14 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
   }
   fragment.append(pr);
 
+  const terminal = createElement('button', { className: 'button', text: '>_' });
+  terminal.type = 'button';
+  // Same gesture as a click on the row, kept as a button because a row is not focusable and this is the
+  // only way to reach the action from the keyboard.
+  terminal.title = 'Terminal de ce dépôt';
+  terminal.addEventListener('click', () => actions.onOpenTerminal(row.project.id));
+  fragment.append(terminal);
+
   const folder = createElement('button', { className: 'button button--quiet', text: '…' });
   folder.type = 'button';
   folder.title = 'Ouvrir le dossier';
@@ -171,6 +214,67 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
   fragment.append(folder);
 
   return fragment;
+}
+
+/**
+ * The project name, renameable in place on a double-click.
+ *
+ * Enter commits, Escape cancels, blur commits: clicking away after typing a name is far more common
+ * than wanting to discard it. The caller is told when an edit opens so it can hold off re-rendering,
+ * because this table refreshes on every git poll and would otherwise wipe the field mid-typing.
+ */
+function buildProjectName(row: ProjectRow, actions: TableActions): HTMLElement {
+  const host = createElement('span', { className: 'cell-project' });
+
+  const label = createElement('button', {
+    className: 'cell-project__name',
+    text: row.project.label,
+    title: `${row.project.path}
+(double-clic pour renommer)`,
+  });
+  label.type = 'button';
+
+  label.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    actions.onEditingChange(true);
+
+    const input = createElement('input', { className: 'cell-project__input' });
+    input.type = 'text';
+    input.value = row.project.label;
+    input.setAttribute('aria-label', 'Renommer le projet');
+
+    let settled = false;
+    const finish = (accept: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      actions.onEditingChange(false);
+      if (accept && input.value.trim().length > 0 && input.value.trim() !== row.project.label) {
+        actions.onRename(row.project.id, input.value.trim());
+      } else {
+        input.replaceWith(label);
+      }
+    };
+
+    input.addEventListener('keydown', (event2) => {
+      if (event2.key === 'Enter') {
+        event2.preventDefault();
+        finish(true);
+      } else if (event2.key === 'Escape') {
+        event2.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => finish(true));
+
+    label.replaceWith(input);
+    input.focus();
+    input.select();
+  });
+
+  host.append(label);
+  return host;
 }
 
 /** Builds a status pill with its coloured dot. */

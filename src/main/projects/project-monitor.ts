@@ -10,7 +10,6 @@ import type {
 import { readChecksState } from '../github/checks-service.js';
 import { readGitState } from '../git/git-service.js';
 import type { ParsedOutput } from './output-parser.js';
-import { isPortListening, isSameRepo, listListeningNodeServers } from './port-probe.js';
 
 /**
  * A partial update to a server state.
@@ -70,11 +69,9 @@ export class ProjectMonitor {
   start(): void {
     void this.refreshGit();
     void this.refreshChecks();
-    void this.refreshExternalServers();
 
     this.gitTimer = setInterval(() => {
       void this.refreshGit();
-      void this.refreshExternalServers();
     }, this.settings().gitPollSeconds * 1000);
 
     this.checksTimer = setInterval(() => {
@@ -95,7 +92,7 @@ export class ProjectMonitor {
 
   /** Forces a full refresh, for the manual refresh button. */
   async refreshAll(): Promise<ProjectRow[]> {
-    await Promise.all([this.refreshGit(), this.refreshChecks(), this.refreshExternalServers()]);
+    await Promise.all([this.refreshGit(), this.refreshChecks()]);
     return this.rows();
   }
 
@@ -154,54 +151,6 @@ export class ProjectMonitor {
       port: null,
       owned: false,
     });
-  }
-
-  /**
-   * Detects servers the dashboard did not start.
-   *
-   * Without this, a project already served from a terminal would show as stopped, which is worse
-   * than showing nothing: the dashboard would be actively wrong. Owned processes are never
-   * overwritten here, since their pty output is a better source.
-   */
-  private async refreshExternalServers(): Promise<void> {
-    const listening = await listListeningNodeServers();
-    let changed = false;
-
-    for (const project of this.projects) {
-      const current = this.servers.get(project.id) ?? idleServer();
-      if (current.owned) {
-        continue;
-      }
-
-      const match = listening.find((server) => isSameRepo(server.repoPath, project.path));
-      if (match !== undefined) {
-        if (current.phase !== 'external' || current.port !== match.port) {
-          this.servers.set(project.id, {
-            ...current,
-            phase: 'external',
-            pid: match.pid,
-            port: match.port,
-            owned: false,
-          });
-          changed = true;
-        }
-        continue;
-      }
-
-      // A `watch` project opens no port, so its absence here proves nothing about it.
-      if (current.phase === 'external') {
-        const stillUp =
-          project.expectedPort !== null && (await isPortListening(project.expectedPort));
-        if (!stillUp) {
-          this.servers.set(project.id, idleServer());
-          changed = true;
-        }
-      }
-    }
-
-    if (changed) {
-      this.emit();
-    }
   }
 
   private patchServer(projectId: ProjectId, patch: ServerPatch): void {

@@ -1,5 +1,21 @@
 import { readFile } from 'node:fs/promises';
-import type { AppSettings, ThemeMode, WindowBounds } from '@shared/contracts.js';
+import {
+  TERMINAL_FONT_SIZE,
+  type ActionRole,
+  type AppSettings,
+  type ProjectAction,
+  type ProjectConfig,
+  type ShellProfile,
+  type ThemeMode,
+  type WindowBounds,
+} from '@shared/contracts.js';
+import {
+  DEFAULT_PROJECTS_ROOT,
+  defaultActions,
+  makeActionId,
+  makeId,
+} from '../projects/project-id.js';
+import { sanitizeProfile } from '../terminal/shell-profiles.js';
 import { atomicWriteFile, fileExists } from './atomic-write.js';
 
 /**
@@ -13,10 +29,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
   themeMode: 'system',
   gitPollSeconds: 10,
   checksPollSeconds: 60,
-  sessionsPollSeconds: 5,
-  // Sessions stay open for days. Below this threshold a session counts as active; above it, idle.
-  sessionIdleMinutes: 5,
-  showTerminal: true,
+  // The terminal is the centre of the window, so the projects pane is the one with a stored height.
+  // 250 shows the three seeded projects without a scrollbar, which is the point of a status strip.
+  projectsHeight: 250,
+  defaultShellProfileId: 'git-bash',
+  terminalFontSize: TERMINAL_FONT_SIZE.default,
+  shellProfiles: [],
+  projectsRoot: DEFAULT_PROJECTS_ROOT,
+  // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
+  // default here would come back every time the user deleted a project.
+  projects: [],
 };
 
 export const DEFAULT_BOUNDS: WindowBounds = { x: -1, y: -1, width: 1180, height: 760 };
@@ -76,28 +98,143 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       15,
       3600,
     ),
-    sessionsPollSeconds: clamp(
-      asNumber(input.sessionsPollSeconds, DEFAULT_SETTINGS.sessionsPollSeconds),
-      2,
-      600,
+    // Clamped so a hand-edited value cannot hide the table or swallow the terminal.
+    projectsHeight: clamp(asNumber(input.projectsHeight, DEFAULT_SETTINGS.projectsHeight), 90, 1200),
+    defaultShellProfileId: asString(
+      input.defaultShellProfileId,
+      DEFAULT_SETTINGS.defaultShellProfileId,
     ),
-    sessionIdleMinutes: clamp(
-      asNumber(input.sessionIdleMinutes, DEFAULT_SETTINGS.sessionIdleMinutes),
-      1,
-      1440,
+    // Clamped rather than trusted: a hand-edited `2` would make the terminal unreadable with no way to
+    // fix it from the app, since the settings window would be the thing you can no longer read.
+    terminalFontSize: clamp(
+      Math.round(asNumber(input.terminalFontSize, TERMINAL_FONT_SIZE.default)),
+      TERMINAL_FONT_SIZE.min,
+      TERMINAL_FONT_SIZE.max,
     ),
-    showTerminal: asBoolean(input.showTerminal, DEFAULT_SETTINGS.showTerminal),
+    shellProfiles: asProfiles(input.shellProfiles),
+    projectsRoot: asString(input.projectsRoot, DEFAULT_SETTINGS.projectsRoot),
+    projects: asProjects(input.projects),
   };
+}
+
+/**
+ * Validates the project list.
+ *
+ * A missing label falls back to the folder name and a missing action list to the defaults, so an
+ * entry hand-written with the bare minimum still works. Entries without an id or a path are dropped:
+ * there is nothing sensible to infer for either.
+ */
+function asProjects(value: unknown): ProjectConfig[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const result: ProjectConfig[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const input = entry as Record<string, unknown>;
+    if (typeof input.path !== 'string' || input.path.length === 0) {
+      continue;
+    }
+    const folder = input.path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'projet';
+    const id = typeof input.id === 'string' && input.id.length > 0 ? input.id : makeId(folder);
+
+    result.push({
+      id,
+      label: typeof input.label === 'string' && input.label.length > 0 ? input.label : folder,
+      path: input.path,
+      // `startScript` is the pre-actions shape of this file. Reading it here is what makes an existing
+      // configuration migrate silently instead of losing a customised start script.
+      actions: asActions(
+        input.actions,
+        typeof input.startScript === 'string' && input.startScript.length > 0
+          ? input.startScript
+          : 'start',
+      ),
+      kind: input.kind === 'server' || input.kind === 'watch' ? input.kind : null,
+      expectedPort:
+        typeof input.expectedPort === 'number' && Number.isFinite(input.expectedPort)
+          ? input.expectedPort
+          : null,
+      enabled: typeof input.enabled === 'boolean' ? input.enabled : true,
+    });
+  }
+  return result;
+}
+
+/**
+ * Validates a project's action list.
+ *
+ * Exported for testing, and the place where two invariants are enforced rather than hoped for: ids
+ * are unique, and **at most one action is a `server`**. A row holds a single server state, so a second
+ * server action would have two processes writing the same phase and the last one to print would win.
+ * Extras are demoted rather than dropped, so the command the user wrote is never lost silently.
+ */
+export function asActions(value: unknown, startScript = 'start'): ProjectAction[] {
+  if (!Array.isArray(value)) {
+    return defaultActions(startScript);
+  }
+
+  const result: ProjectAction[] = [];
+  let serverTaken = false;
+
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+    const input = entry as Record<string, unknown>;
+    const command = typeof input.command === 'string' ? input.command.trim() : '';
+    if (command.length === 0) {
+      // An action with no command has no reason to exist, and its button would do nothing.
+      continue;
+    }
+    const label =
+      typeof input.label === 'string' && input.label.trim().length > 0
+        ? input.label.trim()
+        : command.slice(0, 20);
+    const requested: ActionRole = input.role === 'server' ? 'server' : 'task';
+    const role: ActionRole = requested === 'server' && !serverTaken ? 'server' : 'task';
+    if (role === 'server') {
+      serverTaken = true;
+    }
+
+    result.push({
+      id:
+        typeof input.id === 'string' && input.id.length > 0 && !result.some((a) => a.id === input.id)
+          ? input.id
+          : makeActionId(label, result.map((action) => action.id)),
+      label,
+      command,
+      role,
+      profileId: typeof input.profileId === 'string' && input.profileId.length > 0 ? input.profileId : null,
+    });
+  }
+
+  // An empty list would leave a row with no buttons at all, which reads as a broken dashboard rather
+  // than a deliberate choice.
+  return result.length > 0 ? result : defaultActions(startScript);
+}
+
+/** Drops malformed profiles instead of letting one reach `pty.spawn`. */
+function asProfiles(value: unknown): ShellProfile[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => sanitizeProfile(entry))
+    .filter((profile): profile is ShellProfile => profile !== null);
+}
+
+function asString(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.length > 0 ? value : fallback;
 }
 
 function asThemeMode(value: unknown): ThemeMode {
   return value === 'light' || value === 'dark' || value === 'system'
     ? value
     : DEFAULT_SETTINGS.themeMode;
-}
-
-function asBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback;
 }
 
 function asNumber(value: unknown, fallback: number): number {

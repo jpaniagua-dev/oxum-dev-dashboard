@@ -33,6 +33,36 @@ export function createElement<K extends keyof HTMLElementTagNameMap>(
   return element;
 }
 
+/**
+ * Builds an inline icon from a single path.
+ *
+ * SVG needs `createElementNS`: an `<svg>` created with `createElement` lands in the HTML namespace
+ * and renders as nothing at all, silently.
+ */
+export function createIcon(
+  path: string,
+  options: { paint?: 'fill' | 'stroke'; viewBox?: string } = {},
+): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', options.viewBox ?? '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const shape = document.createElementNS(ns, 'path');
+  shape.setAttribute('d', path);
+  if (options.paint === 'stroke') {
+    shape.setAttribute('fill', 'none');
+    shape.setAttribute('stroke', 'currentColor');
+    shape.setAttribute('stroke-width', '1.6');
+    shape.setAttribute('stroke-linecap', 'round');
+    shape.setAttribute('stroke-linejoin', 'round');
+  } else {
+    shape.setAttribute('fill', 'currentColor');
+  }
+  svg.append(shape);
+  return svg;
+}
+
 /** Removes every child of a node. */
 export function clearChildren(element: HTMLElement): void {
   element.replaceChildren();

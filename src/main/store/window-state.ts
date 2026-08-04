@@ -12,17 +12,25 @@ import { DEFAULT_BOUNDS } from './settings-store.js';
  * broken shortcut.
  */
 export class WindowStateStore {
-  constructor(private readonly filePath: string) {}
+  /**
+   * @param defaults Size to fall back to. Passed in because the settings window is a different
+   * shape from the dashboard, and a store that only ever knew the dashboard's bounds would open it
+   * at the wrong size on first launch.
+   */
+  constructor(
+    private readonly filePath: string,
+    private readonly defaults: WindowBounds = DEFAULT_BOUNDS,
+  ) {}
 
   async load(): Promise<WindowBounds> {
     if (!fileExists(this.filePath)) {
-      return { ...DEFAULT_BOUNDS };
+      return { ...this.defaults };
     }
     try {
       const raw: unknown = JSON.parse(await readFile(this.filePath, 'utf8'));
-      return validateBounds(raw);
+      return validateBounds(raw, this.defaults);
     } catch {
-      return { ...DEFAULT_BOUNDS };
+      return { ...this.defaults };
     }
   }
 
@@ -36,20 +44,20 @@ export class WindowStateStore {
 }
 
 /** Falls back to defaults unless the bounds are sane and land on a connected display. */
-function validateBounds(raw: unknown): WindowBounds {
+function validateBounds(raw: unknown, defaults: WindowBounds): WindowBounds {
   if (typeof raw !== 'object' || raw === null) {
-    return { ...DEFAULT_BOUNDS };
+    return { ...defaults };
   }
   const input = raw as Record<string, unknown>;
   const bounds: WindowBounds = {
-    x: typeof input.x === 'number' ? Math.round(input.x) : DEFAULT_BOUNDS.x,
-    y: typeof input.y === 'number' ? Math.round(input.y) : DEFAULT_BOUNDS.y,
-    width: typeof input.width === 'number' ? Math.round(input.width) : DEFAULT_BOUNDS.width,
-    height: typeof input.height === 'number' ? Math.round(input.height) : DEFAULT_BOUNDS.height,
+    x: typeof input.x === 'number' ? Math.round(input.x) : defaults.x,
+    y: typeof input.y === 'number' ? Math.round(input.y) : defaults.y,
+    width: typeof input.width === 'number' ? Math.round(input.width) : defaults.width,
+    height: typeof input.height === 'number' ? Math.round(input.height) : defaults.height,
   };
 
   if (bounds.width < 380 || bounds.height < 260) {
-    return { ...DEFAULT_BOUNDS };
+    return { ...defaults };
   }
   if (bounds.x === -1 && bounds.y === -1) {
     return bounds;
@@ -65,5 +73,5 @@ function validateBounds(raw: unknown): WindowBounds {
     );
   });
 
-  return visible ? bounds : { ...DEFAULT_BOUNDS };
+  return visible ? bounds : { ...defaults };
 }
