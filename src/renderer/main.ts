@@ -1,15 +1,24 @@
 import type {
   AppSettings,
+  JiraIssue,
+  JiraState,
+  JiraViewId,
   Project,
   ProjectId,
   ProjectRow,
+  RepoPulls,
   ShellProfile,
+  StripTab,
   ThemeMode,
   ThemeState,
 } from '@shared/contracts.js';
+import { showContextMenu } from './ui/context-menu.js';
 import { requireElement } from './ui/dom.js';
+import { renderJiraList } from './ui/jira-list.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
+import { renderPullList } from './ui/pull-list.js';
+import { StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
 
 /**
@@ -34,6 +43,13 @@ class App {
    * landing mid-typing would replace the input and throw the half-typed name away.
    */
   private editingRow = false;
+  private pulls: readonly RepoPulls[] = [];
+  /** Repository selected in the pull request tab, so a refresh does not jump back to the first. */
+  private selectedRepo: ProjectId | null = null;
+  private jira: JiraState | null = null;
+  private selectedJiraView: JiraViewId = 'mine';
+  private strip: StripTabs | null = null;
+  private resizer: { setHeight: (height: number) => void } | null = null;
 
   async start(): Promise<void> {
     const bootstrap = await window.api.bootstrap();
@@ -56,23 +72,46 @@ class App {
           console.error('[terminal] reordonnancement refuse:', error);
         });
       },
+      onLayout: (panes, direction) => {
+        window.api.setTerminalLayout(panes, direction).catch((error: unknown) => {
+          console.error('[terminal] disposition refusee:', error);
+        });
+      },
+      onSplitShell: (cwd, direction) => void this.splitShell(cwd, direction),
+      onCopy: (text) => void window.api.writeClipboard(text),
+      onPasteRequest: () => window.api.readClipboard(),
     });
     this.terminal.setTheme(this.theme.resolved);
     this.terminal.setFontSize(bootstrap.settings.terminalFontSize);
     this.terminal.setProfiles(this.profiles);
-    // Adopt whatever is already running before deciding to open anything.
+    // Adopt whatever is already running before deciding to open anything, sessions first: the layout
+    // names sessions, so a layout applied to an empty strip would resolve to nothing.
     this.terminal.setSessions(bootstrap.terminals);
+    this.terminal.setLayout(bootstrap.layout);
 
+    this.pulls = bootstrap.pulls;
+    this.jira = bootstrap.jira;
     this.bindChrome();
-    this.bindResizer(bootstrap.settings.projectsHeight);
+    this.bindStrip(bootstrap.settings);
     this.renderTable();
+    this.renderPulls();
+    this.renderJira();
 
     window.api.onRowsChanged((rows) => {
       this.rows = rows;
       this.renderTable();
       this.stampRefresh();
     });
+    window.api.onPullsChanged((repos) => {
+      this.pulls = repos;
+      this.renderPulls();
+    });
+    window.api.onJiraChanged((state) => {
+      this.jira = state;
+      this.renderJira();
+    });
     window.api.onTerminalsChanged((sessions) => this.terminal?.setSessions(sessions));
+    window.api.onTerminalLayoutChanged((layout) => this.terminal?.setLayout(layout));
     window.api.onPtyOutput(({ terminalId, data }) => this.terminal?.write(terminalId, data));
     window.api.onThemeChanged((state) => this.applyTheme(state));
 
@@ -125,10 +164,98 @@ class App {
         this.editingRow = editing;
       },
       onStop: (projectId) => void this.stopProject(projectId),
-      onOpenPr: (url) => void window.api.openExternal(url),
       onOpenFolder: (projectId) => void window.api.openFolder(projectId),
       onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
     });
+  }
+
+  private renderJira(): void {
+    if (this.jira === null) {
+      return;
+    }
+    renderJiraList(
+      { views: requireElement('jira-views'), list: requireElement('jira-list') },
+      this.jira,
+      this.selectedJiraView,
+      {
+        onOpen: (url) => void window.api.openExternal(url),
+        onSelect: (view) => {
+          this.selectedJiraView = view;
+          this.renderJira();
+        },
+        onMenu: (issue, x, y) => void this.openIssueMenu(issue, x, y),
+      },
+    );
+  }
+
+  /**
+   * The actions of one issue: assigning it to yourself and moving it.
+   *
+   * The transitions are asked for **when the menu opens**, not cached: a workflow decides which moves are
+   * legal from the current status, so a cached list would offer moves Jira would then refuse. The cost is
+   * one request per right-click, which is the right trade for never lying about what is possible.
+   */
+  private async openIssueMenu(issue: JiraIssue, x: number, y: number): Promise<void> {
+    const transitions = await window.api.jiraTransitions(issue.key);
+    const items = [
+      {
+        label: issue.isMine ? 'Déjà assigné à toi' : 'M’assigner ce ticket',
+        disabled: issue.isMine,
+        run: () => void this.runJiraWrite(() => window.api.assignJiraToMe(issue.key)),
+      },
+      ...transitions.map((transition) => ({
+        label: `Passer en « ${transition.label} »`,
+        run: () =>
+          void this.runJiraWrite(() => window.api.transitionJira(issue.key, transition.id)),
+      })),
+      {
+        label: 'Ouvrir dans le navigateur',
+        run: () => void window.api.openExternal(issue.url),
+      },
+    ];
+    if (transitions.length === 0) {
+      items.splice(1, 0, {
+        // Says why rather than showing a menu that looks broken: no transitions usually means the
+        // connection failed, not that the issue is frozen.
+        label: 'Aucune transition disponible',
+        disabled: true,
+        run: () => {},
+      });
+    }
+    showContextMenu(x, y, items);
+  }
+
+  /** Runs a Jira write and reports its outcome where the user is looking. */
+  private async runJiraWrite(write: () => Promise<{ ok: boolean; message: string }>): Promise<void> {
+    const result = await write();
+    this.stampMessage(result.message);
+    if (!result.ok) {
+      console.warn('[jira]', result.message);
+    }
+  }
+
+  /** Shows a short-lived message in the top bar, next to the refresh stamp. */
+  private stampMessage(message: string): void {
+    requireElement('last-refresh').textContent = message;
+    window.setTimeout(() => this.stampRefresh(), 4000);
+  }
+
+  private renderPulls(): void {
+    renderPullList(
+      { repos: requireElement('pulls-repos'), list: requireElement('pulls-list') },
+      this.pulls,
+      this.selectedRepo,
+      {
+        // Same gesture as a click on a project row, and it goes through the same reuse path: seeing a
+        // pull request usually means going to work on it.
+        onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
+        onOpenPull: (url) => void window.api.openExternal(url),
+        onSelect: (projectId) => {
+          this.selectedRepo = projectId;
+          this.renderPulls();
+        },
+      },
+    );
   }
 
   private stampRefresh(): void {
@@ -161,6 +288,25 @@ class App {
     const stopped = await window.api.stopProjectServer(projectId);
     if (!stopped) {
       console.warn(`[stop] rien à arrêter pour ${projectId}`);
+    }
+  }
+
+  /**
+   * Opens a shell for a split, in the directory of the pane being divided.
+   *
+   * Deliberately not routed through `focusTerminal`: that one gives the new session the focused pane,
+   * which is exactly what a split must not do. The pane is added beside it instead.
+   */
+  private async splitShell(cwd: string, direction: 'columns' | 'rows'): Promise<void> {
+    const preferred = this.settings?.defaultShellProfileId ?? '';
+    const profile = this.profiles.find((entry) => entry.id === preferred) ?? this.profiles[0];
+    if (profile === undefined) {
+      return;
+    }
+    const terminalId = await window.api.openShell({ profileId: profile.id, cwd });
+    if (terminalId !== null) {
+      this.terminal?.addPane(terminalId, direction);
+      await this.replayBuffer(terminalId);
     }
   }
 
@@ -229,12 +375,23 @@ class App {
 
   private async focusTerminal(terminalId: string): Promise<void> {
     this.terminal?.select(terminalId);
-    if (!this.replayed.has(terminalId)) {
-      this.replayed.add(terminalId);
-      const buffer = await window.api.readPtyBuffer(terminalId);
-      if (buffer.length > 0) {
-        this.terminal?.reset(terminalId, buffer);
-      }
+    await this.replayBuffer(terminalId);
+  }
+
+  /**
+   * Replays what a session printed before its view existed, once and only once.
+   *
+   * A tab can collect output long before it is ever displayed, and a view created on first display
+   * would otherwise start empty and lose everything the process had already said.
+   */
+  private async replayBuffer(terminalId: string): Promise<void> {
+    if (this.replayed.has(terminalId)) {
+      return;
+    }
+    this.replayed.add(terminalId);
+    const buffer = await window.api.readPtyBuffer(terminalId);
+    if (buffer.length > 0) {
+      this.terminal?.reset(terminalId, buffer);
     }
   }
 
@@ -242,6 +399,24 @@ class App {
 
   private bindChrome(): void {
     requireElement<HTMLButtonElement>('refresh-button').addEventListener('click', () => {
+      // Refreshes whichever view is on screen: on the pull request tab, the project poll is not what the
+      // button is being pressed for.
+      if (this.strip?.active === 'pulls') {
+        void window.api.refreshPulls().then((repos) => {
+          this.pulls = repos;
+          this.renderPulls();
+          this.stampRefresh();
+        });
+        return;
+      }
+      if (this.strip?.active === 'jira') {
+        void window.api.refreshJira().then((state) => {
+          this.jira = state;
+          this.renderJira();
+          this.stampRefresh();
+        });
+        return;
+      }
       void window.api.refreshNow().then((rows) => {
         this.rows = rows;
         this.renderTable();
@@ -277,19 +452,40 @@ class App {
     });
   }
 
-  private bindResizer(initialHeight: number): void {
-    attachPaneResizer({
+  /**
+   * The strip: its two tabs and its resizer, which share one state.
+   *
+   * The height is written to the key of the **active** tab, and applied again on every tab change. One
+   * resizer for both, because there is only ever one strip: a second instance would fight the first over
+   * the same element.
+   */
+  private bindStrip(settings: AppSettings): void {
+    this.resizer = attachPaneResizer({
       handle: requireElement('projects-resizer'),
       pane: requireElement('projects-pane'),
-      initialHeight,
+      initialHeight: heightOf(settings, settings.activeStrip),
       onResize: () => this.terminal?.refit(),
       onCommit: (height) => {
+        const rounded = Math.round(height);
+        const key = heightKeyOf(this.strip?.active ?? 'projects');
         if (this.settings !== null) {
-          this.settings = { ...this.settings, projectsHeight: Math.round(height) };
+          this.settings = { ...this.settings, [key]: rounded };
         }
-        void window.api.updateSettings({ projectsHeight: Math.round(height) });
+        void window.api.updateSettings({ [key]: rounded });
       },
     });
+
+    this.strip = new StripTabs({
+      onChange: (tab) => {
+        if (this.settings !== null) {
+          this.resizer?.setHeight(heightOf(this.settings, tab));
+        }
+        void window.api.updateSettings({ activeStrip: tab });
+        // The terminal's geometry changed with the strip's: without this its pty keeps the old size.
+        this.terminal?.refit();
+      },
+    });
+    this.strip.adopt(settings.activeStrip);
   }
 
   /* ------------------------------------------------------------------ theme */
@@ -345,6 +541,30 @@ const THEME_ICONS: Record<ThemeMode, { path: string; paint: 'fill' | 'stroke' }>
     paint: 'fill',
   },
 };
+
+/** Remembered height of one strip tab. */
+function heightOf(settings: AppSettings, tab: StripTab): number {
+  switch (tab) {
+    case 'pulls':
+      return settings.pullsHeight;
+    case 'jira':
+      return settings.jiraHeight;
+    case 'projects':
+      return settings.projectsHeight;
+  }
+}
+
+/** Settings key that stores a tab's height. */
+function heightKeyOf(tab: StripTab): 'projectsHeight' | 'pullsHeight' | 'jiraHeight' {
+  switch (tab) {
+    case 'pulls':
+      return 'pullsHeight';
+    case 'jira':
+      return 'jiraHeight';
+    case 'projects':
+      return 'projectsHeight';
+  }
+}
 
 function nextThemeMode(mode: ThemeMode): ThemeMode {
   switch (mode) {

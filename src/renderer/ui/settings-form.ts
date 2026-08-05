@@ -1,6 +1,7 @@
 import {
   TERMINAL_FONT_SIZE,
   type AppSettings,
+  type JiraConfig,
   type ProjectAction,
   type ProjectCandidate,
   type ProjectConfig,
@@ -64,6 +65,7 @@ function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: strin
       project.kind,
       project.expectedPort,
       project.enabled,
+      project.followPulls,
       project.actions.map((action) => [
         action.id,
         action.label,
@@ -79,6 +81,7 @@ function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: strin
 export interface SettingsFormHosts {
   readonly projects: HTMLElement;
   readonly terminal: HTMLElement;
+  readonly jira: HTMLElement;
   readonly footer: HTMLElement;
 }
 
@@ -105,6 +108,10 @@ export class SettingsForm {
   private profiles: ProfileDraft[] = [];
   private defaultProfileId = '';
   private fontSize: number = TERMINAL_FONT_SIZE.default;
+  private jira: JiraConfig = { siteUrl: '', email: '', projectKeys: [], hasToken: false };
+  /** Typed token, held only until the save. Never read back from the main process. */
+  private jiraToken = '';
+  private jiraStatus = '';
   private validations: ProjectValidation[] = [];
   private candidates: ProjectCandidate[] = [];
   private showCandidates = false;
@@ -127,7 +134,14 @@ export class SettingsForm {
   ) {}
 
   /** Loads a fresh draft from the stored settings. */
-  async load(settings: AppSettings, profiles: readonly ShellProfile[]): Promise<void> {
+  async load(
+    settings: AppSettings,
+    profiles: readonly ShellProfile[],
+    jira: JiraConfig,
+  ): Promise<void> {
+    this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
+    this.jiraToken = '';
+    this.jiraStatus = '';
     // Deep copies down to the actions: the form must not mutate the state the dashboard renders from.
     this.projects = settings.projects.map((project) => ({
       ...project,
@@ -164,7 +178,98 @@ export class SettingsForm {
   private render(): void {
     this.renderProjects();
     this.renderTerminal();
+    this.renderJira();
     this.renderFooter();
+  }
+
+  /**
+   * The Jira connection.
+   *
+   * The token field starts empty every time, on purpose: the form is never told the stored one, so it
+   * cannot leak it back and an empty field means "leave it alone" rather than "erase it". The test button
+   * runs one real query, because only that proves the credentials and the project keys together.
+   */
+  private renderJira(): void {
+    clearChildren(this.hosts.jira);
+
+    const grid = createElement('div', { className: 'settings-card__grid' });
+    // No example placeholders here: a greyed example reads as a value already saved, and the question
+    // "is this configured or not" has to be answerable at a glance. An empty field means empty.
+    grid.append(
+      this.field('Site', this.jira.siteUrl, (value) => {
+        this.jira = { ...this.jira, siteUrl: value };
+        this.touch();
+      }),
+    );
+    grid.append(
+      this.field('Email du compte', this.jira.email, (value) => {
+        this.jira = { ...this.jira, email: value };
+        this.touch();
+      }),
+    );
+    grid.append(
+      this.field(
+        'Clés de projet',
+        this.jira.projectKeys.join(', '),
+        (value) => {
+          this.jira = {
+            ...this.jira,
+            projectKeys: value
+              .split(',')
+              .map((key) => key.trim())
+              .filter((key) => key.length > 0),
+          };
+          this.touch();
+        },
+      ),
+    );
+    this.hosts.jira.append(grid);
+
+    const secret = createElement('div', { className: 'settings-card__path' });
+    // The label carries the state, not a placeholder: a token can never be shown, so the field is always
+    // empty and only its label can say whether one is stored.
+    const token = this.field(
+      this.jira.hasToken ? 'Jeton enregistré — en saisir un nouveau pour le remplacer' : 'Jeton d’API',
+      '',
+      (value) => {
+        this.jiraToken = value;
+        this.touch();
+      },
+    );
+    const input = token.querySelector('input');
+    if (input !== null) {
+      // Masked, and never prefilled: there is nothing to prefill it with.
+      input.type = 'password';
+      input.autocomplete = 'off';
+    }
+    secret.append(token);
+
+    const test = createElement('button', { className: 'button', text: 'Tester' });
+    test.type = 'button';
+    test.title = 'Lance une vraie recherche pour vérifier le jeton et les clés de projet';
+    test.addEventListener('click', () => {
+      test.disabled = true;
+      void window.api
+        .testJira()
+        .then((result) => {
+          this.jiraStatus = result.message;
+        })
+        .catch((error: unknown) => {
+          this.jiraStatus = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => {
+          test.disabled = false;
+          this.renderJira();
+        });
+    });
+    secret.append(test);
+    this.hosts.jira.append(secret);
+
+    if (this.jiraStatus.length > 0) {
+      this.hosts.jira.append(
+        createElement('p', { className: 'settings-card__hint', text: this.jiraStatus }),
+      );
+    }
   }
 
   private renderProjects(): void {
@@ -287,6 +392,12 @@ export class SettingsForm {
     );
 
     card.append(grid);
+    card.append(
+      this.checkbox('Suivre les pull requests', project.followPulls, (checked) => {
+        project.followPulls = checked;
+        this.touch();
+      }),
+    );
     card.append(this.buildActionsEditor(project, validation));
 
     if (validation !== undefined && validation.issues.length > 0) {
@@ -650,11 +761,25 @@ export class SettingsForm {
     // applied. The draft is realigned on it for the same reason.
     const saved = await window.api.updateSettings({ terminalFontSize: this.fontSize });
     this.fontSize = saved.terminalFontSize;
+
+    // The token travels only when one was actually typed: an empty field means "keep the stored one".
+    const jira = await window.api.saveJira(
+      {
+        siteUrl: this.jira.siteUrl,
+        email: this.jira.email,
+        projectKeys: [...this.jira.projectKeys],
+      },
+      this.jiraToken.length > 0 ? this.jiraToken : undefined,
+    );
+    this.jira = jira.config;
+    this.jiraToken = '';
+    this.jiraStatus = jira.message;
     this.saved = true;
     this.setDirty(false);
     // Re-rendered rather than just the footer: a font size the store clamped must show its corrected
     // value in the field, otherwise the form claims something the app is not doing.
     this.renderTerminal();
+    this.renderJira();
     this.renderFooter();
   }
 
@@ -695,6 +820,22 @@ export class SettingsForm {
     // `input` rather than `change`, so validation follows typing instead of waiting for blur.
     input.addEventListener('input', () => onChange(input.value));
     wrapper.append(input);
+    return wrapper;
+  }
+
+  /** A labelled checkbox, laid out on one line unlike the stacked text fields. */
+  private checkbox(
+    label: string,
+    checked: boolean,
+    onChange: (checked: boolean) => void,
+  ): HTMLElement {
+    const wrapper = createElement('label', { className: 'settings-check' });
+    const input = createElement('input', { className: 'settings-check__input' });
+    input.type = 'checkbox';
+    input.checked = checked;
+    input.addEventListener('change', () => onChange(input.checked));
+    wrapper.append(input);
+    wrapper.append(createElement('span', { className: 'settings-check__label', text: label }));
     return wrapper;
   }
 

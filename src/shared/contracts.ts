@@ -69,6 +69,8 @@ export interface ProjectConfig {
   readonly expectedPort: number | null;
   /** Excluded from the table without deleting the entry. */
   readonly enabled: boolean;
+  /** Include this repository's pull requests in the pull request tab. */
+  readonly followPulls: boolean;
 }
 
 /** A repository found by scanning the projects root, offered when adding a project. */
@@ -214,6 +216,123 @@ export interface ChecksState {
 }
 
 /* ------------------------------------------------------------------ *
+ * Pull requests
+ * ------------------------------------------------------------------ */
+
+/**
+ * Where a pull request stands with its reviewers.
+ *
+ * `none` is **not** an approval: `gh` reports an empty `reviewDecision` when the repository requires no
+ * review at all, and painting that green would say something GitHub never said.
+ */
+export type PrReview = 'approved' | 'changes-requested' | 'review-required' | 'none';
+
+/** One open pull request, reduced to what answers "does this need me?" at a glance. */
+export interface PullRequest {
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  /** Head branch, the name you would check out. */
+  readonly branch: string;
+  readonly authorLogin: string;
+  readonly isDraft: boolean;
+  readonly review: PrReview;
+  /** Same verdict vocabulary as a project row, including `no-checks` distinct from `passing`. */
+  readonly checks: ChecksVerdict;
+  readonly passed: number;
+  readonly failed: number;
+  readonly pending: number;
+  /**
+   * Whether it involves the signed-in user, computed locally from the payload.
+   *
+   * Two flags rather than one "mine": the list shows why a pull request concerns you, and asking GitHub
+   * for the union would have cost two calls per repository since its search has no usable `OR`.
+   */
+  readonly isAuthor: boolean;
+  readonly isReviewer: boolean;
+  readonly updatedAt: string;
+}
+
+/** Pull requests of one watched repository, plus why there might be none. */
+export interface RepoPulls {
+  readonly projectId: ProjectId;
+  readonly label: string;
+  /** `owner/repo`, or null when the project's remote is not a GitHub one. */
+  readonly slug: string | null;
+  readonly pulls: PullRequest[];
+  readonly checkedAt: string | null;
+  readonly error: string | null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Jira
+ * ------------------------------------------------------------------ */
+
+/**
+ * Coarse state of an issue, from Jira's own status **category** rather than its status name.
+ *
+ * Names are per-project and renamed at will ("En review", "Ready for QA"); the category is the only part
+ * of a Jira workflow that means the same thing everywhere.
+ */
+export type IssueStage = 'todo' | 'in-progress' | 'done' | 'unknown';
+
+export interface JiraIssue {
+  readonly key: string;
+  readonly summary: string;
+  /** The status as configured, shown as written since that is what the team says out loud. */
+  readonly status: string;
+  readonly stage: IssueStage;
+  readonly type: string;
+  /** Display name, or an empty string when unassigned. */
+  readonly assignee: string;
+  readonly isMine: boolean;
+  readonly url: string;
+  readonly updatedAt: string;
+}
+
+/**
+ * A move an issue can make right now, as Jira reports it.
+ *
+ * Read per issue rather than derived from a status list: a workflow decides which moves are legal from
+ * where, and the `id` is what the move is made with.
+ */
+export interface IssueTransition {
+  readonly id: string;
+  /** The status it lands on, which is what the user is choosing. */
+  readonly label: string;
+}
+
+/** One of the two saved views of the Jira tab. */
+export type JiraViewId = 'sprint' | 'mine';
+
+export interface JiraView {
+  readonly id: JiraViewId;
+  readonly label: string;
+  readonly issues: JiraIssue[];
+  readonly checkedAt: string | null;
+  readonly error: string | null;
+}
+
+/** Everything the Jira tab needs, including why it might be empty. */
+export interface JiraState {
+  /** False until a site, an email and a token are all configured. */
+  readonly configured: boolean;
+  readonly views: JiraView[];
+}
+
+/** Jira connection, without the token: that one is encrypted in its own file. */
+export interface JiraConfig {
+  /** Site root, for instance `https://example.atlassian.net`. */
+  readonly siteUrl: string;
+  /** Account email, the user half of the API token's basic auth. */
+  readonly email: string;
+  /** Project keys to look at, `PROJ` and the like. */
+  readonly projectKeys: readonly string[];
+  /** Whether a token is stored. Never the token itself: it only ever travels towards the main process. */
+  readonly hasToken: boolean;
+}
+
+/* ------------------------------------------------------------------ *
  * Aggregated row
  * ------------------------------------------------------------------ */
 
@@ -354,14 +473,32 @@ export interface ThemeState {
  */
 export const TERMINAL_FONT_SIZE = { default: 14, min: 9, max: 28 } as const;
 
+/** Which view the top strip shows. The terminal below is unaffected by this choice. */
+export type StripTab = 'projects' | 'pulls' | 'jira';
+
 export interface AppSettings {
   themeMode: ThemeMode;
   /** Seconds between git refreshes. */
   gitPollSeconds: number;
   /** Seconds between GitHub checks refreshes. Kept well above the git interval: it hits the network. */
   checksPollSeconds: number;
-  /** Height of the projects pane in pixels, remembered across restarts. The terminal takes the rest. */
+  /** Seconds between pull request refreshes. Slower still: one call per watched repository. */
+  pullsPollSeconds: number;
+  /** Strip to reopen on, so the app comes back where it was left. */
+  activeStrip: StripTab;
+  /**
+   * Height of the top strip in pixels, per tab.
+   *
+   * One height each because the two views have different needs: a table of four rows against a
+   * master-detail list of pull requests. Sharing one would mean resizing on every tab change.
+   */
   projectsHeight: number;
+  pullsHeight: number;
+  jiraHeight: number;
+  /** Seconds between Jira refreshes. Two JQL searches per pass, so the slowest loop of all. */
+  jiraPollSeconds: number;
+  /** Jira connection, token excluded. */
+  jira: { siteUrl: string; email: string; projectKeys: string[] };
   /** Profile the bare "new tab" click uses. */
   defaultShellProfileId: string;
   /** Font size of every terminal, in pixels. */
@@ -407,6 +544,11 @@ export interface BootstrapState {
   readonly terminals: TerminalSession[];
   /** Which of those sessions are on screen, and how they share it. */
   readonly layout: TerminalLayout;
+  /** Last known pull requests, so the tab is not empty on the first paint. */
+  readonly pulls: RepoPulls[];
+  readonly jira: JiraState;
+  /** Jira connection as configured, token excluded. */
+  readonly jiraConfig: JiraConfig;
 }
 
 /* ------------------------------------------------------------------ *
@@ -420,6 +562,30 @@ export const IpcChannel = {
   RowsChanged: 'projects:rows-changed',
   /** invoke: () => ProjectRow[], forces a full refresh */
   RefreshNow: 'projects:refresh',
+  /** on: (repos: RepoPulls[]) => void, pushed whenever pull requests are re-read */
+  PullsChanged: 'pulls:changed',
+  /** invoke: () => RepoPulls[], forces a pull request refresh */
+  PullsRefresh: 'pulls:refresh',
+  /** invoke: (url: string) => void, opens a pull request in the real browser */
+  OpenExternal: 'shell:open-external',
+  /** invoke: (text) => void, puts a terminal selection on the system clipboard */
+  ClipboardWrite: 'clipboard:write',
+  /** invoke: () => string, reads the system clipboard for a terminal paste */
+  ClipboardRead: 'clipboard:read',
+  /** on: (state: JiraState) => void, pushed whenever the Jira searches are re-run */
+  JiraChanged: 'jira:changed',
+  /** invoke: () => JiraState, forces a Jira refresh */
+  JiraRefresh: 'jira:refresh',
+  /** invoke: (config, token?) => JiraConfig, saves the connection; the token goes to the secret store */
+  JiraSave: 'jira:save',
+  /** invoke: () => { ok, message }, one live query to tell whether the credentials work */
+  JiraTest: 'jira:test',
+  /** invoke: (key) => IssueTransition[], the moves this issue can make right now */
+  JiraTransitions: 'jira:transitions',
+  /** invoke: (key, transitionId) => { ok, message }, moves an issue */
+  JiraTransition: 'jira:transition',
+  /** invoke: (key) => { ok, message }, assigns an issue to the token's own account */
+  JiraAssignMe: 'jira:assign-me',
   /** invoke: (projectId, actionId) => TerminalId, runs one of a project's actions in its own tab */
   PtyRun: 'pty:run',
   /** invoke: (request: OpenShellRequest) => TerminalId */
@@ -450,8 +616,6 @@ export const IpcChannel = {
   TerminalLayoutSet: 'terminal:layout-set',
   /** on: (layout: TerminalLayout) => void, pushed whenever the visible panes change */
   TerminalLayoutChanged: 'terminal:layout-changed',
-  /** invoke: (url: string) => void, opens in the real browser */
-  OpenExternal: 'shell:open-external',
   /** invoke: (projectId) => void, reveals the repository in the file explorer */
   OpenFolder: 'shell:open-folder',
   /** invoke: (mode: ThemeMode) => ThemeState */
@@ -492,6 +656,37 @@ export interface RendererApi {
   bootstrap(): Promise<BootstrapState>;
   refreshNow(): Promise<ProjectRow[]>;
   onRowsChanged(listener: (rows: ProjectRow[]) => void): () => void;
+
+  refreshPulls(): Promise<RepoPulls[]>;
+  onPullsChanged(listener: (repos: RepoPulls[]) => void): () => void;
+
+  refreshJira(): Promise<JiraState>;
+  onJiraChanged(listener: (state: JiraState) => void): () => void;
+  /**
+   * Saves the Jira connection.
+   *
+   * The token is passed separately and only ever travels **towards** the main process: it is written to
+   * the encrypted store and never sent back, so a compromised renderer cannot read it out. Omit it to
+   * leave the stored one untouched.
+   */
+  saveJira(config: { siteUrl: string; email: string; projectKeys: string[] }, token?: string):
+    Promise<{ config: JiraConfig; message: string }>;
+  testJira(): Promise<{ ok: boolean; message: string }>;
+  /** The moves an issue can make, asked at the moment the menu opens rather than cached. */
+  jiraTransitions(key: string): Promise<IssueTransition[]>;
+  transitionJira(key: string, transitionId: string): Promise<{ ok: boolean; message: string }>;
+  assignJiraToMe(key: string): Promise<{ ok: boolean; message: string }>;
+  /** Opens a pull request in the real browser. Only http(s) is followed, checked in the main process. */
+  openExternal(url: string): Promise<void>;
+
+  /**
+   * The system clipboard, for terminal copy and paste.
+   *
+   * Handled by the main process because a renderer on a `file://` page under this CSP has neither the
+   * permission nor the secure context `navigator.clipboard` requires for reading.
+   */
+  writeClipboard(text: string): Promise<void>;
+  readClipboard(): Promise<string>;
 
   runAction(projectId: ProjectId, actionId: string): Promise<TerminalId>;
   openShell(request: OpenShellRequest): Promise<TerminalId>;
@@ -536,7 +731,6 @@ export interface RendererApi {
   readPtyBuffer(terminalId: TerminalId): Promise<string>;
   onTerminalsChanged(listener: (sessions: TerminalSession[]) => void): () => void;
 
-  openExternal(url: string): Promise<void>;
   openFolder(projectId: ProjectId): Promise<void>;
 
   setThemeMode(mode: ThemeMode): Promise<ThemeState>;

@@ -61,14 +61,27 @@
         </div>
       </header>
 
+      <!--
+        The strip has two views behind two tabs. Only its content changes: the terminal below keeps its
+        own space whatever is selected, which is the point of the whole window.
+      -->
       <section class="projects" id="projects-pane">
         <div class="projects__header">
-          <h2 class="projects__title">Projets</h2>
+          <div class="strip__tabs" role="tablist">
+            <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
+              Projets
+            </button>
+            <button type="button" id="strip-tab-pulls" class="strip__tab" role="tab">
+              Pull requests
+            </button>
+            <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">Jira</button>
+          </div>
           <button type="button" id="add-project" class="button" title="Ajouter un dossier de projet">
             + Projet
           </button>
         </div>
-        <div class="projects__scroll">
+
+        <div class="projects__scroll" id="strip-panel-projects" role="tabpanel">
           <table class="table" id="project-table">
             <thead>
               <tr>
@@ -82,6 +95,17 @@
             </thead>
             <tbody id="project-tbody"></tbody>
           </table>
+        </div>
+
+        <div class="pulls" id="strip-panel-pulls" role="tabpanel" hidden>
+          <div class="pulls__repos" id="pulls-repos"></div>
+          <div class="pulls__list" id="pulls-list"></div>
+        </div>
+
+        <!-- Same master-detail grammar as the pull requests, so there is nothing new to learn. -->
+        <div class="pulls" id="strip-panel-jira" role="tabpanel" hidden>
+          <div class="pulls__repos" id="jira-views"></div>
+          <div class="pulls__list" id="jira-list"></div>
         </div>
       </section>
 

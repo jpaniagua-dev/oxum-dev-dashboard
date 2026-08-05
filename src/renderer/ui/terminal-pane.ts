@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import {
   TERMINAL_FONT_SIZE,
@@ -9,6 +10,7 @@ import {
   type TerminalLayout,
   type TerminalSession,
 } from '@shared/contracts.js';
+import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
 
 /**
@@ -72,6 +74,43 @@ export function replacePane(
   return panes.map((pane, at) => (at === index ? id : pane));
 }
 
+/* ------------------------------------------------------------------ *
+ * Clipboard keys
+ * ------------------------------------------------------------------ */
+
+/** What a key combination should do inside a terminal. */
+export type TerminalKeyAction = 'copy' | 'paste' | 'pass';
+
+/**
+ * Decides what `Ctrl`-based keys mean in a terminal.
+ *
+ * The whole difficulty is `Ctrl+C`. In a terminal it is **SIGINT**, and it has to stay SIGINT: it is how a
+ * dev server gets stopped. But it is also the copy shortcut everywhere else, which is why Windows Terminal
+ * resolves it the same way this does: **copy when there is a selection, interrupt when there is not**. With
+ * `Shift` held it always copies, since `Ctrl+Shift+C` means nothing to a shell.
+ *
+ * `Ctrl+V` never has a terminal meaning worth keeping, so it always pastes.
+ *
+ * Pure and exported: this is a two-line rule whose failure modes are "cannot copy" and, far worse,
+ * "cannot interrupt a build".
+ */
+export function decideTerminalKey(
+  event: Pick<KeyboardEvent, 'type' | 'key' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey'>,
+  hasSelection: boolean,
+): TerminalKeyAction {
+  if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) {
+    return 'pass';
+  }
+  const key = event.key.toLowerCase();
+  if (key === 'v') {
+    return 'paste';
+  }
+  if (key === 'c') {
+    return event.shiftKey || hasSelection ? 'copy' : 'pass';
+  }
+  return 'pass';
+}
+
 /** Palettes matching the app tokens, since xterm needs literal colours rather than CSS variables. */
 const THEMES: Record<ResolvedTheme, Record<string, string>> = {
   light: {
@@ -106,6 +145,16 @@ export interface TerminalPaneActions {
    * the caller decides which profile that means.
    */
   onSplitShell: (cwd: string, direction: PaneDirection) => void;
+  /** Puts a selection on the system clipboard. */
+  onCopy: (text: string) => void;
+  /**
+   * Reads the system clipboard for a paste.
+   *
+   * Goes through the main process rather than `navigator.clipboard`: reading the clipboard from a renderer
+   * needs a permission and a secure context, neither of which a `file://` page under a locked-down CSP
+   * has, while Electron's own clipboard has no such condition.
+   */
+  onPasteRequest: () => Promise<string>;
 }
 
 /** Which side of a tab a drop lands on. */
@@ -139,6 +188,8 @@ interface View {
   readonly term: Terminal;
   readonly fit: FitAddon;
   readonly element: HTMLElement;
+  /** WebGL renderer state: not loaded yet, active, or permanently fallen back to the DOM renderer. */
+  webgl: WebglAddon | 'failed' | null;
 }
 
 /**
@@ -173,7 +224,6 @@ export class TerminalPane {
   private sizes: number[] = [];
   /** Splitters between panes, reused across renders rather than rebuilt. */
   private readonly splitters: HTMLElement[] = [];
-  private contextMenu: HTMLElement | null = null;
 
   constructor(
     private readonly tabsHost: HTMLElement,
@@ -181,16 +231,61 @@ export class TerminalPane {
     private readonly actions: TerminalPaneActions,
   ) {
     window.addEventListener('resize', () => this.fitVisible());
-    // Any click outside closes the profile menu, which is what every menu in every app does.
+    // Any click outside closes the profile menu, which is what every menu in every app does. The context
+    // menu dismisses itself, in the shared module.
     document.addEventListener('click', () => {
-      this.closeContextMenu();
       if (this.menuOpen) {
         this.menuOpen = false;
         this.renderTabs();
       }
     });
-    // A context menu that survived a scroll or a resize would point at the wrong pane.
-    window.addEventListener('blur', () => this.closeContextMenu());
+    this.bindShortcuts();
+  }
+
+  /**
+   * Keyboard equivalents of the pane menu.
+   *
+   * On `document` and in the **capture** phase: the focused terminal is an xterm, which claims every
+   * keystroke it can reach, so a listener on the bubble phase would never see these.
+   *
+   * `Alt+Shift` plus a letter, which is Windows Terminal's own chord, and deliberately **not**
+   * `Ctrl+Alt`: on a Swiss French keyboard `Ctrl+Alt` is what AltGr sends, so every AltGr character
+   * would walk through this handler. Letters rather than digits for the same family of reason, the digit
+   * row needing Shift on that layout.
+   */
+  private bindShortcuts(): void {
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (!event.altKey || !event.shiftKey || event.ctrlKey) {
+          return;
+        }
+        // Holding the chord must not spawn a shell per repeat: the keys stay down for as long as a
+        // finger rests on them, and each repeat is a fresh `keydown`.
+        if (event.repeat) {
+          return;
+        }
+        const focused = this.active;
+        const session = this.sessions.find((entry) => entry.id === focused);
+        const key = event.key.toLowerCase();
+
+        if (key === 'd' && session !== undefined) {
+          event.preventDefault();
+          this.actions.onSplitShell(session.cwd, 'columns');
+        } else if (key === 'b' && session !== undefined) {
+          event.preventDefault();
+          this.actions.onSplitShell(session.cwd, 'rows');
+        } else if (key === 'w' && focused !== null && this.layout.panes.length > 1) {
+          event.preventDefault();
+          const next = removePane(this.layout.panes, focused);
+          this.applyLayout(next, this.layout.direction);
+          this.active = next[next.length - 1] ?? null;
+          this.renderSurface();
+          this.renderTabs();
+        }
+      },
+      true,
+    );
   }
 
   /** Adopts the layout the main process reports. */
@@ -249,7 +344,7 @@ export class TerminalPane {
     for (const view of this.views.values()) {
       view.term.options.fontSize = clamped;
     }
-    this.fitActive();
+    this.fitVisible();
   }
 
   get activeId(): TerminalId | null {
@@ -381,6 +476,33 @@ export class TerminalPane {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.onData((data) => this.actions.onInput(terminalId, data));
+
+    /*
+     * Copy and paste, which a terminal does not get for free.
+     *
+     * `attachCustomKeyEventHandler` is the only hook that runs *before* xterm turns a keystroke into bytes
+     * for the pty. Returning false is what stops `Ctrl+V` from reaching the shell as a control character,
+     * and `Ctrl+C` from becoming SIGINT when the user meant to copy a selection.
+     *
+     * `preventDefault` is not optional: returning false only skips xterm's handling, it does not consume
+     * the keydown. Left alone, the browser then fires its native `paste` event on xterm's hidden textarea,
+     * which xterm also listens to — so the text landed twice, once from us and once from that listener.
+     */
+    term.attachCustomKeyEventHandler((event) => {
+      switch (decideTerminalKey(event, term.hasSelection())) {
+        case 'copy':
+          event.preventDefault();
+          this.copySelection(term);
+          return false;
+        case 'paste':
+          event.preventDefault();
+          this.pasteInto(term);
+          return false;
+        case 'pass':
+          return true;
+      }
+    });
+
     term.open(element);
 
     // Clicking a pane focuses it. Capture phase, because xterm swallows the event on its own surface.
@@ -400,9 +522,45 @@ export class TerminalPane {
       this.openPaneMenu(terminalId, event.clientX, event.clientY);
     });
 
-    const view = { term, fit, element };
+    const view: View = { term, fit, element, webgl: null };
     this.views.set(terminalId, view);
     return view;
+  }
+
+  /**
+   * Switches a pane to the WebGL renderer on its first real display.
+   *
+   * xterm's default renderer draws the screen as DOM nodes, and under Chromium's GPU compositing that
+   * leaves stale text layers on screen while scrolling: frozen glyphs outside the grid, seen in the
+   * wild here. The WebGL renderer repaints its whole canvas, so nothing can be left behind.
+   *
+   * Never called from `ensure()`: a view can be created for a *background* tab (`write` collects
+   * history for hidden sessions), and a WebGL canvas initialised on a `display: none` element is born
+   * with a garbage geometry that later shows up as exactly those frozen glyphs. Loading only from
+   * `fitVisible`, after the pane is on screen and fitted, means the canvas gets its real dimensions.
+   *
+   * On context loss (Chromium caps live WebGL contexts per page and evicts the oldest), the addon is
+   * disposed and xterm falls back to the DOM renderer on its own; marked `failed` so it is not
+   * reloaded just to be evicted again.
+   */
+  private ensureRenderer(view: View): void {
+    if (view.webgl !== null) {
+      return;
+    }
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        console.warn('[terminal] WebGL context lost, falling back to the DOM renderer');
+        webgl.dispose();
+        view.webgl = 'failed';
+      });
+      view.term.loadAddon(webgl);
+      view.webgl = webgl;
+    } catch (error) {
+      // Logged rather than swallowed: a silent fallback here already cost a diagnosis once.
+      view.webgl = 'failed';
+      console.warn(`[terminal] renderer: dom (WebGL failed: ${String(error)})`);
+    }
   }
 
   /**
@@ -525,6 +683,9 @@ export class TerminalPane {
    *
    * All of them, not just the focused one: with a split, each pane has its own geometry and each pty
    * needs to be told about it, or the ones in the background wrap their output at the wrong width.
+   *
+   * Also where the WebGL renderer is engaged and a full repaint forced: this runs precisely when a
+   * pane's geometry may have changed (shown, resized, split), which is when stale pixels appear.
    */
   private fitVisible(): void {
     for (const id of this.layout.panes) {
@@ -535,10 +696,37 @@ export class TerminalPane {
       try {
         view.fit.fit();
         this.actions.onResize(id, view.term.cols, view.term.rows);
+        this.ensureRenderer(view);
+        // A resize repaints the new grid, not what the old one left outside it: repaint everything.
+        view.term.refresh(0, view.term.rows - 1);
       } catch {
         // Fitting fails while the pane is hidden and has no size; harmless.
       }
     }
+  }
+
+  /* --------------------------------------------------------- copy & paste */
+
+  /** Sends the selection to the system clipboard, via the main process. */
+  private copySelection(term: Terminal): void {
+    if (term.hasSelection()) {
+      this.actions.onCopy(term.getSelection());
+    }
+  }
+
+  /**
+   * Pastes the system clipboard into a terminal.
+   *
+   * `term.paste` rather than writing the text straight through: it wraps the payload in bracketed paste
+   * markers when the running program asked for them, which is what stops a multi-line paste from being
+   * executed line by line.
+   */
+  private pasteInto(term: Terminal): void {
+    void this.actions.onPasteRequest().then((text) => {
+      if (text.length > 0) {
+        term.paste(text);
+      }
+    });
   }
 
   /* --------------------------------------------------------- context menus */
@@ -555,25 +743,46 @@ export class TerminalPane {
    */
   private openPaneMenu(terminalId: TerminalId, x: number, y: number): void {
     const session = this.sessions.find((entry) => entry.id === terminalId);
-    if (session === undefined) {
+    const view = this.views.get(terminalId);
+    if (session === undefined || view === undefined) {
       return;
     }
     const { panes, direction } = this.layout;
 
     this.showMenu(x, y, [
       {
+        label: 'Copier',
+        hint: 'Ctrl+C avec une sélection, ou Ctrl+Shift+C',
+        // Same rule as the shortcut: nothing selected means nothing to copy, not "copy the screen".
+        disabled: !view.term.hasSelection(),
+        run: () => {
+          this.copySelection(view.term);
+          view.term.focus();
+        },
+      },
+      {
+        label: 'Coller',
+        hint: 'Ctrl+V',
+        run: () => {
+          this.pasteInto(view.term);
+          view.term.focus();
+        },
+      },
+      {
         label: 'Diviser à droite',
+        hint: 'Alt+Shift+D',
         run: () => this.actions.onSplitShell(session.cwd, 'columns'),
       },
       {
         label: 'Diviser en bas',
+        hint: 'Alt+Shift+B',
         run: () => this.actions.onSplitShell(session.cwd, 'rows'),
       },
       {
         label: 'Fermer ce panneau',
         // Nothing to close when it is the only one, and the terminal itself must not die here.
         disabled: panes.length <= 1,
-        hint: 'Le terminal continue de tourner, son onglet reste',
+        hint: 'Alt+Shift+W : le terminal continue de tourner, son onglet reste',
         run: () => {
           const next = removePane(panes, terminalId);
           this.applyLayout(next, direction);
@@ -637,43 +846,8 @@ export class TerminalPane {
     this.renderTabs();
   }
 
-  private showMenu(
-    x: number,
-    y: number,
-    items: readonly { label: string; run: () => void; disabled?: boolean; hint?: string }[],
-  ): void {
-    this.closeContextMenu();
-    const menu = createElement('div', { className: 'context-menu' });
-
-    for (const item of items) {
-      const button = createElement('button', { className: 'context-menu__item', text: item.label });
-      button.type = 'button';
-      button.disabled = item.disabled === true;
-      if (item.hint !== undefined) {
-        button.title = item.hint;
-      }
-      button.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.closeContextMenu();
-        item.run();
-      });
-      menu.append(button);
-    }
-
-    // Positioned after being measured, so a menu opened near an edge folds back inside the window
-    // instead of being cut off.
-    menu.style.left = '0px';
-    menu.style.top = '0px';
-    document.body.append(menu);
-    const box = menu.getBoundingClientRect();
-    menu.style.left = `${Math.min(x, window.innerWidth - box.width - 4)}px`;
-    menu.style.top = `${Math.min(y, window.innerHeight - box.height - 4)}px`;
-    this.contextMenu = menu;
-  }
-
-  private closeContextMenu(): void {
-    this.contextMenu?.remove();
-    this.contextMenu = null;
+  private showMenu(x: number, y: number, items: readonly MenuItem[]): void {
+    showContextMenu(x, y, items);
   }
 
   /* ------------------------------------------------------------------ tabs */
@@ -688,10 +862,22 @@ export class TerminalPane {
   }
 
   private buildTab(session: TerminalSession): HTMLElement {
-    const wrapper = createElement('span', {
-      className: `terminal__tab${session.id === this.active ? ' terminal__tab--active' : ''}`,
-    });
+    // Two levels of highlight, because with a split several tabs are on screen at once: `visible` says
+    // "you can see this one", `active` says "the keyboard goes here".
+    const visible = this.layout.panes.includes(session.id);
+    const classes = ['terminal__tab'];
+    if (visible) {
+      classes.push('terminal__tab--visible');
+    }
+    if (session.id === this.active) {
+      classes.push('terminal__tab--active');
+    }
+    const wrapper = createElement('span', { className: classes.join(' ') });
     wrapper.dataset.terminalId = session.id;
+    wrapper.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      this.openTabMenu(session, event.clientX, event.clientY);
+    });
 
     if (this.renaming === session.id) {
       wrapper.append(this.buildRenameInput(session));

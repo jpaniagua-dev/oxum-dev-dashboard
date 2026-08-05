@@ -2,12 +2,17 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import {
   IpcChannel,
   type AppSettings,
+  type JiraConfig,
   type ProjectRow,
   type ShellProfile,
   type TerminalLayout,
   type TerminalSession,
 } from '@shared/contracts.js';
+import { PullMonitor } from './github/pull-monitor.js';
 import { registerIpcHandlers } from './ipc.js';
+import { JiraMonitor } from './jira/jira-monitor.js';
+import { buildJql, searchIssues } from './jira/jira-service.js';
+import { SecretStore } from './store/secret-store.js';
 import { ProjectMonitor } from './projects/project-monitor.js';
 import { DEFAULT_PROJECTS_ROOT } from './projects/project-id.js';
 import { resolveProjects, seedProjects } from './projects/registry.js';
@@ -36,6 +41,13 @@ if (!app.requestSingleInstanceLock()) {
 
 /** Terminal geometry reported by the renderer, used when spawning a process. */
 let terminalSize = { cols: 120, rows: 24 };
+/**
+ * Whether a Jira token is stored.
+ *
+ * Kept as a flag rather than re-read on every call: the settings form only needs to know that one exists,
+ * and the token itself has no business travelling back towards the renderer.
+ */
+let hasJiraToken = false;
 let dashboard: DashboardWindow | null = null;
 let terminals: TerminalManager | null = null;
 let monitor: ProjectMonitor | null = null;
@@ -106,6 +118,31 @@ async function bootstrap(): Promise<void> {
   let projectMonitor = buildMonitor();
   monitor = projectMonitor;
 
+  // Its own loop, on its own cadence: one `gh` call per watched repository is minutes-slow work next to
+  // a local git read.
+  const buildPullMonitor = (): PullMonitor =>
+    new PullMonitor(
+      projects,
+      () => settingsStore.get(),
+      (repos) => dashboardWindow.send(IpcChannel.PullsChanged, repos),
+    );
+
+  let pullMonitor = buildPullMonitor();
+
+  // The token lives here, encrypted, and never crosses back to the renderer.
+  const secrets = new SecretStore(AppPaths.jiraToken());
+  const jiraMonitor = new JiraMonitor(
+    () => settingsStore.get(),
+    secrets,
+    (state) => dashboardWindow.send(IpcChannel.JiraChanged, state),
+  );
+
+  /** The connection as the renderer may see it: everything except the token. */
+  const jiraConfig = (): JiraConfig => {
+    const { siteUrl, email, projectKeys } = settingsStore.get().jira;
+    return { siteUrl, email, projectKeys: [...projectKeys], hasToken: hasJiraToken };
+  };
+
   const terminalManager = new TerminalManager({
     onOutput: (terminalId, data) =>
       dashboardWindow.send(IpcChannel.PtyOutput, { terminalId, data }),
@@ -134,10 +171,15 @@ async function bootstrap(): Promise<void> {
     terminalManager.reconcile(next);
 
     projectMonitor.stop();
+    pullMonitor.stop();
     projects = next;
     projectMonitor = buildMonitor();
     monitor = projectMonitor;
     projectMonitor.start();
+    // Rebuilt for the same reason as the project monitor: it keys its state, and its resolved remotes,
+    // by project.
+    pullMonitor = buildPullMonitor();
+    pullMonitor.start();
     dashboardWindow.send(IpcChannel.RowsChanged, projectMonitor.rows());
     // Broadcast: the change usually comes from the settings window, and the dashboard reloads from
     // this event.
@@ -151,6 +193,54 @@ async function bootstrap(): Promise<void> {
   registerIpcHandlers({
     projects: () => projects,
     monitor: () => projectMonitor,
+    pulls: () => pullMonitor,
+    jira: () => jiraMonitor,
+    jiraConfig,
+    saveJiraToken: async (token) => {
+      const result = await secrets.write(token);
+      if (result.ok) {
+        hasJiraToken = token.trim().length > 0;
+        // Applied at once rather than at the next tick of a five-minute loop: the user just pressed save
+        // and expects the tab to fill in.
+        void jiraMonitor.refreshNow();
+      }
+      return result;
+    },
+    /**
+     * Credentials for one Jira write, or null when the connection is incomplete.
+     *
+     * Read at each call rather than held: the token can be replaced from the settings window at any
+     * moment, and a stale copy would keep failing with a message about the wrong thing.
+     */
+    jiraCredentials: async () => {
+      const { siteUrl, email } = settingsStore.get().jira;
+      const token = await secrets.read();
+      return siteUrl.length > 0 && email.length > 0 && token.length > 0
+        ? { siteUrl, email, token }
+        : null;
+    },
+    afterJiraWrite: () => {
+      // Re-read at once: the row the user just changed has to show its new state without waiting for the
+      // five-minute loop.
+      void jiraMonitor.refreshNow();
+    },
+    testJira: async () => {
+      const { siteUrl, email, projectKeys } = settingsStore.get().jira;
+      const token = await secrets.read();
+      if (siteUrl.length === 0 || email.length === 0 || token.length === 0) {
+        return { ok: false, message: 'Site, email et jeton sont tous nécessaires' };
+      }
+      // One real query rather than a ping: only an actual search proves the credentials and the project
+      // keys together, which is what fails in practice.
+      const { issues, error } = await searchIssues(
+        { siteUrl, email, token },
+        buildJql(projectKeys).mine,
+        email,
+      );
+      return error === null
+        ? { ok: true, message: `Connexion réussie, ${issues.length} ticket(s) assigné(s)` }
+        : { ok: false, message: error };
+    },
     terminals: terminalManager,
     settings: settingsStore,
     theme: themeController,
@@ -192,6 +282,9 @@ async function bootstrap(): Promise<void> {
   await loadRendererPage(window, 'index.html');
 
   projectMonitor.start();
+  pullMonitor.start();
+  hasJiraToken = (await secrets.read()).length > 0;
+  jiraMonitor.start();
 
   window.on('close', (event) => {
     // Only dev servers matter here. A shell tab dying with the app is expected; a build being killed
@@ -219,6 +312,8 @@ async function bootstrap(): Promise<void> {
 
   app.on('before-quit', () => {
     projectMonitor.stop();
+    pullMonitor.stop();
+    jiraMonitor.stop();
     terminalManager.stopAll();
   });
 

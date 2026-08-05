@@ -73,7 +73,44 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   terminal qui vole le focus au champ qui vient d'apparaître.
 - **Ne jamais détacher un terminal xterm du DOM.** `open()` sort tôt quand le terminal a déjà un
   élément : le détacher le laisse vivant mais invisible pour toujours. Un conteneur permanent par
-  session, on bascule `hidden`.
+  session, on bascule `hidden`. C'est aussi pourquoi la surface est une **grille** et que l'ordre des
+  panneaux se fait avec la propriété CSS `order` : réordonner en déplaçant les nœuds tuerait les xterm.
+- **La disposition des panneaux est à une seule direction** (`columns` ou `rows`), pas un arbre
+  imbriqué. Choix assumé face à Windows Terminal : la position d'un panneau se déduit de son index, ce
+  qui rend l'arithmétique pure et testable (`insertPane`, `removePane`, `replacePane`). Ne pas
+  introduire de mélange des directions sans passer à un vrai arbre.
+- **Elle vit dans le main**, comme l'ordre des onglets et pour la même raison. Le renderer calcule la
+  liste entière et l'envoie ; le main valide (ids inconnus retirés, doublons écrasés, jamais vide) et
+  la rediffuse. Un `syncLayout` la recale quand une session naît ou meurt, sinon un panneau serait un
+  trou.
+- **Cliquer un onglet non visible remplace le panneau focalisé**, il ne réduit pas la vue à un seul
+  panneau : parcourir les onglets ne doit pas détruire une disposition. Une seule règle, valable aussi
+  pour une action fraîchement lancée. Un split, lui, **ajoute** un panneau : il ne passe donc pas par
+  `focusTerminal`.
+- **Fermer un panneau ne tue pas son terminal.** La vue et la vie d'un terminal sont deux choses
+  distinctes ; un clic dans un menu contextuel ne doit pas pouvoir arrêter un serveur de dev.
+- **Chaque panneau visible a besoin de son propre `fit`.** Avec un split, chaque pty a sa géométrie :
+  n'en ajuster qu'un laisserait les autres couper leur sortie à la mauvaise largeur.
+- **Les raccourcis sont posés sur `document` en phase de capture**, sinon l'xterm focalisé les avale.
+  `Ctrl+Alt` plus une lettre, jamais un chiffre (clavier suisse français), et un garde sur
+  `event.repeat` : sans lui, garder le raccourci enfoncé ouvre un shell par répétition.
+- **Copier/coller : renvoyer `false` du `attachCustomKeyEventHandler` ne suffit pas.** Ça n'empêche
+  que le traitement xterm de la touche, pas l'action par défaut du navigateur : sans
+  `event.preventDefault()`, le keydown `Ctrl+V` déclenche encore l'événement `paste` natif sur le
+  textarea caché de xterm, que xterm écoute aussi — le texte était collé deux fois. La décision
+  (copie seulement avec sélection, `Ctrl+C` reste SIGINT sinon, garde AltGr) vit dans
+  `decideTerminalKey`, pure et testée ; le menu contextuel du panneau passe par les mêmes
+  `copySelection`/`pasteInto` que le raccourci.
+- **Le rendu passe par l'addon WebGL**, pas le renderer DOM par défaut. Le DOM sous le compositing
+  GPU de Chromium laissait des glyphes figés à l'écran pendant le scroll (vu en vrai) ; le canvas
+  WebGL est repeint entier, rien ne peut y rester. Trois règles, chacune payée : l'addon se charge
+  depuis `fitVisible`, **jamais dans `ensure()`** — une vue peut naître pour un onglet en
+  arrière-plan (`write` accumule l'historique des sessions cachées) et un canvas WebGL initialisé en
+  `display: none` naît avec une géométrie fausse qui ressort en glyphes figés hors de la grille à
+  l'affichage. Chaque `fit` est suivi d'un `term.refresh` complet — un resize ne repeint que la
+  nouvelle grille, pas ce que l'ancienne a laissé autour. Et `onContextLoss` dispose l'addon
+  (Chromium plafonne les contextes WebGL vivants par page et évince le plus ancien) : xterm retombe
+  seul sur le renderer DOM, l'état `failed` évitant de recharger un contexte qui serait ré-évincé.
 - **Git Bash se lance avec `-i`**, sinon les alias n'existent pas dans l'onglet.
 - **Les profils sont sondés sur le disque** avant d'être proposés : une entrée de menu qui échoue au
   clic est pire que pas d'entrée.
@@ -145,6 +182,75 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **Le port et le type se déduisent de la commande de l'action `server`**, plus d'un champ
   `startScript`. `scriptNameOf` suit un `npm run <x>` jusqu'au manifeste ; toute autre commande est
   interprétée telle quelle. Réintroduire un `startScript` recréerait deux endroits où se contredire.
+
+## Onglet Pull requests
+
+- **La bande du haut a deux onglets, le terminal n'en dépend pas.** Seul le contenu de la bande change ;
+  un onglet qui volerait la place du terminal irait contre tout le reste de cette app.
+- **Chaque onglet a sa hauteur** (`projectsHeight`, `pullsHeight`) : un tableau de quatre lignes et une
+  liste maître-détail n'ont pas les mêmes besoins. `attachPaneResizer` renvoie un `setHeight` pour que le
+  changement d'onglet applique la bonne, sans dupliquer le bornage ailleurs.
+- **Un `display` posé par une classe écrase le `[hidden]` du navigateur.** `.pulls` est en `display: grid`,
+  donc il a fallu un `.pulls[hidden] { display: none }` explicite : sans lui les deux vues s'empilaient à
+  l'écran. Même piège que `.terminal__view`.
+- **Les dépôts sont déduits des projets** via `git remote get-url origin` (`readRemoteSlug`), avec une case
+  `followPulls` par projet. Pas de seconde liste à tenir à jour ; corollaire assumé, un dépôt non cloné ne
+  peut pas être suivi.
+- **Un seul appel `gh pr list` par dépôt**, filtrage « les miennes » en local sur les `login`. Filtrer côté
+  GitHub aurait coûté deux appels par dépôt, sa syntaxe de recherche ne sachant pas faire ce `OR`. La
+  charge utile complète est donc en main : élargir le filtre plus tard ne coûtera aucun appel.
+- **Trois pièges du payload, tous rencontrés en vrai** : un `reviewDecision` vide veut dire « aucune review
+  requise » et **n'est pas** une approbation ; une review demandée à une **équipe** n'a pas de `login` et
+  doit être ignorée sans planter ; un `statusCheckRollup` vide est `no-checks`, jamais `passing`.
+- **`PullMonitor` est une boucle à part**, cadence en minutes (`pullsPollSeconds`, 180 s par défaut). Elle
+  est reconstruite par `reloadProjects` comme le monitor de projets, parce qu'elle indexe son état et ses
+  remotes résolus par projet.
+- **`verdictFor` est partagé** avec le service de checks : deux endroits décidant ce que « vert » signifie
+  finiraient par ne plus être d'accord.
+- Les cadences de sondage ne sont pas dans l'UI, comme `gitPollSeconds` et `checksPollSeconds` : elles
+  s'éditent dans `settings.json`.
+
+## Onglet Jira
+
+- **Le jeton d'API ne va jamais dans `settings.json`.** Il vit chiffré par `safeStorage` (DPAPI sous
+  Windows, lié au compte) dans `jira-token.bin`. Si le chiffrement est indisponible, `SecretStore.write`
+  **refuse** d'écrire plutôt que de retomber en clair : un secret écrit en clair parce que le coffre était
+  fermé, personne ne le remarque.
+- **Le jeton ne remonte jamais vers le renderer.** Le formulaire reçoit `hasToken: boolean`, jamais la
+  valeur ; un champ vide à l'enregistrement veut dire « garde celui qui est stocké », pas « efface ».
+- **L'étape d'un ticket vient de `statusCategory`, pas du nom du statut.** Les noms sont propres à chaque
+  projet et renommés à volonté (« En review », « Ready for QA ») ; seule la catégorie (`new`,
+  `indeterminate`, `done`) veut dire la même chose partout. Le nom reste ce qui est **affiché**, parce que
+  c'est le mot que l'équipe emploie.
+- **`sprint in openSprints()`** laisse Jira répondre lui-même à « quel est le sprint courant », au lieu de
+  chercher un board puis son sprint actif.
+- **Deux endpoints de recherche possibles.** Jira Cloud a remplacé `POST /rest/api/3/search` par
+  `GET /rest/api/3/search/jql`, et les instances migrent à leur rythme. Le service essaie le nouveau, se
+  rabat une fois sur l'ancien sur 404/410, puis retient la réponse. Ne pas « simplifier » en n'en gardant
+  qu'un sans avoir vérifié sur le site réel.
+- **Le bouton « Tester » lance une vraie recherche**, pas un ping : seule une requête réelle valide à la
+  fois les identifiants et les clés de projet, qui sont ce qui échoue en pratique.
+- Rien n'est interrogé tant que site, email et jeton ne sont pas tous les trois renseignés : une install
+  non configurée ne fait aucune requête.
+- **Les points d'estimation ne sont pas affichés** : leur champ (`customfield_xxxxx`) varie d'un site à
+  l'autre et il faudrait le découvrir via `/rest/api/3/field`. À ajouter si le besoin se confirme.
+- **Les transitions se lisent à l'ouverture du menu**, jamais en cache : un workflow décide quels
+  mouvements sont légaux depuis le statut courant, donc une liste mémorisée proposerait des mouvements que
+  Jira refuserait ensuite. Une requête par clic droit, c'est le bon prix pour ne jamais mentir.
+- **Une transition est libellée par le statut d'arrivée**, pas par son propre nom : le nom est un verbe
+  (« Start progress ») alors que l'utilisateur choisit une destination.
+- **« M'assigner » passe par l'`accountId` du compte du jeton** (`/rest/api/3/myself`), jamais par un
+  email : les emails sont masqués par la confidentialité sur beaucoup de sites, et l'id garantit que
+  l'action ne peut viser personne d'autre.
+- **Les écritures rafraîchissent tout de suite** (`afterJiraWrite`) : la ligne qu'on vient de changer doit
+  montrer son nouvel état sans attendre le tour de boucle de cinq minutes.
+- **Les lignes de tickets sont une grille**, pas une ligne flex : leurs badges sont conditionnels, donc en
+  flex aucune ligne n'était d'accord sur l'emplacement du statut. L'assigné vient avant le statut, et la
+  colonne disparaît dans « Mes tickets » où chaque ligne porterait le même nom.
+- **`context-menu.ts` n'a aucun effet de bord à l'import.** Ses écouteurs de fermeture sont posés à la
+  première ouverture : au chargement du module, deux fichiers de tests sans DOM cassaient.
+- **Pas de placeholder d'exemple dans les réglages.** Un exemple grisé se lit comme une valeur déjà
+  enregistrée ; là où un placeholder subsiste, c'est une valeur déduite, et il est en italique très pâle.
 
 ## Projets configurables
 

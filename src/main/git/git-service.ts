@@ -49,6 +49,41 @@ export async function readGitState(repoPath: string): Promise<GitState> {
   }
 }
 
+/**
+ * The `owner/repo` a repository points at on GitHub, or null when it points elsewhere.
+ *
+ * Null rather than an error for anything unexpected: a project with no remote, or one hosted somewhere
+ * that is not GitHub, is a perfectly normal row that simply has no pull requests to show.
+ */
+export async function readRemoteSlug(repoPath: string): Promise<string | null> {
+  try {
+    const url = (await git(repoPath, ['remote', 'get-url', 'origin'])).trim();
+    return parseRemoteSlug(url);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extracts `owner/repo` from a remote URL.
+ *
+ * Exported for testing, and both forms are handled because both are in the wild: these clones use
+ * `https://github.com/example-org/<repo>.git` while an SSH clone reads
+ * `git@github.com:owner/repo.git`. The `.git` suffix is optional in both.
+ */
+export function parseRemoteSlug(url: string): string | null {
+  const cleaned = url.trim().replace(/\.git$/i, '');
+  const https = /^https?:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\/([^/]+)$/i.exec(cleaned);
+  if (https !== null) {
+    return `${https[1]}/${https[2]}`;
+  }
+  const ssh = /^(?:ssh:\/\/)?git@github\.com[:/]([^/]+)\/([^/]+)$/i.exec(cleaned);
+  if (ssh !== null) {
+    return `${ssh[1]}/${ssh[2]}`;
+  }
+  return null;
+}
+
 async function git(repoPath: string, args: readonly string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
     timeout: TIMEOUT_MS,

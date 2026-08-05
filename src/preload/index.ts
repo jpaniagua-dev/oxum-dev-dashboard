@@ -3,6 +3,9 @@ import {
   IpcChannel,
   type AppSettings,
   type BootstrapState,
+  type IssueTransition,
+  type JiraConfig,
+  type JiraState,
   type OpenShellRequest,
   type PaneDirection,
   type ProjectCandidate,
@@ -11,6 +14,7 @@ import {
   type ProjectRow,
   type ProjectValidation,
   type RendererApi,
+  type RepoPulls,
   type ShellProfile,
   type TerminalChunk,
   type TerminalId,
@@ -31,6 +35,46 @@ const api: RendererApi = {
   bootstrap: (): Promise<BootstrapState> => ipcRenderer.invoke(IpcChannel.Bootstrap),
 
   refreshNow: (): Promise<ProjectRow[]> => ipcRenderer.invoke(IpcChannel.RefreshNow),
+
+  refreshPulls: (): Promise<RepoPulls[]> => ipcRenderer.invoke(IpcChannel.PullsRefresh),
+
+  onPullsChanged: (listener: (repos: RepoPulls[]) => void): (() => void) => {
+    const handler = (_event: unknown, repos: RepoPulls[]): void => listener(repos);
+    ipcRenderer.on(IpcChannel.PullsChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.PullsChanged, handler);
+  },
+
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IpcChannel.OpenExternal, url),
+
+  writeClipboard: (text: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.ClipboardWrite, text),
+
+  readClipboard: (): Promise<string> => ipcRenderer.invoke(IpcChannel.ClipboardRead),
+
+  refreshJira: (): Promise<JiraState> => ipcRenderer.invoke(IpcChannel.JiraRefresh),
+
+  onJiraChanged: (listener: (state: JiraState) => void): (() => void) => {
+    const handler = (_event: unknown, state: JiraState): void => listener(state);
+    ipcRenderer.on(IpcChannel.JiraChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.JiraChanged, handler);
+  },
+
+  saveJira: (
+    config: { siteUrl: string; email: string; projectKeys: string[] },
+    token?: string,
+  ): Promise<{ config: JiraConfig; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.JiraSave, config, token),
+
+  testJira: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke(IpcChannel.JiraTest),
+
+  jiraTransitions: (key: string): Promise<IssueTransition[]> =>
+    ipcRenderer.invoke(IpcChannel.JiraTransitions, key),
+
+  transitionJira: (key: string, transitionId: string): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.JiraTransition, key, transitionId),
+
+  assignJiraToMe: (key: string): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.JiraAssignMe, key),
 
   onRowsChanged: (listener: (rows: ProjectRow[]) => void): (() => void) => {
     const handler = (_event: unknown, rows: ProjectRow[]): void => listener(rows);
@@ -93,8 +137,6 @@ const api: RendererApi = {
     ipcRenderer.on(IpcChannel.TerminalsChanged, handler);
     return () => ipcRenderer.off(IpcChannel.TerminalsChanged, handler);
   },
-
-  openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IpcChannel.OpenExternal, url),
 
   openFolder: (projectId: ProjectId): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.OpenFolder, projectId),

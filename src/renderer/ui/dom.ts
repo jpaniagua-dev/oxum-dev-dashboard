@@ -6,6 +6,20 @@
  * assigning them as HTML would turn a pasted prompt into script injection.
  */
 
+/**
+ * Controls that own their click, so a clickable row must not act on it too.
+ *
+ * Matched with `closest` rather than against a list of known elements: it keeps working when a control is
+ * added later. Shared by the project table and the pull request list, which both have a row-level gesture
+ * sitting under buttons.
+ */
+export function hitsInteractive(event: Event): boolean {
+  return (
+    event.target instanceof Element &&
+    event.target.closest('button, input, select, a, textarea') !== null
+  );
+}
+
 /** Fetches a required element, failing loudly rather than degrading silently. */
 export function requireElement<T extends HTMLElement>(id: string): T {
   const element = document.getElementById(id);

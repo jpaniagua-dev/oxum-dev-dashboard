@@ -70,6 +70,57 @@ stopped happening. The trade-off is explicit: if something outside still holds t
 opens no port. Nothing about it can be observed from the outside, which is precisely why the
 dashboard spawns it and reads its output.
 
+## Pull requests
+
+The top strip has two tabs, `Projets` and `Pull requests`. Only the strip changes: the terminal below
+keeps its space whichever is selected, and each tab remembers its own height.
+
+The pull request tab lists the watched repositories on the left with a counter, and the pull requests of
+the selected one on the right, one line each:
+
+```
+#580  PROJ 412 user profile detail page   [auteur] [à relire] [OK 4]   33 min
+#575  PROJ-1607: Invoice lifecycle actions       [à relire] [sans review] [aucun check]  18 min
+```
+
+- **Which repositories**: derived from each project's `git remote get-url origin`, with a
+  `Suivre les pull requests` checkbox per project in the settings. Nothing to maintain twice, and the
+  trade-off is explicit: a repository you have not cloned cannot be followed.
+- **Which pull requests**: the open ones that involve you, as author or with your review requested. That
+  is the question the tab exists to answer; on an active repository the full list buries it. One
+  `gh pr list` call per repository brings everything, and the filter is applied locally.
+- **`sans review` is not an approval.** `gh` reports an empty `reviewDecision` when the repository
+  requires no review at all, and painting that green would claim something GitHub never said.
+- Clicking a line opens the pull request in your browser. The poll runs every 180 s by default
+  (`pullsPollSeconds`), one call per followed repository, which is far below any rate limit.
+
+## Jira
+
+A third strip tab, same master-detail grammar: `Sprint courant` and `Mes tickets` on the left with their
+counts, the issues of the selected view on the right. Clicking an issue opens it in the browser, there
+being no local equivalent of a ticket.
+
+Unlike GitHub, there is no pre-authenticated CLI to lean on, so the connection is configured in the
+settings: site URL, account email, project keys, and an Atlassian API token.
+
+- **The token is encrypted at rest** by `safeStorage` (DPAPI on Windows, keyed to your account) in its own
+  file, never in `settings.json`. It is never read back towards the settings window: to change it, type a
+  new one, and an empty field means "keep the stored one".
+- **If the platform cannot encrypt, the token is refused** rather than written in the clear.
+- **`Tester`** runs one real search, because only that proves the credentials and the project keys
+  together.
+- The status shown is the one your team configured; the colour comes from Jira's status **category**,
+  which is the only part of a workflow that means the same thing on every board.
+- **Right-click an issue** to assign it to yourself or move it to another status. The available moves are
+  read from Jira when the menu opens, never cached: a workflow decides what is legal from the current
+  status, and a remembered list would offer moves Jira then refuses. Assigning goes through the account id
+  behind your token, so it cannot target anyone else. Both write straight to Jira and the view refreshes
+  at once.
+- Issues are laid out in columns, assignee then status. `Mes tickets` drops the assignee column, since
+  every row would carry your name.
+- Nothing is queried until the site, the email and the token are all set. Poll every 300 s by default
+  (`jiraPollSeconds`).
+
 ### Checks verdicts
 
 `pas poussée` (no upstream, so no pull request can exist) · `pas de PR` · `aucun check` ·
@@ -155,13 +206,25 @@ the strip above (its height is remembered).
 - **Click a project row** to open a shell sitting in that repository, or to come back to the one
   already open there. It reuses rather than stacking, because a whole row is far too easy to click by
   accident to be allowed to pile up terminals. Clicks on a button, a field or the project name are left
-  to those controls. **`>_`** does the same thing and stays for the keyboard, a row not being focusable.
-  A second shell in the same repository comes from `+`.
+  to those controls. A second shell in the same repository comes from `+`. The gesture is mouse-only: a
+  table row is not focusable, and the button that used to duplicate it was just noise.
 - **Double-click a tab name to rename it.** Enter commits, Escape cancels. A renamed tab keeps its
   name even if you relaunch the same command.
 - **Drag a tab to reorder the strip.** The marker on the target tab shows which side the drop lands on.
   The order is held by the main process alongside the sessions, so a hot reload does not shuffle it
   back.
+- **Right-click a pane to split it**, or `Ctrl+Alt+D` for a column and `Ctrl+Alt+B` for a row. A split
+  opens a new shell **in that pane's own directory**, so splitting a repository shell gives you a second
+  one in the same repository.
+- **Right-click a tab** to put that session on screen beside the others, rename it, or close it.
+- `Ctrl+Alt+W`, or "Fermer ce panneau", takes a pane off the surface. The terminal keeps running and its
+  tab stays: killing one is still the cross on its tab, so no menu click can take down a build.
+- Panes share the surface in **one direction**, columns or rows, chosen by the split. Three side by side
+  or three stacked, never a mix: pane positions stay predictable, at the cost of Windows Terminal's
+  nested trees. Drag the separator between two panes to give one more room.
+- Several tabs are highlighted at once when they are on screen; the brighter one is where the keyboard
+  goes. Clicking a tab that is not visible puts it **in place of the focused pane**, so browsing the
+  tabs never destroys a layout.
 - A tab can be closed as soon as it has nothing left to do: shells always, a `task` action always, a
   `server` action once it has stopped. A running server has no close button because `Stop` is the
   deliberate way to end it. A green dot marks a live process.

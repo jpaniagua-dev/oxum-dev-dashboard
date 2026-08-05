@@ -1,4 +1,10 @@
-import type { ChecksState, GitState, ServerState } from '@shared/contracts.js';
+import type {
+  ChecksState,
+  GitState,
+  PrReview,
+  PullRequest,
+  ServerState,
+} from '@shared/contracts.js';
 
 /**
  * Turns domain state into what the table shows.
@@ -70,6 +76,74 @@ export function canStop(server: ServerState): boolean {
  */
 export function canStart(server: ServerState): boolean {
   return !server.owned;
+}
+
+/**
+ * Label and tone for a pull request's review state.
+ *
+ * `none` gets a neutral pill rather than a green one: `gh` reports an empty `reviewDecision` when the
+ * repository requires no review at all, and showing that as approved would claim something nobody said.
+ */
+export function presentReview(review: PrReview): Pill {
+  switch (review) {
+    case 'approved':
+      return { label: 'approuvée', tone: 'ok', title: 'Au moins une approbation, rien à corriger' };
+    case 'changes-requested':
+      return {
+        label: 'à corriger',
+        tone: 'error',
+        title: 'Un relecteur a demandé des changements',
+      };
+    case 'review-required':
+      return { label: 'à relire', tone: 'busy', title: 'En attente de relecture' };
+    case 'none':
+      return { label: 'sans review', tone: 'neutral', title: 'Aucune relecture requise' };
+  }
+}
+
+/**
+ * Label and tone for a pull request's checks.
+ *
+ * Same vocabulary as the project rows, on purpose: `OK n` / `KO n` / `en cours n`, and `aucun check`
+ * kept distinct from green.
+ */
+export function presentPullChecks(pull: PullRequest): Pill {
+  switch (pull.checks) {
+    case 'passing':
+      return { label: `OK ${pull.passed}`, tone: 'ok', title: `${pull.passed} check(s) au vert` };
+    case 'failing':
+      return { label: `KO ${pull.failed}`, tone: 'error', title: `${pull.failed} check(s) en échec` };
+    case 'pending':
+      return {
+        label: `en cours ${pull.pending}`,
+        tone: 'busy',
+        title: `${pull.pending} check(s) en cours`,
+      };
+    case 'no-checks':
+      return { label: 'aucun check', tone: 'info', title: 'Aucun check rapporté' };
+    case 'no-pr':
+    case 'unknown':
+      return { label: '?', tone: 'neutral', title: 'État des checks inconnu' };
+  }
+}
+
+/**
+ * Why a pull request concerns the user, or nothing when it does not.
+ *
+ * Author and reviewer are separate flags in the payload, so the badge can say which it is instead of a
+ * flat "mine" that hides whether the ball is in your court.
+ */
+export function presentInvolvement(pull: PullRequest): Pill | null {
+  if (pull.isAuthor && pull.isReviewer) {
+    return { label: 'à moi', tone: 'info', title: 'Vous êtes auteur et relecteur demandé' };
+  }
+  if (pull.isAuthor) {
+    return { label: 'auteur', tone: 'neutral', title: 'Vous êtes l’auteur' };
+  }
+  if (pull.isReviewer) {
+    return { label: 'à relire', tone: 'busy', title: 'Votre relecture est demandée' };
+  }
+  return null;
 }
 
 /** Label and tone for the checks column. */

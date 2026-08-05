@@ -38,6 +38,9 @@ export function defaultActions(startScript = 'start'): ProjectAction[] {
   ];
 }
 
+/** Whether a project's pull requests are followed by default. Kept here with the other seed values. */
+export const FOLLOW_PULLS_DEFAULT = true;
+
 /**
  * Stable id for an action, unique within its project.
  *

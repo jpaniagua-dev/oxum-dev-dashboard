@@ -12,6 +12,7 @@ import { inferProject, validateActions, validateProjectPath } from './project-in
 import {
   DEFAULT_PROJECTS_ROOT,
   defaultActions,
+  FOLLOW_PULLS_DEFAULT,
   makeActionId,
   makeId,
   shortLabel,
@@ -147,6 +148,7 @@ export function configFromPath(path: string): ProjectConfig {
     kind: null,
     expectedPort: null,
     enabled: true,
+    followPulls: FOLLOW_PULLS_DEFAULT,
   };
 }
 

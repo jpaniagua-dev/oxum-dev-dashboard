@@ -361,6 +361,240 @@ body {
   height: 14px;
 }
 
+/* ------------------------------------------------------------- strip tabs */
+
+.strip__tabs {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.strip__tab {
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.strip__tab:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.strip__tab--active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--primary);
+}
+
+/* ----------------------------------------------------------- pull requests */
+
+/*
+ * Master-detail inside the strip: repositories on the left, their pull requests on the right. Both
+ * scroll on their own so a long list never pushes the terminal out of the window.
+ */
+.pulls {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 10px;
+}
+
+/*
+ * A class that sets `display` beats the browser's own rule for `[hidden]`, so hiding this panel with the
+ * attribute alone left both strip views stacked on screen at once. Same trap as `.terminal__view`.
+ */
+.pulls[hidden] {
+  display: none;
+}
+
+.pulls__repos,
+.pulls__list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.pulls__repos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-right: 1px solid var(--border);
+  padding-right: 8px;
+}
+
+.pulls__repo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pulls__repo:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.pulls__repo--active {
+  background: var(--surface-inset);
+  border-color: var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pulls__repo-count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.pulls__repo-error {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.pulls__empty,
+.pulls__error {
+  margin: 4px 0 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.pulls__error {
+  color: var(--danger);
+}
+
+.pulls__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pull {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pull:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+/* Discreet until the row is hovered: the pills are what the eye is meant to catch first. */
+.pull__open {
+  display: grid;
+  place-items: center;
+  padding: 2px 5px;
+  opacity: 0.45;
+}
+
+.pull:hover .pull__open,
+.pull__open:focus-visible {
+  opacity: 1;
+}
+
+.pull__open svg {
+  width: 13px;
+  height: 13px;
+}
+
+.pull__number {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The title yields the space: the pills on its right are what the tab exists for. */
+.pull__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Issues are a grid, unlike pull requests: their badges are conditional, so a flex row left no two lines
+ * agreeing on where the status sat. Real columns are what make a list scannable.
+ */
+.issue {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) 130px 120px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* "Mes tickets" drops the assignee column: every row would carry the same name. */
+.issues--mine .issue {
+  grid-template-columns: 78px minmax(0, 1fr) 120px;
+}
+
+.issue:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.issue__summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issue__assignee {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Unassigned on a sprint board is usually a mistake, so it does not look like a name. */
+.issue__assignee--none {
+  color: var(--warning);
+  font-style: italic;
+}
+
+.pull__age {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* --------------------------------------------------------------- settings */
 
 /*
@@ -616,6 +850,19 @@ body {
   margin-bottom: 14px;
 }
 
+/* A checkbox reads as one line, unlike the stacked label-over-input of the text fields. */
+.settings-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.settings-check__label {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
 /* The profile picker takes the width it needs; the font size is two digits and asks for no more. */
 .settings-terminal-row {
   display: grid;
@@ -648,6 +895,16 @@ body {
 .settings-field__input:focus {
   outline: none;
   border-color: var(--primary);
+}
+
+/*
+ * A placeholder must never be mistaken for a saved value: where one remains, it is an inferred fallback
+ * (`déduit 4200`, `aucun`), and it says so in italics and much dimmer than real text.
+ */
+.settings-field__input::placeholder {
+  color: var(--text-faint);
+  font-style: italic;
+  opacity: 0.75;
 }
 
 /* -------------------------------------------------------------- candidates */
@@ -746,6 +1003,13 @@ body {
 
 .terminal__tab:hover {
   background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* On screen, but not necessarily where the keyboard goes: with a split, several tabs are visible. */
+.terminal__tab--visible {
+  background: var(--surface);
+  border-color: var(--border);
   color: var(--text);
 }
 
@@ -909,8 +1173,17 @@ body {
   color: var(--primary);
 }
 
+/*
+ * The surface is a grid, so several panes can share it.
+ *
+ * A grid rather than absolute positioning because the panes have to be *ordered*, and `order` is what
+ * lets the DOM keep every terminal exactly where it was created. Moving an xterm element would leave
+ * the terminal alive and blank.
+ */
 .terminal__surface {
-  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
   flex: 1;
   min-height: 0;
   padding: 6px 8px;
@@ -918,14 +1191,20 @@ body {
   user-select: text;
 }
 
+/* Width of the draggable gap between two panes. */
+:root {
+  --pane-splitter: 6px;
+}
+
 /*
- * One permanent container per project. They are stacked and toggled with `hidden` rather than being
- * added and removed: xterm's `open()` refuses to re-attach a terminal that already has an element,
- * so detaching one leaves it alive but invisible forever.
+ * One permanent container per session, toggled with `hidden` rather than added and removed: xterm's
+ * `open()` refuses to re-attach a terminal that already has an element, so detaching one leaves it
+ * alive but invisible forever.
  */
 .terminal__view {
-  position: absolute;
-  inset: 6px 8px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .terminal__view[hidden] {
@@ -934,4 +1213,69 @@ body {
 
 .terminal__view .xterm {
   height: 100%;
+}
+
+/*
+ * Which pane the keyboard goes to. Shown only when there is more than one, since a single pane leaves
+ * no doubt, and drawn as an inset ring so it costs no layout space.
+ */
+.terminal__view--focused {
+  box-shadow: inset 0 0 0 1px var(--primary-border);
+  border-radius: var(--radius-sm);
+}
+
+.terminal__splitter {
+  align-self: stretch;
+  justify-self: stretch;
+  background: var(--border);
+  cursor: col-resize;
+}
+
+.terminal__splitter--rows {
+  cursor: row-resize;
+}
+
+.terminal__splitter:hover {
+  background: var(--primary);
+}
+
+.terminal__splitter[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------------ context menu */
+
+.context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+
+.context-menu__item {
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.context-menu__item:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--primary);
+}
+
+.context-menu__item:disabled {
+  color: var(--text-faint);
+  cursor: default;
 }

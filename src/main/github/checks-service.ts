@@ -111,7 +111,13 @@ export function parsePrPayload(stdout: string): Omit<ChecksState, 'checkedAt' | 
   };
 }
 
-function verdictFor(
+/**
+ * Turns check counts into a verdict.
+ *
+ * Exported so the pull request list reaches the same conclusion from the same numbers: two places
+ * deciding what "green" means would eventually disagree.
+ */
+export function verdictFor(
   total: number,
   passed: number,
   failed: number,

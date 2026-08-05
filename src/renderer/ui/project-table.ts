@@ -1,5 +1,5 @@
 import type { ProjectId, ProjectRow } from '@shared/contracts.js';
-import { clearChildren, createElement } from './dom.js';
+import { clearChildren, createElement, hitsInteractive } from './dom.js';
 import { canStart, canStop, presentChecks, presentGit, presentServer, type Pill } from './presenters.js';
 
 export interface TableActions {
@@ -10,7 +10,6 @@ export interface TableActions {
   /** Called when an inline edit opens or closes, so the caller can pause re-rendering. */
   onEditingChange: (editing: boolean) => void;
   onStop: (projectId: ProjectId) => void;
-  onOpenPr: (url: string) => void;
   onOpenFolder: (projectId: ProjectId) => void;
   /** Opens a shell already sitting in the repository. */
   onOpenTerminal: (projectId: ProjectId) => void;
@@ -46,23 +45,15 @@ export function renderProjectTable(
   }
 }
 
-/**
- * Controls that own their click, so the row must not act on it too.
- *
- * Matched with `closest` rather than by comparing to a list of known elements: it keeps working when a
- * control is added later, and it covers the two conflicts that matter. A click on any action button
- * would otherwise both run the action and open a shell; and double-clicking the project name to rename
- * it fires two clicks, so the row would open a terminal and steal the focus from the input that just
- * appeared.
- */
-const INTERACTIVE = 'button, input, select, a, textarea';
-
 function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
   const tr = createElement('tr');
   tr.className = 'table__row';
   tr.title = 'Clic : ouvrir le terminal de ce dépôt';
+  // The guard covers two conflicts: a click on an action button would otherwise both run the action and
+  // open a shell, and the double-click that renames a project fires two clicks, so the row would steal
+  // the focus from the input that just appeared.
   tr.addEventListener('click', (event) => {
-    if (!(event.target instanceof Element) || event.target.closest(INTERACTIVE) !== null) {
+    if (hitsInteractive(event)) {
       return;
     }
     actions.onOpenTerminal(row.project.id);
@@ -150,8 +141,8 @@ function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
  *
  * The list comes from the project's configuration, in its declared order. Only the `server` action is
  * special: while it runs it is replaced by `Stop`, because a second click on it would do nothing
- * useful and the row needs a way to end what it started. Everything after the configured actions is a
- * built-in that opens something rather than running a command, so it is not part of the editable list.
+ * useful and the row needs a way to end what it started. The last two are built-ins that open something
+ * rather than running a command, so they are not part of the editable list.
  */
 function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment {
   const fragment = document.createDocumentFragment();
@@ -189,24 +180,8 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
     fragment.append(start);
   }
 
-  const prUrl = row.checks?.prUrl ?? null;
-  const pr = createElement('button', { className: 'button', text: 'PR' });
-  pr.type = 'button';
-  pr.disabled = prUrl === null;
-  pr.title = prUrl === null ? 'Aucune PR pour cette branche' : (row.checks?.prTitle ?? 'Ouvrir la PR');
-  if (prUrl !== null) {
-    pr.addEventListener('click', () => actions.onOpenPr(prUrl));
-  }
-  fragment.append(pr);
-
-  const terminal = createElement('button', { className: 'button', text: '>_' });
-  terminal.type = 'button';
-  // Same gesture as a click on the row, kept as a button because a row is not focusable and this is the
-  // only way to reach the action from the keyboard.
-  terminal.title = 'Terminal de ce dépôt';
-  terminal.addEventListener('click', () => actions.onOpenTerminal(row.project.id));
-  fragment.append(terminal);
-
+  // No terminal button: a click anywhere on the row does it, and a second control for the same gesture
+  // was only noise. The trade-off is that the action is now mouse-only, a row not being focusable.
   const folder = createElement('button', { className: 'button button--quiet', text: '…' });
   folder.type = 'button';
   folder.title = 'Ouvrir le dossier';

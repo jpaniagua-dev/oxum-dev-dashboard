@@ -6,6 +6,7 @@ import {
   type ProjectAction,
   type ProjectConfig,
   type ShellProfile,
+  type StripTab,
   type ThemeMode,
   type WindowBounds,
 } from '@shared/contracts.js';
@@ -29,6 +30,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
   themeMode: 'system',
   gitPollSeconds: 10,
   checksPollSeconds: 60,
+  // One `gh` call per watched repository, so the slowest of the three loops by design.
+  pullsPollSeconds: 180,
+  activeStrip: 'projects',
+  // Taller than the project table: a master-detail list needs the room.
+  pullsHeight: 360,
+  jiraHeight: 360,
+  // Two network searches per pass, so the slowest loop of the three.
+  jiraPollSeconds: 300,
+  jira: { siteUrl: '', email: '', projectKeys: [] },
   // The terminal is the centre of the window, so the projects pane is the one with a stored height.
   // 250 shows the three seeded projects without a scrollbar, which is the point of a status strip.
   projectsHeight: 250,
@@ -98,8 +108,18 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       15,
       3600,
     ),
-    // Clamped so a hand-edited value cannot hide the table or swallow the terminal.
+    pullsPollSeconds: clamp(
+      asNumber(input.pullsPollSeconds, DEFAULT_SETTINGS.pullsPollSeconds),
+      30,
+      3600,
+    ),
+    jiraPollSeconds: clamp(asNumber(input.jiraPollSeconds, DEFAULT_SETTINGS.jiraPollSeconds), 60, 3600),
+    jira: asJira(input.jira),
+    activeStrip: asStrip(input.activeStrip),
+    // Clamped so a hand-edited value cannot hide the strip or swallow the terminal.
     projectsHeight: clamp(asNumber(input.projectsHeight, DEFAULT_SETTINGS.projectsHeight), 90, 1200),
+    pullsHeight: clamp(asNumber(input.pullsHeight, DEFAULT_SETTINGS.pullsHeight), 90, 1200),
+    jiraHeight: clamp(asNumber(input.jiraHeight, DEFAULT_SETTINGS.jiraHeight), 90, 1200),
     defaultShellProfileId: asString(
       input.defaultShellProfileId,
       DEFAULT_SETTINGS.defaultShellProfileId,
@@ -159,6 +179,9 @@ function asProjects(value: unknown): ProjectConfig[] {
           ? input.expectedPort
           : null,
       enabled: typeof input.enabled === 'boolean' ? input.enabled : true,
+      // Followed unless said otherwise, so an existing configuration gains the pull request tab without
+      // being edited first.
+      followPulls: typeof input.followPulls === 'boolean' ? input.followPulls : true,
     });
   }
   return result;
@@ -215,6 +238,30 @@ export function asActions(value: unknown, startScript = 'start'): ProjectAction[
   // An empty list would leave a row with no buttons at all, which reads as a broken dashboard rather
   // than a deliberate choice.
   return result.length > 0 ? result : defaultActions(startScript);
+}
+
+/**
+ * Validates the Jira connection.
+ *
+ * The token is **not** part of this shape and never will be: it lives encrypted in its own file. Project
+ * keys are trimmed and uppercased because JQL is case-sensitive on them and a stray `proj` returns nothing
+ * with no error at all.
+ */
+function asJira(value: unknown): AppSettings['jira'] {
+  const input = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const keys = Array.isArray(input.projectKeys) ? input.projectKeys : [];
+  return {
+    siteUrl: typeof input.siteUrl === 'string' ? input.siteUrl.trim().replace(/\/+$/, '') : '',
+    email: typeof input.email === 'string' ? input.email.trim() : '',
+    projectKeys: keys
+      .filter((key): key is string => typeof key === 'string')
+      .map((key) => key.trim().toUpperCase())
+      .filter((key) => key.length > 0),
+  };
+}
+
+function asStrip(value: unknown): StripTab {
+  return value === 'pulls' || value === 'jira' ? value : 'projects';
 }
 
 /** Drops malformed profiles instead of letting one reach `pty.spawn`. */

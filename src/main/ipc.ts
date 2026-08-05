@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, shell } from 'electron';
+import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
 import {
   IpcChannel,
   type AppSettings,
@@ -9,7 +9,11 @@ import {
   type ProjectConfig,
   type ProjectId,
   type ProjectRow,
+  type IssueTransition,
+  type JiraConfig,
+  type JiraState,
   type ProjectValidation,
+  type RepoPulls,
   type ShellProfile,
   type TerminalId,
   type ThemeMode,
@@ -21,6 +25,15 @@ import {
   findProject,
   validateProjects,
 } from './projects/registry.js';
+import type { PullMonitor } from './github/pull-monitor.js';
+import type { JiraMonitor } from './jira/jira-monitor.js';
+import {
+  applyTransition,
+  assignIssue,
+  readMyAccountId,
+  readTransitions,
+  type JiraCredentials,
+} from './jira/jira-service.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -31,6 +44,16 @@ export interface IpcDependencies {
   /** Live project list, re-read on every call since settings can change it at any time. */
   readonly projects: () => readonly Project[];
   readonly monitor: () => ProjectMonitor;
+  readonly pulls: () => PullMonitor;
+  readonly jira: () => JiraMonitor;
+  /** Writes the Jira token to the encrypted store. Never reads it back towards the renderer. */
+  readonly saveJiraToken: (token: string) => Promise<{ ok: boolean; message: string }>;
+  readonly jiraConfig: () => JiraConfig;
+  readonly testJira: () => Promise<{ ok: boolean; message: string }>;
+  /** Credentials for one Jira write, or null when the connection is incomplete. */
+  readonly jiraCredentials: () => Promise<JiraCredentials | null>;
+  /** Called after a successful write, to refresh the views without waiting for the poll. */
+  readonly afterJiraWrite: () => void;
   readonly terminals: TerminalManager;
   readonly settings: SettingsStore;
   readonly theme: ThemeController;
@@ -69,9 +92,101 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     shellProfiles: deps.profiles(),
     terminals: deps.terminals.sessions(),
     layout: deps.terminals.layout(),
+    pulls: deps.pulls().rows(),
+    jira: deps.jira().state(),
+    jiraConfig: deps.jiraConfig(),
   }));
 
   ipcMain.handle(IpcChannel.RefreshNow, async (): Promise<ProjectRow[]> => deps.monitor().refreshAll());
+
+  ipcMain.handle(IpcChannel.PullsRefresh, async (): Promise<RepoPulls[]> =>
+    deps.pulls().refreshNow(),
+  );
+
+  ipcMain.handle(IpcChannel.JiraRefresh, async (): Promise<JiraState> => deps.jira().refreshNow());
+
+  ipcMain.handle(IpcChannel.JiraTest, async (): Promise<{ ok: boolean; message: string }> =>
+    deps.testJira(),
+  );
+
+  ipcMain.handle(
+    IpcChannel.JiraSave,
+    async (_event, config: unknown, token: unknown): Promise<{ config: JiraConfig; message: string }> => {
+      const input = typeof config === 'object' && config !== null ? (config as Record<string, unknown>) : {};
+      await deps.settings.update({
+        jira: {
+          siteUrl: typeof input.siteUrl === 'string' ? input.siteUrl : '',
+          email: typeof input.email === 'string' ? input.email : '',
+          projectKeys: Array.isArray(input.projectKeys)
+            ? input.projectKeys.filter((key): key is string => typeof key === 'string')
+            : [],
+        },
+      });
+
+      // An absent token leaves the stored one alone: the form never receives it, so it cannot send it
+      // back, and an empty string would otherwise wipe a working credential on every save.
+      let message = 'Connexion enregistrée';
+      if (typeof token === 'string' && token.length > 0) {
+        const result = await deps.saveJiraToken(token);
+        message = result.message;
+      }
+      return { config: deps.jiraConfig(), message };
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.JiraTransitions,
+    async (_event, key: unknown): Promise<IssueTransition[]> => {
+      const credentials = await deps.jiraCredentials();
+      if (credentials === null || typeof key !== 'string') {
+        return [];
+      }
+      const { transitions } = await readTransitions(credentials, key);
+      return transitions;
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.JiraTransition,
+    async (_event, key: unknown, transitionId: unknown): Promise<{ ok: boolean; message: string }> => {
+      const credentials = await deps.jiraCredentials();
+      if (credentials === null || typeof key !== 'string' || typeof transitionId !== 'string') {
+        return { ok: false, message: 'Connexion Jira incomplète' };
+      }
+      const result = await applyTransition(credentials, key, transitionId);
+      if (result.ok) {
+        deps.afterJiraWrite();
+      }
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.JiraAssignMe,
+    async (_event, key: unknown): Promise<{ ok: boolean; message: string }> => {
+      const credentials = await deps.jiraCredentials();
+      if (credentials === null || typeof key !== 'string') {
+        return { ok: false, message: 'Connexion Jira incomplète' };
+      }
+      // The account id comes from the token's own account, so "assign to me" cannot target anyone else.
+      const { accountId, error } = await readMyAccountId(credentials);
+      if (error !== null) {
+        return { ok: false, message: error };
+      }
+      const result = await assignIssue(credentials, key, accountId);
+      if (result.ok) {
+        deps.afterJiraWrite();
+      }
+      return result;
+    },
+  );
+
+  ipcMain.handle(IpcChannel.OpenExternal, async (_event, url: unknown): Promise<void> => {
+    // Only http(s) is followed: an arbitrary string here could otherwise launch a local handler.
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+      await shell.openExternal(url);
+    }
+  });
 
   ipcMain.handle(
     IpcChannel.PtyRun,
@@ -212,12 +327,13 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     typeof terminalId === 'string' ? deps.terminals.buffer(terminalId) : '',
   );
 
-  ipcMain.handle(IpcChannel.OpenExternal, async (_event, url: unknown): Promise<void> => {
-    // Only http(s) is followed: an arbitrary string here could otherwise launch a local handler.
-    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
-      await shell.openExternal(url);
+  ipcMain.handle(IpcChannel.ClipboardWrite, async (_event, text: unknown): Promise<void> => {
+    if (typeof text === 'string' && text.length > 0) {
+      clipboard.writeText(text);
     }
   });
+
+  ipcMain.handle(IpcChannel.ClipboardRead, async (): Promise<string> => clipboard.readText());
 
   ipcMain.handle(IpcChannel.OpenFolder, async (_event, projectId: unknown): Promise<void> => {
     const project = resolveProject(deps.projects(), projectId);

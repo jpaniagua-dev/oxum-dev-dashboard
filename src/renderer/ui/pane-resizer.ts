@@ -53,7 +53,7 @@ export function attachPaneResizer(options: {
   initialHeight: number;
   onResize: () => void;
   onCommit: (height: number) => void;
-}): void {
+}): { setHeight: (height: number) => void } {
   let dragging = false;
 
   const paneTop = (): number => options.pane.getBoundingClientRect().top;
@@ -118,4 +118,8 @@ export function attachPaneResizer(options: {
 
   // Re-clamp when the window shrinks, so the strip cannot end up taller than the window.
   window.addEventListener('resize', () => apply(currentHeight()));
+
+  // Handed back so switching strip tabs can apply that tab's own remembered height. Applying it from
+  // outside would have to duplicate the clamping, which is exactly where a resizer goes wrong.
+  return { setHeight: (height: number) => apply(height) };
 }

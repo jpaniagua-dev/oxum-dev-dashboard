@@ -113,6 +113,7 @@ describe('stopProjectServer', () => {
       onParsed: () => {},
       onProjectStartExit: () => {},
       onSessionsChanged: () => {},
+      onLayoutChanged: () => {},
     });
     expect(manager.stopProjectServer('web-app')).toBe(false);
   });
