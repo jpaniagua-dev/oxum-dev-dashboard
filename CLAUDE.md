@@ -64,6 +64,13 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **Une session terminal n'appartient pas à un projet.** `TerminalManager` est indexé par
   `TerminalId`. Revenir à une clé par projet rendrait impossible d'avoir un shell ouvert pendant
   qu'un serveur tourne, ce qui est le cas d'usage normal.
+- **Le bouton `Terminal` et le clic sur la ligne ne sont pas le même geste**, et c'est la distinction
+  qui compte : la ligne revient toujours au shell unique du dépôt, le bouton ouvre **un nouvel onglet**
+  dans son dossier à chaque clic. Le bouton passe donc par `openShell` et non `openProjectShell`, ce
+  qui laisse ces onglets sans `projectId` : invisibles pour la recherche de réutilisation de la ligne,
+  et jamais fermés par `reconcile`. Le bouton avait été retiré une fois comme redondant avec le clic,
+  ce qu'il n'était pas : cette lecture supprimait le seul moyen d'ouvrir un deuxième shell sur un même
+  dépôt. Le bouton de la liste des PR porte le même libellé et donc le même comportement, exprès.
 - **Cliquer une ligne ouvre le shell du dépôt, et le réutilise.** Le geste est trop facile à
   déclencher pour empiler un onglet par clic. Un shell de dépôt porte donc un `projectId` **et** pas
   d'`actionId` : tout code qui parcourt ces deux champs doit accepter ce couple. La règle de
@@ -200,6 +207,17 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **Un `display` posé par une classe écrase le `[hidden]` du navigateur.** `.pulls` est en `display: grid`,
   donc il a fallu un `.pulls[hidden] { display: none }` explicite : sans lui les deux vues s'empilaient à
   l'écran. Même piège que `.terminal__view`.
+- **Un clic sur une ligne de PR ouvre la PR dans le navigateur**, et le terminal du dépôt a son propre
+  bouton. Les deux gestes étaient inversés jusqu'à ce que l'usage tranche : devant une liste de pull
+  requests, le réflexe est d'aller lire la PR, et le terminal est le geste délibéré. Le garde
+  `hitsInteractive` est ce qui empêche le bouton d'ouvrir aussi le navigateur en sortant de la ligne.
+- **Le bouton « Ouvrir <CLÉ> » de l'onglet Jira pointe sur `/browse/<CLÉ>`**, jamais sur un chemin
+  `/jira/software/...`. Un chemin de board exige l'id numérique du board *et* le style du projet, deux
+  choses que l'app n'a pas : vérifié sur le site réel, `PROJ` est **team-managed** (`style: next-gen`,
+  donc `/jira/software/projects/...`) alors qu'un projet company-managed utilise
+  `/jira/software/c/projects/...`. Deviner entre les deux donnerait un 404 une fois sur deux.
+  `/browse/<CLÉ>` est la seule forme que Jira Cloud résout pour tous les types de projet. Épinglé par
+  un test pour que personne ne l'« améliore » en chemin de board.
 - **Les dépôts sont déduits des projets** via `git remote get-url origin` (`readRemoteSlug`), avec une case
   `followPulls` par projet. Pas de seconde liste à tenir à jour ; corollaire assumé, un dépôt non cloné ne
   peut pas être suivi.

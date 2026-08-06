@@ -1,17 +1,23 @@
 import type { ProjectId, PullRequest, RepoPulls } from '@shared/contracts.js';
-import { clearChildren, createElement, createIcon, hitsInteractive } from './dom.js';
+import { clearChildren, createElement, hitsInteractive } from './dom.js';
 import { buildPill } from './project-table.js';
 import { presentInvolvement, presentPullChecks, presentReview } from './presenters.js';
 
 export interface PullListActions {
   /**
-   * Opens the repository's terminal.
+   * Opens **a new** shell in the repository's folder.
    *
-   * What a click on a row does, the same gesture as a click on a project row: the reflex after seeing a
-   * pull request is to go work on it, not to read it again in a browser.
+   * Same meaning as the `Terminal` button of the project table, on purpose: one label, one behaviour.
+   * Two buttons reading `Terminal` and doing different things would be worse than either choice.
    */
-  onOpenTerminal: (projectId: ProjectId) => void;
-  /** Opens a pull request on GitHub. Its own button, since it is the deliberate detour. */
+  onNewTerminal: (projectId: ProjectId) => void;
+  /**
+   * Opens a pull request on GitHub.
+   *
+   * What a click on a row does. The two gestures were the other way round until use decided it: the
+   * reflex in front of a pull request list is to go read the pull request, and the terminal is the
+   * deliberate move.
+   */
   onOpenPull: (url: string) => void;
   /** Remembers which repository is selected, so a refresh does not jump back to the first. */
   onSelect: (projectId: ProjectId) => void;
@@ -113,7 +119,7 @@ export function renderPullList(
  *
  * A `div` rather than a `button`, because it carries a button of its own and nesting them is invalid
  * HTML that browsers silently rearrange. The row-level click is guarded the same way the project table
- * guards its own, so the GitHub button does not also open a terminal.
+ * guards its own, so the terminal button does not also open the browser.
  */
 function buildPullRow(
   pull: PullRequest,
@@ -121,7 +127,7 @@ function buildPullRow(
   actions: PullListActions,
 ): HTMLElement {
   const row = createElement('div', { className: 'pull' });
-  row.title = `${pull.title}\n${pull.branch}\n(clic : terminal du dépôt)`;
+  row.title = `${pull.title}\n${pull.branch}\n(clic : ouvrir la PR sur GitHub)`;
 
   row.append(createElement('span', { className: 'pull__number', text: `#${pull.number}` }));
   // `textContent` everywhere: titles and branch names come from outside the app.
@@ -139,21 +145,21 @@ function buildPullRow(
   row.append(buildPill(presentPullChecks(pull)));
   row.append(createElement('span', { className: 'pull__age', text: describeAge(pull.updatedAt) }));
 
-  const open = createElement('button', { className: 'button button--quiet pull__open' });
-  open.type = 'button';
-  open.title = `Ouvrir la PR #${pull.number} sur GitHub`;
-  open.setAttribute('aria-label', open.title);
-  // Drawn rather than a character, for the same reason as the shell picker's chevron: as text its size
-  // and baseline are the font's decision.
-  open.append(createIcon('M6.5 3.5h-3v9h9v-3M9.5 3.5h3v3M12.2 3.8l-5 5', { paint: 'stroke' }));
-  open.addEventListener('click', () => actions.onOpenPull(pull.url));
-  row.append(open);
+  const terminal = createElement('button', {
+    className: 'button button--quiet pull__terminal',
+    text: 'Terminal',
+  });
+  terminal.type = 'button';
+  terminal.title = 'Ouvrir un nouvel onglet dans ce dossier';
+  terminal.addEventListener('click', () => actions.onNewTerminal(projectId));
+  row.append(terminal);
 
   row.addEventListener('click', (event) => {
+    // Without this the terminal button would open the browser on its way out of the row.
     if (hitsInteractive(event)) {
       return;
     }
-    actions.onOpenTerminal(projectId);
+    actions.onOpenPull(pull.url);
   });
   return row;
 }

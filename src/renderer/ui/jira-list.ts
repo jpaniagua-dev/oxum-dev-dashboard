@@ -12,6 +12,24 @@ export interface JiraListActions {
 }
 
 /**
+ * Where to send the browser for a project's board.
+ *
+ * `/browse/<KEY>` rather than a `/jira/software/...` board path, and the reason is that the board path
+ * needs two things this app does not have: the numeric board id, and the project's style. Verified on
+ * the real site: `PROJ` is a **team-managed** project (`style: next-gen`), whose boards live under
+ * `/jira/software/projects/<KEY>/boards/<id>`, while a company-managed one uses
+ * `/jira/software/c/projects/...`. Guessing between the two would 404 half the time, and resolving the
+ * id means an extra Agile API call on every start.
+ *
+ * `/browse/<KEY>` is the one form Jira Cloud resolves for every project type and redirects to that
+ * project's own default view, which for a software project is its board. Pure and exported so the
+ * choice is pinned by a test rather than rediscovered.
+ */
+export function boardUrl(siteUrl: string, projectKey: string): string {
+  return `${siteUrl.replace(/\/+$/, '')}/browse/${encodeURIComponent(projectKey.trim().toUpperCase())}`;
+}
+
+/**
  * Label and tone for an issue's stage.
  *
  * Driven by Jira's status **category**, not its name: names are per-project and renamed at will, while the
@@ -38,6 +56,7 @@ export function renderJiraList(
   state: JiraState,
   selected: JiraViewId,
   actions: JiraListActions,
+  boards: { siteUrl: string; projectKeys: readonly string[] } = { siteUrl: '', projectKeys: [] },
 ): void {
   clearChildren(hosts.views);
   clearChildren(hosts.list);
@@ -70,6 +89,25 @@ export function renderJiraList(
     }
     row.addEventListener('click', () => actions.onSelect(view.id));
     hosts.views.append(row);
+  }
+
+  /*
+   * One board shortcut per configured project, under the views rather than in the strip header: the
+   * header is shared with the other tabs, and a control that only makes sense here belongs here.
+   */
+  if (boards.siteUrl.length > 0) {
+    for (const key of boards.projectKeys) {
+      // A full `.button`, not `--quiet`: borderless it read as a disabled list item rather than a
+      // control, sitting as it does directly under two view rows.
+      const open = createElement('button', {
+        className: 'button jira__board',
+        text: `Ouvrir ${key}`,
+        title: `Ouvrir le board ${key} dans le navigateur`,
+      });
+      open.type = 'button';
+      open.addEventListener('click', () => actions.onOpen(boardUrl(boards.siteUrl, key)));
+      hosts.views.append(open);
+    }
   }
 
   if (active === undefined) {

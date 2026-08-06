@@ -11,8 +11,21 @@ export interface TableActions {
   onEditingChange: (editing: boolean) => void;
   onStop: (projectId: ProjectId) => void;
   onOpenFolder: (projectId: ProjectId) => void;
-  /** Opens a shell already sitting in the repository. */
+  /**
+   * Opens the repository's shell, reusing the one already there.
+   *
+   * The row-level gesture. Reuse is what makes it safe: a click on a row is too easy to trigger to
+   * stack a tab each time.
+   */
   onOpenTerminal: (projectId: ProjectId) => void;
+  /**
+   * Opens **a new** shell in the repository's folder, every time.
+   *
+   * The button, and deliberately not the same thing as the row: the row has one shell it comes back
+   * to, whereas the button is how you get a second one to work alongside it. Those tabs carry no
+   * `projectId`, so they are invisible to the row's reuse lookup and nothing ever closes them for you.
+   */
+  onNewTerminal: (projectId: ProjectId) => void;
 }
 
 /**
@@ -180,8 +193,20 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
     fragment.append(start);
   }
 
-  // No terminal button: a click anywhere on the row does it, and a second control for the same gesture
-  // was only noise. The trade-off is that the action is now mouse-only, a row not being focusable.
+  /*
+   * A terminal button, on top of the row-level click, and **not** the same gesture.
+   *
+   * The row comes back to the repository's one shell; this opens a new tab in its folder every time,
+   * which is how you get a second shell to work alongside a first. It was removed once as redundant
+   * with the row, which it never was: that reading cost the only way to open more than one shell per
+   * repository, and the row click is besides invisible and unreachable from the keyboard.
+   */
+  const terminal = createElement('button', { className: 'button', text: 'Terminal' });
+  terminal.type = 'button';
+  terminal.title = 'Ouvrir un nouvel onglet dans ce dossier';
+  terminal.addEventListener('click', () => actions.onNewTerminal(row.project.id));
+  fragment.append(terminal);
+
   const folder = createElement('button', { className: 'button button--quiet', text: '…' });
   folder.type = 'button';
   folder.title = 'Ouvrir le dossier';

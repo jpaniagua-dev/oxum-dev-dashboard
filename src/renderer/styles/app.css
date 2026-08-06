@@ -548,21 +548,22 @@ body {
 }
 
 /* Discreet until the row is hovered: the pills are what the eye is meant to catch first. */
-.pull__open {
-  display: grid;
-  place-items: center;
-  padding: 2px 5px;
+.pull__terminal {
+  padding: 1px 7px;
+  font-size: 11px;
+  white-space: nowrap;
   opacity: 0.45;
 }
 
-.pull:hover .pull__open,
-.pull__open:focus-visible {
+.pull:hover .pull__terminal,
+.pull__terminal:focus-visible {
   opacity: 1;
 }
 
-.pull__open svg {
-  width: 13px;
-  height: 13px;
+/* Sits under the view list, separated from it so it does not read as a third view. */
+.jira__board {
+  margin-top: 8px;
+  text-align: left;
 }
 
 .pull__number {
@@ -1171,7 +1172,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1182,15 +1183,20 @@ body {
   flex-wrap: wrap;
 }
 
+/*
+ * `min-height` rather than more vertical padding alone: a tab holds a label, a dot and a close cross of
+ * differing heights, so padding alone made the tabs grow unevenly depending on what they carried.
+ */
 .terminal__tab {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 4px 2px 8px;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 6px 3px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-faint);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .terminal__tab:hover {
@@ -1248,7 +1254,8 @@ body {
   cursor: pointer;
 }
 
-/* Sized to the tab it replaces, so renaming does not make the strip jump. */
+/* Sized to the tab it replaces, so renaming does not make the strip jump. Font size follows
+   `.terminal__tab`: the two diverging is what made the row shift on a double-click. */
 .terminal__tab-input {
   width: 110px;
   padding: 1px 4px;
@@ -1257,7 +1264,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .terminal__tab-input:focus {

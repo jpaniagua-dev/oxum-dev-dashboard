@@ -174,6 +174,7 @@ class App {
       onStop: (projectId) => void this.stopProject(projectId),
       onOpenFolder: (projectId) => void window.api.openFolder(projectId),
       onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
+      onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
     });
   }
 
@@ -192,6 +193,10 @@ class App {
           this.renderJira();
         },
         onMenu: (issue, x, y) => void this.openIssueMenu(issue, x, y),
+      },
+      {
+        siteUrl: this.settings?.jira.siteUrl ?? '',
+        projectKeys: this.settings?.jira.projectKeys ?? [],
       },
     );
   }
@@ -256,7 +261,7 @@ class App {
       {
         // Same gesture as a click on a project row, and it goes through the same reuse path: seeing a
         // pull request usually means going to work on it.
-        onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
+        onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
         onOpenPull: (url) => void window.api.openExternal(url),
         onSelect: (projectId) => {
           this.selectedRepo = projectId;
@@ -328,12 +333,36 @@ class App {
   /**
    * Opens the repository's shell, or brings back the one already open there.
    *
-   * Triggered by a click anywhere on the row, and by the `>_` button. The main process resolves the
-   * project, the profile and the existing tab: doing it here meant three lookups the renderer had no
-   * authority over, and reuse could not be decided at all.
+   * Triggered by a click anywhere on the row. The main process resolves the project, the profile and
+   * the existing tab: doing it here meant three lookups the renderer had no authority over, and reuse
+   * could not be decided at all.
    */
   private async openShellInProject(projectId: ProjectId): Promise<void> {
     const terminalId = await window.api.openProjectShell(projectId);
+    if (terminalId !== null) {
+      await this.focusTerminal(terminalId);
+    }
+  }
+
+  /**
+   * Opens a new shell in a project's folder, without reusing anything.
+   *
+   * The `Terminal` button, as opposed to the row click above. It goes through `openShell` rather than
+   * `openProjectShell` precisely because that one spawns unconditionally and tags the tab with no
+   * `projectId`: the row keeps its own single shell, and these extra tabs are free shells that no
+   * configuration change can close behind your back.
+   */
+  private async openNewShellInProject(projectId: ProjectId): Promise<void> {
+    const project = this.projects.find((entry) => entry.id === projectId);
+    if (project === undefined) {
+      return;
+    }
+    const terminalId = await window.api.openShell({
+      // The profile the bare "new tab" click uses, so the button and the `+` agree on the shell.
+      profileId: this.settings?.defaultShellProfileId ?? '',
+      cwd: project.path,
+      title: project.label,
+    });
     if (terminalId !== null) {
       await this.focusTerminal(terminalId);
     }

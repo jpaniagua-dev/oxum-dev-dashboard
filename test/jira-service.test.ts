@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildJql, parseIssues, parseTransitions } from '../src/main/jira/jira-service.js';
-import { presentStage } from '../src/renderer/ui/jira-list.js';
+import { boardUrl, presentStage } from '../src/renderer/ui/jira-list.js';
 
 const SITE = 'https://example.atlassian.net';
 const ME = 'dev@example.com';
@@ -160,5 +160,31 @@ describe('presentStage', () => {
 
   it('never shows an empty pill', () => {
     expect(presentStage('unknown', '').label).toBe('sans statut');
+  });
+});
+
+describe('boardUrl', () => {
+  it('builds the project shortcut Jira resolves for any project style', () => {
+    /*
+     * `/browse/<KEY>` on purpose, and pinned here so nobody "improves" it into a board path. A board
+     * path needs the numeric board id AND the project style, neither of which this app holds: a team-managed project is
+     * team-managed (`/jira/software/projects/...`) while a company-managed project uses
+     * `/jira/software/c/projects/...`, so a hardcoded guess would 404 half the time.
+     */
+    expect(boardUrl('https://example.atlassian.net', 'PROJ')).toBe(
+      'https://example.atlassian.net/browse/PROJ',
+    );
+  });
+
+  it('tolerates a trailing slash on the site and a sloppy key', () => {
+    // The store already trims and uppercases what it saves, but this function is also called with a
+    // value straight from a settings draft.
+    expect(boardUrl('https://example.atlassian.net/', ' proj ')).toBe(
+      'https://example.atlassian.net/browse/PROJ',
+    );
+  });
+
+  it('encodes the key rather than pasting it into a URL', () => {
+    expect(boardUrl('https://x.atlassian.net', 'A B')).toBe('https://x.atlassian.net/browse/A%20B');
   });
 });
