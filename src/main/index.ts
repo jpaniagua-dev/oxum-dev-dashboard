@@ -12,6 +12,7 @@ import { PullMonitor } from './github/pull-monitor.js';
 import { registerIpcHandlers } from './ipc.js';
 import { JiraMonitor } from './jira/jira-monitor.js';
 import { buildJql, searchIssues } from './jira/jira-service.js';
+import { NotesStore } from './notes/notes-store.js';
 import { SecretStore } from './store/secret-store.js';
 import { ProjectMonitor } from './projects/project-monitor.js';
 import { DEFAULT_PROJECTS_ROOT } from './projects/project-id.js';
@@ -137,6 +138,23 @@ async function bootstrap(): Promise<void> {
     (state) => dashboardWindow.send(IpcChannel.JiraChanged, state),
   );
 
+  /*
+   * Notes own their folder, which may be the app's own or one the user picked.
+   *
+   * `mayCreate` is the difference that matters: the default folder is ours and is created on demand,
+   * whereas a folder the user chose and later deleted is left alone. Silently re-creating a directory
+   * somewhere else on their disk is not something a dashboard should do.
+   */
+  const notesStore = new NotesStore(
+    () => {
+      const configured = settingsStore.get().notesFolder.trim();
+      return configured.length > 0
+        ? { path: configured, mayCreate: false }
+        : { path: AppPaths.notes(), mayCreate: true };
+    },
+    (state) => dashboardWindow.send(IpcChannel.NotesChanged, state),
+  );
+
   /** The connection as the renderer may see it: everything except the token. */
   const jiraConfig = (): JiraConfig => {
     const { siteUrl, email, projectKeys } = settingsStore.get().jira;
@@ -241,6 +259,27 @@ async function bootstrap(): Promise<void> {
         ? { ok: true, message: `Connexion réussie, ${issues.length} ticket(s) assigné(s)` }
         : { ok: false, message: error };
     },
+    notes: () => notesStore,
+    defaultNotesFolder: () => AppPaths.notes(),
+    confirmNoteDelete: (title) => {
+      const options: Electron.MessageBoxSyncOptions = {
+        type: 'warning',
+        buttons: ['Supprimer', 'Annuler'],
+        // Cancel is the default: this dialog is one keystroke away from destroying a note.
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Supprimer la note',
+        message: `Supprimer « ${title} » ?`,
+        detail: 'Le fichier est effacé du dossier de notes. Cette action est définitive.',
+      };
+      // Two distinct overloads, as in `pickFolder`: they cannot be collapsed into one optional argument.
+      const parent = dashboardWindow.browserWindow;
+      const answer =
+        parent === null
+          ? dialog.showMessageBoxSync(options)
+          : dialog.showMessageBoxSync(parent, options);
+      return answer === 0;
+    },
     terminals: terminalManager,
     settings: settingsStore,
     theme: themeController,
@@ -275,6 +314,16 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  /*
+   * Read **before** the window exists, and awaited.
+   *
+   * Read once rather than polled: nothing but this app writes that folder, and an `fs.watch` would fire
+   * on our own saves and fight the editor. Awaiting it here is what puts the notes in `BootstrapState`:
+   * done after the page loaded, the renderer's bootstrap would race it, come back with an empty list,
+   * and a panel reopened on startup would show its notes but select none of them.
+   */
+  await notesStore.refresh();
+
   const window = await dashboardWindow.create({
     preloadPath: preloadPath(),
     backgroundColor: themeController.backgroundColor(),
@@ -285,6 +334,13 @@ async function bootstrap(): Promise<void> {
   pullMonitor.start();
   hasJiraToken = (await secrets.read()).length > 0;
   jiraMonitor.start();
+
+  // Leaving the window is a natural save point, and it costs nothing when nothing is pending.
+  app.on('browser-window-blur', () => {
+    if (notesStore.hasPending()) {
+      void notesStore.flush();
+    }
+  });
 
   window.on('close', (event) => {
     // Only dev servers matter here. A shell tab dying with the app is expected; a build being killed
@@ -310,7 +366,27 @@ async function bootstrap(): Promise<void> {
     }
   });
 
-  app.on('before-quit', () => {
+  /*
+   * Quit, with one deferral for unsaved notes.
+   *
+   * `before-quit` is synchronous, so an `await` here would simply not be honoured and the last
+   * keystrokes would die with the process. It does however accept `preventDefault`, so the quit is
+   * cancelled once, the buffer is written, and `app.quit()` is called again.
+   *
+   * The early `return` is load-bearing: without it the monitors would stop and every terminal would be
+   * killed on a quit that was just cancelled, leaving the app running with nothing alive in it.
+   */
+  let notesFlushed = false;
+  app.on('before-quit', (event) => {
+    if (!notesFlushed && notesStore.hasPending()) {
+      event.preventDefault();
+      void notesStore.flush().finally(() => {
+        notesFlushed = true;
+        app.quit();
+      });
+      return;
+    }
+
     projectMonitor.stop();
     pullMonitor.stop();
     jiraMonitor.stop();

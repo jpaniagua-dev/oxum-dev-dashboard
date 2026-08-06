@@ -44,6 +44,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   projectsHeight: 250,
   defaultShellProfileId: 'git-bash',
   terminalFontSize: TERMINAL_FONT_SIZE.default,
+  // Empty means the default folder. Resolved in the main process, never here: this module must not
+  // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in CLAUDE.md.
+  notesFolder: '',
+  notesWidth: 340,
+  notesOpen: false,
   shellProfiles: [],
   projectsRoot: DEFAULT_PROJECTS_ROOT,
   // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
@@ -131,6 +136,13 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       TERMINAL_FONT_SIZE.min,
       TERMINAL_FONT_SIZE.max,
     ),
+    // Trimmed but an empty string is preserved: it is the meaningful "use the default folder" value,
+    // so `asString`'s fallback-on-empty behaviour would be wrong here.
+    notesFolder: typeof input.notesFolder === 'string' ? input.notesFolder.trim() : '',
+    // Clamped for the same reason as the strip heights: a hand-edited width must not be able to hide
+    // the terminal behind the panel.
+    notesWidth: clamp(asNumber(input.notesWidth, DEFAULT_SETTINGS.notesWidth), 240, 900),
+    notesOpen: typeof input.notesOpen === 'boolean' ? input.notesOpen : false,
     shellProfiles: asProfiles(input.shellProfiles),
     projectsRoot: asString(input.projectsRoot, DEFAULT_SETTINGS.projectsRoot),
     projects: asProjects(input.projects),

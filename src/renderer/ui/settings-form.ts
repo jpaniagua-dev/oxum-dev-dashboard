@@ -81,6 +81,7 @@ function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: strin
 export interface SettingsFormHosts {
   readonly projects: HTMLElement;
   readonly terminal: HTMLElement;
+  readonly notes: HTMLElement;
   readonly jira: HTMLElement;
   readonly footer: HTMLElement;
 }
@@ -108,6 +109,10 @@ export class SettingsForm {
   private profiles: ProfileDraft[] = [];
   private defaultProfileId = '';
   private fontSize: number = TERMINAL_FONT_SIZE.default;
+  /** Empty means "the default folder", so it is never coerced to the resolved path. */
+  private notesFolder = '';
+  /** The path an empty `notesFolder` resolves to, shown as the placeholder. */
+  private defaultNotesFolder = '';
   private jira: JiraConfig = { siteUrl: '', email: '', projectKeys: [], hasToken: false };
   /** Typed token, held only until the save. Never read back from the main process. */
   private jiraToken = '';
@@ -138,7 +143,10 @@ export class SettingsForm {
     settings: AppSettings,
     profiles: readonly ShellProfile[],
     jira: JiraConfig,
+    defaultNotesFolder: string,
   ): Promise<void> {
+    this.notesFolder = settings.notesFolder;
+    this.defaultNotesFolder = defaultNotesFolder;
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
     this.jiraStatus = '';
@@ -178,8 +186,48 @@ export class SettingsForm {
   private render(): void {
     this.renderProjects();
     this.renderTerminal();
+    this.renderNotes();
     this.renderJira();
     this.renderFooter();
+  }
+
+  /**
+   * The notes folder.
+   *
+   * Empty is a real value meaning "the app's own folder", so the placeholder shows the path that will
+   * be used. That is the one case the house rule allows a placeholder: it states a **deduced** value
+   * rather than pretending an example is a saved setting.
+   */
+  private renderNotes(): void {
+    clearChildren(this.hosts.notes);
+
+    const row = createElement('div', { className: 'settings-card__path' });
+    row.append(
+      this.field(
+        'Dossier des notes',
+        this.notesFolder,
+        (value) => {
+          this.notesFolder = value;
+          this.touch();
+        },
+        this.defaultNotesFolder,
+      ),
+    );
+
+    const browse = createElement('button', { className: 'button', text: '…' });
+    browse.type = 'button';
+    browse.title = 'Choisir un dossier';
+    browse.addEventListener('click', () => {
+      void window.api.pickFolder('Dossier des notes').then((picked) => {
+        if (picked !== null) {
+          this.notesFolder = picked;
+          this.touch();
+          this.render();
+        }
+      });
+    });
+    row.append(browse);
+    this.hosts.notes.append(row);
   }
 
   /**
@@ -759,8 +807,12 @@ export class SettingsForm {
     await window.api.saveProfiles(this.profiles, this.defaultProfileId);
     // Clamped by the store, so a value typed outside the bounds comes back corrected rather than being
     // applied. The draft is realigned on it for the same reason.
-    const saved = await window.api.updateSettings({ terminalFontSize: this.fontSize });
+    const saved = await window.api.updateSettings({
+      terminalFontSize: this.fontSize,
+      notesFolder: this.notesFolder,
+    });
     this.fontSize = saved.terminalFontSize;
+    this.notesFolder = saved.notesFolder;
 
     // The token travels only when one was actually typed: an empty field means "keep the stored one".
     const jira = await window.api.saveJira(

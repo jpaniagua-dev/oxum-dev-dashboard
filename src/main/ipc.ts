@@ -12,6 +12,9 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type NoteContent,
+  type NoteId,
+  type NotesState,
   type ProjectValidation,
   type RepoPulls,
   type ShellProfile,
@@ -34,7 +37,9 @@ import {
   readTransitions,
   type JiraCredentials,
 } from './jira/jira-service.js';
+import type { NotesStore } from './notes/notes-store.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
+import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveDefaultProfile } from './terminal/shell-profiles.js';
 import type { TerminalManager } from './terminal/terminal-manager.js';
@@ -54,6 +59,17 @@ export interface IpcDependencies {
   readonly jiraCredentials: () => Promise<JiraCredentials | null>;
   /** Called after a successful write, to refresh the views without waiting for the poll. */
   readonly afterJiraWrite: () => void;
+  readonly notes: () => NotesStore;
+  /** Where notes land when `notesFolder` is empty. Shown as the placeholder in the settings window. */
+  readonly defaultNotesFolder: () => string;
+  /**
+   * Asks the user to confirm a deletion.
+   *
+   * Native and owned by the main process, like the unsaved-settings prompt: an in-page overlay in the
+   * notes panel would sit next to a text editor, and a mousedown-inside/mouseup-outside selection
+   * fires a `click` on the common ancestor. That is the exact bug that got the settings modal removed.
+   */
+  readonly confirmNoteDelete: (title: string) => boolean;
   readonly terminals: TerminalManager;
   readonly settings: SettingsStore;
   readonly theme: ThemeController;
@@ -95,6 +111,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     pulls: deps.pulls().rows(),
     jira: deps.jira().state(),
     jiraConfig: deps.jiraConfig(),
+    notes: deps.notes().state(),
+    defaultNotesFolder: deps.defaultNotesFolder(),
   }));
 
   ipcMain.handle(IpcChannel.RefreshNow, async (): Promise<ProjectRow[]> => deps.monitor().refreshAll());
@@ -104,6 +122,39 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   );
 
   ipcMain.handle(IpcChannel.JiraRefresh, async (): Promise<JiraState> => deps.jira().refreshNow());
+
+  /* ---------------------------------------------------------------- notes */
+
+  ipcMain.handle(IpcChannel.NotesRefresh, async (): Promise<NotesState> => deps.notes().refresh());
+
+  ipcMain.handle(IpcChannel.NoteOpen, async (_event, id: unknown): Promise<NoteContent | null> =>
+    typeof id === 'string' ? deps.notes().open(id) : null,
+  );
+
+  ipcMain.handle(IpcChannel.NoteCreate, async (): Promise<NoteId | null> => deps.notes().create());
+
+  // `send`, not `invoke`: a keystroke must never wait on a round trip. The store debounces.
+  ipcMain.on(IpcChannel.NoteUpdate, (_event, id: unknown, text: unknown) => {
+    if (typeof id === 'string' && typeof text === 'string') {
+      deps.notes().update(id, text);
+    }
+  });
+
+  ipcMain.handle(IpcChannel.NoteFlush, async (): Promise<void> => deps.notes().flush());
+
+  ipcMain.handle(IpcChannel.NoteDelete, async (_event, id: unknown): Promise<boolean> => {
+    if (typeof id !== 'string') {
+      return false;
+    }
+    const note = deps.notes().state().notes.find((entry) => entry.id === id);
+    if (note === undefined) {
+      return false;
+    }
+    if (!deps.confirmNoteDelete(note.title)) {
+      return false;
+    }
+    return deps.notes().delete(id);
+  });
 
   ipcMain.handle(IpcChannel.JiraTest, async (): Promise<{ ok: boolean; message: string }> =>
     deps.testJira(),
@@ -354,13 +405,18 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, patch: unknown): Promise<AppSettings> => {
       const parsed = asPatch(patch);
       const saved = await deps.settings.update(parsed);
+      if (parsed.notesFolder !== undefined) {
+        // Flushes into the *old* folder before switching, which `reopen` guarantees: pending writes
+        // carry the path they were typed against, so the last keystrokes must not follow the move.
+        await deps.notes().reopen();
+      }
       /*
-       * Broadcast everything except a bare pane height. That one originates in the dashboard itself and
-       * is written on every drag release, so echoing it back would make the table and the terminal
-       * rebuild on each resize. Anything else can come from the settings window and must reach the
-       * dashboard.
+       * Broadcast everything except the keys the dashboard writes about its own geometry. Those are
+       * written on every drag release and every tab change, so echoing them back would rebuild the
+       * table and the terminal mid-gesture. Anything else can come from the settings window and must
+       * reach the dashboard.
        */
-      if (Object.keys(parsed).some((key) => key !== 'projectsHeight')) {
+      if (Object.keys(parsed).some((key) => !LOCAL_ONLY_KEYS.has(key))) {
         deps.broadcastSettings(saved);
       }
       return saved;
@@ -463,20 +519,3 @@ function asShellRequest(value: unknown): OpenShellRequest {
 }
 
 /** Keeps only the keys the renderer is allowed to change. */
-function asPatch(value: unknown): Partial<AppSettings> {
-  if (typeof value !== 'object' || value === null) {
-    return {};
-  }
-  const input = value as Record<string, unknown>;
-  const patch: Partial<AppSettings> = {};
-
-  if (typeof input.projectsHeight === 'number') patch.projectsHeight = input.projectsHeight;
-  if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
-  if (typeof input.defaultShellProfileId === 'string') {
-    patch.defaultShellProfileId = input.defaultShellProfileId;
-  }
-  if (typeof input.gitPollSeconds === 'number') patch.gitPollSeconds = input.gitPollSeconds;
-  if (typeof input.checksPollSeconds === 'number') patch.checksPollSeconds = input.checksPollSeconds;
-
-  return patch;
-}

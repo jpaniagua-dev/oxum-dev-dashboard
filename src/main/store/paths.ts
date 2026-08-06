@@ -15,4 +15,6 @@ export const AppPaths = {
     join(app.getPath('userData'), 'settings-window-state.json'),
   /** Encrypted Jira token, kept out of `settings.json` on purpose. */
   jiraToken: (): string => join(app.getPath('userData'), 'jira-token.bin'),
+  /** Default notes folder, used when `notesFolder` is empty. */
+  notes: (): string => join(app.getPath('userData'), 'notes'),
 } as const;

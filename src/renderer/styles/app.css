@@ -28,6 +28,32 @@ body {
   height: 100%;
 }
 
+/*
+ * Everything under the top bar is a row: the workspace, then the notes panel.
+ *
+ * The top bar is deliberately not part of this row, which is what keeps `#projects-pane` at the same
+ * distance from the top of the viewport whether the panel is open or not. `pane-resizer.ts` measures
+ * exactly that distance, so its arithmetic and its test stay valid for free.
+ */
+.app__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * `min-width: 0` is not cosmetic. The xterm surface has a large min-content width, and a flex item
+ * refuses to shrink below it by default: without this the workspace stays wide and pushes the notes
+ * panel off the right edge of the window.
+ */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 /* ----------------------------------------------------------------- topbar */
 
 .topbar {
@@ -359,6 +385,21 @@ body {
 .icon-button svg {
   width: 14px;
   height: 14px;
+}
+
+/* Line-drawn icon, matching what `createIcon(path, { paint: 'stroke' })` produces in TypeScript. */
+.icon-stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A toggled panel button reads as pressed, the way the active strip tab does. */
+.icon-button[aria-pressed='true'] {
+  background: var(--surface-inset);
+  color: var(--primary);
 }
 
 /* ------------------------------------------------------------- strip tabs */
@@ -962,6 +1003,157 @@ body {
   display: none;
 }
 
+/* ------------------------------------------------------------------ notes */
+
+.notes-resizer {
+  width: 5px;
+  flex: none;
+  background: var(--border);
+  cursor: ew-resize;
+}
+
+.notes-resizer:hover,
+.notes-resizer:focus-visible {
+  background: var(--primary);
+  outline: none;
+}
+
+.notes-resizer[hidden] {
+  display: none;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 340px;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/*
+ * A `display` set by a class beats the browser's own rule for `[hidden]`, so the panel would stay on
+ * screen when hidden. Same trap as `.pulls` and `.terminal__view`, both of which already carry it.
+ */
+.notes[hidden] {
+  display: none;
+}
+
+.notes__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notes__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.notes__list {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 2px;
+  max-height: 38%;
+  overflow-y: auto;
+  padding: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.notes__surface {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.notes__status {
+  flex: none;
+  margin: 0;
+  padding: 3px 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.note-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.note-row:hover {
+  background: var(--surface-hover);
+}
+
+.note-row--active {
+  background: var(--surface-inset);
+  border-color: var(--border-strong);
+  font-weight: 600;
+}
+
+.note-row__title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.note-row__age {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.note-row__delete {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  /* Revealed on hover: one delete cross per row, always visible, turns the list into a minefield. */
+  opacity: 0;
+}
+
+.note-row:hover .note-row__delete,
+.note-row__delete:focus-visible {
+  opacity: 1;
+}
+
+.note-row__delete:hover {
+  background: var(--surface-raised);
+  color: var(--error);
+}
+
+.notes__empty,
+.notes__error {
+  margin: 6px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.notes__error {
+  color: var(--error);
+}
+
 /* --------------------------------------------------------------- terminal */
 
 /* The terminal takes every pixel the projects strip does not need. */
@@ -1278,4 +1470,168 @@ body {
 .context-menu__item:disabled {
   color: var(--text-faint);
   cursor: default;
+}
+
+/* ------------------------------------------------------------- format bar */
+
+/*
+ * Copied verbatim from `oxum-prompt-editor`, along with the CodeMirror block below it. Every `var()`
+ * they use already resolves here: the two projects' `tokens.css` are byte-identical, including the
+ * `--md-*` and `--code-*` families this editor reads. Keeping the copies literal is what makes a
+ * future re-sync a diff.
+ */
+
+.format-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: 3px 8px;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+.format-bar__group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* Separators let the bar read as four families rather than a wall of thirteen icons. */
+.format-bar__separator {
+  width: 1px;
+  height: 16px;
+  margin: 0 5px;
+  background: var(--border);
+}
+
+.format-button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.format-button:hover {
+  background: var(--surface-hover);
+  color: var(--primary);
+}
+
+.format-button:active {
+  background: var(--primary-soft);
+}
+
+.format-button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Glyph buttons (B, I, H1) carry their label as text, so they opt out of stroke styling. */
+.format-button--glyph {
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+
+.format-button--italic {
+  font-style: italic;
+}
+
+.format-button--strike {
+  text-decoration: line-through;
+}
+
+.format-button--mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------- codemirror */
+
+.cm-editor {
+  height: 100%;
+  font-family: var(--font-mono);
+  background: var(--surface);
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-scroller {
+  padding: 10px 14px 14px;
+  line-height: 1.6;
+}
+
+.cm-content {
+  caret-color: var(--primary);
+}
+
+.cm-cursor,
+.cm-dropCursor {
+  border-left-color: var(--primary);
+  border-left-width: 2px;
+}
+
+.cm-selectionBackground,
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground {
+  background: var(--selection) !important;
+}
+
+/* `.cm-activeLine` is set in the editor theme, not here: CodeMirror's base-theme selector is
+   more specific than a stylesheet rule and would win. See markdown-theme.ts. */
+
+.cm-gutters {
+  display: none;
+}
+
+.cm-placeholder {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.cm-panels {
+  background: var(--surface-raised);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.cm-panels input,
+.cm-panels button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+
+.cm-searchMatch {
+  background: var(--primary-soft);
+  outline: 1px solid var(--primary-border);
+}
+
+.cm-searchMatch-selected {
+  background: var(--selection);
+}
+
+/*
+ * The dashboard sets `user-select: none` on the body (only the terminal surface opts back in),
+ * so without this the note text cannot be selected with the mouse at all.
+ */
+.cm-editor {
+  user-select: text;
 }

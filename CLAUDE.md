@@ -141,9 +141,16 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   largeur. Les bornes vivent dans `TERMINAL_FONT_SIZE` (`contracts.ts`), lues par le clamp du store, le
   champ des réglages et le repli du pane, et le store les applique même à un fichier édité à la main.
   Une valeur illisible se corrigerait autrement dans une fenêtre de réglages devenue illisible.
-- **`settings:update` diffuse, sauf pour `projectsHeight` seul.** Cette clé naît dans le dashboard et
-  s'écrit à chaque relâchement du séparateur ; la renvoyer ferait reconstruire le tableau et le terminal
-  à chaque redimensionnement. Tout le reste peut venir de la fenêtre de réglages et doit arriver.
+- **`settings:update` diffuse, sauf pour les clés de `LOCAL_ONLY_KEYS`.** Ces clés naissent dans le
+  dashboard et s'écrivent à chaque relâchement de séparateur ou changement d'onglet ; les renvoyer
+  ferait reconstruire le tableau et le terminal en pleine geste. Tout le reste peut venir de la
+  fenêtre de réglages et doit arriver.
+- **`asPatch` vit dans `store/settings-patch.ts`, pas dans `ipc.ts`**, parce que `ipc.ts` importe
+  Electron au niveau module et qu'un test l'exigerait alors aussi. Sa liste est **la** liste des clés
+  que le renderer peut écrire, et une clé qui n'y est pas échoue en silence total : `pullsHeight`,
+  `jiraHeight` et `activeStrip` y manquaient depuis la V2 alors que `renderer/main.ts` les envoyait,
+  donc les hauteurs d'onglets et l'onglet actif ne survivaient pas à un redémarrage. D'où
+  `test/settings-patch.test.ts`, qui verrouille la liste dans les deux sens.
 - **Le tableau ne se redessine pas pendant une édition en place.** Il se rafraîchit à chaque cycle
   git, donc un rafraîchissement au milieu d'une frappe effacerait le champ.
 
@@ -251,6 +258,90 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   première ouverture : au chargement du module, deux fichiers de tests sans DOM cassaient.
 - **Pas de placeholder d'exemple dans les réglages.** Un exemple grisé se lit comme une valeur déjà
   enregistrée ; là où un placeholder subsiste, c'est une valeur déduite, et il est en italique très pâle.
+
+## Panneau Notes
+
+- **La fenêtre est une rangée sous la barre du haut** (`.app__body` en flex row, `.workspace` en
+  colonne, l'`<aside>` à droite). La barre du haut reste **hors** de cette rangée, et c'est toute
+  l'astuce : `#projects-pane` garde sa distance au haut du viewport, donc `resolvePaneHeight`,
+  `clampPaneHeight` et `test/pane-resizer.test.ts` sont inchangés. Ouvrir le panneau ne change **que
+  la largeur** de l'espace de travail.
+- **`min-width: 0` sur `.workspace` n'est pas cosmétique** : la largeur min-content de l'xterm est
+  grande et un élément flex refuse de rétrécir en dessous, donc sans ça le panneau part hors écran.
+  Et `.notes[hidden] { display: none }` explicite, même piège que `.pulls`.
+- **Le `resize` de fenêtre ne se déclenche pas quand le panneau s'ouvre**, la fenêtre n'ayant pas
+  changé de taille. Il faut donc `terminal.refit()` explicitement à trois endroits : la bascule, le
+  glissement du séparateur, et l'application de la largeur mémorisée au démarrage.
+- **`WORKSPACE_RESERVE = 480`** dans `side-resizer.ts` : le panneau ne peut jamais réduire le
+  terminal en dessous de 480 px. L'invariant devient un bornage, pas un espoir. `side-resizer.ts` est
+  un module à part et **pas** une généralisation de `attachPaneResizer` : ce dernier code en dur l'axe
+  vertical, et sa direction est justement ce que verrouille son test.
+- **Pas de modale ni de superposition.** Une sélection de texte commencée dans l'éditeur et relâchée
+  au-dehors déclencherait un `click` sur l'ancêtre commun : c'est exactement le bug qui a fait
+  retirer la modale des réglages, et un éditeur de texte en est le cas le plus exposé.
+- **Le nom de fichier est un horodatage, pas le titre.** Le titre *est* la première ligne du corps,
+  donc un nom dérivé du titre serait renommé à chaque frappe sur la ligne 1, avec la course `EPERM`
+  de Windows à chaque fois. L'id sert aussi de garde contre la traversée de chemin, validé à chaque
+  entrée. Et il **doit garder son `T`** : `NOTE_ID_PATTERN` l'exige, et l'avoir retiré faisait
+  échouer `isNoteId`, sortir `update()` en silence et perdre toutes les frappes.
+- **Pas de frontmatter.** Tout ce qu'il porterait est déjà gratuit (`mtime`, taille, première ligne),
+  et le round-trip serait une transformation sur la seule chose qu'il ne faut jamais perdre.
+- **L'anti-rebond de 300 ms vit dans le main, pas dans le renderer.** Le renderer meurt plusieurs
+  fois par minute sous `--watch` ; avec le minuteur côté main, un plantage en pleine phrase ne perd
+  rien, et le quit a un seul tampon à vider. `openNote` **vide la file puis lit**, en un seul
+  handler, pour que l'ordre ne dépende pas de la discipline du renderer.
+- **Supprimer jette d'abord le tampon en attente**, sinon une écriture différée ressuscite le fichier
+  200 ms plus tard. C'est le bug le plus probable du store, il a son test.
+- **`before-quit` est synchrone** : `preventDefault()`, puis `flush().finally(() => app.quit())`, avec
+  un `return` anticipé sans lequel les moniteurs s'arrêteraient sur une fermeture annulée.
+- **`notesStore.refresh()` est attendu AVANT la création de la fenêtre.** Fait après le chargement de
+  la page, le `bootstrap` du renderer le devance, revient avec une liste vide, et un panneau rouvert
+  au démarrage affiche ses notes sans en sélectionner aucune.
+- **`NotesState` ne transporte jamais le corps d'une note.** C'est ce qui rend un rafraîchissement de
+  liste incapable, *par construction*, d'écraser le texte en cours de frappe. La liste est poussée,
+  le corps est tiré.
+- **Pas de `fs.watch`** : il se déclencherait sur nos propres écritures et se battrait avec l'éditeur,
+  et sur un dossier synchronisé il tournerait en boucle.
+- **L'éditeur est repris de `oxum-prompt-editor`**, pas réécrit. Les `tokens.css` des deux repos sont
+  identiques au byte, y compris les `--md-*` que lit `markdown-theme.ts`, donc les blocs CSS se
+  copient sans retouche. Trois divergences assumées, marquées dans le code : `@codemirror/language-data`
+  écarté (~1,4 Mo sur 120 chunks pour de la prose), pas de compartiment de taille de police, et un
+  `loadDocument` qui fait un **`setState`** et non un `replaceAll` — sinon l'historique d'annulation
+  survit au changement de note et `Ctrl+Z` dans la note B y tape le contenu de la note A.
+- **La CSP n'a pas eu à changer** : `style-src 'self' 'unsafe-inline'` préexistait, et c'est ce que
+  CodeMirror utilise pour injecter ses `<style>`. `script-src 'self'` reste intact, il n'a pas besoin
+  de `unsafe-eval`. Import statique et pas dynamique : un chunk émis à la demande poserait une
+  question non vérifiée sur `script-src` en `file://`.
+- **`.cm-editor { user-select: text }`** est obligatoire : le `body` de cette app est en
+  `user-select: none` et seul `.terminal__surface` y dérogeait, donc sans cette règle le texte d'une
+  note n'est pas sélectionnable à la souris.
+- **`Escape` n'est pas dans le keymap CodeMirror** mais sur le panneau, en phase de bulle : le keymap
+  tourne en `Prec.highest`, donc un `Escape` là battrait celui de l'extension de recherche et
+  fermerait le panneau en laissant la barre de recherche ouverte derrière.
+- **`Alt+Shift+N`** bascule le panneau, comme les `Alt+Shift+{D,B,W}` du terminal et pour les mêmes
+  raisons : phase de capture, pas de `Ctrl+Alt` (AltGr en suisse français), une lettre et pas un
+  chiffre, et un garde sur `event.repeat`.
+
+## Mails et Teams : pourquoi ils ne sont pas là
+
+Demandés en V3, écartés après mesure, pas par manque de temps :
+
+- **Outlook classique en COM est mort sur ce poste.** `HKCU\...\Outlook\Preferences\UseNewOutlook = 1`
+  fait que le lancement d'`OUTLOOK.EXE` passe la main au nouveau Outlook puis se termine **sans
+  enregistrer sa classe COM** ; l'activation échoue après ~31 s en `CO_E_SERVER_EXEC_FAILURE`.
+  Reproduit deux fois, et confirmé par le démarrage d'`olk.exe` à l'instant de la sonde.
+- **Microsoft Graph passe par un admin Entra.** Mesuré sur le tenant :
+  `defaultUserRolePermissions.allowedToCreateApps = false`, aucune politique de consentement
+  utilisateur, et aucun rôle d'annuaire actif pour ce compte. Le claim `scp` du token du CLI Azure
+  (`Application.ReadWrite.All`…) est celui de **l'application CLI**, pas les droits de l'utilisateur :
+  il fait croire à tort qu'on peut créer une app registration en ligne de commande.
+- **La cloche d'activité Teams n'a aucune API de lecture**, même avec Graph. Le maximum lisible serait
+  `GET /me/chats` + `viewpoint.lastMessageReadDateTime`, ce qui exclut déjà les mentions en canal.
+
+Si l'app registration arrive un jour : client public, redirect `http://localhost`, délégué
+`Mail.Read` + `offline_access` (+ `Chat.Read`), `@azure/msal-node` en device code, jeton chiffré par
+le `SecretStore` qui existe déjà, moniteur calqué sur `JiraMonitor`. La place dans `.topbar__actions`
+et le patron de la bande sont laissés prêts.
 
 ## Projets configurables
 

@@ -6,6 +6,9 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type NoteContent,
+  type NoteId,
+  type NotesState,
   type OpenShellRequest,
   type PaneDirection,
   type ProjectCandidate,
@@ -50,6 +53,28 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.ClipboardWrite, text),
 
   readClipboard: (): Promise<string> => ipcRenderer.invoke(IpcChannel.ClipboardRead),
+
+  refreshNotes: (): Promise<NotesState> => ipcRenderer.invoke(IpcChannel.NotesRefresh),
+
+  onNotesChanged: (listener: (state: NotesState) => void): (() => void) => {
+    const handler = (_event: unknown, state: NotesState): void => listener(state);
+    ipcRenderer.on(IpcChannel.NotesChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.NotesChanged, handler);
+  },
+
+  openNote: (id: NoteId): Promise<NoteContent | null> =>
+    ipcRenderer.invoke(IpcChannel.NoteOpen, id),
+
+  createNote: (): Promise<NoteId | null> => ipcRenderer.invoke(IpcChannel.NoteCreate),
+
+  // `send`, like `sendPtyInput`: a keystroke must not wait on a round trip.
+  updateNote: (id: NoteId, text: string): void => {
+    ipcRenderer.send(IpcChannel.NoteUpdate, id, text);
+  },
+
+  flushNotes: (): Promise<void> => ipcRenderer.invoke(IpcChannel.NoteFlush),
+
+  deleteNote: (id: NoteId): Promise<boolean> => ipcRenderer.invoke(IpcChannel.NoteDelete, id),
 
   refreshJira: (): Promise<JiraState> => ipcRenderer.invoke(IpcChannel.JiraRefresh),
 

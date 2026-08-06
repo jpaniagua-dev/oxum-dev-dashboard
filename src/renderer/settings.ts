@@ -17,6 +17,7 @@ async function start(): Promise<void> {
     {
       projects: requireElement('settings-projects'),
       terminal: requireElement('settings-terminal'),
+      notes: requireElement('settings-notes'),
       jira: requireElement('settings-jira'),
       footer: requireElement('settings-footer'),
     },
@@ -28,7 +29,12 @@ async function start(): Promise<void> {
     },
   );
 
-  await form.load(bootstrap.settings, bootstrap.shellProfiles, bootstrap.jiraConfig);
+  await form.load(
+    bootstrap.settings,
+    bootstrap.shellProfiles,
+    bootstrap.jiraConfig,
+    bootstrap.defaultNotesFolder,
+  );
 
   window.api.onThemeChanged((state) => applyTheme(state));
 
@@ -44,7 +50,9 @@ async function start(): Promise<void> {
     }
     void window.api
       .bootstrap()
-      .then((next) => form.load(settings, next.shellProfiles, next.jiraConfig));
+      .then((next) =>
+        form.load(settings, next.shellProfiles, next.jiraConfig, next.defaultNotesFolder),
+      );
   });
 
   // Escape closes, as it did when this was a dialog. The unsaved-changes prompt still applies,

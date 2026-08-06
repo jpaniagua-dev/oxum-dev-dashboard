@@ -461,6 +461,51 @@ export interface ThemeState {
 }
 
 /* ------------------------------------------------------------------ *
+ * Notes
+ * ------------------------------------------------------------------ */
+
+/**
+ * A note's identity: the stem of its file name, a compact creation timestamp.
+ *
+ * Derived from the creation date and never from the title, because the title *is* the first line of
+ * the body. A title-derived file name would be renamed on every keystroke on line 1, each rename
+ * exposed to the Windows rename race `atomicWriteFile` already exists to survive.
+ */
+export type NoteId = string;
+
+/** Shape of a valid id, and the guard against a crafted path reaching `join`. */
+export const NOTE_ID_PATTERN = /^\d{8}T\d{6}\d{0,3}(-\d+)?$/;
+
+export interface Note {
+  readonly id: NoteId;
+  /** First meaningful line of the body, derived on read. Never stored. */
+  readonly title: string;
+  /** ISO 8601, from the file's mtime. */
+  readonly updatedAt: string;
+  readonly size: number;
+}
+
+/**
+ * The note list as the renderer sees it.
+ *
+ * **Carries no note body, by construction.** That is what makes a list refresh unable to clobber
+ * text being typed: there is simply nothing in this payload that could overwrite the editor.
+ */
+export interface NotesState {
+  /** Resolved absolute folder, shown in the settings window. */
+  readonly folder: string;
+  /** Newest-updated first. */
+  readonly notes: readonly Note[];
+  /** French, user-facing. A missing folder must read as a message, not as "no notes yet". */
+  readonly error: string | null;
+}
+
+export interface NoteContent {
+  readonly id: NoteId;
+  readonly text: string;
+}
+
+/* ------------------------------------------------------------------ *
  * Settings
  * ------------------------------------------------------------------ */
 
@@ -505,6 +550,18 @@ export interface AppSettings {
   terminalFontSize: number;
   /** User-declared shell profiles, merged over the detected ones by id. */
   shellProfiles: ShellProfile[];
+  /**
+   * Folder holding the note files.
+   *
+   * Empty means "the default folder", resolved in the main process to `<userData>/notes`. It is not
+   * resolved here on purpose: `DEFAULT_SETTINGS` must not depend on a module that imports Electron,
+   * a trap this file's own history records.
+   */
+  notesFolder: string;
+  /** Width of the notes panel in pixels. Clamped so it can never swallow the terminal. */
+  notesWidth: number;
+  /** Whether the notes panel is open, so the app comes back the way it was left. */
+  notesOpen: boolean;
   /** Where to look for repositories when detecting candidates. */
   projectsRoot: string;
   /**
@@ -549,6 +606,16 @@ export interface BootstrapState {
   readonly jira: JiraState;
   /** Jira connection as configured, token excluded. */
   readonly jiraConfig: JiraConfig;
+  /** The note list, so the panel is populated on the first paint. */
+  readonly notes: NotesState;
+  /**
+   * Folder an empty `notesFolder` resolves to.
+   *
+   * Distinct from `notes.folder`, which is whichever folder is actually in use: the settings window
+   * needs the *default* to show as a placeholder, and it cannot compute it since resolving it means
+   * asking Electron where `userData` is.
+   */
+  readonly defaultNotesFolder: string;
 }
 
 /* ------------------------------------------------------------------ *
@@ -586,6 +653,20 @@ export const IpcChannel = {
   JiraTransition: 'jira:transition',
   /** invoke: (key) => { ok, message }, assigns an issue to the token's own account */
   JiraAssignMe: 'jira:assign-me',
+  /** on: (state: NotesState) => void, pushed whenever the note list changes */
+  NotesChanged: 'notes:changed',
+  /** invoke: () => NotesState, re-reads the folder from disk */
+  NotesRefresh: 'notes:refresh',
+  /** invoke: (id) => NoteContent | null, flushes pending writes **then** reads */
+  NoteOpen: 'notes:open',
+  /** invoke: () => NoteId | null, creates an empty note */
+  NoteCreate: 'notes:create',
+  /** send: (id, text) => void, fire-and-forget; the debounce and the durability live in main */
+  NoteUpdate: 'notes:update',
+  /** invoke: () => void, writes anything still pending */
+  NoteFlush: 'notes:flush',
+  /** invoke: (id) => boolean, confirms in the main process then deletes */
+  NoteDelete: 'notes:delete',
   /** invoke: (projectId, actionId) => TerminalId, runs one of a project's actions in its own tab */
   PtyRun: 'pty:run',
   /** invoke: (request: OpenShellRequest) => TerminalId */
@@ -678,6 +759,29 @@ export interface RendererApi {
   assignJiraToMe(key: string): Promise<{ ok: boolean; message: string }>;
   /** Opens a pull request in the real browser. Only http(s) is followed, checked in the main process. */
   openExternal(url: string): Promise<void>;
+
+  refreshNotes(): Promise<NotesState>;
+  onNotesChanged(listener: (state: NotesState) => void): () => void;
+  /**
+   * Reads a note.
+   *
+   * Flushes any pending write **before** reading, in one handler, so that switching notes inside the
+   * debounce window cannot read a stale file. Doing it in two calls would make the ordering depend on
+   * renderer discipline.
+   */
+  openNote(id: NoteId): Promise<NoteContent | null>;
+  /** Creates an empty note and returns its id. Null when the folder is unusable. */
+  createNote(): Promise<NoteId | null>;
+  /**
+   * Records a note's text.
+   *
+   * Fire-and-forget like `sendPtyInput`: a keystroke must never wait on a round trip. The main
+   * process debounces and writes, which is also what keeps the text safe when the renderer dies.
+   */
+  updateNote(id: NoteId, text: string): void;
+  flushNotes(): Promise<void>;
+  /** Asks for confirmation in the main process, then deletes. False when the user cancelled. */
+  deleteNote(id: NoteId): Promise<boolean>;
 
   /**
    * The system clipboard, for terminal copy and paste.
