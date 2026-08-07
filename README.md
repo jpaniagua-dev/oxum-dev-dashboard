@@ -18,9 +18,9 @@ npm run dist         # build the installer and the portable build
 
 | Artifact | Install | Time to a window |
 | --- | --- | --- |
-| `…-1.0.0-x64.exe` (NSIS installer) | yes | ~10 s |
-| `…-1.0.0-x64.zip` | no, unpack once | ~10 s |
-| `…-1.0.0-portable.exe` | no, single file | **~26 s, every launch** |
+| `…-<version>-x64.exe` (NSIS installer) | yes | ~10 s |
+| `…-<version>-x64.zip` | no, unpack once | ~10 s |
+| `…-<version>-portable.exe` | no, single file | **~26 s, every launch** |
 
 The single-file portable target unpacks the whole ~100 MB app into `%TEMP%` at **every** start, and it
 does not cache: measured at 30 s cold and 26,5 s on the next launch, against 9,6 s once unpacked. Prefer
@@ -72,7 +72,7 @@ dashboard spawns it and reads its output.
 
 ## Pull requests
 
-The top strip has two tabs, `Projets` and `Pull requests`. Only the strip changes: the terminal below
+The top strip has four tabs, `Projets`, `Pull requests`, `Jira` and `Git`. Only the strip changes: the terminal below
 keeps its space whichever is selected, and each tab remembers its own height.
 
 The pull request tab lists the watched repositories on the left with a counter, and the pull requests of
@@ -120,6 +120,48 @@ settings: site URL, account email, project keys, and an Atlassian API token.
   every row would carry your name.
 - Nothing is queried until the site, the email and the token are all set. Poll every 300 s by default
   (`jiraPollSeconds`).
+
+## Git
+
+The fourth tab, and the one where the strip stops being a glance and becomes a place to work: pick a
+repository on the left, then `Changements`, `Branches` or `Historique` in the middle, and read the diff
+on the right. The boundary between the working column and the diff is draggable and remembered.
+
+```
+Changements 12  Branches 4  Historique              ↻  ↓  ↑
+[x] MM  src/app/feature/x.component.ts
+[ ] ·M  src/app/feature/x.component.html
+```
+
+- **Staging is per file**, and the two status columns are never merged: `MM` is a file staged *and*
+  edited again, and flattening that into one state would make the checkbox lie about what the commit
+  will contain. Clicking a row shows its diff, ticking the box stages it, and the two gestures do not
+  interfere.
+- **The commit runs in a terminal tab**, not silently. `husky` and `lint-staged` can take half a minute
+  and print everything that explains a refusal; run in the background all of that collapses into a
+  one-line failure. The message travels through a file rather than a `-m` argument, so it can be
+  multi-line and nothing in it can be read as an option — a subject starting with `-` is a real thing
+  people type. The file is kept, so a rejected commit does not lose what you wrote.
+- **Branch names are validated by `git check-ref-format`**, not by a pattern of ours: git's rules are
+  subtler than they look, and an approximation either refuses a legal name or lets git fail later while
+  talking about something else.
+- **Checkout is a button per branch**, never a click on the row: it changes what is on disk. Nothing is
+  stashed and nothing is forced, so a checkout blocked by local changes fails and git says which files
+  are in the way.
+- **`Pull` is fast-forward only.** A merge or a rebase can stop on a conflict, and this strip has
+  nothing to offer someone standing in a half-finished rebase; refusing to start one is the only
+  outcome it can honestly explain. A diverged branch is a terminal's business. `Push` publishes a new
+  branch with `-u origin <branch>` on its first run.
+- The three network operations are the icons at the end of the tab row; right-clicking the header row
+  (or the `⋯` button) also offers them plus a terminal in the repository.
+- Reads are **pulled**, not polled: only the selected repository is ever on screen, so branches, history
+  and status are read when you open the tab, change repository or write something — never in the
+  background for a tab nobody is looking at.
+
+What this tab deliberately does **not** do: stash, resolve conflicts, rebase, or stage individual hunks.
+All four leave the repository in an intermediate state it could neither show nor finish. Conflicts are
+painted as errors in the list rather than hidden among the modifications, precisely to send you to the
+terminal.
 
 ### Checks verdicts
 
