@@ -18,7 +18,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--font-xl);
   user-select: none;
 }
 
@@ -66,7 +66,7 @@ body {
  */
 .strip__meta {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -137,7 +137,7 @@ body {
 
 .projects__title {
   margin: 0;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -159,14 +159,14 @@ body {
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12.5px;
+  font-size: var(--font-lg);
 }
 
 .table th {
   padding: 7px 10px;
   border-bottom: 1px solid var(--border);
   color: var(--text-faint);
-  font-size: 10.5px;
+  font-size: var(--font-2xs);
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -225,7 +225,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--font-lg);
   font-weight: 600;
 }
 
@@ -235,7 +235,7 @@ body {
 
 .cell-branch {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -250,7 +250,7 @@ body {
   white-space: nowrap;
   color: var(--danger);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 /* -------------------------------------------------------------- status pill */
@@ -262,7 +262,7 @@ body {
   padding: 2px 9px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -332,7 +332,7 @@ body {
   border-radius: 999px;
   background: var(--surface-inset);
   color: var(--warning);
-  font-size: 10px;
+  font-size: var(--font-3xs);
   font-weight: 600;
 }
 
@@ -345,7 +345,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   cursor: pointer;
 }
 
@@ -434,7 +434,7 @@ body {
   background: transparent;
   color: var(--text-faint);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -500,7 +500,7 @@ body {
   background: transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   text-align: left;
   cursor: pointer;
 }
@@ -531,7 +531,7 @@ body {
 .pulls__error {
   margin: 4px 0 0;
   color: var(--text-faint);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   line-height: 1.5;
 }
 
@@ -555,7 +555,7 @@ body {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   text-align: left;
   cursor: pointer;
 }
@@ -568,7 +568,7 @@ body {
 /* Discreet until the row is hovered: the pills are what the eye is meant to catch first. */
 .pull__terminal {
   padding: 1px 7px;
-  font-size: 11px;
+  font-size: var(--font-xs);
   white-space: nowrap;
   opacity: 0.45;
 }
@@ -587,7 +587,7 @@ body {
 .pull__number {
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -613,7 +613,7 @@ body {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--font-md);
   cursor: pointer;
 }
 
@@ -636,7 +636,7 @@ body {
 
 .issue__assignee {
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -650,7 +650,7 @@ body {
 
 .pull__age {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -681,7 +681,7 @@ body {
 
 .settings__title {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--font-xl);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -708,7 +708,7 @@ body {
 
 .settings__section-title {
   margin: 0 0 4px;
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -718,13 +718,13 @@ body {
 .settings__note {
   margin: 0 0 10px;
   color: var(--text-faint);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   line-height: 1.5;
 }
 
 .settings__note code {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 .settings__empty {
@@ -733,7 +733,7 @@ body {
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .settings__footer {
@@ -749,7 +749,7 @@ body {
 .settings__status {
   margin-right: auto;
   color: var(--warning);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 /* A save confirmation is not a warning, and reusing the amber would read as one. */
@@ -795,7 +795,7 @@ body {
 .settings-card__title {
   flex: 1;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: var(--font-lg);
 }
 
 .settings-card__badge {
@@ -803,7 +803,7 @@ body {
   border-radius: 999px;
   background: var(--surface-inset);
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: var(--font-3xs);
 }
 
 .settings-card__path {
@@ -829,7 +829,7 @@ body {
 }
 
 .settings-actions__title {
-  font-size: 10.5px;
+  font-size: var(--font-2xs);
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -839,7 +839,7 @@ body {
 .settings-actions__empty {
   margin: 0;
   color: var(--warning);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 /*
@@ -873,7 +873,7 @@ body {
 }
 
 .issue {
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 .issue--error {
@@ -888,7 +888,7 @@ body {
   margin: 0;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: var(--font-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -920,7 +920,7 @@ body {
 
 .settings-check__label {
   color: var(--text-dim);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 /* The profile picker takes the width it needs; the font size is two digits and asks for no more. */
@@ -937,7 +937,7 @@ body {
 
 .settings-field__label {
   color: var(--text-faint);
-  font-size: 10.5px;
+  font-size: var(--font-2xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -949,7 +949,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 .settings-field__input:focus {
@@ -986,17 +986,17 @@ body {
   align-items: center;
   gap: 10px;
   padding: 4px 6px;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .settings-candidate__label {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 .settings-candidate__meta {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 /* ---------------------------------------------------------------- resizer */
@@ -1069,7 +1069,7 @@ body {
 }
 
 .notes__title {
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -1099,7 +1099,7 @@ body {
   padding: 3px 8px;
   border-top: 1px solid var(--border);
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 .note-row {
@@ -1131,7 +1131,7 @@ body {
 
 .note-row__age {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1166,7 +1166,7 @@ body {
 .notes__error {
   margin: 6px;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .notes__error {
@@ -1238,7 +1238,7 @@ body {
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .terminal__tab:hover {
@@ -1306,7 +1306,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
 }
 
 .terminal__tab-input:focus {
@@ -1332,7 +1332,7 @@ body {
   border-radius: 3px;
   background: transparent;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: var(--font-xl);
   line-height: 1;
   cursor: pointer;
 }
@@ -1357,7 +1357,7 @@ body {
   background: transparent;
   color: var(--text-faint);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   line-height: 1;
   padding: 3px 6px;
   border-radius: var(--radius-sm);
@@ -1404,7 +1404,7 @@ body {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   text-align: left;
   cursor: pointer;
 }
@@ -1521,7 +1521,7 @@ body {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   text-align: left;
   cursor: pointer;
 }
@@ -1580,7 +1580,7 @@ body {
   background: transparent;
   color: var(--text-dim);
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--font-md);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1606,7 +1606,7 @@ body {
 
 /* Glyph buttons (B, I, H1) carry their label as text, so they opt out of stroke styling. */
 .format-button--glyph {
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   letter-spacing: 0.02em;
 }
 
@@ -1620,7 +1620,7 @@ body {
 
 .format-button--mono {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 /* ------------------------------------------------------------- codemirror */
@@ -1742,6 +1742,49 @@ body {
 }
 
 /*
+ * One repository line: the selectable row, plus its terminal icon beside it.
+ *
+ * The icon is a sibling and not a child because the row is a real `<button>` (see `buildRepoTerminal`),
+ * so the line has to be a flex row rather than the row itself. `min-width: 0` on the row is what lets
+ * the name give way instead of pushing the icon out of a 170px column.
+ */
+.git__repo-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.git__repo-line > .pulls__repo {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A project name truncates at the end: what distinguishes two of them is their beginning. Scoped to
+   this column, the only one where a control now shares the width. */
+.git__repo-line .pulls__repo-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Faded until its line is hovered, exactly like the pull request list's `Terminal` button and for the
+ * same reason: a column of repository names should read as names, and one control per line at full
+ * contrast turns it into a toolbar. Reachable by keyboard all the same, hence the `:focus-visible`.
+ */
+.git__repo-terminal {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  opacity: 0.35;
+}
+
+.git__repo-line:hover .git__repo-terminal,
+.git__repo-terminal:focus-visible {
+  opacity: 1;
+}
+
+/*
  * The middle column is itself a grid, in rows: header, sub-tabs, list, commit form.
  * Only the list is `1fr`, so the form keeps its height and the list absorbs whatever is left.
  */
@@ -1773,7 +1816,7 @@ body {
 
 .git__branch {
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   /* A branch name is an identifier: the mono face keeps `PROJ-1601-x` from being read as prose. */
   font-family: var(--font-mono);
@@ -1807,7 +1850,7 @@ body {
   background: transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   cursor: pointer;
 }
 
@@ -1824,7 +1867,7 @@ body {
 .git__view-count {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 .git__list {
@@ -1842,7 +1885,7 @@ body {
   padding: 3px 6px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--font-md);
   color: var(--text);
   cursor: pointer;
 }
@@ -1889,7 +1932,7 @@ body {
   unicode-bidi: plaintext;
   text-align: left;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 /*
@@ -1904,7 +1947,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: var(--font-sm);
 }
 
 /* A branch name is an identifier, so it keeps the mono face; a subject is prose and does not. */
@@ -1916,7 +1959,7 @@ body {
 .git__track {
   flex: none;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1936,14 +1979,14 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 .git__sha {
   flex: none;
   color: var(--text-faint);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--font-xs);
 }
 
 .git__input {
@@ -1955,7 +1998,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   font-family: var(--font-mono);
 }
 
@@ -1979,7 +2022,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--font-md);
   /* Vertical only: a horizontal drag would fight the grid column it lives in. */
   resize: vertical;
   /* The body of this app is `user-select: none`, so without this the message cannot be selected. */
@@ -2000,7 +2043,7 @@ body {
 
 .git__diff-title {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2018,7 +2061,7 @@ body {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--font-sm);
   line-height: 1.55;
   width: max-content;
   min-width: 100%;

@@ -20,6 +20,7 @@ import {
   moveTab,
   normalizeGroups,
   splitGroup,
+  tabsAfter,
 } from '@shared/terminal-groups.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
@@ -212,7 +213,7 @@ export class TerminalPane {
   }
 
   /**
-   * Keyboard equivalents of the pane menu.
+   * Keyboard equivalents of the pane and tab menus.
    *
    * On `document` and in the **capture** phase: the focused terminal is an xterm, which claims every
    * keystroke it can reach, so a listener on the bubble phase would never see these.
@@ -221,19 +222,36 @@ export class TerminalPane {
    * `Ctrl+Alt`: on a Swiss French keyboard `Ctrl+Alt` is what AltGr sends, so every AltGr character
    * would walk through this handler. Letters rather than digits for the same family of reason, the digit
    * row needing Shift on that layout.
+   *
+   * `Ctrl+Alt+W` (close the active tab) is the one exception to that rule, asked for explicitly. It is
+   * survivable for this key and only this key: `W` carries no AltGr character on the Swiss French
+   * layout, so the combination types nothing and there is nothing to shadow. It is matched on
+   * `event.code` rather than `event.key` precisely because that assumption is about the *physical* key:
+   * under a chord that some layouts do map, `key` becomes the composed character and the comparison
+   * would quietly stop matching. Any future `Ctrl+Alt` chord has to be checked against the layout the
+   * same way, or it will eat a character someone types for real.
    */
   private bindShortcuts(): void {
     document.addEventListener(
       'keydown',
       (event) => {
-        if (!event.altKey || !event.shiftKey || event.ctrlKey) {
+        // Holding a chord must not fire once per repeat: the keys stay down for as long as a finger
+        // rests on them, and each repeat is a fresh `keydown`.
+        if (event.repeat || !event.altKey || event.metaKey) {
           return;
         }
-        // Holding the chord must not spawn a shell per repeat: the keys stay down for as long as a
-        // finger rests on them, and each repeat is a fresh `keydown`.
-        if (event.repeat) {
+
+        if (event.ctrlKey) {
+          if (!event.shiftKey && event.code === 'KeyW') {
+            event.preventDefault();
+            this.closeActiveTab();
+          }
           return;
         }
+        if (!event.shiftKey) {
+          return;
+        }
+
         const focused = this.activeId;
         const session = this.sessions.find((entry) => entry.id === focused);
         const key = event.key.toLowerCase();
@@ -251,6 +269,22 @@ export class TerminalPane {
       },
       true,
     );
+  }
+
+  /**
+   * Closes the tab the keyboard is on.
+   *
+   * Silent when that tab cannot be closed, which is the whole point of `closable` being derived: a dev
+   * server that is still running keeps its tab, and `Stop` stays the deliberate gesture for it. A
+   * shortcut able to take down a build by muscle memory is exactly what that rule exists to prevent,
+   * and refusing quietly is the same answer the tab's own cross gives — it simply is not there.
+   */
+  private closeActiveTab(): void {
+    const active = this.activeId;
+    const session = this.sessions.find((entry) => entry.id === active);
+    if (session !== undefined && session.closable) {
+      this.actions.onClose(session.id);
+    }
   }
 
   /** Adopts the layout the main process reports. */
@@ -860,6 +894,20 @@ export class TerminalPane {
   private openTabMenu(session: TerminalSession, x: number, y: number): void {
     const alone = (this.layout.groups[groupIndexOf(this.layout.groups, session.id)]?.tabs.length ?? 0) <= 1;
 
+    /*
+     * "Close the tabs to the right" resolves to sessions here rather than in `tabsAfter`, because the
+     * ones that refuse to close are a property of the session and not of the strip: a running dev
+     * server is not closable, so it is **skipped and left in place** instead of turning the whole
+     * gesture into a failure. The count in the label is the number that will actually go, and the hint
+     * names what stays — a menu item promising four closures and doing three is how you stop trusting
+     * the menu.
+     */
+    const rightward = tabsAfter(this.layout.groups, session.id);
+    const closable = rightward
+      .map((id) => this.sessions.find((entry) => entry.id === id))
+      .filter((entry): entry is TerminalSession => entry !== undefined && entry.closable);
+    const kept = rightward.length - closable.length;
+
     this.showMenu(x, y, [
       {
         label: 'Déplacer dans un panneau à droite',
@@ -881,8 +929,26 @@ export class TerminalPane {
       },
       {
         label: 'Fermer l’onglet',
+        hint: 'Ctrl+Alt+W sur l’onglet actif',
         disabled: !session.closable,
         run: () => this.actions.onClose(session.id),
+      },
+      {
+        label:
+          closable.length > 0
+            ? `Fermer les onglets vers la droite (${closable.length})`
+            : 'Fermer les onglets vers la droite',
+        // Nothing to the right, or nothing there that can be closed: either way there is no gesture.
+        disabled: closable.length === 0,
+        hint:
+          kept > 0
+            ? `${kept} onglet(s) restent : un serveur qui tourne ne se ferme pas ici, il s’arrête avec « Stop ».`
+            : 'Ferme les onglets suivants de ce panneau seulement, pas ceux d’un panneau voisin.',
+        run: () => {
+          for (const entry of closable) {
+            this.actions.onClose(entry.id);
+          }
+        },
       },
     ]);
   }

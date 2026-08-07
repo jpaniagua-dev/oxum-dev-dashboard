@@ -658,6 +658,20 @@ export interface NoteContent {
  */
 export const TERMINAL_FONT_SIZE = { default: 14, min: 9, max: 28 } as const;
 
+/**
+ * Interface font size, in CSS pixels: the base of the type ladder in `tokens.css`.
+ *
+ * Separate from `TERMINAL_FONT_SIZE` because the two answer different questions — "can I read the
+ * app" against "how much output fits in a pane" — and one number for both would force a compromise
+ * neither side wants. Every size in the interface is a **ratio** of this one (`--font-3xs` to
+ * `--font-xl`), so the ladder keeps its proportions at any value.
+ *
+ * The bounds are narrower than the terminal's on purpose: this size drives text inside boxes whose
+ * padding is fixed, so far past 17px a tab row or a pill starts to crowd its own borders. The
+ * terminal, being a grid of its own, has no such ceiling.
+ */
+export const UI_FONT_SIZE = { default: 13, min: 11, max: 17 } as const;
+
 /** Which view the top strip shows. The terminal below is unaffected by this choice. */
 export type StripTab = 'projects' | 'pulls' | 'jira' | 'git';
 
@@ -711,6 +725,8 @@ export interface AppSettings {
   defaultShellProfileId: string;
   /** Font size of every terminal, in pixels. */
   terminalFontSize: number;
+  /** Font size of the interface, in pixels: the base every other size is a ratio of. */
+  uiFontSize: number;
   /** User-declared shell profiles, merged over the detected ones by id. */
   shellProfiles: ShellProfile[];
   /**

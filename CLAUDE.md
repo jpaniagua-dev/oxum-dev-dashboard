@@ -170,6 +170,23 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   sur ConPTY c'est tout l'intérêt : il garde sa propre copie de l'écran et la réimprime au prochain
   repaint qu'il décide, donc un effacement côté xterm seul remettait le texte qu'on venait de
   supprimer. Le tampon conservé part avec, sinon un redémarrage du renderer rejouerait l'effacé.
+- **« Fermer les onglets vers la droite » s'arrête au bord du panneau.** `tabsAfter` ne regarde que le
+  groupe de l'onglet visé, parce qu'avec une barre d'onglets par panneau « à droite de cet onglet » est une
+  affirmation sur cette barre-là : ramasser les onglets d'un panneau voisin ferait qu'un geste de ménage
+  atteint un panneau que personne ne regardait. Et les onglets non fermables sont **sautés, pas refusés** :
+  le compte affiché dans le libellé est le nombre qui va vraiment partir, l'infobulle dit ce qui reste. Un
+  item qui promet quatre fermetures et en fait trois, c'est un menu auquel on cesse de croire.
+- **`Ctrl+Alt+W` est la seule exception assumée à la règle « pas de `Ctrl+Alt` »**, demandée
+  explicitement. Elle ne tient que pour cette touche : `W` ne porte aucun caractère AltGr sur le clavier
+  suisse français, donc la combinaison ne tape rien et il n'y a rien à masquer. Elle est comparée sur
+  `event.code` et non `event.key` précisément parce que l'hypothèse porte sur la touche **physique** :
+  sous un accord que certaines dispositions mappent, `key` devient le caractère composé et la comparaison
+  cesserait silencieusement de matcher. Tout futur accord `Ctrl+Alt` doit être vérifié contre la
+  disposition de la même façon, sinon il mange un caractère que quelqu'un tape pour de vrai.
+- **Un raccourci ne ferme jamais un onglet non fermable.** `Ctrl+Alt+W` sort en silence sur un serveur qui
+  tourne, comme son onglet sort en silence sans croix : `closable` est dérivé pour ça, et `Stop` reste le
+  geste délibéré. Un raccourci capable de tuer un build par automatisme est exactement ce que cette règle
+  empêche.
 - **Git Bash se lance avec `-i`**, sinon les alias n'existent pas dans l'onglet.
 - **Les profils sont sondés sur le disque** avant d'être proposés : une entrée de menu qui échoue au
   clic est pire que pas d'entrée.
@@ -339,6 +356,14 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **« M'assigner » passe par l'`accountId` du compte du jeton** (`/rest/api/3/myself`), jamais par un
   email : les emails sont masqués par la confidentialité sur beaucoup de sites, et l'id garantit que
   l'action ne peut viser personne d'autre.
+- **L'ordre d'affichage met « en cours » en tête, et c'est un tri LOCAL stable.** `orderIssues` trie sur
+  le `stage` (donc sur `statusCategory`, même raison que `presentStage` : « En review » et « Ready for QA »
+  doivent compter comme du travail en cours) et sur cette seule clé, pour que l'`ORDER BY` du JQL reste
+  l'ordre **à l'intérieur** de chaque groupe. Sans cette stabilité, il y aurait deux autorités sur l'ordre
+  et la seconde serait invisible. Fait localement et pas en JQL : `ORDER BY statusCategory DESC` se lit
+  « en cours puis à faire » **uniquement parce que** les deux recherches excluent Done, donc il
+  s'inverserait en silence le jour où quelqu'un élargit le scope, et la collation des catégories de Jira
+  n'est pas vérifiable depuis ici.
 - **Les écritures rafraîchissent tout de suite** (`afterJiraWrite`) : la ligne qu'on vient de changer doit
   montrer son nouvel état sans attendre le tour de boucle de cinq minutes.
 - **Les lignes de tickets sont une grille**, pas une ligne flex : leurs badges sont conditionnels, donc en
@@ -537,6 +562,14 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **`gitHeight` par défaut à 460**, la plus grande des quatre. Trois colonnes finissant par un diff,
   c'est l'onglet où l'on cesse de jeter un œil pour se mettre à travailler ; 250 px montreraient quatre
   lignes de diff.
+- **L'icône terminal d'une ligne de dépôt est la SŒUR de la ligne, pas son enfant**, et c'est toute la
+  raison d'être du conteneur `git__repo-line`. La ligne est un vrai `<button>` (donc atteignable au Tab et
+  qui répond à Entrée) et nicher un bouton dans un bouton est du HTML invalide que les navigateurs
+  réarrangent en silence — la raison même pour laquelle une ligne de PR est un `div`. Ici la ligne garde sa
+  sémantique et l'icône est un contrôle de plein droit. Conséquence voulue : ouvrir un terminal ne
+  **sélectionne pas** le dépôt, donc ça ne déclenche aucune lecture git d'un repo que personne n'a ouvert.
+  Elle n'est pas désactivée par `state.busy`, comme la même entrée du menu du dépôt : elle ne lance aucune
+  commande git.
 - **Ce que cet onglet ne fait pas, et pourquoi** : pas de stash, pas de résolution de conflit, pas de
   rebase, pas de staging par morceaux. Tous partagent la même raison : ils laissent le dépôt dans un
   état intermédiaire que cette bande ne saurait ni montrer ni terminer. Les conflits sont affichés en
@@ -610,6 +643,35 @@ patron de la bande sont laissés prêts.
   `undefined` à l'évaluation de `DEFAULT_SETTINGS` : `projectsRoot` partait vide, l'amorçage scannait
   un chemin inexistant, et le dashboard démarrait avec un tableau vide sans la moindre erreur. Ces
   valeurs vivent dans `projects/project-id.ts`, qui n'importe rien.
+
+## Typographie
+
+- **Aucune taille de police en dur dans le CSS.** Les 64 déclarations `font-size` passent par sept
+  tokens (`--font-3xs` … `--font-xl`) qui sont des **ratios** de `--ui-font-size`, écrit sur l'élément
+  racine depuis `uiFontSize`. Des ratios et pas des tailles absolues, pour une raison mesurable :
+  soustraire un pixel fixe d'une base variable aplatit l'échelle quand la base grandit, et une échelle
+  typographique paramétrable devient alors sept tailles qui se ressemblent toutes.
+- **Les ratios sont les tailles historiques divisées par 12**, le palier du milieu. À la base par défaut
+  rien ne bouge d'une fraction de pixel : c'était un refactor, pas une refonte. Ajouter une règle →
+  `--font-md`, sauf raison explicite ; les extrêmes existent parce que le design les utilisait déjà
+  (en-têtes de colonnes en capitales, badges).
+- **Le terminal n'est PAS sur cette échelle.** xterm porte sa taille comme une option, alimentée par
+  `terminalFontSize` : deux réglages séparés parce qu'ils répondent à deux questions différentes
+  (« est-ce que je lis l'app » contre « combien de sortie tient dans un panneau »). Ne pas les fusionner.
+- **`applyUiFontSize` est appelée dans les DEUX renderers.** Le dashboard et la fenêtre de réglages sont
+  deux pages du même chrome ; un réglage qui redimensionnerait l'une et pas l'autre se lirait comme un
+  bug, celui-ci d'autant plus que le formulaire qui le change est dans la fenêtre qui ne suivrait pas.
+  Dans `settings.ts` elle est appelée **avant** les gardes de `onSettingsChanged`, sinon l'écho de sa
+  propre sauvegarde — le cas exact qui redimensionne ce formulaire — serait jeté.
+- **Changer la taille d'interface refait le `fit` du terminal.** Un texte plus grand rend la rangée
+  d'onglets et le chrome de la bande plus hauts, donc la boîte laissée au terminal change de taille sans
+  que la fenêtre ait bougé : `resize` ne se déclenche pas. Même piège que l'ouverture du panneau notes.
+- **Les bornes (`UI_FONT_SIZE`, 11 à 17) sont plus serrées que celles du terminal**, et c'est délibéré :
+  cette taille dessine du texte dans des boîtes dont le padding est fixe, et au-delà une rangée
+  d'onglets ou une pastille se serre contre ses propres bordures. Le clamp est doublé côté renderer
+  (`clampUiFontSize`) parce qu'un renderer rechargé à chaud peut lire un bootstrap d'un main plus
+  ancien, et qu'un `NaN` passé à `setProperty` produit une déclaration invalide : tous les tokens
+  retombent alors sur leur valeur de repli, ce qui change toute l'interface sans que rien ne le signale.
 
 ## Commandes
 

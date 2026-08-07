@@ -160,6 +160,8 @@ function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelA
 
   for (const project of state.projects) {
     const active = project.id === state.selectedProject;
+    // The wrapper exists only so the terminal icon can be a sibling of the row; see `buildRepoTerminal`.
+    const line = createElement('div', { className: 'git__repo-line' });
     const row = createElement('button', {
       className: `pulls__repo${active ? ' pulls__repo--active' : ''}`,
     });
@@ -182,8 +184,45 @@ function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelA
     }
 
     row.addEventListener('click', () => actions.onSelectProject(project.id));
-    host.append(row);
+    line.append(row, buildRepoTerminal(project, actions));
+    host.append(line);
   }
+}
+
+/**
+ * A terminal window with a prompt inside it.
+ *
+ * Drawn as a frame plus a chevron and a caret, and sized against the **rendered** 14px icon like the
+ * sync arrows below: the chevron is 2.2 units of a 16-unit box per barb, because anything finer comes
+ * out as a hairline and the glyph stops reading as a prompt.
+ */
+const TERMINAL_ICON =
+  'M2.4 3.4L13.6 3.4L13.6 12.6L2.4 12.6ZM5 6.2L7.2 8.4L5 10.6M8.8 10.6L11.4 10.6';
+
+/**
+ * The per-repository terminal shortcut, next to the project's name.
+ *
+ * A **sibling** of the row rather than a child of it, and that is the whole reason this column grew a
+ * wrapper element. The row is a real `<button>`, so it is reachable by Tab and answers Enter; nesting
+ * a button inside a button is invalid HTML that browsers silently rearrange, which is the same reason
+ * a pull request row is a `div`. Here the row keeps its semantics and the icon is a control in its own
+ * right, so neither has to give anything up.
+ *
+ * Being outside the row also settles what the gesture means: opening a terminal does **not** select
+ * the repository, so it cannot set off a git read of a repo nobody asked to look at. And it is not
+ * disabled by `state.busy`, unlike every other control of this tab — it runs no git command, exactly
+ * like the same entry in the repository menu.
+ */
+function buildRepoTerminal(project: Project, actions: GitPanelActions): HTMLButtonElement {
+  const button = createElement('button', { className: 'icon-button git__repo-terminal' });
+  button.type = 'button';
+  button.title = `Ouvrir un nouvel onglet de terminal dans ${project.path}`;
+  // An icon says nothing to a screen reader, and the label has to name the project: there is one of
+  // these per row.
+  button.setAttribute('aria-label', `Ouvrir un terminal dans ${project.label}`);
+  button.append(createIcon(TERMINAL_ICON, { paint: 'stroke' }));
+  button.addEventListener('click', () => actions.onNewTerminal(project.id));
+  return button;
 }
 
 /**

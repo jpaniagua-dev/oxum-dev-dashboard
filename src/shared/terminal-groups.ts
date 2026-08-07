@@ -22,6 +22,25 @@ export function groupIndexOf(groups: readonly TerminalGroup[], id: TerminalId): 
 }
 
 /**
+ * The tabs sitting to the right of one, in its **own** pane.
+ *
+ * Scoped to the group on purpose: with a tab strip per pane, "to the right of this tab" is a statement
+ * about that strip and nothing else. Tabs of a neighbouring pane are not further right in any order
+ * the user can see — they are somewhere else entirely — and sweeping them up would make a routine
+ * cleanup gesture reach into a pane nobody was looking at.
+ *
+ * Returns `[]` for an unknown id and for the last tab of a strip, which is what makes the caller's
+ * "nothing to close" case a plain empty list rather than a special case.
+ */
+export function tabsAfter(groups: readonly TerminalGroup[], id: TerminalId): TerminalId[] {
+  const group = groups[groupIndexOf(groups, id)];
+  if (group === undefined) {
+    return [];
+  }
+  return group.tabs.slice(group.tabs.indexOf(id) + 1);
+}
+
+/**
  * Drops empty groups and repairs any `active` that no longer names one of its group's tabs.
  *
  * The last tab is what an orphaned `active` falls back to, rather than the first: a tab is appended

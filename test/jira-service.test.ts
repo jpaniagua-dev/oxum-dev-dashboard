@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildJql, parseIssues, parseTransitions } from '../src/main/jira/jira-service.js';
-import { boardUrl, presentStage } from '../src/renderer/ui/jira-list.js';
+import { boardUrl, orderIssues, presentStage } from '../src/renderer/ui/jira-list.js';
+import type { IssueStage, JiraIssue } from '../src/shared/contracts.js';
 
 const SITE = 'https://example.atlassian.net';
 const ME = 'dev@example.com';
@@ -160,6 +161,64 @@ describe('presentStage', () => {
 
   it('never shows an empty pill', () => {
     expect(presentStage('unknown', '').label).toBe('sans statut');
+  });
+});
+
+describe('orderIssues', () => {
+  /** Only the two fields the ordering reads; the rest of an issue is irrelevant here. */
+  function issue(key: string, stage: IssueStage): JiraIssue {
+    return {
+      key,
+      summary: '',
+      status: '',
+      stage,
+      type: '',
+      assignee: '',
+      isMine: false,
+      url: '',
+      updatedAt: '',
+    };
+  }
+
+  it('puts what is in progress first', () => {
+    const ordered = orderIssues([
+      issue('PROJ-1', 'todo'),
+      issue('PROJ-2', 'done'),
+      issue('PROJ-3', 'in-progress'),
+    ]);
+    expect(ordered.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-1', 'PROJ-2']);
+  });
+
+  it('keeps the order the JQL returned inside a group', () => {
+    /*
+     * The point of a stable sort on a single key: the search already ordered these (`updated DESC` in
+     * "Mes tickets"), so lifting the in-progress group must not reshuffle anything else. Without
+     * stability this is where a second, invisible ordering rule would creep in.
+     */
+    const ordered = orderIssues([
+      issue('PROJ-9', 'todo'),
+      issue('PROJ-4', 'in-progress'),
+      issue('PROJ-7', 'todo'),
+      issue('PROJ-2', 'in-progress'),
+    ]);
+    expect(ordered.map((entry) => entry.key)).toEqual(['PROJ-4', 'PROJ-2', 'PROJ-9', 'PROJ-7']);
+  });
+
+  it('ranks an unknown category after the real work but before what is finished', () => {
+    const ordered = orderIssues([
+      issue('PROJ-1', 'done'),
+      issue('PROJ-2', 'unknown'),
+      issue('PROJ-3', 'todo'),
+    ]);
+    expect(ordered.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-2', 'PROJ-1']);
+  });
+
+  it('does not touch the list it was given', () => {
+    // The panel is rebuilt from pushed state on every poll; sorting that array in place would mutate
+    // what the main process sent.
+    const source = [issue('PROJ-1', 'todo'), issue('PROJ-2', 'in-progress')];
+    orderIssues(source);
+    expect(source.map((entry) => entry.key)).toEqual(['PROJ-1', 'PROJ-2']);
   });
 });
 

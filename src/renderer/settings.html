@@ -21,6 +21,20 @@
       </header>
 
       <div class="settings__body">
+        <!--
+          Interface before everything else, and a section of its own rather than a field tucked into
+          "Terminal": someone whose app is too small to read looks for the app, not for the terminal.
+        -->
+        <section class="settings__section">
+          <h2 class="settings__section-title">Interface</h2>
+          <p class="settings__note">
+            Cette taille est la base de toute la typographie de l’app : tout le reste (badges,
+            en-têtes, listes) garde ses proportions autour d’elle. Le terminal, lui, a sa propre
+            taille dans la section ci-dessous.
+          </p>
+          <div id="settings-interface"></div>
+        </section>
+
         <section class="settings__section">
           <h2 class="settings__section-title">Projets</h2>
           <p class="settings__note">

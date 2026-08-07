@@ -118,6 +118,10 @@ settings: site URL, account email, project keys, and an Atlassian API token.
   at once.
 - Issues are laid out in columns, assignee then status. `Mes tickets` drops the assignee column, since
   every row would carry your name.
+- **What is in progress comes first**, in both views. Grouped by Jira's status *category*, never by the
+  status name, so "En review" and "Ready for QA" rank with everything else the team is working on. Inside
+  each group the order the search returned is preserved: `status, key` for the sprint, most recently
+  updated first for yours.
 - Nothing is queried until the site, the email and the token are all set. Poll every 300 s by default
   (`jiraPollSeconds`).
 
@@ -154,6 +158,9 @@ Changements 12  Branches 4  Historique              ↻  ↓  ↑
   branch with `-u origin <branch>` on its first run.
 - The three network operations are the icons at the end of the tab row; right-clicking the header row
   (or the `⋯` button) also offers them plus a terminal in the repository.
+- **Every repository in the left column carries a terminal icon**, which opens a new tab in that folder.
+  It sits beside the row rather than inside it, and that is deliberate: clicking it does not select the
+  repository, so getting a shell somewhere never triggers a git read of a repo you were not looking at.
 - Reads are **pulled**, not polled: only the selected repository is ever on screen, so branches, history
   and status are read when you open the tab, change repository or write something — never in the
   background for a tab nobody is looking at.
@@ -211,7 +218,14 @@ with it. Servers you started from a terminal are never touched.
 
 ## Settings
 
-The gear in the strip's tab row opens a dialog with two sections.
+The gear in the strip's tab row opens a window with five sections.
+
+**Interface** holds one number: the font size of the application itself, 11 to 17 px, 13 by default.
+Every other size in the app is a **ratio** of it — column headers, badges, lists and diffs all keep
+their proportions as it moves — so this scales the whole interface rather than one piece of it. The
+terminal is deliberately not on that ladder: it has its own size below, because "can I read the app"
+and "how much output fits in a pane" are different questions. Saving resizes the settings window
+itself, which is as direct a confirmation as it gets.
 
 **Projects** are configuration, not code. Add, rename, repoint or remove them without rebuilding, and
 edit their actions in place. Adding one means picking a folder: the type (`server` / `watch`) and the
@@ -229,8 +243,8 @@ exist are warnings: each breaks one button at most, and a folder is a perfectly 
 Renaming changes the label only. The id stays derived from the folder, which is what stops a rename
 from orphaning a running terminal.
 
-**Terminal** holds the default profile, the font size (9 to 28 px, 14 by default, applied live to every
-tab) and, per profile, the binary path, arguments and starting directory. Editing a path marks the
+**Terminal** holds the default profile, the terminal font size (9 to 28 px, 14 by default, applied live
+to every tab) and, per profile, the binary path, arguments and starting directory. Editing a path marks the
 profile as custom and it then wins over detection.
 
 Everything still lives in `settings.json`, so hand-editing remains possible; the dialog and the file
@@ -265,7 +279,12 @@ to another by dragging it there.
 - **Right-click a pane to split it**, or `Alt+Shift+D` for a column and `Alt+Shift+B` for a row. A split
   opens a new shell **in that pane's own directory**, so splitting a repository shell gives you a second
   one in the same repository.
-- **Right-click a tab** to move it to a pane of its own, rename it, or close it.
+- **Right-click a tab** to move it to a pane of its own, rename it, close it, or **close every tab to its
+  right**. "Vers la droite" means the rest of *that pane's* strip and nothing else, and it counts what it
+  will close in its own label: a running server is skipped rather than closed, so the count and the
+  outcome always match.
+- `Ctrl+Alt+W` closes the **active** tab, if it can be closed. A running server keeps its tab, exactly as
+  it keeps its missing cross: `Stop` is the deliberate way to end one.
 - `Alt+Shift+W`, or "Fermer ce panneau", closes a pane. **Its tabs move to the neighbouring pane**, they
   do not die with it: killing a terminal is still the cross on its tab, so no menu click can take down
   a build.

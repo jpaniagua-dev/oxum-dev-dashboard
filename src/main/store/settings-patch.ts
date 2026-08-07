@@ -52,6 +52,9 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   }
   if (typeof input.stripCollapsed === 'boolean') patch.stripCollapsed = input.stripCollapsed;
   if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
+  // Broadcast, and deliberately not in `LOCAL_ONLY_KEYS`: it is written by the settings window and has
+  // to reach the dashboard, which is the window whose text it resizes.
+  if (typeof input.uiFontSize === 'number') patch.uiFontSize = input.uiFontSize;
   if (typeof input.defaultShellProfileId === 'string') {
     patch.defaultShellProfileId = input.defaultShellProfileId;
   }

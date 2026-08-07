@@ -50,6 +50,40 @@ export function presentStage(stage: IssueStage, status: string): Pill {
   }
 }
 
+/**
+ * Where each stage lands in the list.
+ *
+ * In progress first: it is the work of the day, and it is the answer to the question this tab gets
+ * asked most often. `unknown` sits after `todo` — a status outside the three known categories is rare
+ * and there is nothing to do about it — and `done` last, both views excluding it anyway.
+ */
+const STAGE_ORDER: Record<IssueStage, number> = {
+  'in-progress': 0,
+  todo: 1,
+  unknown: 2,
+  done: 3,
+};
+
+/**
+ * Display order of a view's issues, in progress at the top.
+ *
+ * Two decisions worth keeping. It sorts on the **stage**, not on the status name, for the same reason
+ * `presentStage` does: names are per-project and renamed at will ("En review", "Ready for QA") while
+ * the category is the only part of a workflow that means the same thing on every board.
+ *
+ * And it is a **stable** sort on that single key, which is what keeps it from becoming a second
+ * authority on ordering: the JQL already sorts (`status ASC, key ASC` for the sprint, `updated DESC`
+ * for mine) and a stable sort keeps that order inside each group. This only lifts a group to the top.
+ *
+ * Done locally rather than in the JQL on purpose. `ORDER BY statusCategory DESC` happens to read as
+ * "in progress, then to do" *because* both searches exclude Done — it would silently invert the day
+ * someone widens the scope, and Jira's category collation is not something this app can verify from
+ * here. Pure and exported so the order is pinned by a test instead of read off the screen.
+ */
+export function orderIssues(issues: readonly JiraIssue[]): JiraIssue[] {
+  return [...issues].sort((left, right) => STAGE_ORDER[left.stage] - STAGE_ORDER[right.stage]);
+}
+
 /** Renders the two saved views and the issues of the selected one. */
 export function renderJiraList(
   hosts: { views: HTMLElement; list: HTMLElement },
@@ -132,7 +166,7 @@ export function renderJiraList(
   const showAssignee = active.id !== 'mine';
   hosts.list.classList.toggle('issues--mine', !showAssignee);
 
-  for (const issue of active.issues) {
+  for (const issue of orderIssues(active.issues)) {
     hosts.list.append(buildIssueRow(issue, showAssignee, actions));
   }
 }

@@ -8,6 +8,7 @@ import {
   moveTab,
   normalizeGroups,
   splitGroup,
+  tabsAfter,
 } from '../src/shared/terminal-groups.js';
 
 const group = (tabs: string[], active: string): TerminalGroup => ({ tabs, active });
@@ -26,6 +27,35 @@ function expectSane(groups: readonly TerminalGroup[]): void {
     expect(entry.tabs).toContain(entry.active);
   }
 }
+
+describe('tabsAfter', () => {
+  it('lists the tabs to the right, in order', () => {
+    expect(tabsAfter([group(['a', 'b', 'c', 'd'], 'b')], 'b')).toEqual(['c', 'd']);
+  });
+
+  it('stops at the edge of the pane', () => {
+    /*
+     * The point of scoping this to one group: with a tab strip per pane, "to the right of b" is a
+     * statement about b's strip. Pulling in a neighbouring pane's tabs would make the gesture reach into
+     * a pane the user was not looking at.
+     */
+    expect(tabsAfter([group(['a', 'b'], 'b'), group(['c', 'd'], 'c')], 'b')).toEqual([]);
+    expect(tabsAfter([group(['a', 'b'], 'b'), group(['c', 'd'], 'c')], 'c')).toEqual(['d']);
+  });
+
+  it('answers with an empty list rather than a special case', () => {
+    // The last tab of a strip and an id that is nowhere: both mean "nothing to close".
+    expect(tabsAfter([group(['a', 'b'], 'a')], 'b')).toEqual([]);
+    expect(tabsAfter([group(['a'], 'a')], 'zzz')).toEqual([]);
+    expect(tabsAfter([], 'a')).toEqual([]);
+  });
+
+  it('does not depend on which tab is active', () => {
+    const groups = [group(['a', 'b', 'c'], 'a')];
+    expect(tabsAfter(groups, 'a')).toEqual(['b', 'c']);
+    expect(tabsAfter(groups, 'c')).toEqual([]);
+  });
+});
 
 describe('normalizeGroups', () => {
   it('keeps a sane layout untouched', () => {

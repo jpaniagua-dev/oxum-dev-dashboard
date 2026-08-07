@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import {
   TERMINAL_FONT_SIZE,
+  UI_FONT_SIZE,
   type ActionRole,
   type AppSettings,
   type ProjectAction,
@@ -51,6 +52,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   projectsHeight: 250,
   defaultShellProfileId: 'git-bash',
   terminalFontSize: TERMINAL_FONT_SIZE.default,
+  uiFontSize: UI_FONT_SIZE.default,
   // Empty means the default folder. Resolved in the main process, never here: this module must not
   // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in CLAUDE.md.
   notesFolder: '',
@@ -145,6 +147,13 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       Math.round(asNumber(input.terminalFontSize, TERMINAL_FONT_SIZE.default)),
       TERMINAL_FONT_SIZE.min,
       TERMINAL_FONT_SIZE.max,
+    ),
+    // Clamped for exactly the reason above, only more so: this one sizes the settings window's own
+    // text, so a hand-edited `4` would have to be fixed in a form that is no longer readable.
+    uiFontSize: clamp(
+      Math.round(asNumber(input.uiFontSize, UI_FONT_SIZE.default)),
+      UI_FONT_SIZE.min,
+      UI_FONT_SIZE.max,
     ),
     // Trimmed but an empty string is preserved: it is the meaningful "use the default folder" value,
     // so `asString`'s fallback-on-empty behaviour would be wrong here.

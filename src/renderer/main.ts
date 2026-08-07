@@ -36,6 +36,7 @@ import { renderPullList } from './ui/pull-list.js';
 import { attachSideResizer } from './ui/side-resizer.js';
 import { StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
+import { applyUiFontSize } from './ui/ui-font.js';
 
 /**
  * Application shell.
@@ -95,6 +96,9 @@ class App {
     this.settings = bootstrap.settings;
     this.profiles = bootstrap.shellProfiles;
     this.applyTheme(bootstrap.theme);
+    // Before anything is measured: the strip resizer and the terminal's fit both read pixel sizes that
+    // the text size decides, so applying it afterwards would fit them to a layout already gone.
+    applyUiFontSize(bootstrap.settings.uiFontSize);
 
     this.terminal = new TerminalPane(
       requireElement('terminal-surface'),
@@ -199,6 +203,15 @@ class App {
     this.profiles = bootstrap.shellProfiles;
     this.terminal?.setProfiles(this.profiles);
     this.terminal?.setFontSize(bootstrap.settings.terminalFontSize);
+    /*
+     * The interface size, then a refit.
+     *
+     * The refit is the non-obvious half: bigger text makes the tab row and the strip's own chrome
+     * taller, so the box left to the terminal changes size without the window ever resizing — and a
+     * `resize` event is exactly what does not fire here. Same trap as opening the notes panel.
+     */
+    applyUiFontSize(bootstrap.settings.uiFontSize);
+    this.terminal?.refit();
     this.rows = await window.api.refreshNow();
     this.renderTable();
     // The repository column is drawn from the project list, which is exactly what may have changed.

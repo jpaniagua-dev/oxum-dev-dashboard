@@ -103,6 +103,33 @@
   --font-ui: 'Barlow', 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
 
+  /*
+   * The type ladder, and the one number the whole interface hangs from.
+   *
+   * `--ui-font-size` is written on the root element from `uiFontSize` in the settings; the seven steps
+   * are **ratios** of it, so a change moves every size at once and keeps the hierarchy intact. They
+   * are ratios and not absolute sizes for exactly that reason: subtracting a fixed pixel from a
+   * variable base flattens the ladder as the base grows, which is how a scalable type scale turns into
+   * seven sizes that all look the same.
+   *
+   * The ratios are the sizes this app already used, divided by 12 — the middle step. So at the default
+   * base nothing moves by a fraction of a pixel, and the whole thing stays a refactor rather than a
+   * redesign. `--font-md` is the step to reach for when adding a rule; the extremes exist because the
+   * design already used them (uppercase column headers, badges).
+   *
+   * **The terminal is not on this ladder.** xterm carries its own font size as an option, set from
+   * `terminalFontSize`, so it is deliberately untouched by this: the two are configured separately
+   * because they answer different questions ("can I read the app" and "how much output fits").
+   */
+  --ui-font-size: 13px;
+  --font-3xs: calc(var(--ui-font-size) * 0.833);
+  --font-2xs: calc(var(--ui-font-size) * 0.875);
+  --font-xs: calc(var(--ui-font-size) * 0.917);
+  --font-sm: calc(var(--ui-font-size) * 0.958);
+  --font-md: var(--ui-font-size);
+  --font-lg: calc(var(--ui-font-size) * 1.042);
+  --font-xl: calc(var(--ui-font-size) * 1.083);
+
   --radius: 6px;
   --radius-sm: 4px;
 }

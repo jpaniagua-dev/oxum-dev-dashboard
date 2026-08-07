@@ -1,5 +1,6 @@
 import {
   TERMINAL_FONT_SIZE,
+  UI_FONT_SIZE,
   type AppSettings,
   type JiraConfig,
   type ProjectAction,
@@ -79,6 +80,7 @@ function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: strin
 }
 
 export interface SettingsFormHosts {
+  readonly interface: HTMLElement;
   readonly projects: HTMLElement;
   readonly terminal: HTMLElement;
   readonly notes: HTMLElement;
@@ -109,6 +111,8 @@ export class SettingsForm {
   private profiles: ProfileDraft[] = [];
   private defaultProfileId = '';
   private fontSize: number = TERMINAL_FONT_SIZE.default;
+  /** Interface font size draft, separate from the terminal's: see `renderInterface`. */
+  private uiFontSize: number = UI_FONT_SIZE.default;
   /** Empty means "the default folder", so it is never coerced to the resolved path. */
   private notesFolder = '';
   /** The path an empty `notesFolder` resolves to, shown as the placeholder. */
@@ -158,6 +162,7 @@ export class SettingsForm {
     this.profiles = profiles.map((profile) => ({ ...profile, args: [...profile.args] }));
     this.defaultProfileId = settings.defaultShellProfileId;
     this.fontSize = settings.terminalFontSize;
+    this.uiFontSize = settings.uiFontSize;
     this.setDirty(false);
     this.saved = false;
     this.showCandidates = false;
@@ -184,11 +189,43 @@ export class SettingsForm {
   /* ------------------------------------------------------------- rendering */
 
   private render(): void {
+    this.renderInterface();
     this.renderProjects();
     this.renderTerminal();
     this.renderNotes();
     this.renderJira();
     this.renderFooter();
+  }
+
+  /**
+   * The interface font size.
+   *
+   * Its own section rather than a second field in "Terminal", because the two sizes are not variants of
+   * one setting: this one decides whether the app is comfortable to read, the terminal's decides how
+   * much output fits in a pane. Someone whose interface is too small looks for the interface.
+   *
+   * The value only takes effect on save, like the terminal's, and it resizes this very window when it
+   * does — which is the clearest possible confirmation that it worked.
+   */
+  private renderInterface(): void {
+    clearChildren(this.hosts.interface);
+
+    const row = createElement('div', { className: 'settings-terminal-row' });
+    row.append(
+      this.field(
+        'Taille de police de l’interface',
+        String(this.uiFontSize),
+        (value) => {
+          const parsed = Number.parseInt(value, 10);
+          // Same rule as the terminal's field: an unusable value falls back to the default instead of
+          // being kept, since this is the field that would become unreadable.
+          this.uiFontSize = Number.isFinite(parsed) ? parsed : UI_FONT_SIZE.default;
+          this.touch();
+        },
+        `${UI_FONT_SIZE.min} à ${UI_FONT_SIZE.max}, défaut ${UI_FONT_SIZE.default}`,
+      ),
+    );
+    this.hosts.interface.append(row);
   }
 
   /**
@@ -661,7 +698,7 @@ export class SettingsForm {
     row.append(defaults);
     row.append(
       this.field(
-        'Taille de police',
+        'Taille de police du terminal',
         String(this.fontSize),
         (value) => {
           const parsed = Number.parseInt(value, 10);
@@ -809,9 +846,11 @@ export class SettingsForm {
     // applied. The draft is realigned on it for the same reason.
     const saved = await window.api.updateSettings({
       terminalFontSize: this.fontSize,
+      uiFontSize: this.uiFontSize,
       notesFolder: this.notesFolder,
     });
     this.fontSize = saved.terminalFontSize;
+    this.uiFontSize = saved.uiFontSize;
     this.notesFolder = saved.notesFolder;
 
     // The token travels only when one was actually typed: an empty field means "keep the stored one".

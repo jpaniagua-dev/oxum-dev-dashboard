@@ -1,6 +1,7 @@
 import type { ThemeState } from '@shared/contracts.js';
 import { requireElement } from './ui/dom.js';
 import { SettingsForm } from './ui/settings-form.js';
+import { applyUiFontSize } from './ui/ui-font.js';
 
 /**
  * Entry point of the settings window.
@@ -12,9 +13,11 @@ import { SettingsForm } from './ui/settings-form.js';
 async function start(): Promise<void> {
   const bootstrap = await window.api.bootstrap();
   applyTheme(bootstrap.theme);
+  applyUiFontSize(bootstrap.settings.uiFontSize);
 
   const form = new SettingsForm(
     {
+      interface: requireElement('settings-interface'),
       projects: requireElement('settings-projects'),
       terminal: requireElement('settings-terminal'),
       notes: requireElement('settings-notes'),
@@ -45,6 +48,9 @@ async function start(): Promise<void> {
    * echo of this window's own save.
    */
   window.api.onSettingsChanged((settings) => {
+    // Before the two guards below, and outside them: the font size is applied even when this event is
+    // only the echo of this window's own save, which is precisely the case that resizes this form.
+    applyUiFontSize(settings.uiFontSize);
     if (form.hasUnsavedChanges || form.matchesLoadedState(settings)) {
       return;
     }

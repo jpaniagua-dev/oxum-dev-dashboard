@@ -45,6 +45,7 @@ describe('asPatch', () => {
     expect(
       asPatch({
         terminalFontSize: 16,
+        uiFontSize: 14,
         defaultShellProfileId: 'git-bash',
         gitPollSeconds: 10,
         checksPollSeconds: 60,
@@ -52,6 +53,7 @@ describe('asPatch', () => {
       }),
     ).toEqual({
       terminalFontSize: 16,
+      uiFontSize: 14,
       defaultShellProfileId: 'git-bash',
       gitPollSeconds: 10,
       checksPollSeconds: 60,
@@ -107,7 +109,15 @@ describe('LOCAL_ONLY_KEYS', () => {
   });
 
   it('does not cover anything the settings window owns', () => {
-    for (const key of ['terminalFontSize', 'notesFolder', 'defaultShellProfileId', 'projects']) {
+    // `uiFontSize` in particular: it is born in the settings window and its whole purpose is to reach
+    // the dashboard, so listing it as local-only would leave the app's text size stuck.
+    for (const key of [
+      'terminalFontSize',
+      'uiFontSize',
+      'notesFolder',
+      'defaultShellProfileId',
+      'projects',
+    ]) {
       expect(LOCAL_ONLY_KEYS.has(key)).toBe(false);
     }
   });
