@@ -8,6 +8,7 @@ import {
   type TerminalLayout,
   type TerminalSession,
 } from '@shared/contracts.js';
+import { writeCommitMessage } from './git/commit-message.js';
 import { PullMonitor } from './github/pull-monitor.js';
 import { registerIpcHandlers } from './ipc.js';
 import { JiraMonitor } from './jira/jira-monitor.js';
@@ -259,6 +260,8 @@ async function bootstrap(): Promise<void> {
         ? { ok: true, message: `Connexion réussie, ${issues.length} ticket(s) assigné(s)` }
         : { ok: false, message: error };
     },
+    writeCommitMessage: (projectId, message) =>
+      writeCommitMessage(AppPaths.commitMessages(), projectId, message),
     notes: () => notesStore,
     defaultNotesFolder: () => AppPaths.notes(),
     confirmNoteDelete: (title) => {

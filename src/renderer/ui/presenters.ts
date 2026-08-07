@@ -1,10 +1,13 @@
 import type {
   ChecksState,
+  GitBranch,
+  GitChange,
   GitState,
   PrReview,
   PullRequest,
   ServerState,
 } from '@shared/contracts.js';
+import { hasWorktreeChange, isStaged } from '@shared/git-changes.js';
 
 /**
  * Turns domain state into what the table shows.
@@ -235,3 +238,80 @@ export function presentGit(git: GitState | null): GitSummary {
   return { parts, warning: flags.length > 0 ? flags.join(' ') : null };
 }
 
+
+/* ------------------------------------------------------------------ *
+ * Git tab
+ * ------------------------------------------------------------------ */
+
+/**
+ * Turns a file's two status columns into a label and a tone.
+ *
+ * The letters are shown **as git prints them** rather than translated into French words. They are two
+ * characters wide whatever the state, so the list stays aligned, and anyone who has run `git status`
+ * already reads them; the long form goes in the tooltip, which is where a word has room to be a word.
+ *
+ * The tone deliberately follows the *worktree* column when the two disagree. `MM` means staged, then
+ * edited again: painting it as "staged" would suggest the commit will contain what is on disk, which
+ * is exactly the thing that is not true.
+ */
+export function presentChange(change: GitChange): Pill {
+  const label = `${normalizeColumn(change.index)}${normalizeColumn(change.worktree)}`;
+
+  if (change.untracked) {
+    return { label: '??', tone: 'info', title: 'Nouveau fichier, pas encore suivi par git' };
+  }
+  if (change.index === 'U' || change.worktree === 'U' || label === 'AA' || label === 'DD') {
+    // Conflicts are the one state this tab cannot resolve, so they are painted as an error rather
+    // than hidden among the modifications.
+    return { label, tone: 'error', title: 'Conflit à résoudre, dans un terminal' };
+  }
+
+  const staged = isStaged(change);
+  const dirty = hasWorktreeChange(change);
+  const source = change.from === null ? '' : ` (depuis ${change.from})`;
+
+  if (staged && dirty) {
+    return {
+      label,
+      tone: 'busy',
+      title: `Ajouté à l’index puis modifié à nouveau : le commit ne prendra que la version indexée${source}`,
+    };
+  }
+  if (staged) {
+    return { label, tone: 'ok', title: `Prêt à être committé${source}` };
+  }
+  return { label, tone: 'neutral', title: `Modifié, pas encore ajouté à l’index${source}` };
+}
+
+/**
+ * How far a branch stands from its upstream, in the shortest readable form.
+ *
+ * Empty when there is nothing to say, so the caller can skip the element entirely: a badge reading
+ * "à jour" on every line of a list is noise that hides the two lines that are not.
+ */
+export function presentTrack(branch: GitBranch): string {
+  if (branch.upstream === null) {
+    return 'locale';
+  }
+  if (branch.gone) {
+    return 'upstream supprimée';
+  }
+  const marks: string[] = [];
+  if (branch.ahead > 0) {
+    marks.push(`↑${branch.ahead}`);
+  }
+  if (branch.behind > 0) {
+    marks.push(`↓${branch.behind}`);
+  }
+  return marks.join(' ');
+}
+
+/**
+ * A space for git's own space.
+ *
+ * git prints a space for "nothing here", which is invisible in HTML and collapses the two-character
+ * column to one. A middle dot keeps the width without pretending a letter is there.
+ */
+function normalizeColumn(column: string): string {
+  return column === ' ' || column.length === 0 ? '·' : column;
+}

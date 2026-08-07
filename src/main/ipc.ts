@@ -1,9 +1,14 @@
 import { release } from 'node:os';
 import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
 import {
+  GIT_COMMIT_ACTION_ID,
   IpcChannel,
   type AppSettings,
   type BootstrapState,
+  type GitDiff,
+  type GitDiffTarget,
+  type GitRepoState,
+  type GitResult,
   type OpenShellRequest,
   type Project,
   type ProjectCandidate,
@@ -24,6 +29,14 @@ import {
   type ThemeMode,
   type ThemeState,
 } from '@shared/contracts.js';
+import {
+  checkoutBranch,
+  createBranch,
+  readDiff,
+  readRepoState,
+  stagePaths,
+  sync,
+} from './git/git-commands.js';
 import {
   configFromPath,
   detectCandidates,
@@ -62,6 +75,14 @@ export interface IpcDependencies {
   readonly jiraCredentials: () => Promise<JiraCredentials | null>;
   /** Called after a successful write, to refresh the views without waiting for the poll. */
   readonly afterJiraWrite: () => void;
+  /**
+   * Persists a commit message and hands back the file `git commit -F` will read.
+   *
+   * Injected rather than called directly, for the same reason `defaultNotesFolder` is: resolving the
+   * folder means asking Electron where `userData` lives, and this module is already the one place
+   * that must stay testable without an Electron runtime around it.
+   */
+  readonly writeCommitMessage: (projectId: ProjectId, message: string) => Promise<string>;
   readonly notes: () => NotesStore;
   /** Where notes land when `notesFolder` is empty. Shown as the placeholder in the settings window. */
   readonly defaultNotesFolder: () => string;
@@ -126,6 +147,134 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   );
 
   ipcMain.handle(IpcChannel.JiraRefresh, async (): Promise<JiraState> => deps.jira().refreshNow());
+
+  /* ------------------------------------------------------------------ git */
+
+  /*
+   * The Git tab's channels are all **pull**, with no monitor behind them.
+   *
+   * Only one repository is ever on screen, and branches, history and status for every project would
+   * be several times the work of the strip's own git poll for something nobody is looking at. The
+   * renderer asks when it shows the tab, when the selection changes and after every write, which is
+   * exactly when the answer can have changed.
+   */
+
+  ipcMain.handle(
+    IpcChannel.GitState,
+    async (_event, projectId: unknown): Promise<GitRepoState | null> => {
+      const project = resolveProject(deps.projects(), projectId);
+      return project === undefined ? null : readRepoState(project);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitDiff,
+    async (_event, projectId: unknown, target: unknown): Promise<GitDiff> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const parsed = asDiffTarget(target);
+      if (project === undefined || parsed === null) {
+        return { title: '', lines: [], note: 'Projet ou fichier introuvable.' };
+      }
+      return readDiff(project.path, parsed);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitBranchCreate,
+    async (_event, projectId: unknown, name: unknown, checkout: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined || typeof name !== 'string') {
+        return { ok: false, message: 'Projet introuvable' };
+      }
+      return createBranch(project.path, name, checkout === true);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitCheckout,
+    async (_event, projectId: unknown, name: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined || typeof name !== 'string') {
+        return { ok: false, message: 'Projet introuvable' };
+      }
+      return checkoutBranch(project.path, name);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitStage,
+    async (_event, projectId: unknown, paths: unknown, staged: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { ok: false, message: 'Projet introuvable' };
+      }
+      const list = Array.isArray(paths)
+        ? paths.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+        : [];
+      return stagePaths(project.path, list, staged === true);
+    },
+  );
+
+  /**
+   * Commits what is staged, in a terminal tab.
+   *
+   * The one write that does **not** go through `execFile`, and the reason is the pre-commit hooks:
+   * `husky` and `lint-staged` can run for half a minute and print everything worth reading about why
+   * a commit was refused. Run silently, all of that would be reduced to a one-line failure; run in a
+   * tab, it is watched exactly as it would be from a shell — which is also what the whole app's
+   * "every action ends in a terminal tab" rule asks for.
+   */
+  ipcMain.handle(
+    IpcChannel.GitCommit,
+    async (
+      _event,
+      projectId: unknown,
+      message: unknown,
+    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { terminalId: null, result: { ok: false, message: 'Projet introuvable' } };
+      }
+      if (typeof message !== 'string' || message.trim().length === 0) {
+        return { terminalId: null, result: { ok: false, message: 'Message de commit vide' } };
+      }
+
+      const file = await deps.writeCommitMessage(project.id, message);
+      const terminalId = deps.terminals.runProjectCommand({
+        project,
+        actionId: GIT_COMMIT_ACTION_ID,
+        title: `${project.label} · commit`,
+        // `git` straight from PATH, no shell: the app already calls it that way everywhere else.
+        // `--cleanup=strip` drops comment lines and trailing blanks the way an editor session would.
+        file: 'git',
+        args: ['commit', '--cleanup=strip', '-F', file],
+        size: deps.terminalSize(),
+      });
+
+      return {
+        terminalId,
+        result:
+          terminalId === null
+            ? { ok: false, message: 'Impossible d’ouvrir l’onglet de commit' }
+            : { ok: true, message: 'Commit lancé dans un onglet' },
+      };
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitSync,
+    async (_event, projectId: unknown, op: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const operation = op === 'fetch' || op === 'pull' || op === 'push' ? op : null;
+      if (project === undefined || operation === null) {
+        return { ok: false, message: 'Opération inconnue' };
+      }
+      // Re-read rather than trusting what the renderer last saw: `push` needs to know whether the
+      // branch has an upstream, and a stale answer is what turns a first push into a puzzling refusal.
+      const state = await readRepoState(project);
+      return sync(project.path, operation, state.branch, state.hasUpstream);
+    },
+  );
 
   /* ---------------------------------------------------------------- notes */
 
@@ -533,6 +682,26 @@ function readGroups(value: unknown): TerminalGroup[] {
     groups.push({ tabs, active: typeof input.active === 'string' ? input.active : first });
   }
   return groups;
+}
+
+/**
+ * Reads a diff target off the wire.
+ *
+ * Returns null rather than a default on anything unexpected: the two shapes name different git
+ * commands, and guessing one would show the wrong thing instead of saying nothing.
+ */
+function asDiffTarget(value: unknown): GitDiffTarget | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+  const input = value as Record<string, unknown>;
+  if (input.kind === 'commit' && typeof input.sha === 'string' && input.sha.length > 0) {
+    return { kind: 'commit', sha: input.sha };
+  }
+  if (input.kind === 'file' && typeof input.path === 'string' && input.path.length > 0) {
+    return { kind: 'file', path: input.path, staged: input.staged === true };
+  }
+  return null;
 }
 
 function asThemeMode(value: unknown): ThemeMode {

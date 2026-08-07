@@ -37,6 +37,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Taller than the project table: a master-detail list needs the room.
   pullsHeight: 360,
   jiraHeight: 360,
+  // Taller still, and on purpose: three columns ending in a diff is the one tab of this strip where
+  // the user stops glancing and starts working. 250 pixels would show four lines of a diff.
+  gitHeight: 460,
+  // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
+  // 340 was not. The diff keeps the rest, and the separator is there to change the balance.
+  gitListWidth: 460,
   // Two network searches per pass, so the slowest loop of the three.
   jiraPollSeconds: 300,
   jira: { siteUrl: '', email: '', projectKeys: [] },
@@ -127,6 +133,8 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     projectsHeight: clamp(asNumber(input.projectsHeight, DEFAULT_SETTINGS.projectsHeight), 90, 1200),
     pullsHeight: clamp(asNumber(input.pullsHeight, DEFAULT_SETTINGS.pullsHeight), 90, 1200),
     jiraHeight: clamp(asNumber(input.jiraHeight, DEFAULT_SETTINGS.jiraHeight), 90, 1200),
+    gitHeight: clamp(asNumber(input.gitHeight, DEFAULT_SETTINGS.gitHeight), 90, 1200),
+    gitListWidth: clamp(asNumber(input.gitListWidth, DEFAULT_SETTINGS.gitListWidth), 240, 1400),
     defaultShellProfileId: asString(
       input.defaultShellProfileId,
       DEFAULT_SETTINGS.defaultShellProfileId,
@@ -275,7 +283,7 @@ function asJira(value: unknown): AppSettings['jira'] {
 }
 
 function asStrip(value: unknown): StripTab {
-  return value === 'pulls' || value === 'jira' ? value : 'projects';
+  return value === 'pulls' || value === 'jira' || value === 'git' ? value : 'projects';
 }
 
 /** Drops malformed profiles instead of letting one reach `pty.spawn`. */

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import * as pty from '@lydell/node-pty';
 import type { IPty } from '@lydell/node-pty';
+import { RESERVED_ACTION_PREFIX } from '@shared/contracts.js';
 import type {
   ActionRole,
   PaneDirection,
@@ -175,6 +176,56 @@ export class TerminalManager {
       args: resolved.args,
       size,
       projectKind: project.kind,
+    });
+  }
+
+  /**
+   * Runs a one-shot command in a project's folder, in a tab of its own.
+   *
+   * The path the Git tab's commit takes. It is deliberately **not** a `ProjectAction`: an action is
+   * user configuration living in `settings.json`, whereas this command is built by the app from what
+   * the user typed in a form, and inventing a fake action to carry it would put a phantom button in
+   * the settings window.
+   *
+   * The executable is spawned **directly**, with no shell in between. That is the difference from
+   * `runProjectAction`, and it is the point: a commit message is arbitrary text, so passing it
+   * through `bash -ic` would mean quoting it correctly against a shell, forever. There is no shell to
+   * quote against here, and the message travels through a file rather than the command line anyway.
+   *
+   * Reuse follows the same rule as an action: one tab per `actionId`, replaced once its process has
+   * ended, so committing twice does not litter the strip.
+   */
+  runProjectCommand(options: {
+    project: Project;
+    /** Reserved id, `git:`-prefixed, which is what exempts the tab from `reconcile`. */
+    actionId: string;
+    title: string;
+    file: string;
+    args: readonly string[];
+    size: TerminalSize;
+  }): TerminalId | null {
+    const existing = this.findActionSession(options.project.id, options.actionId);
+    if (existing !== undefined) {
+      if (existing.session.running) {
+        return existing.session.id;
+      }
+      this.entries.delete(existing.session.id);
+    }
+
+    return this.spawn({
+      title: existing?.session.renamed === true ? existing.session.title : options.title,
+      renamed: existing?.session.renamed === true,
+      kind: 'project',
+      projectId: options.project.id,
+      actionId: options.actionId,
+      // `task`, so the tab is closable at any moment and its output is never parsed as build markers.
+      role: 'task',
+      profileId: null,
+      cwd: options.project.path,
+      file: options.file,
+      args: [...options.args],
+      size: options.size,
+      projectKind: null,
     });
   }
 
@@ -507,11 +558,14 @@ function actionTitle(project: Project, action: ProjectAction): string {
 /**
  * Whether a configuration change has left a tab with no button able to act on it.
  *
- * Pure and exported so the rule is tested rather than trusted, since two of its four cases are easy to
- * get wrong in opposite directions:
+ * Pure and exported so the rule is tested rather than trusted, since three of its five cases are easy
+ * to get wrong in opposite directions:
  * - a **free shell** (no project) belongs to nobody and is never unreachable;
  * - a **repository shell** has a project but no action, so looking one up would find nothing and close
  *   a perfectly good shell on every settings save;
+ * - a **reserved** tab (`git:`) has a project *and* an action id, but that id names no configured
+ *   action: it belongs to the Git tab, which owns its own buttons. Looking it up in the project's
+ *   actions finds nothing, so without this case every settings save would kill a commit mid-hook;
  * - an action that no longer exists leaves its tab orphaned;
  * - an action **demoted** from `server` leaves a running process whose row shows neither `Run` nor
  *   `Stop`, so the port would stay held with nothing left to press.
@@ -527,7 +581,7 @@ export function isUnreachable(
   if (project === undefined) {
     return true;
   }
-  if (session.actionId === null) {
+  if (session.actionId === null || session.actionId.startsWith(RESERVED_ACTION_PREFIX)) {
     return false;
   }
   const action = project.actions.find((candidate) => candidate.id === session.actionId);

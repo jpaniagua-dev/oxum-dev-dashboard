@@ -184,6 +184,145 @@ export interface GitState {
 }
 
 /* ------------------------------------------------------------------ *
+ * Git tab
+ * ------------------------------------------------------------------ */
+
+/**
+ * One changed file, as `git status` reports it.
+ *
+ * The two status letters are kept apart rather than merged into one "state". They answer different
+ * questions and a file can carry both at once: `MM` is a file staged with further edits on top, and
+ * collapsing that into a single letter would make the staging checkbox lie about what a commit would
+ * actually contain.
+ */
+export interface GitChange {
+  /** Path relative to the repository root, in git's own forward-slash form. */
+  readonly path: string;
+  /** Index column: what is staged. A space when nothing is. */
+  readonly index: string;
+  /** Working-tree column: what is modified on disk beyond the index. */
+  readonly worktree: string;
+  /** True when git does not track this path at all yet. */
+  readonly untracked: boolean;
+  /** Previous path of a rename or a copy, which git reports as a separate field. */
+  readonly from: string | null;
+}
+
+/** A local branch, with how far it stands from its upstream. */
+export interface GitBranch {
+  readonly name: string;
+  readonly current: boolean;
+  /** `origin/x`, or null when the branch was never pushed. */
+  readonly upstream: string | null;
+  readonly ahead: number;
+  readonly behind: number;
+  /** True when the upstream is gone from the remote, so pushing would recreate it. */
+  readonly gone: boolean;
+  /** ISO date of the tip commit, which is what "my recent branches" really sorts by. */
+  readonly updatedAt: string;
+}
+
+/** One commit of the history, reduced to what a strip can show on a line. */
+export interface GitCommit {
+  /** Abbreviated sha, which is what the user copies and what `git show` takes. */
+  readonly sha: string;
+  readonly subject: string;
+  readonly author: string;
+  readonly date: string;
+  /** Decorations pointing at it, e.g. `HEAD -> main, origin/main`. Empty when there are none. */
+  readonly refs: string;
+}
+
+/**
+ * What a line of a diff is.
+ *
+ * `meta` covers everything git prints around the content (`diff --git`, `index`, mode changes,
+ * `\ No newline at end of file`): shown, because a mode change or a rename is part of what would be
+ * committed, but never counted as an added or removed line.
+ */
+export type GitDiffLineKind = 'add' | 'del' | 'context' | 'hunk' | 'meta';
+
+export interface GitDiffLine {
+  readonly kind: GitDiffLineKind;
+  /** The line as git printed it, leading marker included. */
+  readonly text: string;
+  /** Position in the old file, null on an added line and on a header. */
+  readonly oldLine: number | null;
+  /** Position in the new file, null on a removed line and on a header. */
+  readonly newLine: number | null;
+}
+
+/**
+ * What the diff column is showing.
+ *
+ * Either a file of the working tree or a whole commit, because both answer "what changed" and the
+ * column renders them identically. Keeping one shape means the history and the change list share a
+ * single view instead of growing two that drift.
+ */
+export type GitDiffTarget =
+  | { readonly kind: 'file'; readonly path: string; readonly staged: boolean }
+  | { readonly kind: 'commit'; readonly sha: string };
+
+export interface GitDiff {
+  /** Heading of the column: a path, or a sha and its subject. */
+  readonly title: string;
+  readonly lines: readonly GitDiffLine[];
+  /**
+   * Why there is nothing to show, when there is nothing.
+   *
+   * A binary file, an empty diff or a git failure are three different situations and an empty list
+   * would say the same thing for all three.
+   */
+  readonly note: string | null;
+}
+
+/** Everything the Git tab shows for one repository. */
+export interface GitRepoState {
+  readonly projectId: ProjectId;
+  readonly label: string;
+  readonly path: string;
+  /** Current branch, or `detached@<sha>`. */
+  readonly branch: string;
+  readonly branches: readonly GitBranch[];
+  readonly changes: readonly GitChange[];
+  readonly commits: readonly GitCommit[];
+  readonly ahead: number;
+  readonly behind: number;
+  readonly hasUpstream: boolean;
+  /** ISO timestamp of the read, null while it has never succeeded. */
+  readonly checkedAt: string | null;
+  /** Set when git itself failed, e.g. the folder is not a repository. */
+  readonly error: string | null;
+}
+
+/**
+ * Outcome of a git write, reported where the button was pressed.
+ *
+ * The message is git's own first line rather than a sentence of ours: "Your local changes to the
+ * following files would be overwritten by checkout" says exactly what to do next, and nothing this
+ * app could word would beat it.
+ */
+export interface GitResult {
+  readonly ok: boolean;
+  readonly message: string;
+}
+
+/** A network operation of the Git tab, all three sharing one channel and one budget. */
+export type GitSyncOp = 'fetch' | 'pull' | 'push';
+
+/**
+ * Action id prefix reserved for tabs the Git tab opens.
+ *
+ * A `commit` tab is tied to a project but is **not** one of its configured actions, so it must be
+ * exempt from the reconciliation that closes tabs whose action has disappeared. Without the exemption
+ * every settings save would kill a commit in progress. See `isUnreachable`.
+ */
+export const RESERVED_ACTION_PREFIX = 'git:';
+
+/** Action id of the commit tab, one per project so a rerun reuses it. */
+export const GIT_COMMIT_ACTION_ID = `${RESERVED_ACTION_PREFIX}commit`;
+
+/* ------------------------------------------------------------------ *
  * GitHub checks
  * ------------------------------------------------------------------ */
 
@@ -520,7 +659,7 @@ export interface NoteContent {
 export const TERMINAL_FONT_SIZE = { default: 14, min: 9, max: 28 } as const;
 
 /** Which view the top strip shows. The terminal below is unaffected by this choice. */
-export type StripTab = 'projects' | 'pulls' | 'jira';
+export type StripTab = 'projects' | 'pulls' | 'jira' | 'git';
 
 export interface AppSettings {
   themeMode: ThemeMode;
@@ -549,6 +688,21 @@ export interface AppSettings {
   projectsHeight: number;
   pullsHeight: number;
   jiraHeight: number;
+  /**
+   * Height of the Git tab, and the tallest default of the four.
+   *
+   * Three columns ending in a diff cannot be read in the 250 pixels a status table is happy with:
+   * this tab is the one where the strip stops being a glance and becomes a place to work.
+   */
+  gitHeight: number;
+  /**
+   * Width of the Git tab's working column, in pixels. The diff column takes what is left.
+   *
+   * Stored on the **list** side rather than the diff side, and that is the load-bearing half of the
+   * choice: whichever column is not stored absorbs every window resize, and leftover width is worth
+   * something to a diff (long lines of code) and nothing to a column of file paths.
+   */
+  gitListWidth: number;
   /** Seconds between Jira refreshes. Two JQL searches per pass, so the slowest loop of all. */
   jiraPollSeconds: number;
   /** Jira connection, token excluded. */
@@ -708,6 +862,25 @@ export const IpcChannel = {
   JiraTransition: 'jira:transition',
   /** invoke: (key) => { ok, message }, assigns an issue to the token's own account */
   JiraAssignMe: 'jira:assign-me',
+  /** invoke: (projectId) => GitRepoState | null, everything the Git tab shows for one repository */
+  GitState: 'git:state',
+  /** invoke: (projectId, target: GitDiffTarget) => GitDiff, a file's changes or a whole commit */
+  GitDiff: 'git:diff',
+  /** invoke: (projectId, name, checkout: boolean) => GitResult */
+  GitBranchCreate: 'git:branch-create',
+  /** invoke: (projectId, name) => GitResult */
+  GitCheckout: 'git:checkout',
+  /** invoke: (projectId, paths: string[], staged: boolean) => GitResult, stages or unstages */
+  GitStage: 'git:stage',
+  /**
+   * invoke: (projectId, message) => { terminalId, result }
+   *
+   * Writes the message to a file and runs `git commit -F` in a terminal tab, so hooks and their
+   * output are visible rather than swallowed by a silent `execFile`.
+   */
+  GitCommit: 'git:commit',
+  /** invoke: (projectId, op: GitSyncOp) => GitResult, the three network operations */
+  GitSync: 'git:sync',
   /** on: (state: NotesState) => void, pushed whenever the note list changes */
   NotesChanged: 'notes:changed',
   /** invoke: () => NotesState, re-reads the folder from disk */
@@ -814,6 +987,33 @@ export interface RendererApi {
   assignJiraToMe(key: string): Promise<{ ok: boolean; message: string }>;
   /** Opens a pull request in the real browser. Only http(s) is followed, checked in the main process. */
   openExternal(url: string): Promise<void>;
+
+  /**
+   * Reads a repository's full git state for the Git tab.
+   *
+   * Pulled on demand rather than pushed by a monitor: only the selected repository is ever displayed,
+   * and polling branches, history and status for every project would be several times the work of the
+   * strip's own git poll for something nobody is looking at.
+   */
+  gitState(projectId: ProjectId): Promise<GitRepoState | null>;
+  /** The diff of one working-tree file, or of a whole commit. */
+  gitDiff(projectId: ProjectId, target: GitDiffTarget): Promise<GitDiff>;
+  /** Creates a branch, optionally switching to it. The name is validated by git itself. */
+  gitCreateBranch(projectId: ProjectId, name: string, checkout: boolean): Promise<GitResult>;
+  gitCheckout(projectId: ProjectId, name: string): Promise<GitResult>;
+  /** Stages the given paths, or unstages them when `staged` is false. */
+  gitStage(projectId: ProjectId, paths: string[], staged: boolean): Promise<GitResult>;
+  /**
+   * Commits what is staged, in a terminal tab.
+   *
+   * Returns the tab so the caller can bring it forward: the point of running it there is that the
+   * pre-commit hooks are watchable, which is worth nothing if the tab stays hidden.
+   */
+  gitCommit(
+    projectId: ProjectId,
+    message: string,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
+  gitSync(projectId: ProjectId, op: GitSyncOp): Promise<GitResult>;
 
   refreshNotes(): Promise<NotesState>;
   onNotesChanged(listener: (state: NotesState) => void): () => void;

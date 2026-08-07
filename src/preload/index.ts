@@ -3,6 +3,11 @@ import {
   IpcChannel,
   type AppSettings,
   type BootstrapState,
+  type GitDiff,
+  type GitDiffTarget,
+  type GitRepoState,
+  type GitResult,
+  type GitSyncOp,
   type IssueTransition,
   type JiraConfig,
   type JiraState,
@@ -54,6 +59,30 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.ClipboardWrite, text),
 
   readClipboard: (): Promise<string> => ipcRenderer.invoke(IpcChannel.ClipboardRead),
+
+  gitState: (projectId: ProjectId): Promise<GitRepoState | null> =>
+    ipcRenderer.invoke(IpcChannel.GitState, projectId),
+
+  gitDiff: (projectId: ProjectId, target: GitDiffTarget): Promise<GitDiff> =>
+    ipcRenderer.invoke(IpcChannel.GitDiff, projectId, target),
+
+  gitCreateBranch: (projectId: ProjectId, name: string, checkout: boolean): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitBranchCreate, projectId, name, checkout),
+
+  gitCheckout: (projectId: ProjectId, name: string): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitCheckout, projectId, name),
+
+  gitStage: (projectId: ProjectId, paths: string[], staged: boolean): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitStage, projectId, paths, staged),
+
+  gitCommit: (
+    projectId: ProjectId,
+    message: string,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
+    ipcRenderer.invoke(IpcChannel.GitCommit, projectId, message),
+
+  gitSync: (projectId: ProjectId, op: GitSyncOp): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitSync, projectId, op),
 
   refreshNotes: (): Promise<NotesState> => ipcRenderer.invoke(IpcChannel.NotesRefresh),
 

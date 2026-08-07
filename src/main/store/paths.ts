@@ -17,4 +17,11 @@ export const AppPaths = {
   jiraToken: (): string => join(app.getPath('userData'), 'jira-token.bin'),
   /** Default notes folder, used when `notesFolder` is empty. */
   notes: (): string => join(app.getPath('userData'), 'notes'),
+  /**
+   * Where the Git tab writes commit messages before handing them to `git commit -F`.
+   *
+   * Under `userData` rather than the system temp folder: a hook can reject a commit, and the message
+   * that was typed is then worth keeping somewhere a cleanup job will not sweep it away.
+   */
+  commitMessages: (): string => join(app.getPath('userData'), 'commit-messages'),
 } as const;

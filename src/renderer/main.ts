@@ -1,5 +1,9 @@
 import type {
   AppSettings,
+  GitDiff,
+  GitDiffTarget,
+  GitRepoState,
+  GitSyncOp,
   JiraIssue,
   JiraState,
   JiraViewId,
@@ -15,6 +19,15 @@ import type {
 } from '@shared/contracts.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
+import {
+  buildRepoMenuItems,
+  defaultTargetFor,
+  renderGitPanel,
+  type GitPanelActions,
+  type GitPanelState,
+  type GitViewId,
+} from './ui/git-panel.js';
+import { attachGitSplitter } from './ui/git-split.js';
 import { renderJiraList } from './ui/jira-list.js';
 import { NotesPanel } from './ui/notes-panel.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
@@ -51,10 +64,28 @@ class App {
   private selectedRepo: ProjectId | null = null;
   private jira: JiraState | null = null;
   private selectedJiraView: JiraViewId = 'mine';
+  /*
+   * Git tab state.
+   *
+   * All of it lives here rather than inside the panel because the panel is rebuilt whole on every
+   * refresh: a draft message or a selected file kept in the DOM would be thrown away every ten
+   * seconds. `gitEditing` is the same guard as `editingRow` and for the same reason.
+   */
+  private gitProject: ProjectId | null = null;
+  private gitRepo: GitRepoState | null = null;
+  private gitView: GitViewId = 'changes';
+  private gitTarget: GitDiffTarget | null = null;
+  private gitDiff: GitDiff | null = null;
+  private gitMessage = '';
+  private gitBranchDraft = '';
+  private gitBusy = false;
+  private gitEditing = false;
   private strip: StripTabs | null = null;
   /** Whether the top strip is folded down to its tab row. Mirrors `settings.stripCollapsed`. */
   private stripCollapsed = false;
   private resizer: { setHeight: (height: number) => void } | null = null;
+  /** The Git tab's list/diff separator. Held so a settings change can reapply the stored width. */
+  private gitSplitter: { setWidth: (width: number) => void } | null = null;
   private notes: NotesPanel | null = null;
   private notesResizer: { setWidth: (width: number) => void } | null = null;
 
@@ -106,10 +137,22 @@ class App {
     this.renderTable();
     this.renderPulls();
     this.renderJira();
+    // Painted so the tab is never blank, but only **read** when it is the one on screen: the reads
+    // are per-repository and there is no monitor pushing them.
+    this.renderGit();
+    if (bootstrap.settings.activeStrip === 'git') {
+      void this.loadGit();
+    }
 
     window.api.onRowsChanged((rows) => {
       this.rows = rows;
       this.renderTable();
+      // The git poll is the natural heartbeat for the Git tab too: the working tree it describes is
+      // the very thing that tab shows. Only when it is on screen, since reading branches, history and
+      // status for a hidden tab is work for nobody.
+      if (this.strip?.active === 'git') {
+        void this.loadGit();
+      }
       this.stampRefresh();
     });
     window.api.onPullsChanged((repos) => {
@@ -158,6 +201,15 @@ class App {
     this.terminal?.setFontSize(bootstrap.settings.terminalFontSize);
     this.rows = await window.api.refreshNow();
     this.renderTable();
+    // The repository column is drawn from the project list, which is exactly what may have changed.
+    // The selection is dropped when its project is gone, so the panel cannot point at nothing.
+    if (!this.projects.some((project) => project.id === this.gitProject)) {
+      this.gitProject = null;
+      this.gitRepo = null;
+      this.gitTarget = null;
+      this.gitDiff = null;
+    }
+    this.renderGit();
     this.stampRefresh();
   }
 
@@ -273,6 +325,250 @@ class App {
         },
       },
     );
+  }
+
+  /* -------------------------------------------------------------------- git */
+
+  private renderGit(): void {
+    renderGitPanel(
+      {
+        repos: requireElement('git-repos'),
+        header: requireElement('git-header'),
+        views: requireElement('git-views'),
+        list: requireElement('git-list'),
+        commit: requireElement('git-commit'),
+        diff: requireElement('git-diff'),
+      },
+      this.gitPanelState(),
+      this.gitPanelActions(),
+    );
+  }
+
+  /**
+   * The Git tab's state, as one object.
+   *
+   * Extracted because the action menu needs the very same snapshot as the panel: two places assembling
+   * it would eventually disagree about, say, whether a write is in flight, and the menu would offer a
+   * `Push` the panel has already disabled.
+   */
+  private gitPanelState(): GitPanelState {
+    return {
+      projects: this.projects,
+      selectedProject: this.gitProject,
+      repo: this.gitRepo,
+      view: this.gitView,
+      target: this.gitTarget,
+      diff: this.gitDiff,
+      message: this.gitMessage,
+      branchDraft: this.gitBranchDraft,
+      busy: this.gitBusy,
+    };
+  }
+
+  private gitPanelActions(): GitPanelActions {
+    return {
+        onSelectProject: (projectId) => {
+          if (projectId === this.gitProject) {
+            return;
+          }
+          this.gitProject = projectId;
+          // The diff and the drafts belong to the repository that was open, not to this one: keeping
+          // a message typed for another project is how a commit ends up in the wrong place.
+          this.gitRepo = null;
+          this.gitTarget = null;
+          this.gitDiff = null;
+          this.gitMessage = '';
+          this.gitBranchDraft = '';
+          this.renderGit();
+          void this.loadGit();
+        },
+        onSelectView: (view) => {
+          this.gitView = view;
+          this.renderGit();
+        },
+        onSelectTarget: (target) => {
+          this.gitTarget = target;
+          this.gitDiff = null;
+          this.renderGit();
+          void this.loadGitDiff();
+        },
+        onStage: (paths, staged) =>
+          void this.runGitWrite(() => window.api.gitStage(this.requireGitProject(), paths, staged)),
+        onCheckout: (name) =>
+          void this.runGitWrite(() => window.api.gitCheckout(this.requireGitProject(), name)),
+        onCreateBranch: (name) => {
+          void this.runGitWrite(async () => {
+            const result = await window.api.gitCreateBranch(this.requireGitProject(), name, true);
+            if (result.ok) {
+              this.gitBranchDraft = '';
+            }
+            return result;
+          });
+        },
+        onCommit: () => void this.commitGit(),
+        onMessage: (value) => {
+          // Stored without a re-render: the textarea already shows it, and rebuilding the panel on
+          // every keystroke would move the caret.
+          this.gitMessage = value;
+        },
+        onBranchDraft: (value) => {
+          this.gitBranchDraft = value;
+        },
+        onSync: (op) => void this.syncGit(op),
+        onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
+        onMenu: (x, y) => this.openGitMenu(x, y),
+        onEditing: (editing) => {
+          this.gitEditing = editing;
+        },
+    };
+  }
+
+  /**
+   * The repository's actions: the three network operations and a terminal.
+   *
+   * Rebuilt at each opening rather than held, for the same reason the Jira transitions are read when
+   * their menu opens: the labels depend on live state (`Push` becomes `Push et publier la branche`
+   * without an upstream) and a menu built once would eventually offer the wrong one.
+   */
+  private openGitMenu(x: number, y: number): void {
+    if (this.gitRepo === null || this.gitRepo.error !== null) {
+      return;
+    }
+    showContextMenu(x, y, buildRepoMenuItems(this.gitRepo, this.gitPanelState(), this.gitPanelActions()));
+  }
+
+  /**
+   * Reads the selected repository, defaulting the selection to the first project.
+   *
+   * Skipped while a field has the focus: this runs on the git poll, so a refresh landing mid-sentence
+   * would replace the textarea under the cursor. Exactly the guard the project table's rename uses.
+   */
+  private async loadGit(): Promise<void> {
+    if (this.gitEditing) {
+      return;
+    }
+    this.gitProject ??= this.projects[0]?.id ?? null;
+    const projectId = this.gitProject;
+    if (projectId === null) {
+      this.renderGit();
+      return;
+    }
+
+    this.gitRepo = await window.api.gitState(projectId);
+    // The selected file may have been committed or reverted since the last pass, and a diff column
+    // still showing it would describe something that no longer exists.
+    if (this.gitTarget?.kind === 'file') {
+      const path = this.gitTarget.path;
+      if (!(this.gitRepo?.changes.some((change) => change.path === path) ?? false)) {
+        this.gitTarget = null;
+        this.gitDiff = null;
+      }
+    }
+    /*
+     * Opens on the first changed file when nothing is selected.
+     *
+     * The diff is the reason the tab has a third column, and arriving on an empty one asks the user to
+     * click before the tab tells them anything. Only when there is no selection at all, so it can
+     * never pull the view away from a file being read, and only on the changes view: preselecting a
+     * commit would fire a `git show` for a list nobody has looked at yet.
+     */
+    const first = this.gitRepo?.changes[0];
+    if (this.gitTarget === null && this.gitView === 'changes' && first !== undefined) {
+      this.gitTarget = defaultTargetFor(first);
+      this.gitDiff = null;
+    }
+    this.renderGit();
+    if (this.gitTarget !== null && this.gitDiff === null) {
+      await this.loadGitDiff();
+    }
+  }
+
+  private async loadGitDiff(): Promise<void> {
+    const projectId = this.gitProject;
+    const target = this.gitTarget;
+    if (projectId === null || target === null) {
+      return;
+    }
+    const diff = await window.api.gitDiff(projectId, target);
+    // Dropped when the selection moved on while this was in flight: a slow diff must not overwrite
+    // the fast one the user asked for afterwards.
+    if (this.gitTarget === target) {
+      this.gitDiff = diff;
+      this.renderGit();
+    }
+  }
+
+  /**
+   * Runs a git write, then re-reads.
+   *
+   * Every write goes through here so three things always happen together: the buttons are disabled
+   * while it runs, the outcome is reported where the user is looking, and the state is re-read. A
+   * checkout that succeeded but left the branch list showing the old branch is worse than one that
+   * failed loudly.
+   */
+  private async runGitWrite(write: () => Promise<{ ok: boolean; message: string }>): Promise<void> {
+    if (this.gitBusy) {
+      return;
+    }
+    this.gitBusy = true;
+    this.renderGit();
+    try {
+      const result = await write();
+      this.stampMessage(result.message);
+      if (!result.ok) {
+        console.warn('[git]', result.message);
+      }
+    } finally {
+      this.gitBusy = false;
+      // The diff is dropped rather than kept: staging a file changes what `git diff` answers for it,
+      // so the panel would otherwise show the previous answer next to the new checkbox.
+      this.gitDiff = null;
+      await this.loadGit();
+    }
+  }
+
+  private async syncGit(op: GitSyncOp): Promise<void> {
+    await this.runGitWrite(() => window.api.gitSync(this.requireGitProject(), op));
+  }
+
+  /**
+   * Commits, in a terminal tab.
+   *
+   * The tab is brought forward straight away: running the commit there is only worth anything if the
+   * hook output is watched, and a commit tab created behind the current one would be invisible until
+   * it had already finished.
+   */
+  private async commitGit(): Promise<void> {
+    const projectId = this.gitProject;
+    if (projectId === null || this.gitBusy) {
+      return;
+    }
+    this.gitBusy = true;
+    this.renderGit();
+    try {
+      const { terminalId, result } = await window.api.gitCommit(projectId, this.gitMessage);
+      this.stampMessage(result.message);
+      if (terminalId !== null) {
+        // Cleared once handed over: the message now lives in the file git is reading, and leaving it
+        // in the form invites committing it twice.
+        this.gitMessage = '';
+        await this.focusTerminal(terminalId);
+      }
+    } finally {
+      this.gitBusy = false;
+      await this.loadGit();
+    }
+  }
+
+  /**
+   * The selected project, for the write paths.
+   *
+   * They are only reachable from a rendered panel, which cannot exist without a selection, so an
+   * empty string here would be a programming error rather than a state to handle: the main process
+   * answers "projet introuvable" and it shows up in the status line.
+   */
+  private requireGitProject(): ProjectId {
+    return this.gitProject ?? '';
   }
 
   private stampRefresh(): void {
@@ -458,6 +754,13 @@ class App {
         });
         return;
       }
+      if (this.strip?.active === 'git') {
+        // The diff goes with it: the file may well have changed since it was read, and refreshing
+        // everything except the pane being looked at is the wrong half.
+        this.gitDiff = null;
+        void this.loadGit().then(() => this.stampRefresh());
+        return;
+      }
       void window.api.refreshNow().then((rows) => {
         this.rows = rows;
         this.renderTable();
@@ -522,11 +825,40 @@ class App {
           this.resizer?.setHeight(heightOf(this.settings, tab));
         }
         void window.api.updateSettings({ activeStrip: tab });
+        // Nothing is read for the Git tab while it is hidden, so showing it is the moment to read.
+        // The stored column width goes back on here too: the splitter cannot measure a `display: none`
+        // panel, so this is the first instant its value can actually be honoured.
+        if (tab === 'git') {
+          this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);
+          void this.loadGit();
+        }
         // The terminal's geometry changed with the strip's: without this its pty keeps the old size.
         this.terminal?.refit();
       },
     });
     this.strip.adopt(settings.activeStrip);
+
+    /*
+     * The Git tab's own separator, inside the strip rather than at the edge of the window.
+     *
+     * Attached once, here, next to the strip's other resizer: both are geometry of the same pane. The
+     * terminal is **not** refitted on this one, unlike the two others, and that is not an oversight —
+     * this separator moves a boundary *inside* the strip, so the terminal's box does not change.
+     */
+    this.gitSplitter = attachGitSplitter({
+      handle: requireElement('git-resizer'),
+      panel: requireElement('strip-panel-git'),
+      list: requireElement('git-main'),
+      initialWidth: settings.gitListWidth,
+      onResize: () => {},
+      onCommit: (width) => {
+        const rounded = Math.round(width);
+        if (this.settings !== null) {
+          this.settings = { ...this.settings, gitListWidth: rounded };
+        }
+        void window.api.updateSettings({ gitListWidth: rounded });
+      },
+    });
 
     requireElement<HTMLButtonElement>('strip-collapse').addEventListener('click', () => {
       this.applyStripCollapsed(!this.stripCollapsed);
@@ -777,6 +1109,14 @@ const THEME_ICONS: Record<ThemeMode, { path: string; paint: 'fill' | 'stroke' }>
   },
 };
 
+/**
+ * Fallback width of the Git tab's working column.
+ *
+ * Only reached if the settings have not loaded, which is a state the panel can technically be in; it
+ * matches the CSS fallback in `.git` so the two cannot disagree about the first paint.
+ */
+const DEFAULT_GIT_LIST_WIDTH = 460;
+
 /** Remembered height of one strip tab. */
 function heightOf(settings: AppSettings, tab: StripTab): number {
   switch (tab) {
@@ -784,18 +1124,24 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.pullsHeight;
     case 'jira':
       return settings.jiraHeight;
+    case 'git':
+      return settings.gitHeight;
     case 'projects':
       return settings.projectsHeight;
   }
 }
 
 /** Settings key that stores a tab's height. */
-function heightKeyOf(tab: StripTab): 'projectsHeight' | 'pullsHeight' | 'jiraHeight' {
+function heightKeyOf(
+  tab: StripTab,
+): 'projectsHeight' | 'pullsHeight' | 'jiraHeight' | 'gitHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
     case 'jira':
       return 'jiraHeight';
+    case 'git':
+      return 'gitHeight';
     case 'projects':
       return 'projectsHeight';
   }

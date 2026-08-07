@@ -1699,3 +1699,376 @@ body {
 .cm-editor {
   user-select: text;
 }
+
+/* ------------------------------------------------------------------- git */
+
+/*
+ * Three columns instead of the two the pull requests use: repositories, the working area, and the
+ * diff. The diff gets `1fr` because it is the one that has to be *read* rather than scanned, and the
+ * middle column is fixed so a long file path cannot squeeze it.
+ *
+ * Each column scrolls on its own, `min-height: 0` on every one of them: without it a grid item
+ * refuses to shrink below its content and a long branch list would push the terminal off screen.
+ */
+.git {
+  display: grid;
+  /*
+   * The working column's width is a custom property so the separator can drive it: a grid *track*
+   * cannot be given a width from a drag, but the property that sizes it can. The fallback matters —
+   * it is what the layout uses for the frame before the resizer has applied the stored value.
+   */
+  grid-template-columns: 170px var(--git-list-width, 460px) 5px minmax(0, 1fr);
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 10px;
+}
+
+/* Same grammar as the two other separators of this app, on the horizontal axis like the notes one. */
+.git__resizer {
+  background: var(--border);
+  cursor: ew-resize;
+}
+
+.git__resizer:hover,
+.git__resizer:focus-visible {
+  background: var(--primary);
+  outline: none;
+}
+
+/* Same trap as `.pulls` and `.terminal__view`: a class setting `display` beats `[hidden]`. */
+.git[hidden] {
+  display: none;
+}
+
+/*
+ * The middle column is itself a grid, in rows: header, sub-tabs, list, commit form.
+ * Only the list is `1fr`, so the form keeps its height and the list absorbs whatever is left.
+ */
+/* No border on this side any more: the draggable separator is now the divider, and having both
+   would draw two lines a few pixels apart. */
+.git__main {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 6px;
+  min-height: 0;
+}
+
+.git__header-row,
+.git__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.git__bar {
+  padding-bottom: 4px;
+}
+
+/* Pushes what follows to the right edge without a margin rule per button. */
+.git__spacer {
+  flex: 1;
+}
+
+.git__branch {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  /* A branch name is an identifier: the mono face keeps `PROJ-1601-x` from being read as prose. */
+  font-family: var(--font-mono);
+}
+
+.git__views {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+/*
+ * The network actions sit at the end of the tab row, slightly dimmer than the tabs.
+ *
+ * `align-self: center` rather than stretching: an icon button as tall as a tab would read as a fourth
+ * tab, which is exactly what it must not be — these three do something, the tabs only switch a view.
+ */
+.git__sync {
+  align-self: center;
+  height: 22px;
+}
+
+.git__view {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git__view:hover {
+  color: var(--text);
+}
+
+.git__view--active {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+}
+
+.git__view-count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.git__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.git__row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.git__row:hover {
+  background: var(--surface-hover);
+}
+
+/*
+ * A branch row is not clickable, and must not pretend to be: checkout is its button, deliberately, so
+ * that changing what is on disk is never one stray click away in a list.
+ */
+.git__branch-row {
+  cursor: default;
+}
+
+.git__row--selected {
+  background: var(--surface-inset);
+  border-color: var(--border);
+}
+
+.git__check {
+  flex: none;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+/*
+ * A file path truncates from the *left*: the end of `src/app/feature/x.component.ts` is what tells
+ * two files apart, and a plain ellipsis cuts off exactly that.
+ *
+ * `direction: rtl` is what moves the ellipsis to the front, and `unicode-bidi: plaintext` is the part
+ * that makes it safe: without it the box's direction also governs the text, and a path's leading or
+ * trailing punctuation gets reordered to the wrong end. `plaintext` derives the run's direction from
+ * its own first strong character, so the path reads normally inside a right-anchored box.
+ */
+.git__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  unicode-bidi: plaintext;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/*
+ * A branch name or a commit subject truncates from the right, the ordinary way.
+ *
+ * Deliberately not `.git__path`: those two are read from the start (`PROJ-1601-…`, "feat: …"), so the
+ * rule that helps a path actively hurts them.
+ */
+.git__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+
+/* A branch name is an identifier, so it keeps the mono face; a subject is prose and does not. */
+.git__branch-row .git__label {
+  font-family: var(--font-mono);
+}
+
+/* Always two or three characters (`↑2 ↓11`), so it never needs to shrink. */
+.git__track {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Decorations, which have to yield to the subject.
+ *
+ * `flex: none` was wrong here and it showed the moment a commit carried real refs: a merge on `main`
+ * reads `HEAD -> main, origin/main, origin/HEAD`, and an unshrinkable badge that long left the
+ * subject exactly one character wide. The subject is what the row is *for*; the refs are context, so
+ * they shrink first and are capped. The full list stays in the row's tooltip.
+ */
+.git__refs {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 38%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.git__sha {
+  flex: none;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.git__input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.git__input:focus-visible,
+.git__message:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
+.git__commit {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.git__message {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  /* Vertical only: a horizontal drag would fight the grid column it lives in. */
+  resize: vertical;
+  /* The body of this app is `user-select: none`, so without this the message cannot be selected. */
+  user-select: text;
+}
+
+.git__commit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.git__diff {
+  min-height: 0;
+  overflow: auto;
+}
+
+.git__diff-title {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The diff itself.
+ *
+ * `min-content` width on the grid so a long line scrolls the pane horizontally instead of wrapping:
+ * a wrapped diff line breaks the alignment between the gutters and the code, which is the only thing
+ * making the two columns of numbers readable.
+ */
+.diff {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  width: max-content;
+  min-width: 100%;
+}
+
+.diff__line {
+  display: contents;
+}
+
+.diff__gutter {
+  padding: 0 6px;
+  text-align: right;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  white-space: pre;
+}
+
+.diff__text {
+  padding-right: 10px;
+  white-space: pre;
+  color: var(--text);
+  /* Selecting a diff to paste it elsewhere is a normal thing to want, and the body forbids it. */
+  user-select: text;
+}
+
+.diff__line--add .diff__gutter,
+.diff__line--add .diff__text {
+  background: var(--diff-add-bg);
+}
+
+.diff__line--add .diff__gutter {
+  color: var(--diff-add-gutter);
+}
+
+.diff__line--del .diff__gutter,
+.diff__line--del .diff__text {
+  background: var(--diff-del-bg);
+}
+
+.diff__line--del .diff__gutter {
+  color: var(--diff-del-gutter);
+}
+
+.diff__line--hunk .diff__gutter,
+.diff__line--hunk .diff__text {
+  background: var(--diff-hunk-bg);
+  color: var(--diff-hunk);
+}
+
+.diff__line--meta .diff__text {
+  color: var(--text-faint);
+}

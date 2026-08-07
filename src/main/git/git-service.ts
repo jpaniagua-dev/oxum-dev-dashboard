@@ -1,11 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { GitState } from '@shared/contracts.js';
-
-const execFileAsync = promisify(execFile);
-
-/** A git call that takes longer than this is treated as a failure rather than blocking a refresh. */
-const TIMEOUT_MS = 8000;
+import { describeGitError, git } from './run-git.js';
 
 /**
  * Reads a repository's state with plain `git` calls.
@@ -13,6 +7,10 @@ const TIMEOUT_MS = 8000;
  * `git` is invoked directly rather than through a library: the four commands below are stable,
  * scriptable and already installed, and a dependency would add a dependency without removing any
  * of the parsing.
+ *
+ * The runner itself lives in `run-git.ts`, shared with the Git tab's commands: one place decides
+ * that git is called with an argument array and never through a shell, which is what keeps a branch
+ * name from ever being read as shell syntax.
  */
 export async function readGitState(repoPath: string): Promise<GitState> {
   try {
@@ -44,7 +42,7 @@ export async function readGitState(repoPath: string): Promise<GitState> {
       ahead: 0,
       hasUpstream: false,
       stashes: 0,
-      error: describeError(error),
+      error: describeGitError(error),
     };
   }
 }
@@ -82,15 +80,6 @@ export function parseRemoteSlug(url: string): string | null {
     return `${ssh[1]}/${ssh[2]}`;
   }
   return null;
-}
-
-async function git(repoPath: string, args: readonly string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
-    timeout: TIMEOUT_MS,
-    windowsHide: true,
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  return stdout;
 }
 
 async function readBranch(repoPath: string): Promise<string> {
@@ -182,16 +171,4 @@ async function readStashCount(repoPath: string): Promise<number> {
 function toCount(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function describeError(error: unknown): string {
-  if (error instanceof Error) {
-    // execFile puts git's own message on stderr, which is far more useful than "Command failed".
-    const stderr = (error as { stderr?: string }).stderr;
-    if (typeof stderr === 'string' && stderr.trim().length > 0) {
-      return stderr.trim().split(/\r?\n/)[0] ?? error.message;
-    }
-    return error.message;
-  }
-  return String(error);
 }

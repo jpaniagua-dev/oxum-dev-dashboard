@@ -10,6 +10,8 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'projectsHeight',
   'pullsHeight',
   'jiraHeight',
+  'gitHeight',
+  'gitListWidth',
   'activeStrip',
   'stripCollapsed',
   'notesWidth',
@@ -38,10 +40,13 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.projectsHeight === 'number') patch.projectsHeight = input.projectsHeight;
   if (typeof input.pullsHeight === 'number') patch.pullsHeight = input.pullsHeight;
   if (typeof input.jiraHeight === 'number') patch.jiraHeight = input.jiraHeight;
+  if (typeof input.gitHeight === 'number') patch.gitHeight = input.gitHeight;
+  if (typeof input.gitListWidth === 'number') patch.gitListWidth = input.gitListWidth;
   if (
     input.activeStrip === 'projects' ||
     input.activeStrip === 'pulls' ||
-    input.activeStrip === 'jira'
+    input.activeStrip === 'jira' ||
+    input.activeStrip === 'git'
   ) {
     patch.activeStrip = input.activeStrip;
   }

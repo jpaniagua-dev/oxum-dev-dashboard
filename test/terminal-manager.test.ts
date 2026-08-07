@@ -5,11 +5,12 @@ import {
   resolveActionCommand,
   TerminalManager,
 } from '../src/main/terminal/terminal-manager.js';
-import type {
-  Project,
-  ProjectAction,
-  ShellProfile,
-  TerminalSession,
+import {
+  GIT_COMMIT_ACTION_ID,
+  type Project,
+  type ProjectAction,
+  type ShellProfile,
+  type TerminalSession,
 } from '../src/shared/contracts.js';
 
 function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
@@ -92,6 +93,25 @@ describe('isUnreachable', () => {
   it('keeps a tab whose action is still there', () => {
     expect(isUnreachable({ projectId: 'web', actionId: 'run' }, 'server', project)).toBe(false);
     expect(isUnreachable({ projectId: 'web', actionId: 'commit' }, 'task', project)).toBe(false);
+  });
+
+  it('keeps a reserved git tab, whose action id names no configured action', () => {
+    /*
+     * The Git tab's commit runs in a tab carrying `git:commit`, which is deliberately not one of the
+     * project's actions: it is built by the app, not configured by the user. Looked up in the action
+     * list it finds nothing, so without the `git:` exemption every settings save would close a commit
+     * while its pre-commit hooks were still running.
+     */
+    expect(isUnreachable({ projectId: 'web', actionId: GIT_COMMIT_ACTION_ID }, 'task', project)).toBe(
+      false,
+    );
+  });
+
+  it('still drops a reserved tab when the project itself is gone', () => {
+    // The exemption is about the action list, not about the project: no project, no folder to run in.
+    expect(
+      isUnreachable({ projectId: 'gone', actionId: GIT_COMMIT_ACTION_ID }, 'task', undefined),
+    ).toBe(true);
   });
 
   it('drops a running server whose action was demoted to a task', () => {

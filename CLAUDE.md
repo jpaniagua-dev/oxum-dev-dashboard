@@ -247,8 +247,11 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 
 ## Onglet Pull requests
 
-- **La bande du haut a deux onglets, le terminal n'en dépend pas.** Seul le contenu de la bande change ;
-  un onglet qui volerait la place du terminal irait contre tout le reste de cette app.
+- **La bande du haut a quatre onglets, le terminal n'en dépend pas.** Seul le contenu de la bande
+  change ; un onglet qui volerait la place du terminal irait contre tout le reste de cette app.
+  Ajouter une vue, c'est une entrée dans `STRIP_TABS`, deux éléments dans `index.html`, une hauteur
+  dans `AppSettings` — et cette hauteur doit être ajoutée à `asPatch` **et** à `LOCAL_ONLY_KEYS`,
+  faute de quoi elle est jetée en silence (voir la note sur `settings-patch.ts`).
 - **Il n'y a plus de barre de titre applicative.** Tout ce qu'elle portait (dernier rafraîchissement,
   `Rafraîchir`, notes, réglages, thème) vit dans la rangée d'onglets de la bande, qui était déjà une
   rangée de chrome : deux rangées de chrome au-dessus d'un terminal, c'en est une de trop quand le
@@ -408,6 +411,136 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **`Alt+Shift+N`** bascule le panneau, comme les `Alt+Shift+{D,B,W}` du terminal et pour les mêmes
   raisons : phase de capture, pas de `Ctrl+Alt` (AltGr en suisse français), une lettre et pas un
   chiffre, et un garde sur `event.repeat`.
+
+## Onglet Git
+
+- **La lecture est tirée, pas poussée.** Aucun moniteur derrière cet onglet : une seule ligne est
+  affichée à la fois, et sonder branches, historique et statut de tous les projets coûterait plusieurs
+  fois le poll git de la bande pour ce que personne ne regarde. Le renderer demande quand il affiche
+  l'onglet, quand la sélection change et après chaque écriture, c'est-à-dire exactement quand la
+  réponse a pu changer. Le battement de cœur, lui, est le `RowsChanged` du poll git : c'est le même
+  arbre de travail que décrit cet onglet.
+- **Les écritures rapides passent par `execFile`, le commit par un onglet du terminal.** Ce n'est pas
+  une incohérence, c'est la seule ligne de partage qui tienne : un checkout ou un `git add` est
+  instantané et son résultat se lit dans la bande, alors qu'un commit déclenche `husky` et
+  `lint-staged`, qui peuvent tourner une demi-minute et impriment tout ce qui explique un refus. Lancé
+  en silence, ça se réduit à une ligne d'échec ; lancé dans un onglet, ça se regarde comme depuis un
+  shell, ce que demande de toute façon la règle « toute action finit dans un onglet ».
+- **Le message de commit passe par un fichier, jamais par `-m`.** Deux raisons indépendantes : un
+  message est multi-ligne par convention, donc `-m` ferait décider au formulaire de la forme du
+  message ; et le message atteint git comme des **octets sur le disque**, donc rien dedans ne peut
+  être lu comme une option. Un sujet commençant par `-`, ça existe, et son test aussi.
+- **Le fichier de message est conservé après le commit.** Il ne coûte rien, et quand un hook refuse le
+  commit c'est la seule copie survivante de ce qui a été tapé : l'effacer transformerait un hook en
+  échec en travail perdu.
+- **L'onglet de commit porte un `actionId` réservé, `git:`.** Il est lié à un projet mais n'est **pas**
+  une de ses actions configurées : cherché dans la liste des actions il ne trouve rien, donc sans le
+  cas d'exemption dans `isUnreachable` chaque enregistrement des réglages tuerait un commit en plein
+  hook. Le cas est testé, comme les quatre autres de cette fonction.
+- **`run-git.ts` est le seul endroit qui appelle git.** `execFile` avec un tableau d'arguments et
+  **jamais de shell** : un nom de branche ou un chemin ne peut donc pas être lu comme de la syntaxe
+  shell. `git-service.ts` a été replié dessus plutôt que de garder son propre lanceur, sinon il y
+  aurait deux réponses à « comment on appelle git ici ». Deux budgets, pas un : 8 s en local, 120 s
+  pour le réseau, un push par VPN n'étant pas une opération de huit secondes.
+- **`git status --porcelain -z`, jamais sans `-z`.** Sans lui git **échappe** tout chemin non-ASCII
+  (`"src/cr\303\251ation.ts"`) selon `core.quotepath`, qu'il faudrait désassembler, et sépare les
+  enregistrements par des retours à la ligne qu'un chemin peut contenir. Avec `-z` les chemins sont
+  bruts. Corollaire à ne pas perdre : un renommage occupe **deux** champs, et ne pas consommer le
+  second ajoute un fichier fantôme et décale tout le reste.
+- **Les colonnes index et arbre de travail ne sont jamais fusionnées.** `MM` (indexé puis remodifié)
+  est le cas qu'un état unique écraserait, et c'est celui où la case à cocher mentirait sur ce que le
+  commit contient. `isStaged` vit dans `shared/git-changes.ts` parce que le renderer coche la case et
+  que le main garde le commit : deux définitions de « indexé » finiraient par diverger, exactement
+  comme `verdictFor` côté checks. Et `?` n'est **pas** un état indexé, ce qu'un simple `!== ' '` rate.
+- **Dans un diff, les en-têtes se testent avant les marqueurs.** `---` et `+++` commencent par les
+  caractères de suppression et d'ajout : lus comme du contenu ils consomment deux numéros de ligne et
+  décalent tout ce qui suit. Ils sont donc reconnus **avec leur espace finale**, ce qui les distingue
+  d'un `----` supprimé dans un Markdown, cas réel et testé.
+- **`git diff --no-index` sort en 1 dès qu'il trouve une différence.** C'est documenté et ce n'est pas
+  un échec : c'est le seul moyen de voir le contenu d'un fichier non suivi, et traiter ce code retour
+  comme une erreur afficherait un message d'erreur pour chaque nouveau fichier.
+- **`pull` est `--ff-only`, volontairement.** Un merge ou un rebase peut s'arrêter sur un conflit, et
+  cet onglet n'a rien à proposer à quelqu'un debout au milieu d'un rebase : refuser de le commencer
+  est la seule issue qu'il puisse honnêtement expliquer. Une branche divergée, c'est le terminal.
+- **`push` devient `-u origin <branche>` quand il n'y a pas d'upstream**, relu au moment du clic et
+  non d'après ce que le renderer avait vu : c'est le premier push de toute branche neuve, et une
+  réponse périmée en ferait un refus incompréhensible.
+- **Le checkout ne stashe rien et ne force rien**, et il est un **bouton**, pas un clic sur la ligne :
+  changer ce qu'il y a sur le disque ne doit pas être à un clic perdu dans une liste. Un checkout
+  bloqué par des modifications locales échoue, et git dit lui-même quels fichiers gênent. Un stash
+  automatique déplacerait du travail là où personne n'a demandé ni regardé.
+- **Le nom d'une branche est validé par `git check-ref-format`**, pas par une expression régulière à
+  nous : les règles de git sont plus subtiles qu'elles n'en ont l'air (pas de `..`, pas de `.lock`
+  final, pas de `@{`) et une approximation refuse un nom légal ou laisse passer un illégal que git
+  rejettera plus tard en parlant d'autre chose.
+- **Le panneau se reconstruit entier à chaque poll**, donc le brouillon de message, le nom de branche
+  en cours de frappe et la sélection vivent dans `App`, pas dans le DOM. Et le rafraîchissement est
+  **suspendu tant qu'un champ a le focus** (`gitEditing`), même garde et même raison que le renommage
+  en place du tableau.
+- **Le sujet d'un commit prime sur ses refs.** `flex: none` sur le badge de refs était faux et ça s'est
+  vu au premier vrai merge : `HEAD -> main, origin/main, origin/HEAD` ne rétrécissait pas et laissait
+  au sujet **un caractère**. Les refs sont du contexte, elles rétrécissent d'abord et sont plafonnées ;
+  la liste complète reste dans l'infobulle.
+- **Un chemin se tronque à gauche, un sujet à droite.** La fin de
+  `src/app/feature/x.component.ts` est ce qui distingue deux fichiers ; le début de `PROJ-1601-…` ou de
+  `feat: …` est ce qui distingue deux branches ou deux commits. D'où deux classes et pas une.
+  `direction: rtl` seul ne suffit pas : sans `unicode-bidi: plaintext`, la direction de la boîte
+  gouverne aussi le texte et réordonne la ponctuation de tête ou de queue.
+- **Le diff est plafonné à 4000 lignes, et il le dit.** Un lockfile généré fait des dizaines de
+  milliers de lignes, et un élément par ligne est ce qui fige la bande. Un diff coupé en silence se lit
+  comme un diff complet, donc la troncature est annoncée dans la vue.
+- **La colonne diff s'ouvre sur le premier fichier modifié.** C'est la raison d'être de la troisième
+  colonne, et arriver sur une colonne vide demande de cliquer avant que l'onglet ne dise quoi que ce
+  soit. Uniquement quand rien n'est sélectionné, donc ça ne peut jamais arracher la vue à un fichier en
+  cours de lecture, et uniquement sur la vue Changements : présélectionner un commit lancerait un
+  `git show` pour une liste que personne n'a ouverte.
+- **`defaultTargetFor` décide du côté affiché**, partagée par le clic et par la présélection : l'arbre
+  de travail quand il y a quelque chose, l'index sinon. C'est aussi le seul choix jamais vide, `git
+  diff` ne rendant rien sur un fichier dont tout est indexé. Le bouton index/disque n'apparaît que pour
+  un fichier qui est les deux à la fois, le seul cas où la question a deux réponses.
+- **Un menu ouvert au clic GAUCHE doit couper la propagation.** `showContextMenu` se referme sur tout
+  `click` atteignant `document`, ce qui est correct pour tous ses autres appelants : ils ouvrent depuis
+  `contextmenu`, et un clic droit n'émet aucun `click`. Le bouton `⋯` est le premier menu ouvert au
+  clic gauche, et sans `event.stopPropagation()` le clic d'ouverture continuait jusqu'à l'écouteur de
+  fermeture et refermait le menu dans le même tick : un bouton parfaitement mort à l'usage, et
+  invisible en test.
+- **Fetch, pull et push sont AUSSI des icônes au bout de la rangée d'onglets.** Elles y sont et pas
+  dans l'en-tête parce que c'est la rangée des contrôles : l'en-tête est une ligne d'état (branche,
+  écart amont) et y mêler des verbes est ce qui la rendait illisible. `align-self: center` et une
+  hauteur inférieure aux onglets, exprès : une icône aussi haute qu'un onglet se lit comme un
+  quatrième onglet, or ces trois-là *font* quelque chose alors qu'un onglet change seulement de vue.
+- **La pointe d'une flèche se dimensionne sur l'icône RENDUE, pas sur le viewBox.** La première
+  version de l'icône fetch dessinait sa pointe sur 1,3 unité d'une boîte de 16, soit environ un pixel
+  par barbe une fois rendue à 14 px : elle sortait en moustache et l'icône se lisait comme un « C ».
+  Vu en vrai, à la loupe, corrigé à 2,2 unités.
+- **Les actions du dépôt sont un menu, pas des boutons.** Fetch, pull, push et « ouvrir un terminal
+  ici » occupaient quatre boutons sur la ligne d'en-tête ; une bande de statut se lit d'un coup d'œil,
+  et quatre contrôles en concurrence avec le nom de branche, ce n'est plus un coup d'œil. Clic droit
+  sur la ligne d'en-tête, plus un bouton `⋯` gardé pour la raison qui a fait garder le chevron à côté
+  du double-clic de repli : le geste de connaisseur n'a pas à être le geste découvrable, mais il faut
+  qu'il y en ait un. Le menu est **reconstruit à chaque ouverture**, comme les transitions Jira : ses
+  libellés dépendent de l'état (`Push` devient « Push et publier la branche » sans upstream).
+- **`gitPanelState()` et `gitPanelActions()` sont extraits pour ça.** Le menu a besoin exactement du
+  même instantané que le panneau ; deux endroits qui l'assemblent finiraient par ne plus être d'accord,
+  et la panne serait un menu proposant un `Push` que le panneau a déjà désactivé.
+- **La frontière liste/diff est déplaçable, et c'est la largeur de la LISTE qui est stockée.** La
+  colonne non stockée absorbe chaque redimensionnement de fenêtre : de la largeur en trop vaut quelque
+  chose pour un diff (les longues lignes de code) et rien pour une colonne de chemins. Le séparateur
+  écrit une **custom property** sur la grille et non une largeur sur la colonne : une piste de grille
+  ne se dimensionne pas depuis un glisser, la propriété qui la dimensionne, si. Et contrairement aux
+  deux autres séparateurs de l'app, celui-ci **ne refait pas le `fit` du terminal** : il déplace une
+  frontière *interne* à la bande, la boîte du terminal ne bouge pas.
+- **`git-split.ts` est un troisième module de séparateur, pas une généralisation.** Même raisonnement
+  que pour `side-resizer.ts` : trois axes différents (hauteur ancrée en haut, largeur ancrée à droite,
+  largeur ancrée à gauche dans un conteneur), et la direction d'un resizer est précisément ce qui
+  s'écrit à l'envers — ça s'est déjà produit ici. Les trois sont donc des fonctions pures testées.
+- **`gitHeight` par défaut à 460**, la plus grande des quatre. Trois colonnes finissant par un diff,
+  c'est l'onglet où l'on cesse de jeter un œil pour se mettre à travailler ; 250 px montreraient quatre
+  lignes de diff.
+- **Ce que cet onglet ne fait pas, et pourquoi** : pas de stash, pas de résolution de conflit, pas de
+  rebase, pas de staging par morceaux. Tous partagent la même raison : ils laissent le dépôt dans un
+  état intermédiaire que cette bande ne saurait ni montrer ni terminer. Les conflits sont affichés en
+  `error` dans la liste plutôt que noyés parmi les modifications, précisément pour renvoyer au terminal.
 
 ## Mails et Teams : pourquoi ils ne sont pas là
 

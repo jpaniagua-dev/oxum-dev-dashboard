@@ -85,6 +85,18 @@
   --code-operator: #0b5a8a;
   --code-punctuation: var(--grey-700);
 
+  /* Diff colours, declared as tokens for the same reason as the Markdown ones: one set of rules in
+     `app.css` serves both themes. Deliberately their own values rather than `--success` / `--danger`:
+     those are status colours meant to catch the eye, and a diff is mostly made of them, so reusing
+     them would paint an ordinary change as an alarm. The background carries the meaning, the text
+     stays the normal reading colour. */
+  --diff-add-bg: #e3f6e9;
+  --diff-add-gutter: #1a7f45;
+  --diff-del-bg: #fceaea;
+  --diff-del-gutter: #b3261e;
+  --diff-hunk: var(--grey-500);
+  --diff-hunk-bg: var(--grey-100);
+
   /* --- typography ------------------------------------------------------- */
   /* Barlow is the intended UI face; it is not a Windows default, so the stack falls back
      cleanly rather than shipping a font file. */
@@ -146,4 +158,13 @@
   --code-function: #82c8f8;
   --code-operator: #89ddff;
   --code-punctuation: #a7b0c0;
+
+  /* Tinted near-black rather than the light theme's pastels: on #131313 a light green background
+     turns the line into the brightest thing on screen, which is the opposite of what a diff needs. */
+  --diff-add-bg: #102a1a;
+  --diff-add-gutter: #6fcf97;
+  --diff-del-bg: #2e1517;
+  --diff-del-gutter: #f08a86;
+  --diff-hunk: var(--grey-500);
+  --diff-hunk-bg: #1b1b1b;
 }

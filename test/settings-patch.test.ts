@@ -13,6 +13,7 @@ describe('asPatch', () => {
       projectsHeight: 250,
       pullsHeight: 360,
       jiraHeight: 400,
+      gitHeight: 460,
       activeStrip: 'jira',
       notesWidth: 340,
       notesOpen: true,
@@ -22,9 +23,21 @@ describe('asPatch', () => {
       projectsHeight: 250,
       pullsHeight: 360,
       jiraHeight: 400,
+      gitHeight: 460,
       activeStrip: 'jira',
       notesWidth: 340,
       notesOpen: true,
+    });
+  });
+
+  it('accepts the Git tab as an active strip', () => {
+    // A fourth tab is one more branch in a union that is checked by hand in three places: here, the
+    // settings store's `asStrip`, and the renderer's height lookup. Missing it here would silently
+    // send the user back to the projects tab at every restart.
+    expect(asPatch({ activeStrip: 'git', gitHeight: 500, gitListWidth: 520 })).toEqual({
+      activeStrip: 'git',
+      gitHeight: 500,
+      gitListWidth: 520,
     });
   });
 
@@ -76,6 +89,8 @@ describe('LOCAL_ONLY_KEYS', () => {
     // the settings window from reaching the dashboard. Both are silent, hence the list.
     expect([...LOCAL_ONLY_KEYS].sort()).toEqual([
       'activeStrip',
+      'gitHeight',
+      'gitListWidth',
       'jiraHeight',
       'notesOpen',
       'notesWidth',

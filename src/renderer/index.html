@@ -53,6 +53,7 @@
               Pull requests
             </button>
             <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">Jira</button>
+            <button type="button" id="strip-tab-git" class="strip__tab" role="tab">Git</button>
           </div>
           <div class="projects__header-actions">
             <span id="last-refresh" class="strip__meta"></span>
@@ -154,6 +155,37 @@
         <div class="pulls" id="strip-panel-jira" role="tabpanel" hidden>
           <div class="pulls__repos" id="jira-views"></div>
           <div class="pulls__list" id="jira-list"></div>
+        </div>
+
+        <!--
+          The same master-detail grammar again, with one column more: repositories, then the working
+          area (changes, branches or history), then the diff. Three columns rather than two because
+          the third one is a diff, and a diff read in the width left over by a list is not read at all.
+
+          Every child is filled by `git-panel.ts` with `textContent`: branch names, commit subjects and
+          diff bodies are all text from outside the app.
+        -->
+        <div class="git" id="strip-panel-git" role="tabpanel" hidden>
+          <div class="pulls__repos" id="git-repos"></div>
+          <div class="git__main" id="git-main">
+            <div class="git__header" id="git-header"></div>
+            <div class="git__views" id="git-views" role="tablist"></div>
+            <div class="git__list" id="git-list"></div>
+            <div class="git__commit" id="git-commit"></div>
+          </div>
+          <!--
+            The share between the working column and the diff. Its own element rather than a border on
+            a column: a grid track cannot be dragged, and the width it drives is a property of the grid.
+          -->
+          <div
+            class="git__resizer"
+            id="git-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Redimensionner le diff"
+            tabindex="0"
+          ></div>
+          <div class="git__diff" id="git-diff"></div>
         </div>
       </section>
 
