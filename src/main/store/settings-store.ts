@@ -33,6 +33,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // One `gh` call per watched repository, so the slowest of the three loops by design.
   pullsPollSeconds: 180,
   activeStrip: 'projects',
+  stripCollapsed: false,
   // Taller than the project table: a master-detail list needs the room.
   pullsHeight: 360,
   jiraHeight: 360,
@@ -121,6 +122,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     jiraPollSeconds: clamp(asNumber(input.jiraPollSeconds, DEFAULT_SETTINGS.jiraPollSeconds), 60, 3600),
     jira: asJira(input.jira),
     activeStrip: asStrip(input.activeStrip),
+    stripCollapsed: input.stripCollapsed === true,
     // Clamped so a hand-edited value cannot hide the strip or swallow the terminal.
     projectsHeight: clamp(asNumber(input.projectsHeight, DEFAULT_SETTINGS.projectsHeight), 90, 1200),
     pullsHeight: clamp(asNumber(input.pullsHeight, DEFAULT_SETTINGS.pullsHeight), 90, 1200),

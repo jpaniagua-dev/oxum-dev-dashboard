@@ -20,6 +20,7 @@ import {
   type RepoPulls,
   type ShellProfile,
   type TerminalChunk,
+  type TerminalGroup,
   type TerminalId,
   type TerminalLayout,
   type TerminalSession,
@@ -128,11 +129,8 @@ const api: RendererApi = {
   renameTerminal: (terminalId: TerminalId, title: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.TerminalRename, terminalId, title),
 
-  reorderTerminals: (orderedIds: TerminalId[]): Promise<void> =>
-    ipcRenderer.invoke(IpcChannel.TerminalReorder, orderedIds),
-
-  setTerminalLayout: (panes: TerminalId[], direction: PaneDirection): Promise<void> =>
-    ipcRenderer.invoke(IpcChannel.TerminalLayoutSet, panes, direction),
+  setTerminalLayout: (groups: readonly TerminalGroup[], direction: PaneDirection): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.TerminalLayoutSet, groups, direction),
 
   onTerminalLayoutChanged: (listener: (layout: TerminalLayout) => void): (() => void) => {
     const handler = (_event: unknown, layout: TerminalLayout): void => listener(layout);
@@ -156,6 +154,10 @@ const api: RendererApi = {
 
   readPtyBuffer: (terminalId: TerminalId): Promise<string> =>
     ipcRenderer.invoke(IpcChannel.PtyBuffer, terminalId),
+
+  clearPty: (terminalId: TerminalId): void => {
+    ipcRenderer.send(IpcChannel.PtyClear, terminalId);
+  },
 
   onTerminalsChanged: (listener: (sessions: TerminalSession[]) => void): (() => void) => {
     const handler = (_event: unknown, sessions: TerminalSession[]): void => listener(sessions);

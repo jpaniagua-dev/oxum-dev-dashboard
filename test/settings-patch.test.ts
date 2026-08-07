@@ -81,7 +81,14 @@ describe('LOCAL_ONLY_KEYS', () => {
       'notesWidth',
       'projectsHeight',
       'pullsHeight',
+      'stripCollapsed',
     ]);
+  });
+
+  it('lets the dashboard persist the folded strip', () => {
+    expect(asPatch({ stripCollapsed: true })).toEqual({ stripCollapsed: true });
+    expect(asPatch({ stripCollapsed: false })).toEqual({ stripCollapsed: false });
+    expect(asPatch({ stripCollapsed: 'yes' })).toEqual({});
   });
 
   it('does not cover anything the settings window owns', () => {

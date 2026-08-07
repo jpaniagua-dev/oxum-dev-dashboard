@@ -21,60 +21,13 @@
       sends the user to an external console.
     -->
     <div class="app">
-      <header class="topbar">
-        <span class="topbar__title">
-          <span class="topbar__mark" aria-hidden="true"></span>
-          Dev Dashboard
-        </span>
-        <div class="topbar__actions">
-          <span id="last-refresh" class="topbar__meta"></span>
-          <button type="button" id="refresh-button" class="button">Rafraîchir</button>
-          <button
-            type="button"
-            id="notes-button"
-            class="icon-button"
-            title="Notes (Alt+Shift+N)"
-            aria-label="Afficher les notes"
-            aria-pressed="false"
-          >
-            <!-- A sheet with three lines of writing, drawn in strokes like the other panel icons. -->
-            <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
-              <path
-                d="M4 2.2h8v11.6H4zM6.2 5.4h3.6M6.2 8h3.6M6.2 10.6h2.2"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            id="settings-button"
-            class="icon-button"
-            title="Réglages"
-            aria-label="Ouvrir les réglages"
-          >
-            <!--
-              A solid eight-tooth gear with the hub punched out by `evenodd`.
-              The previous icon drew its teeth at 28% opacity, which at 14px read as a faint smudge
-              rather than a gear. One shape at full contrast is what makes it legible at this size.
-            -->
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path
-                fill="currentColor"
-                fill-rule="evenodd"
-                d="M6.53 2.7L6.91 0.73L9.09 0.73L9.47 2.7L10.71 3.21L12.37 2.09L13.91 3.63L12.79 5.29L13.3 6.53L15.27 6.91L15.27 9.09L13.3 9.47L12.79 10.71L13.91 12.37L12.37 13.91L10.71 12.79L9.47 13.3L9.09 15.27L6.91 15.27L6.53 13.3L5.29 12.79L3.63 13.91L2.09 12.37L3.21 10.71L2.7 9.47L0.73 9.09L0.73 6.91L2.7 6.53L3.21 5.29L2.09 3.63L3.63 2.09L5.29 3.21ZM8 5.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0 -4.5Z"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            id="theme-button"
-            class="icon-button"
-            title="Thème"
-            aria-label="Changer de thème"
-          >
-            <svg id="theme-icon" viewBox="0 0 16 16" aria-hidden="true"></svg>
-          </button>
-        </div>
-      </header>
+      <!--
+        There is no top bar. Every control it held moved into the strip's tab row, which was already
+        a row of chrome: two rows of chrome above a terminal is one too many when the terminal is the
+        point of the window. The application title went with it, the native title bar already saying
+        it. Bonus of the move: the tab row is the part that never folds, so the settings, the notes
+        and the refresh stay one click away with the strip folded.
+      -->
 
       <!--
         Below the top bar the window is a row: the workspace on the left, the notes panel on the right.
@@ -90,7 +43,8 @@
         own space whatever is selected, which is the point of the whole window.
       -->
       <section class="projects" id="projects-pane">
-        <div class="projects__header">
+        <!-- Double-clicking this row folds the strip, the way a title bar maximises a window. -->
+        <div class="projects__header" id="projects-header" title="Double-clic : replier ou déplier">
           <div class="strip__tabs" role="tablist">
             <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
               Projets
@@ -100,9 +54,79 @@
             </button>
             <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">Jira</button>
           </div>
-          <button type="button" id="add-project" class="button" title="Ajouter un dossier de projet">
-            + Projet
-          </button>
+          <div class="projects__header-actions">
+            <span id="last-refresh" class="strip__meta"></span>
+            <button type="button" id="refresh-button" class="button">Rafraîchir</button>
+            <button type="button" id="add-project" class="button" title="Ajouter un dossier de projet">
+              + Projet
+            </button>
+            <button
+              type="button"
+              id="notes-button"
+              class="icon-button"
+              title="Notes (Alt+Shift+N)"
+              aria-label="Afficher les notes"
+              aria-pressed="false"
+            >
+              <!-- A sheet with three lines of writing, drawn in strokes like the other panel icons. -->
+              <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                <path d="M4 2.2h8v11.6H4zM6.2 5.4h3.6M6.2 8h3.6M6.2 10.6h2.2" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              id="settings-button"
+              class="icon-button"
+              title="Réglages"
+              aria-label="Ouvrir les réglages"
+            >
+              <!--
+                A solid eight-tooth gear with the hub punched out by `evenodd`.
+                The previous icon drew its teeth at 28% opacity, which at 14px read as a faint smudge
+                rather than a gear. One shape at full contrast is what makes it legible at this size.
+              -->
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  fill-rule="evenodd"
+                  d="M6.53 2.7L6.91 0.73L9.09 0.73L9.47 2.7L10.71 3.21L12.37 2.09L13.91 3.63L12.79 5.29L13.3 6.53L15.27 6.91L15.27 9.09L13.3 9.47L12.79 10.71L13.91 12.37L12.37 13.91L10.71 12.79L9.47 13.3L9.09 15.27L6.91 15.27L6.53 13.3L5.29 12.79L3.63 13.91L2.09 12.37L3.21 10.71L2.7 9.47L0.73 9.09L0.73 6.91L2.7 6.53L3.21 5.29L2.09 3.63L3.63 2.09L5.29 3.21ZM8 5.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0 -4.5Z"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              id="theme-button"
+              class="icon-button"
+              title="Thème"
+              aria-label="Changer de thème"
+            >
+              <svg id="theme-icon" viewBox="0 0 16 16" aria-hidden="true"></svg>
+            </button>
+            <!--
+              Folds the strip down to this tab row. The row itself never folds: a control that hides
+              itself leaves no way back, and the tabs double as the gesture to bring the content back.
+            -->
+            <button
+              type="button"
+              id="strip-collapse"
+              class="icon-button"
+              title="Replier la bande (Alt+Shift+A)"
+              aria-label="Replier la bande"
+              aria-expanded="true"
+              aria-controls="projects-pane"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                <path
+                  d="M3.5 10l4.5-4.5 4.5 4.5"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="projects__scroll" id="strip-panel-projects" role="tabpanel">
@@ -142,11 +166,11 @@
         tabindex="0"
       ></div>
 
+      <!--
+        No header above the surface any more: each pane draws its own tab strip inside the grid, so a
+        split gives a complete terminal rather than a second window onto one shared strip.
+      -->
       <section class="terminal" id="terminal-pane">
-        <div class="terminal__header">
-          <div class="terminal__tabs" id="terminal-tabs"></div>
-          <button type="button" id="terminal-clear" class="button button--quiet">Vider</button>
-        </div>
         <div class="terminal__surface" id="terminal-surface"></div>
       </section>
         </div>

@@ -78,24 +78,48 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **Un clic sur un contrôle ne doit pas atteindre la ligne** (`closest('button, input, …')`). Sans ça,
   un clic sur une action la lance *et* ouvre un shell, et le double-clic de renommage ouvre un
   terminal qui vole le focus au champ qui vient d'apparaître.
+- **Un panneau est un GROUPE d'onglets, pas une session.** `TerminalGroup = { tabs, active }`. Avant,
+  un panneau *était* une session et la barre d'onglets était unique au-dessus de toute la surface :
+  splitter divisait donc la **vue** pendant que la barre continuait de lister toutes les sessions de
+  l'app, ce qui donnait deux fenêtres sur une seule barre. Un split donne maintenant un terminal
+  complet, onglets compris, et déplacer un onglet d'un panneau à l'autre n'est qu'un déplacement entre
+  groupes. Deux invariants portent tout : **un groupe n'est jamais vide** et **une session est dans
+  exactement un groupe**. Ils sont tenus à un seul endroit, `normalizeGroups`.
+- **`shared/terminal-groups.ts` est partagé exprès.** Le renderer calcule une disposition, le main
+  valide la même forme avec les mêmes fonctions. Deux implémentations de « cette disposition est-elle
+  saine » finiraient par ne plus être d'accord, et la conséquence (un panneau blanc, une session sans
+  onglet) est invisible tant qu'on ne la subit pas.
+- **Une session orpheline est adoptée, jamais jetée.** `normalizeGroups` rattache au dernier groupe
+  toute session vivante qu'aucun groupe ne cite. C'est la panne dangereuse : sans onglet nulle part,
+  un processus tourne sans rien pour l'afficher ni l'arrêter. C'est aussi ce qui rend visible un
+  onglet fraîchement lancé avant que le renderer ait dit où il le voulait.
 - **Ne jamais détacher un terminal xterm du DOM.** `open()` sort tôt quand le terminal a déjà un
   élément : le détacher le laisse vivant mais invisible pour toujours. Un conteneur permanent par
-  session, on bascule `hidden`. C'est aussi pourquoi la surface est une **grille** et que l'ordre des
-  panneaux se fait avec la propriété CSS `order` : réordonner en déplaçant les nœuds tuerait les xterm.
+  session, on bascule `hidden`. C'est aussi pourquoi la surface est une **grille** et pourquoi bandes,
+  vues et séparateurs sont tous enfants directs de la surface, placés sur des **lignes de grille
+  explicites** (`stripLine`, `viewLine`, `splitterLine`, pures et testées). Une bande qui envelopperait
+  sa vue obligerait à déplacer un xterm quand son onglet change de panneau, donc à le tuer.
 - **La disposition des panneaux est à une seule direction** (`columns` ou `rows`), pas un arbre
   imbriqué. Choix assumé face à Windows Terminal : la position d'un panneau se déduit de son index, ce
-  qui rend l'arithmétique pure et testable (`insertPane`, `removePane`, `replacePane`). Ne pas
-  introduire de mélange des directions sans passer à un vrai arbre.
-- **Elle vit dans le main**, comme l'ordre des onglets et pour la même raison. Le renderer calcule la
-  liste entière et l'envoie ; le main valide (ids inconnus retirés, doublons écrasés, jamais vide) et
-  la rediffuse. Un `syncLayout` la recale quand une session naît ou meurt, sinon un panneau serait un
-  trou.
-- **Cliquer un onglet non visible remplace le panneau focalisé**, il ne réduit pas la vue à un seul
-  panneau : parcourir les onglets ne doit pas détruire une disposition. Une seule règle, valable aussi
-  pour une action fraîchement lancée. Un split, lui, **ajoute** un panneau : il ne passe donc pas par
-  `focusTerminal`.
-- **Fermer un panneau ne tue pas son terminal.** La vue et la vie d'un terminal sont deux choses
-  distinctes ; un clic dans un menu contextuel ne doit pas pouvoir arrêter un serveur de dev.
+  qui rend l'arithmétique pure et testable. Ne pas introduire de mélange des directions sans passer à
+  un vrai arbre.
+- **La disposition vit dans le main, et elle EST l'ordre des onglets.** Il n'y a plus deux autorités :
+  le canal `terminal:reorder` et l'ordre d'insertion de la `Map` ont disparu, un onglet est là où son
+  groupe le dit. Le renderer calcule la structure entière et l'envoie, le main la valide et la
+  rediffuse ; `syncLayout` la recale quand une session naît ou meurt.
+- **Cliquer un onglet le montre dans SON panneau**, sans rien remplacer ni réduire : avec une barre par
+  panneau, ce geste ne peut plus vouloir dire autre chose. C'était l'inverse avant (l'onglet prenait la
+  place du panneau focalisé), et cette règle-là n'a plus de raison d'être.
+- **Fermer un panneau ne tue pas ses terminaux** : ses onglets passent au panneau voisin. La vue et la
+  vie d'un terminal sont deux choses distinctes ; un clic dans un menu contextuel ne doit pas pouvoir
+  arrêter un serveur de dev.
+- **`moveTab` prend le voisin, pas un index.** `before` est l'onglet devant lequel atterrir, lu dans la
+  liste **privée de l'onglet déplacé**. Un index calculé sur une liste qui contient encore l'onglet
+  tiré vise une case trop tôt dès qu'on déplace vers la droite : c'est le bug que l'ancien `reorderIds`
+  avait déjà, désigner le voisin le rend impossible.
+- **Un dépôt sur la bande elle-même, hors des onglets, ajoute au bout de ce panneau.** C'est ce qui
+  fait d'une bande presque vide une cible valide, et le geste pour « mets ce terminal dans ce
+  panneau-là » quand on vise le panneau et pas une position.
 - **Chaque panneau visible a besoin de son propre `fit`.** Avec un split, chaque pty a sa géométrie :
   n'en ajuster qu'un laisserait les autres couper leur sortie à la mauvaise largeur.
 - **Les raccourcis sont posés sur `document` en phase de capture**, sinon l'xterm focalisé les avale.
@@ -118,6 +142,34 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   nouvelle grille, pas ce que l'ancienne a laissé autour. Et `onContextLoss` dispose l'addon
   (Chromium plafonne les contextes WebGL vivants par page et évince le plus ancien) : xterm retombe
   seul sur le renderer DOM, l'état `failed` évitant de recharger un contexte qui serait ré-évincé.
+- **xterm doit savoir qu'il parle à ConPTY** (`windowsPty`, alimenté par `terminalCompat` dans le
+  bootstrap). Sans ça il suppose un pty Unix et **refait lui-même le reflow** de son tampon à chaque
+  resize, alors que ConPTY reflow et réimprime de son côté depuis le tampon de console qu'il possède :
+  deux propriétaires réécrivent les mêmes lignes à partir d'origines différentes, et le perdant laisse
+  des caractères en place. C'est ça, les « lettres fantômes » vues avec un TUI plein écran. Le numéro
+  de build n'est pas décoratif, xterm change de comportement à 21376 : `parseWindowsBuild` rejette un
+  build `0` plutôt que de deviner, un mauvais numéro étant pire que pas de numéro.
+- **`rescaleOverlappingGlyphs: true`.** Un caractère de largeur ambiguë (`⎿`, `●`, les traits de
+  cadre, le spinner d'une session Claude Code) fait une cellule de large pour la police mais peint
+  plus large. Sous WebGL seules les cellules marquées sales sont repeintes, donc les pixels débordés
+  dans une cellule que personne n'a touchée cette frame restent à l'écran. Option WebGL uniquement,
+  ce qui est exactement notre cas.
+- **Pas de `convertEol`.** Elle fait qu'un `\n` seul renvoie aussi le chariot : c'est un correctif
+  pour une sortie branchée directement, pas pour une sortie de pty où les fins de ligne sont déjà
+  celles que le programme a voulues. Laissée active, un saut de ligne seul émis pour descendre **en
+  gardant la colonne** (ce que fait un TUI qui redessine une frame sur place) ramenait le curseur en
+  colonne 0 : le redessin repartait au mauvais endroit et ne recouvrait jamais la queue de la frame
+  précédente.
+- **Le pty n'est prévenu que quand la géométrie a vraiment changé.** `fitVisible` tourne à chaque
+  rendu : changement d'onglet, focus d'un panneau, ouverture des notes, et une fois par `pointermove`
+  pendant le glissement d'un séparateur. Un resize de la même taille n'est pas gratuit sous Windows
+  (ConPTY réimprime l'écran qu'il détient) et un TUI plein écran répond à chacun en redessinant toute
+  sa frame. `View.sent` mémorise la dernière taille annoncée ; la comparaison ne coûte rien et
+  supprime tous les resize redondants.
+- **Effacer, c'est les deux bouts ou aucun.** `pty.clear()` est un no-op partout sauf sur ConPTY, et
+  sur ConPTY c'est tout l'intérêt : il garde sa propre copie de l'écran et la réimprime au prochain
+  repaint qu'il décide, donc un effacement côté xterm seul remettait le texte qu'on venait de
+  supprimer. Le tampon conservé part avec, sinon un redémarrage du renderer rejouerait l'effacé.
 - **Git Bash se lance avec `-i`**, sinon les alias n'existent pas dans l'onglet.
 - **Les profils sont sondés sur le disque** avant d'être proposés : une entrée de menu qui échoue au
   clic est pire que pas d'entrée.
@@ -132,10 +184,6 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   rouvert à chaque fois, empilant des onglets identiques.
 - **Renommer un onglet pose `renamed`**, ce qui empêche un relancement de la commande d'écraser le
   nom choisi.
-- **L'ordre des onglets vit dans le main**, dans l'ordre d'insertion de la `Map` des sessions
-  (`reorder` la reconstruit). Le garder dans le renderer le perdrait à chaque rechargement à chaud, et
-  c'est `bootstrap` qu'un renderer neuf lit. Les ids inconnus de l'appelant sont ajoutés à la fin, pas
-  écartés : un onglet peut naître entre le début du glisser et le lâcher.
 - **Aucun rendu pendant un glisser.** Remplacer l'élément tiré en cours de geste annule le drag dans
   Chromium : le marqueur d'insertion est une classe posée sur les nœuds vivants, et la barre n'est
   reconstruite qu'une fois le nouvel ordre revenu du main. C'est aussi ce qui rend l'affichage
@@ -201,6 +249,27 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 
 - **La bande du haut a deux onglets, le terminal n'en dépend pas.** Seul le contenu de la bande change ;
   un onglet qui volerait la place du terminal irait contre tout le reste de cette app.
+- **Il n'y a plus de barre de titre applicative.** Tout ce qu'elle portait (dernier rafraîchissement,
+  `Rafraîchir`, notes, réglages, thème) vit dans la rangée d'onglets de la bande, qui était déjà une
+  rangée de chrome : deux rangées de chrome au-dessus d'un terminal, c'en est une de trop quand le
+  terminal est le sujet de la fenêtre. Le titre applicatif est parti avec, la barre de titre native le
+  disant déjà. Bénéfice du déplacement : cette rangée est celle qui ne se replie jamais, donc les
+  réglages et le rafraîchissement restent à un clic quand la bande est repliée.
+- **`pane-resizer.ts` a survécu à la suppression sans être touché** : il mesure la distance de
+  `#projects-pane` au haut du viewport avec `getBoundingClientRect` au moment où il en a besoin,
+  jamais depuis une constante. Le panneau démarre simplement plus haut. Ne pas y introduire de
+  hauteur d'en-tête en dur, c'est précisément ce qui aurait cassé ici.
+- **La bande se replie sur sa rangée d'onglets** (`stripCollapsed`, bouton et `Alt+Shift+A`), pour
+  travailler dans le terminal sans rien perdre de vue. **La rangée d'onglets, elle, ne se replie
+  jamais** : un contrôle qui se cache lui-même ne laisse aucun moyen de revenir. Corollaire assumé et
+  voulu : cliquer un onglet quand c'est replié déplie, parce que c'est le geste naturel pour « montre-
+  moi ça ». Replier doit **effacer** la hauteur en ligne posée par `attachPaneResizer` (une classe ne
+  bat pas un style inline), déplier la repose via le resizer pour qu'elle repasse par le même bornage,
+  et le séparateur est masqué entre les deux : le glisser réécrirait une hauteur en travers du repli.
+- **Le double-clic sur la rangée d'onglets replie aussi**, comme un double-clic sur une barre de titre.
+  Il passe par `hitsInteractive`, et ce n'est pas un détail : sans ce garde, double-cliquer « Jira »
+  sélectionnerait cet onglet **et** replierait le panneau qu'on demandait à voir. Le chevron reste : le
+  double-clic est le geste qu'on trouve quand on connaît l'app, pas celui qui doit être découvrable.
 - **Chaque onglet a sa hauteur** (`projectsHeight`, `pullsHeight`) : un tableau de quatre lignes et une
   liste maître-détail n'ont pas les mêmes besoins. `attachPaneResizer` renvoie un `setHeight` pour que le
   changement d'onglet applique la bonne, sans dupliquer le bornage ailleurs.
@@ -358,8 +427,9 @@ Demandés en V3, écartés après mesure, pas par manque de temps :
 
 Si l'app registration arrive un jour : client public, redirect `http://localhost`, délégué
 `Mail.Read` + `offline_access` (+ `Chat.Read`), `@azure/msal-node` en device code, jeton chiffré par
-le `SecretStore` qui existe déjà, moniteur calqué sur `JiraMonitor`. La place dans `.topbar__actions`
-et le patron de la bande sont laissés prêts.
+le `SecretStore` qui existe déjà, moniteur calqué sur `JiraMonitor`. La place dans
+`.projects__header-actions` (l'ancienne `.topbar__actions`, disparue avec la barre de titre) et le
+patron de la bande sont laissés prêts.
 
 ## Projets configurables
 

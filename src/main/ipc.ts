@@ -1,3 +1,4 @@
+import { release } from 'node:os';
 import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
 import {
   IpcChannel,
@@ -18,6 +19,7 @@ import {
   type ProjectValidation,
   type RepoPulls,
   type ShellProfile,
+  type TerminalGroup,
   type TerminalId,
   type ThemeMode,
   type ThemeState,
@@ -38,6 +40,7 @@ import {
   type JiraCredentials,
 } from './jira/jira-service.js';
 import type { NotesStore } from './notes/notes-store.js';
+import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
@@ -113,6 +116,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     jiraConfig: deps.jiraConfig(),
     notes: deps.notes().state(),
     defaultNotesFolder: deps.defaultNotesFolder(),
+    terminalCompat: terminalCompat(process.platform, release()),
   }));
 
   ipcMain.handle(IpcChannel.RefreshNow, async (): Promise<ProjectRow[]> => deps.monitor().refreshAll());
@@ -340,17 +344,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     },
   );
 
-  ipcMain.handle(IpcChannel.TerminalReorder, async (_event, ids: unknown): Promise<void> => {
-    if (Array.isArray(ids)) {
-      deps.terminals.reorder(ids.filter((id): id is string => typeof id === 'string'));
-    }
-  });
-
   ipcMain.handle(
     IpcChannel.TerminalLayoutSet,
-    async (_event, panes: unknown, direction: unknown): Promise<void> => {
+    async (_event, groups: unknown, direction: unknown): Promise<void> => {
       deps.terminals.setLayout(
-        Array.isArray(panes) ? panes.filter((id): id is string => typeof id === 'string') : [],
+        readGroups(groups),
         direction === 'rows' ? 'rows' : 'columns',
       );
     },
@@ -377,6 +375,12 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(IpcChannel.PtyBuffer, async (_event, terminalId: unknown): Promise<string> =>
     typeof terminalId === 'string' ? deps.terminals.buffer(terminalId) : '',
   );
+
+  ipcMain.on(IpcChannel.PtyClear, (_event, terminalId: unknown) => {
+    if (typeof terminalId === 'string') {
+      deps.terminals.clear(terminalId);
+    }
+  });
 
   ipcMain.handle(IpcChannel.ClipboardWrite, async (_event, text: unknown): Promise<void> => {
     if (typeof text === 'string' && text.length > 0) {
@@ -500,6 +504,35 @@ function asRawProjects(value: unknown): ProjectConfig[] {
 
 function resolveProject(projects: readonly Project[], id: unknown): Project | undefined {
   return typeof id === 'string' ? findProject(projects, id as ProjectId) : undefined;
+}
+
+/**
+ * Reads a pane layout off the wire.
+ *
+ * Shape only: whether the groups make *sense* is `normalizeGroups`' job in the manager, and doing
+ * half of it here would be a second opinion on the same question. All this guarantees is that what
+ * reaches it is arrays of strings, so a malformed message cannot crash the main process.
+ */
+function readGroups(value: unknown): TerminalGroup[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const groups: TerminalGroup[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null) {
+      continue;
+    }
+    const input = raw as Record<string, unknown>;
+    const tabs = Array.isArray(input.tabs)
+      ? input.tabs.filter((id): id is string => typeof id === 'string')
+      : [];
+    const first = tabs[0];
+    if (first === undefined) {
+      continue;
+    }
+    groups.push({ tabs, active: typeof input.active === 'string' ? input.active : first });
+  }
+  return groups;
 }
 
 function asThemeMode(value: unknown): ThemeMode {

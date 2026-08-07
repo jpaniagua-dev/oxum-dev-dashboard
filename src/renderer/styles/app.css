@@ -29,11 +29,13 @@ body {
 }
 
 /*
- * Everything under the top bar is a row: the workspace, then the notes panel.
+ * The window is a row: the workspace, then the notes panel.
  *
- * The top bar is deliberately not part of this row, which is what keeps `#projects-pane` at the same
- * distance from the top of the viewport whether the panel is open or not. `pane-resizer.ts` measures
- * exactly that distance, so its arithmetic and its test stay valid for free.
+ * It used to sit under a top bar kept deliberately outside it, so that opening the notes changed the
+ * workspace's width and nothing else. That bar is gone, its controls having moved into the strip's
+ * tab row, and the property it protected survives its removal: `pane-resizer.ts` measures
+ * `#projects-pane`'s distance to the top of the viewport with `getBoundingClientRect` at the moment
+ * it needs it, never from a constant, so the pane simply starts higher now.
  */
 .app__body {
   display: flex;
@@ -54,46 +56,19 @@ body {
   min-height: 0;
 }
 
-/* ----------------------------------------------------------------- topbar */
+/* ------------------------------------------------------------- strip meta */
 
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  background: var(--surface-raised);
-  border-bottom: 1px solid var(--border);
-}
-
-.topbar__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.topbar__mark {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  background: var(--primary);
-}
-
-.topbar__actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.topbar__meta {
+/*
+ * Timestamp of the last refresh, in the strip's tab row.
+ *
+ * `tabular-nums` so the seconds ticking over do not make the whole row of buttons shuffle sideways
+ * every second, which a proportional font would.
+ */
+.strip__meta {
   color: var(--text-faint);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------- projects */
@@ -111,12 +86,53 @@ body {
   background: var(--surface);
 }
 
+/*
+ * The one row of chrome in this window: the strip's tabs on the left, every application control on
+ * the right. It is also the row that never folds, so those controls stay reachable with the strip
+ * folded away.
+ */
 .projects__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 12px 5px;
+  padding: 5px 12px;
+}
+
+/*
+ * `flex: none` so the buttons keep their size and the tab list is what gives way in a narrow window:
+ * a truncated "Pull requests" is still readable, a half-drawn gear is not.
+ */
+.projects__header-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+}
+
+/*
+ * The strip folded down to its tab row, so the terminal takes the rest of the window.
+ *
+ * `height: auto` rather than a small fixed one: the row is what it is, and a number here would be a
+ * second opinion on its height that a font change would silently invalidate. `min-height` has to go
+ * with it, or the 90px floor meant for the resizer would hold the fold open.
+ */
+.projects--collapsed {
+  height: auto;
+  min-height: 0;
+}
+
+/*
+ * A `display` set by a class beats the browser's `[hidden]`, so every panel that has one needs this
+ * spelled out. Third time in this file: `.pulls`, `.notes`, and now the folded strip's panels.
+ */
+.projects--collapsed .projects__scroll,
+.projects--collapsed .pulls {
+  display: none;
+}
+
+.projects--collapsed #strip-collapse svg {
+  transform: rotate(180deg);
 }
 
 .projects__title {
@@ -407,6 +423,8 @@ body {
 .strip__tabs {
   display: inline-flex;
   gap: 2px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .strip__tab {
@@ -1167,13 +1185,37 @@ body {
   background: var(--surface-inset);
 }
 
-.terminal__header {
+/*
+ * One tab strip per pane, laid on the surface grid next to the view it belongs to rather than
+ * wrapping it: a wrapper would mean moving an xterm element when a tab changes pane, and a detached
+ * xterm never comes back.
+ */
+.terminal__strip {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 8px;
+  min-width: 0;
+  padding: 4px 6px;
   border-bottom: 1px solid var(--border);
+}
+
+/* Which pane a new tab, a split or a shortcut would act on. */
+.terminal__strip--focused {
+  border-bottom-color: var(--primary-border);
+}
+
+/* Dropping on the strip itself, away from any tab, appends to that pane. */
+.terminal__strip--drop {
+  background: var(--surface-hover);
+}
+
+.terminal__strip[hidden] {
+  display: none;
+}
+
+.terminal__strip-clear {
+  flex: none;
 }
 
 .terminal__tabs {
@@ -1379,15 +1421,30 @@ body {
  * lets the DOM keep every terminal exactly where it was created. Moving an xterm element would leave
  * the terminal alive and blank.
  */
+/*
+ * The whole surface, panes included. Two fixed rows when the panes sit side by side (every strip on
+ * row 1, every view on row 2, so the strips align across panes); two rows *per pane* when they are
+ * stacked. Strips, views and splitters are all direct children placed on explicit grid lines, which
+ * is what lets a tab change pane without its xterm element ever moving in the DOM.
+ */
 .terminal__surface {
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: 1fr;
+  grid-template-rows: auto 1fr;
   flex: 1;
   min-height: 0;
-  padding: 6px 8px;
   overflow: hidden;
   user-select: text;
+}
+
+/* Padding lives on the cells, not the surface: on the surface it would sit outside the splitters. */
+.terminal__strip,
+.terminal__view {
+  padding-inline: 8px;
+}
+
+.terminal__view {
+  padding-block: 6px;
 }
 
 /* Width of the draggable gap between two panes. */

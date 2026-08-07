@@ -169,7 +169,7 @@ with it. Servers you started from a terminal are never touched.
 
 ## Settings
 
-The gear in the top bar opens a dialog with two sections.
+The gear in the strip's tab row opens a dialog with two sections.
 
 **Projects** are configuration, not code. Add, rename, repoint or remove them without rebuilding, and
 edit their actions in place. Adding one means picking a folder: the type (`server` / `watch`) and the
@@ -197,10 +197,16 @@ go through the same validation.
 ## The terminal
 
 The terminal is the centre of the window, not a drawer: it takes every pixel the projects strip does
-not need. Project output and free-form shells share one tab strip, and dragging the separator resizes
-the strip above (its height is remembered).
+not need. Dragging the separator resizes the strip above (its height is remembered), and the strip
+folds away entirely when you want the window to be nothing but terminals: the chevron beside
+`+ Projet`, `Alt+Shift+A`, or a **double-click on the tab row** itself, the way a title bar maximises
+a window. Its tab row stays visible when folded, and clicking a tab unfolds it.
 
-- **`+`** opens the default profile; the **caret** next to it lists the others.
+**A pane is a whole terminal, tabs included.** Splitting gives you a second tab strip with its own
+tabs and its own active one, not a second window onto a shared strip, and a tab moves from one pane
+to another by dragging it there.
+
+- **`+`** opens the default profile **in that pane**; the **caret** next to it lists the others.
 - Profiles are **probed on disk**, so the menu only offers shells that exist. On a machine with
   Git Bash, PowerShell 5.1, cmd and WSL, those four appear and PowerShell 7 does not.
 - **Click a project row** to open a shell sitting in that repository, or to come back to the one
@@ -210,21 +216,24 @@ the strip above (its height is remembered).
   table row is not focusable, and the button that used to duplicate it was just noise.
 - **Double-click a tab name to rename it.** Enter commits, Escape cancels. A renamed tab keeps its
   name even if you relaunch the same command.
-- **Drag a tab to reorder the strip.** The marker on the target tab shows which side the drop lands on.
-  The order is held by the main process alongside the sessions, so a hot reload does not shuffle it
-  back.
-- **Right-click a pane to split it**, or `Ctrl+Alt+D` for a column and `Ctrl+Alt+B` for a row. A split
+- **Drag a tab to reorder its strip, or into another pane.** The marker on the target tab shows which
+  side the drop lands on; dropping on a strip away from its tabs appends to that pane. Dragging the
+  last tab out of a pane closes it. The layout is held by the main process alongside the sessions, so
+  a hot reload does not shuffle it back.
+- **Right-click a pane to split it**, or `Alt+Shift+D` for a column and `Alt+Shift+B` for a row. A split
   opens a new shell **in that pane's own directory**, so splitting a repository shell gives you a second
   one in the same repository.
-- **Right-click a tab** to put that session on screen beside the others, rename it, or close it.
-- `Ctrl+Alt+W`, or "Fermer ce panneau", takes a pane off the surface. The terminal keeps running and its
-  tab stays: killing one is still the cross on its tab, so no menu click can take down a build.
+- **Right-click a tab** to move it to a pane of its own, rename it, or close it.
+- `Alt+Shift+W`, or "Fermer ce panneau", closes a pane. **Its tabs move to the neighbouring pane**, they
+  do not die with it: killing a terminal is still the cross on its tab, so no menu click can take down
+  a build.
 - Panes share the surface in **one direction**, columns or rows, chosen by the split. Three side by side
   or three stacked, never a mix: pane positions stay predictable, at the cost of Windows Terminal's
   nested trees. Drag the separator between two panes to give one more room.
-- Several tabs are highlighted at once when they are on screen; the brighter one is where the keyboard
-  goes. Clicking a tab that is not visible puts it **in place of the focused pane**, so browsing the
-  tabs never destroys a layout.
+- Every pane shows one of its tabs; the brighter tab is the pane where the keyboard goes. Clicking a
+  tab shows it **in its own pane**, so browsing the tabs never disturbs a layout.
+- **"Vider"** clears a pane at both ends, xterm and the pty, so ConPTY cannot reprint what you just
+  cleared.
 - A tab can be closed as soon as it has nothing left to do: shells always, a `task` action always, a
   `server` action once it has stopped. A running server has no close button because `Stop` is the
   deliberate way to end it. A green dot marks a live process.

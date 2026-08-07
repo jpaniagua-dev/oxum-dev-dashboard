@@ -6,10 +6,21 @@ import {
   type PaneDirection,
   type ResolvedTheme,
   type ShellProfile,
+  type TerminalCompat,
+  type TerminalGroup,
   type TerminalId,
   type TerminalLayout,
   type TerminalSession,
 } from '@shared/contracts.js';
+import {
+  activateTab,
+  addTab,
+  closeGroup,
+  groupIndexOf,
+  moveTab,
+  normalizeGroups,
+  splitGroup,
+} from '@shared/terminal-groups.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
 
@@ -21,57 +32,6 @@ import { clearChildren, createElement, createIcon } from './dom.js';
  */
 function chevronDown(): SVGSVGElement {
   return createIcon('M3.5 6l4.5 4.5L12.5 6', { paint: 'stroke' });
-}
-
-/* ------------------------------------------------------------------ *
- * Layout arithmetic
- *
- * Pure and exported: every gesture on the panes is "the same list, differently", so the interesting
- * part is list surgery and it deserves tests rather than trust. The one rule they all share is that the
- * result is never empty, because an empty layout is a blank surface with no way back.
- * ------------------------------------------------------------------ */
-
-/** Inserts a pane right after another, or at the end when that other one is not there. */
-export function insertPane(
-  panes: readonly TerminalId[],
-  added: TerminalId,
-  after: TerminalId | null,
-): TerminalId[] {
-  if (panes.includes(added)) {
-    return [...panes];
-  }
-  const index = after === null ? -1 : panes.indexOf(after);
-  if (index === -1) {
-    return [...panes, added];
-  }
-  return [...panes.slice(0, index + 1), added, ...panes.slice(index + 1)];
-}
-
-/** Removes a pane from the view. Refuses to empty the layout. */
-export function removePane(panes: readonly TerminalId[], id: TerminalId): TerminalId[] {
-  const next = panes.filter((pane) => pane !== id);
-  return next.length > 0 ? next : [...panes];
-}
-
-/**
- * Shows a session in the place of another.
- *
- * What clicking a tab does when that session is not on screen: the focused pane becomes it. Replacing
- * rather than collapsing to a single pane is what lets a split survive browsing through the tabs.
- */
-export function replacePane(
-  panes: readonly TerminalId[],
-  replaced: TerminalId | null,
-  id: TerminalId,
-): TerminalId[] {
-  if (panes.includes(id)) {
-    return [...panes];
-  }
-  const index = replaced === null ? -1 : panes.indexOf(replaced);
-  if (index === -1) {
-    return panes.length === 0 ? [id] : [...panes.slice(0, -1), id];
-  }
-  return panes.map((pane, at) => (at === index ? id : pane));
 }
 
 /* ------------------------------------------------------------------ *
@@ -132,12 +92,10 @@ export interface TerminalPaneActions {
   onResize: (terminalId: TerminalId, cols: number, rows: number) => void;
   onClose: (terminalId: TerminalId) => void;
   onRename: (terminalId: TerminalId, title: string) => void;
-  /** Open a new shell tab from a profile. */
+  /** Open a new shell tab from a profile, in the focused pane. */
   onNewShell: (profileId: string) => void;
-  /** New tab order after a drag, in display order. */
-  onReorder: (orderedIds: TerminalId[]) => void;
-  /** New set of visible panes and their direction. */
-  onLayout: (panes: TerminalId[], direction: PaneDirection) => void;
+  /** The panes and their tabs after a gesture. One call for every shape the surface can take. */
+  onLayout: (groups: readonly TerminalGroup[], direction: PaneDirection) => void;
   /**
    * Open a new shell in a directory, for a split.
    *
@@ -155,34 +113,17 @@ export interface TerminalPaneActions {
    * has, while Electron's own clipboard has no such condition.
    */
   onPasteRequest: () => Promise<string>;
+  /**
+   * Tells the pty its screen was cleared.
+   *
+   * Clearing xterm alone is not enough on ConPTY, which keeps its own copy of the screen and reprints
+   * it at the next repaint it decides to make.
+   */
+  onClear: (terminalId: TerminalId) => void;
 }
 
 /** Which side of a tab a drop lands on. */
 type DropSide = 'before' | 'after';
-
-/**
- * The order a drop produces.
- *
- * Pure and exported so the arithmetic is tested rather than eyeballed: the moved id has to be removed
- * *before* the target index is read, otherwise dragging a tab to the right lands one position short.
- */
-export function reorderIds(
-  order: readonly TerminalId[],
-  moved: TerminalId,
-  target: TerminalId,
-  side: DropSide,
-): TerminalId[] {
-  if (moved === target) {
-    return [...order];
-  }
-  const without = order.filter((id) => id !== moved);
-  const index = without.indexOf(target);
-  if (index === -1) {
-    return [...order];
-  }
-  const at = side === 'before' ? index : index + 1;
-  return [...without.slice(0, at), moved, ...without.slice(at)];
-}
 
 interface View {
   readonly term: Terminal;
@@ -190,53 +131,81 @@ interface View {
   readonly element: HTMLElement;
   /** WebGL renderer state: not loaded yet, active, or permanently fallen back to the DOM renderer. */
   webgl: WebglAddon | 'failed' | null;
+  /**
+   * Geometry last announced to the pty, so an unchanged one is never announced again.
+   *
+   * `null` until the first fit. See `fitVisible` for why a redundant resize is not free.
+   */
+  sent: { cols: number; rows: number } | null;
 }
 
 /**
- * The terminal pane: project output and free-form shells in one tab strip.
+ * The terminal surface: one or more panes, each a complete terminal with its own tab strip.
+ *
+ * **A pane is a group of tabs, not a session.** Splitting used to divide the *view* while a single
+ * strip above the surface went on listing every session in the app, so a split gave you two windows
+ * onto one tab bar. A group owns its tabs and its active one, so splitting gives you a terminal,
+ * tabs included, and dragging a tab from one pane to another is just moving it between groups.
  *
  * **Each terminal gets its own permanent container and is opened exactly once.** xterm's `open()`
  * early-returns when the terminal already has an element, so detaching that element and re-opening
  * leaves the terminal alive in memory but invisible forever: it believes it is attached while the
- * pane stays blank. Switching tabs therefore toggles visibility and never touches the DOM tree.
+ * pane stays blank. Nothing here ever moves a view in the DOM. Every view and every strip is a direct
+ * child of the surface, and placement is done by assigning explicit grid lines — which is also why
+ * the surface is a grid rather than a flex row.
  */
 export class TerminalPane {
   private readonly views = new Map<TerminalId, View>();
   private sessions: readonly TerminalSession[] = [];
   private profiles: readonly ShellProfile[] = [];
-  private active: TerminalId | null = null;
   private theme: ResolvedTheme = 'light';
   /** Overwritten from the settings as soon as the bootstrap lands; this is only the pre-bootstrap value. */
   private fontSize: number = TERMINAL_FONT_SIZE.default;
-  private menuOpen = false;
+  /** Index of the group whose profile menu is open, if any. */
+  private menuOpen: number | null = null;
   /** Id of the tab currently being renamed in place, if any. */
   private renaming: TerminalId | null = null;
   /** Tab being dragged, if any. Held so a drop knows what to move. */
   private dragging: TerminalId | null = null;
-  /** Visible panes, mirroring what the main process holds. */
-  private layout: TerminalLayout = { direction: 'columns', panes: [] };
+  /** The panes, mirroring what the main process holds. */
+  private layout: TerminalLayout = { direction: 'columns', groups: [] };
   /**
-   * Relative size of each pane, one entry per pane.
+   * Index of the pane the keyboard and every "here" gesture belong to.
+   *
+   * A new tab, a split and the shortcuts all need a pane to act on, and with several complete
+   * terminals on screen "the current one" is no longer implied by there being a single strip.
+   */
+  private focused = 0;
+  /**
+   * Relative size of each pane, one entry per group.
    *
    * Renderer-only, unlike the layout itself: it is a pixel preference rather than user intent, and
    * resetting it when the number of panes changes is what keeps the arithmetic simple.
    */
   private sizes: number[] = [];
+  /** Tab strips, one per pane, reused across renders rather than rebuilt. */
+  private readonly strips: HTMLElement[] = [];
   /** Splitters between panes, reused across renders rather than rebuilt. */
   private readonly splitters: HTMLElement[] = [];
 
   constructor(
-    private readonly tabsHost: HTMLElement,
     private readonly surface: HTMLElement,
     private readonly actions: TerminalPaneActions,
+    /**
+     * The pty backend behind every session, or `null` off Windows.
+     *
+     * A constructor argument rather than a setter: it decides an option xterm reads when a terminal is
+     * built, so a terminal created before it landed would keep the wrong behaviour for its whole life.
+     */
+    private readonly compat: TerminalCompat | null = null,
   ) {
     window.addEventListener('resize', () => this.fitVisible());
     // Any click outside closes the profile menu, which is what every menu in every app does. The context
     // menu dismisses itself, in the shared module.
     document.addEventListener('click', () => {
-      if (this.menuOpen) {
-        this.menuOpen = false;
-        this.renderTabs();
+      if (this.menuOpen !== null) {
+        this.menuOpen = null;
+        this.renderStrips();
       }
     });
     this.bindShortcuts();
@@ -265,7 +234,7 @@ export class TerminalPane {
         if (event.repeat) {
           return;
         }
-        const focused = this.active;
+        const focused = this.activeId;
         const session = this.sessions.find((entry) => entry.id === focused);
         const key = event.key.toLowerCase();
 
@@ -275,13 +244,9 @@ export class TerminalPane {
         } else if (key === 'b' && session !== undefined) {
           event.preventDefault();
           this.actions.onSplitShell(session.cwd, 'rows');
-        } else if (key === 'w' && focused !== null && this.layout.panes.length > 1) {
+        } else if (key === 'w' && this.layout.groups.length > 1) {
           event.preventDefault();
-          const next = removePane(this.layout.panes, focused);
-          this.applyLayout(next, this.layout.direction);
-          this.active = next[next.length - 1] ?? null;
-          this.renderSurface();
-          this.renderTabs();
+          this.closeFocusedGroup();
         }
       },
       true,
@@ -290,22 +255,8 @@ export class TerminalPane {
 
   /** Adopts the layout the main process reports. */
   setLayout(layout: TerminalLayout): void {
-    const panes = layout.panes.filter((id) => this.sessions.some((session) => session.id === id));
-    const changedCount = panes.length !== this.layout.panes.length;
-    this.layout = { direction: layout.direction, panes };
-    if (changedCount || this.sizes.length !== panes.length) {
-      // Equal shares on every change of count: keeping old fractions would make a new pane inherit a
-      // width that meant something for a different number of panes.
-      this.sizes = panes.map(() => 1);
-    }
-    for (const id of panes) {
-      this.ensure(id);
-    }
-    if (this.active === null || !panes.includes(this.active)) {
-      this.active = panes[panes.length - 1] ?? null;
-    }
-    this.renderSurface();
-    this.renderTabs();
+    this.adopt(layout.groups, layout.direction);
+    this.render();
   }
 
   setTheme(theme: ResolvedTheme): void {
@@ -317,7 +268,7 @@ export class TerminalPane {
 
   setProfiles(profiles: readonly ShellProfile[]): void {
     this.profiles = profiles;
-    this.renderTabs();
+    this.renderStrips();
   }
 
   /**
@@ -347,15 +298,16 @@ export class TerminalPane {
     this.fitVisible();
   }
 
+  /** The tab the keyboard goes to: the active one of the focused pane. */
   get activeId(): TerminalId | null {
-    return this.active;
+    return this.layout.groups[this.focused]?.active ?? null;
   }
 
   /**
-   * Reconciles the tab strip with the sessions the main process reports.
+   * Reconciles the strips with the sessions the main process reports.
    *
    * Views for sessions that disappeared are disposed here: a closed tab must free its xterm, or the
-   * pane leaks a renderer per closed terminal.
+   * surface leaks a renderer per closed terminal.
    */
   setSessions(sessions: readonly TerminalSession[]): void {
     this.sessions = sessions;
@@ -369,21 +321,10 @@ export class TerminalPane {
       }
     }
 
-    // A dead session cannot hold a pane. The main process says the same thing a moment later, but
-    // waiting for it would leave a hole on the surface in the meantime.
-    const panes = this.layout.panes.filter((id) => live.has(id));
-    if (panes.length !== this.layout.panes.length) {
-      this.layout = { ...this.layout, panes };
-      this.sizes = panes.map(() => 1);
-    }
-    if (this.active !== null && !live.has(this.active)) {
-      this.active = null;
-    }
-    if (this.active === null) {
-      this.active = panes[panes.length - 1] ?? null;
-    }
-    this.renderSurface();
-    this.renderTabs();
+    // A dead session cannot hold a tab, and a pane left with none must go. The main process says the
+    // same thing a moment later, but waiting for it would leave a hole on the surface meanwhile.
+    this.adopt(this.layout.groups, this.layout.direction);
+    this.render();
   }
 
   /** Appends output, creating the view on demand so a background tab still collects its history. */
@@ -400,43 +341,67 @@ export class TerminalPane {
     }
   }
 
-  clearActive(): void {
-    if (this.active !== null) {
-      this.views.get(this.active)?.term.clear();
-    }
-  }
-
   /**
    * Brings a session to the foreground.
    *
-   * When it is already on screen this only moves the keyboard focus. When it is not, it takes the place
-   * of the focused pane rather than collapsing the split: browsing the tabs must not undo a layout the
-   * user built. One rule, and it holds for a click on a tab as much as for a freshly launched action.
+   * It is shown in **its own pane**, and the pane it lives in becomes the focused one. Nothing is
+   * replaced and no pane is collapsed: with each pane carrying its own strip, clicking a tab can only
+   * ever mean "show this one, here". A session that belongs to no pane yet — one just spawned — is
+   * adopted by the focused pane.
    */
   select(terminalId: TerminalId): void {
     this.ensure(terminalId);
-    if (!this.layout.panes.includes(terminalId)) {
-      this.applyLayout(replacePane(this.layout.panes, this.active, terminalId), this.layout.direction);
+    const at = groupIndexOf(this.layout.groups, terminalId);
+    if (at === -1) {
+      this.applyLayout(addTab(this.layout.groups, this.focused, terminalId), this.layout.direction);
+    } else {
+      this.focused = at;
+      this.applyLayout(activateTab(this.layout.groups, terminalId), this.layout.direction);
     }
-    this.active = terminalId;
-    this.renderSurface();
+    this.render();
     this.views.get(terminalId)?.term.focus();
-    this.renderTabs();
   }
 
-  /** Adds a session as a new pane beside the focused one, which is what a split does. */
+  /** Puts a session in a brand new pane beside the focused one, which is what a split does. */
   addPane(terminalId: TerminalId, direction: PaneDirection): void {
     this.ensure(terminalId);
-    this.applyLayout(insertPane(this.layout.panes, terminalId, this.active), direction);
-    this.active = terminalId;
-    this.renderSurface();
+    const at = this.focused;
+    this.applyLayout(splitGroup(this.layout.groups, at, terminalId), direction);
+    this.focused = groupIndexOf(this.layout.groups, terminalId);
+    this.render();
     this.views.get(terminalId)?.term.focus();
-    this.renderTabs();
   }
 
-  /** Re-fits every visible terminal, needed after the pane is shown or resized. */
+  /** Re-fits every visible terminal, needed after the surface is shown or resized. */
   refit(): void {
     this.fitVisible();
+  }
+
+  /* --------------------------------------------------------------- layout */
+
+  /**
+   * Takes in a set of groups, whoever computed them, and makes the local state match.
+   *
+   * Everything a gesture or the main process can produce goes through `normalizeGroups` here, so the
+   * renderer holds exactly the layout the main process will hold once the round trip completes. The
+   * views are created for every tab, including the ones in the background, because output is written
+   * to a session's view whether or not it is on screen.
+   */
+  private adopt(groups: readonly TerminalGroup[], direction: PaneDirection): void {
+    const live = this.sessions.map((session) => session.id);
+    const next = normalizeGroups(groups, live);
+    this.layout = { direction, groups: next };
+    if (this.sizes.length !== next.length) {
+      // Equal shares on every change of count: keeping old fractions would make a new pane inherit a
+      // width that meant something for a different number of panes.
+      this.sizes = next.map(() => 1);
+    }
+    for (const group of next) {
+      for (const id of group.tabs) {
+        this.ensure(id);
+      }
+    }
+    this.focused = Math.min(Math.max(this.focused, 0), Math.max(next.length - 1, 0));
   }
 
   /**
@@ -446,161 +411,99 @@ export class TerminalPane {
    * click has to feel immediate. The main process is still the authority: its push arrives moments
    * later with the same value, or with a corrected one if a session died in between.
    */
-  private applyLayout(panes: TerminalId[], direction: PaneDirection): void {
-    if (this.sizes.length !== panes.length) {
-      this.sizes = panes.map(() => 1);
-    }
-    this.layout = { direction, panes };
-    this.actions.onLayout(panes, direction);
+  private applyLayout(groups: readonly TerminalGroup[], direction: PaneDirection): void {
+    this.adopt(groups, direction);
+    this.actions.onLayout(this.layout.groups, direction);
   }
 
-  private ensure(terminalId: TerminalId): View {
-    const existing = this.views.get(terminalId);
-    if (existing !== undefined) {
-      return existing;
-    }
+  /** Closes the focused pane, its tabs moving to a neighbour rather than dying with it. */
+  private closeFocusedGroup(): void {
+    const at = this.focused;
+    this.applyLayout(closeGroup(this.layout.groups, at), this.layout.direction);
+    this.focused = Math.min(at, this.layout.groups.length - 1);
+    this.render();
+  }
 
-    // A dedicated, permanent container: `open()` is called on it once and never again.
-    const element = createElement('div', { className: 'terminal__view' });
-    element.hidden = terminalId !== this.active;
-    this.surface.append(element);
-
-    const term = new Terminal({
-      fontFamily: "'Cascadia Code', Consolas, monospace",
-      fontSize: this.fontSize,
-      scrollback: 5000,
-      cursorBlink: true,
-      convertEol: true,
-      theme: THEMES[this.theme],
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.onData((data) => this.actions.onInput(terminalId, data));
-
-    /*
-     * Copy and paste, which a terminal does not get for free.
-     *
-     * `attachCustomKeyEventHandler` is the only hook that runs *before* xterm turns a keystroke into bytes
-     * for the pty. Returning false is what stops `Ctrl+V` from reaching the shell as a control character,
-     * and `Ctrl+C` from becoming SIGINT when the user meant to copy a selection.
-     *
-     * `preventDefault` is not optional: returning false only skips xterm's handling, it does not consume
-     * the keydown. Left alone, the browser then fires its native `paste` event on xterm's hidden textarea,
-     * which xterm also listens to — so the text landed twice, once from us and once from that listener.
-     */
-    term.attachCustomKeyEventHandler((event) => {
-      switch (decideTerminalKey(event, term.hasSelection())) {
-        case 'copy':
-          event.preventDefault();
-          this.copySelection(term);
-          return false;
-        case 'paste':
-          event.preventDefault();
-          this.pasteInto(term);
-          return false;
-        case 'pass':
-          return true;
-      }
-    });
-
-    term.open(element);
-
-    // Clicking a pane focuses it. Capture phase, because xterm swallows the event on its own surface.
-    element.addEventListener(
-      'mousedown',
-      () => {
-        if (this.active !== terminalId) {
-          this.active = terminalId;
-          this.renderSurface();
-          this.renderTabs();
-        }
-      },
-      true,
-    );
-    element.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      this.openPaneMenu(terminalId, event.clientX, event.clientY);
-    });
-
-    const view: View = { term, fit, element, webgl: null };
-    this.views.set(terminalId, view);
-    return view;
+  private render(): void {
+    this.renderSurface();
+    this.renderStrips();
   }
 
   /**
-   * Switches a pane to the WebGL renderer on its first real display.
-   *
-   * xterm's default renderer draws the screen as DOM nodes, and under Chromium's GPU compositing that
-   * leaves stale text layers on screen while scrolling: frozen glyphs outside the grid, seen in the
-   * wild here. The WebGL renderer repaints its whole canvas, so nothing can be left behind.
-   *
-   * Never called from `ensure()`: a view can be created for a *background* tab (`write` collects
-   * history for hidden sessions), and a WebGL canvas initialised on a `display: none` element is born
-   * with a garbage geometry that later shows up as exactly those frozen glyphs. Loading only from
-   * `fitVisible`, after the pane is on screen and fitted, means the canvas gets its real dimensions.
-   *
-   * On context loss (Chromium caps live WebGL contexts per page and evicts the oldest), the addon is
-   * disposed and xterm falls back to the DOM renderer on its own; marked `failed` so it is not
-   * reloaded just to be evicted again.
-   */
-  private ensureRenderer(view: View): void {
-    if (view.webgl !== null) {
-      return;
-    }
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        console.warn('[terminal] WebGL context lost, falling back to the DOM renderer');
-        webgl.dispose();
-        view.webgl = 'failed';
-      });
-      view.term.loadAddon(webgl);
-      view.webgl = webgl;
-    } catch (error) {
-      // Logged rather than swallowed: a silent fallback here already cost a diagnosis once.
-      view.webgl = 'failed';
-      console.warn(`[terminal] renderer: dom (WebGL failed: ${String(error)})`);
-    }
-  }
-
-  /**
-   * Lays the visible panes out on the surface.
+   * Places every pane on the surface.
    *
    * **No terminal is ever moved in the DOM.** Each keeps the permanent container it was opened on, and
-   * ordering is done with the CSS `order` property: a grid honours it, and detaching an xterm element
-   * to reorder it would leave the terminal alive but blank forever. Splitters are interleaved on the
-   * odd orders.
+   * placement is done by assigning explicit grid lines: detaching an xterm element to reorder it would
+   * leave the terminal alive but blank forever. A pane is two cells of that grid, the strip above its
+   * view, so both are direct children of the surface and neither wraps the other.
    */
   private renderSurface(): void {
-    const { panes, direction } = this.layout;
-
-    for (const [id, view] of this.views) {
-      const index = panes.indexOf(id);
-      view.element.hidden = index === -1;
-      view.element.style.order = String(index * 2);
-      view.element.classList.toggle('terminal__view--focused', panes.length > 1 && id === this.active);
-    }
+    const { groups, direction } = this.layout;
+    const columns = direction === 'columns';
 
     const tracks: string[] = [];
-    panes.forEach((_id, index) => {
+    groups.forEach((_group, index) => {
       if (index > 0) {
         tracks.push('var(--pane-splitter)');
       }
-      tracks.push(`${this.sizes[index] ?? 1}fr`);
+      // In a column layout a pane is one track wide and the strip/view split is the two fixed rows.
+      // Stacked, a pane is two tracks tall, so its own strip and view each need one.
+      tracks.push(columns ? `${this.sizes[index] ?? 1}fr` : `auto ${this.sizes[index] ?? 1}fr`);
+    });
+    const template = tracks.join(' ');
+
+    this.surface.classList.toggle('terminal__surface--split', groups.length > 1);
+    this.surface.style.gridTemplateColumns = columns ? template : '1fr';
+    this.surface.style.gridTemplateRows = columns ? 'auto 1fr' : template;
+
+    this.syncStrips(groups.length);
+    this.syncSplitters(groups.length, direction);
+
+    this.strips.forEach((strip, index) => {
+      strip.hidden = index >= groups.length;
+      place(strip, columns, stripLine(index, columns), columns ? '1' : undefined);
     });
 
-    const template = tracks.join(' ');
-    this.surface.classList.toggle('terminal__surface--split', panes.length > 1);
-    if (direction === 'columns') {
-      this.surface.style.gridTemplateColumns = template;
-      this.surface.style.gridTemplateRows = '1fr';
-    } else {
-      this.surface.style.gridTemplateRows = template;
-      this.surface.style.gridTemplateColumns = '1fr';
+    const focusedActive = groups[this.focused]?.active ?? null;
+    for (const [id, view] of this.views) {
+      const at = groupIndexOf(groups, id);
+      const group = at === -1 ? undefined : groups[at];
+      view.element.hidden = group === undefined || group.active !== id;
+      if (group !== undefined) {
+        place(view.element, columns, viewLine(at, columns), columns ? '2' : undefined);
+      }
+      view.element.classList.toggle(
+        'terminal__view--focused',
+        groups.length > 1 && id === focusedActive,
+      );
     }
 
-    this.syncSplitters(panes.length, direction);
+    this.splitters.forEach((splitter, index) => {
+      if (splitter.hidden) {
+        return;
+      }
+      const line = String(splitterLine(index, columns));
+      if (columns) {
+        splitter.style.gridColumn = line;
+        splitter.style.gridRow = '1 / 3';
+      } else {
+        splitter.style.gridColumn = '1';
+        splitter.style.gridRow = line;
+      }
+    });
+
     this.fitVisible();
+  }
+
+  /** Keeps one strip per pane, reusing the elements across renders. */
+  private syncStrips(paneCount: number): void {
+    while (this.strips.length < paneCount) {
+      const index = this.strips.length;
+      const strip = createElement('div', { className: 'terminal__strip' });
+      this.attachStripDrop(strip, index);
+      this.surface.append(strip);
+      this.strips.push(strip);
+    }
   }
 
   /** Keeps one splitter per gap between panes, reusing the elements across renders. */
@@ -616,8 +519,6 @@ export class TerminalPane {
     }
     this.splitters.forEach((splitter, index) => {
       splitter.hidden = index >= needed;
-      // Sits between pane `index` and pane `index + 1`.
-      splitter.style.order = String(index * 2 + 1);
       splitter.classList.toggle('terminal__splitter--rows', direction === 'rows');
     });
   }
@@ -678,27 +579,173 @@ export class TerminalPane {
     splitter.addEventListener('pointercancel', end);
   }
 
+  private ensure(terminalId: TerminalId): View {
+    const existing = this.views.get(terminalId);
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    // A dedicated, permanent container: `open()` is called on it once and never again.
+    const element = createElement('div', { className: 'terminal__view' });
+    element.hidden = true;
+    this.surface.append(element);
+
+    const term = new Terminal({
+      fontFamily: "'Cascadia Code', Consolas, monospace",
+      fontSize: this.fontSize,
+      scrollback: 5000,
+      cursorBlink: true,
+      /*
+       * Told what pty it is driving, xterm stops reflowing its own buffer on resize and grows into
+       * the scrollback instead. ConPTY reflows and reprints on its side; two owners rewriting the
+       * same rows from different origins is what leaves characters stranded on screen.
+       *
+       * Spread rather than set to `undefined` off Windows: under `exactOptionalPropertyTypes` an
+       * explicit `undefined` is not the same thing as an absent key, and xterm's option is optional
+       * without being nullable. Absent is what "no workaround" means here.
+       */
+      ...(this.compat === null ? {} : { windowsPty: this.compat }),
+      /*
+       * Shrinks glyphs that are one cell wide in the font's opinion but paint wider than one cell.
+       * Ambiguous-width characters do exactly that, and a full-screen TUI is made of them: the box
+       * drawing, `⎿`, `●` and the spinner of a Claude Code session all bleed into the neighbouring
+       * cell. Under the WebGL renderer only the cells marked dirty are repainted, so the bled pixels
+       * of a cell nobody touched this frame simply stay there. WebGL-only option, which is precisely
+       * our case.
+       */
+      rescaleOverlappingGlyphs: true,
+      /*
+       * No `convertEol`. It makes a bare `\n` also return the carriage, which is a fix for programs
+       * whose output is piped straight in — and this output comes from a pty, where the line endings
+       * are already whatever the program meant them to be. Left on, a lone line feed emitted to move
+       * down *while keeping the column* (what a TUI does when it redraws a frame in place) dropped
+       * the cursor to column 0, so the redraw started at the wrong place and never covered the tail
+       * of the previous frame.
+       */
+      theme: THEMES[this.theme],
+    });
+    const fit = new FitAddon();
+    term.loadAddon(fit);
+    term.onData((data) => this.actions.onInput(terminalId, data));
+
+    /*
+     * Copy and paste, which a terminal does not get for free.
+     *
+     * `attachCustomKeyEventHandler` is the only hook that runs *before* xterm turns a keystroke into bytes
+     * for the pty. Returning false is what stops `Ctrl+V` from reaching the shell as a control character,
+     * and `Ctrl+C` from becoming SIGINT when the user meant to copy a selection.
+     *
+     * `preventDefault` is not optional: returning false only skips xterm's handling, it does not consume
+     * the keydown. Left alone, the browser then fires its native `paste` event on xterm's hidden textarea,
+     * which xterm also listens to — so the text landed twice, once from us and once from that listener.
+     */
+    term.attachCustomKeyEventHandler((event) => {
+      switch (decideTerminalKey(event, term.hasSelection())) {
+        case 'copy':
+          event.preventDefault();
+          this.copySelection(term);
+          return false;
+        case 'paste':
+          event.preventDefault();
+          this.pasteInto(term);
+          return false;
+        case 'pass':
+          return true;
+      }
+    });
+
+    term.open(element);
+
+    // Clicking a pane focuses it. Capture phase, because xterm swallows the event on its own surface.
+    element.addEventListener(
+      'mousedown',
+      () => {
+        const at = groupIndexOf(this.layout.groups, terminalId);
+        if (at !== -1 && at !== this.focused) {
+          this.focused = at;
+          this.render();
+        }
+      },
+      true,
+    );
+    element.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      this.openPaneMenu(terminalId, event.clientX, event.clientY);
+    });
+
+    const view: View = { term, fit, element, webgl: null, sent: null };
+    this.views.set(terminalId, view);
+    return view;
+  }
+
   /**
-   * Refits every visible pane.
+   * Switches a pane to the WebGL renderer on its first real display.
+   *
+   * xterm's default renderer draws the screen as DOM nodes, and under Chromium's GPU compositing that
+   * leaves stale text layers on screen while scrolling: frozen glyphs outside the grid, seen in the
+   * wild here. The WebGL renderer repaints its whole canvas, so nothing can be left behind.
+   *
+   * Never called from `ensure()`: a view can be created for a *background* tab (`write` collects
+   * history for hidden sessions), and a WebGL canvas initialised on a `display: none` element is born
+   * with a garbage geometry that later shows up as exactly those frozen glyphs. Loading only from
+   * `fitVisible`, after the pane is on screen and fitted, means the canvas gets its real dimensions.
+   *
+   * On context loss (Chromium caps live WebGL contexts per page and evicts the oldest), the addon is
+   * disposed and xterm falls back to the DOM renderer on its own; marked `failed` so it is not
+   * reloaded just to be evicted again.
+   */
+  private ensureRenderer(view: View): void {
+    if (view.webgl !== null) {
+      return;
+    }
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        console.warn('[terminal] WebGL context lost, falling back to the DOM renderer');
+        webgl.dispose();
+        view.webgl = 'failed';
+      });
+      view.term.loadAddon(webgl);
+      view.webgl = webgl;
+    } catch (error) {
+      // Logged rather than swallowed: a silent fallback here already cost a diagnosis once.
+      view.webgl = 'failed';
+      console.warn(`[terminal] renderer: dom (WebGL failed: ${String(error)})`);
+    }
+  }
+
+  /**
+   * Refits every pane on screen.
    *
    * All of them, not just the focused one: with a split, each pane has its own geometry and each pty
    * needs to be told about it, or the ones in the background wrap their output at the wrong width.
    *
    * Also where the WebGL renderer is engaged and a full repaint forced: this runs precisely when a
    * pane's geometry may have changed (shown, resized, split), which is when stale pixels appear.
+   *
+   * **The pty is only told when the geometry actually changed.** This method runs on every render:
+   * switching tabs, focusing a pane, opening the notes panel, and once per `pointermove` while a
+   * splitter is dragged. A resize of the same size is not free on Windows — ConPTY reprints the
+   * screen it holds — and a full-screen TUI answers each one by redrawing its whole frame. Dozens of
+   * those per second, interleaved with output already in flight, is how frames end up painted over
+   * each other. The comparison costs nothing and removes every redundant one.
    */
   private fitVisible(): void {
-    for (const id of this.layout.panes) {
-      const view = this.views.get(id);
+    for (const group of this.layout.groups) {
+      const view = this.views.get(group.active);
       if (view === undefined) {
         continue;
       }
       try {
         view.fit.fit();
-        this.actions.onResize(id, view.term.cols, view.term.rows);
+        const { cols, rows } = view.term;
+        if (view.sent === null || view.sent.cols !== cols || view.sent.rows !== rows) {
+          view.sent = { cols, rows };
+          this.actions.onResize(group.active, cols, rows);
+        }
         this.ensureRenderer(view);
         // A resize repaints the new grid, not what the old one left outside it: repaint everything.
-        view.term.refresh(0, view.term.rows - 1);
+        view.term.refresh(0, rows - 1);
       } catch {
         // Fitting fails while the pane is hidden and has no size; harmless.
       }
@@ -729,6 +776,12 @@ export class TerminalPane {
     });
   }
 
+  /** Clears a pane, both ends: the xterm buffer and the pty's own copy of the screen. */
+  private clear(terminalId: TerminalId): void {
+    this.views.get(terminalId)?.term.clear();
+    this.actions.onClear(terminalId);
+  }
+
   /* --------------------------------------------------------- context menus */
 
   /**
@@ -738,16 +791,18 @@ export class TerminalPane {
    * profile you split from: splitting a repository shell to get a second one in the same repository is
    * the whole point, and re-running the pane's command instead would be surprising for a dev server.
    *
-   * Closing a pane only takes it off the surface: its process keeps running and its tab stays. Killing
-   * a terminal remains the cross on its tab, so one stray click in a menu cannot take down a build.
+   * Closing a pane hands its tabs to a neighbour: its processes keep running and its tabs stay
+   * reachable. Killing a terminal remains the cross on its tab, so one stray click in a menu cannot
+   * take down a build.
    */
   private openPaneMenu(terminalId: TerminalId, x: number, y: number): void {
     const session = this.sessions.find((entry) => entry.id === terminalId);
     const view = this.views.get(terminalId);
-    if (session === undefined || view === undefined) {
+    const at = groupIndexOf(this.layout.groups, terminalId);
+    if (session === undefined || view === undefined || at === -1) {
       return;
     }
-    const { panes, direction } = this.layout;
+    const { groups, direction } = this.layout;
 
     this.showMenu(x, y, [
       {
@@ -780,52 +835,48 @@ export class TerminalPane {
       },
       {
         label: 'Fermer ce panneau',
-        // Nothing to close when it is the only one, and the terminal itself must not die here.
-        disabled: panes.length <= 1,
-        hint: 'Alt+Shift+W : le terminal continue de tourner, son onglet reste',
+        // Nothing to close when it is the only one, and its terminals must not die here.
+        disabled: groups.length <= 1,
+        hint: 'Alt+Shift+W : les onglets passent au panneau voisin',
         run: () => {
-          const next = removePane(panes, terminalId);
-          this.applyLayout(next, direction);
-          if (this.active === terminalId) {
-            this.active = next[next.length - 1] ?? null;
-          }
-          this.renderSurface();
-          this.renderTabs();
+          this.focused = at;
+          this.closeFocusedGroup();
         },
       },
       {
         label: 'Réunir en un seul panneau',
-        disabled: panes.length <= 1,
+        disabled: groups.length <= 1,
         run: () => {
-          this.applyLayout([terminalId], direction);
-          this.active = terminalId;
-          this.renderSurface();
-          this.renderTabs();
+          const tabs = groups.flatMap((group) => group.tabs);
+          this.focused = 0;
+          this.applyLayout([{ tabs, active: terminalId }], direction);
+          this.render();
         },
       },
     ]);
   }
 
-  /** The menu on a tab: putting that session on screen beside the others, renaming, closing. */
+  /** The menu on a tab: moving it to a pane of its own, renaming, closing. */
   private openTabMenu(session: TerminalSession, x: number, y: number): void {
-    const visible = this.layout.panes.includes(session.id);
+    const alone = (this.layout.groups[groupIndexOf(this.layout.groups, session.id)]?.tabs.length ?? 0) <= 1;
 
     this.showMenu(x, y, [
       {
-        label: 'Afficher à droite',
-        disabled: visible,
-        run: () => this.showBeside(session.id, 'columns'),
+        label: 'Déplacer dans un panneau à droite',
+        // The only tab of its pane is already alone: moving it would close one pane to open another.
+        disabled: alone,
+        run: () => this.moveToOwnPane(session.id, 'columns'),
       },
       {
-        label: 'Afficher en bas',
-        disabled: visible,
-        run: () => this.showBeside(session.id, 'rows'),
+        label: 'Déplacer dans un panneau en bas',
+        disabled: alone,
+        run: () => this.moveToOwnPane(session.id, 'rows'),
       },
       {
         label: 'Renommer',
         run: () => {
           this.renaming = session.id;
-          this.renderTabs();
+          this.renderStrips();
         },
       },
       {
@@ -836,41 +887,63 @@ export class TerminalPane {
     ]);
   }
 
-  /** Puts an existing session on screen next to the focused pane. */
-  private showBeside(terminalId: TerminalId, direction: PaneDirection): void {
-    this.ensure(terminalId);
-    this.applyLayout(insertPane(this.layout.panes, terminalId, this.active), direction);
-    this.active = terminalId;
-    this.renderSurface();
+  /** Takes a tab out of its pane and gives it one of its own, beside the pane it came from. */
+  private moveToOwnPane(terminalId: TerminalId, direction: PaneDirection): void {
+    const from = groupIndexOf(this.layout.groups, terminalId);
+    this.applyLayout(splitGroup(this.layout.groups, from, terminalId), direction);
+    this.focused = groupIndexOf(this.layout.groups, terminalId);
+    this.render();
     this.views.get(terminalId)?.term.focus();
-    this.renderTabs();
   }
 
   private showMenu(x: number, y: number, items: readonly MenuItem[]): void {
     showContextMenu(x, y, items);
   }
 
-  /* ------------------------------------------------------------------ tabs */
+  /* ---------------------------------------------------------------- strips */
 
-  private renderTabs(): void {
-    clearChildren(this.tabsHost);
+  private renderStrips(): void {
+    this.layout.groups.forEach((group, index) => {
+      const strip = this.strips[index];
+      if (strip === undefined) {
+        return;
+      }
+      clearChildren(strip);
+      strip.classList.toggle('terminal__strip--focused', index === this.focused);
 
-    for (const session of this.sessions) {
-      this.tabsHost.append(this.buildTab(session));
-    }
-    this.tabsHost.append(this.buildNewTabButton());
+      const tabs = createElement('div', { className: 'terminal__tabs' });
+      for (const id of group.tabs) {
+        const session = this.sessions.find((entry) => entry.id === id);
+        if (session !== undefined) {
+          tabs.append(this.buildTab(session, group, index));
+        }
+      }
+      tabs.append(this.buildNewTabButton(index));
+      strip.append(tabs);
+
+      const clear = createElement('button', {
+        className: 'button button--quiet terminal__strip-clear',
+        text: 'Vider',
+      });
+      clear.type = 'button';
+      clear.title = 'Effacer la sortie de cet onglet';
+      clear.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.clear(group.active);
+      });
+      strip.append(clear);
+    });
   }
 
-  private buildTab(session: TerminalSession): HTMLElement {
-    // Two levels of highlight, because with a split several tabs are on screen at once: `visible` says
-    // "you can see this one", `active` says "the keyboard goes here".
-    const visible = this.layout.panes.includes(session.id);
+  private buildTab(session: TerminalSession, group: TerminalGroup, groupIndex: number): HTMLElement {
+    // Two levels of highlight: `visible` says "this is what its pane is showing", `active` says "the
+    // keyboard goes here", which with several panes on screen are genuinely different things.
     const classes = ['terminal__tab'];
-    if (visible) {
+    if (group.active === session.id) {
       classes.push('terminal__tab--visible');
-    }
-    if (session.id === this.active) {
-      classes.push('terminal__tab--active');
+      if (groupIndex === this.focused) {
+        classes.push('terminal__tab--active');
+      }
     }
     const wrapper = createElement('span', { className: classes.join(' ') });
     wrapper.dataset.terminalId = session.id;
@@ -886,16 +959,16 @@ export class TerminalPane {
         className: 'terminal__tab-label',
         text: session.title,
         // The working directory is the one thing you always want to know about a shell tab.
-        title: `${session.cwd}\n(double-clic pour renommer, glisser pour réordonner)`,
+        title: `${session.cwd}\n(double-clic pour renommer, glisser pour réordonner ou changer de panneau)`,
       });
       label.type = 'button';
-      label.setAttribute('aria-selected', String(session.id === this.active));
+      label.setAttribute('aria-selected', String(session.id === this.activeId));
       label.addEventListener('click', () => this.select(session.id));
       // Double-click to rename in place, the convention every tabbed app already trained the user on.
       label.addEventListener('dblclick', (event) => {
         event.preventDefault();
         this.renaming = session.id;
-        this.renderTabs();
+        this.renderStrips();
       });
       wrapper.append(label);
 
@@ -904,7 +977,7 @@ export class TerminalPane {
       // on the label and a `<button>` is not draggable on its own.
       wrapper.draggable = true;
       label.draggable = true;
-      this.attachDragHandlers(wrapper, session.id);
+      this.attachDragHandlers(wrapper, session.id, groupIndex);
     }
 
     // A dot marks a live process, so a finished tab is visibly inert rather than looking active.
@@ -926,15 +999,17 @@ export class TerminalPane {
     return wrapper;
   }
 
+  /* ------------------------------------------------------------------ drag */
+
   /**
-   * Drag and drop for one tab.
+   * Drag and drop for one tab, within its pane or into another.
    *
    * **Nothing re-renders during a drag.** Replacing the dragged element mid-gesture cancels the drag in
-   * Chromium, so the drop marker is toggled as a class on the live nodes and the strip is only rebuilt
-   * once the main process reports the new order. That is also what makes the result authoritative
-   * rather than optimistic: the order shown is always the order the main process holds.
+   * Chromium, so the drop marker is toggled as a class on the live nodes and the strips are only
+   * rebuilt once the main process reports the new layout. That is also what makes the result
+   * authoritative rather than optimistic: what is shown is always what the main process holds.
    */
-  private attachDragHandlers(wrapper: HTMLElement, id: TerminalId): void {
+  private attachDragHandlers(wrapper: HTMLElement, id: TerminalId, groupIndex: number): void {
     wrapper.addEventListener('dragstart', (event) => {
       this.dragging = id;
       wrapper.classList.add('terminal__tab--dragging');
@@ -951,6 +1026,7 @@ export class TerminalPane {
       }
       // Without this the drop is refused and the cursor shows "not allowed".
       event.preventDefault();
+      event.stopPropagation();
       if (event.dataTransfer !== null) {
         event.dataTransfer.dropEffect = 'move';
       }
@@ -963,20 +1039,78 @@ export class TerminalPane {
         return;
       }
       event.preventDefault();
-      const side = this.sideOf(wrapper, event.clientX);
+      event.stopPropagation();
+      const before = this.neighbourOf(groupIndex, id, moved, this.sideOf(wrapper, event.clientX));
       this.endDrag();
-      this.actions.onReorder(
-        reorderIds(
-          this.sessions.map((session) => session.id),
-          moved,
-          id,
-          side,
-        ),
-      );
+      this.commitMove(moved, groupIndex, before);
     });
 
-    // Covers a drag released outside the strip or cancelled with Escape: the markers must not survive.
+    // Covers a drag released outside the strips or cancelled with Escape: markers must not survive.
     wrapper.addEventListener('dragend', () => this.endDrag());
+  }
+
+  /**
+   * Dropping on a strip rather than on one of its tabs appends to that pane.
+   *
+   * This is what makes an empty-ish strip a valid target at all, and it is the gesture for "put this
+   * terminal in that pane" when the aim is the pane rather than a position in its order.
+   */
+  private attachStripDrop(strip: HTMLElement, groupIndex: number): void {
+    strip.addEventListener('dragover', (event) => {
+      if (this.dragging === null) {
+        return;
+      }
+      event.preventDefault();
+      if (event.dataTransfer !== null) {
+        event.dataTransfer.dropEffect = 'move';
+      }
+      strip.classList.add('terminal__strip--drop');
+    });
+    strip.addEventListener('dragleave', () => strip.classList.remove('terminal__strip--drop'));
+    strip.addEventListener('drop', (event) => {
+      const moved = this.dragging;
+      if (moved === null) {
+        return;
+      }
+      event.preventDefault();
+      this.endDrag();
+      this.commitMove(moved, groupIndex, null);
+    });
+  }
+
+  /**
+   * Reports a move and waits for the answer.
+   *
+   * Deliberately not applied locally first, unlike every other gesture: a drop is the one case where
+   * an optimistic render would land while Chromium is still finishing the drag, and the strips are
+   * exactly the nodes it is dragging from.
+   */
+  private commitMove(moved: TerminalId, toGroup: number, before: TerminalId | null): void {
+    this.actions.onLayout(
+      moveTab(this.layout.groups, moved, toGroup, before),
+      this.layout.direction,
+    );
+  }
+
+  /**
+   * The tab a drop should land in front of, `null` to land last.
+   *
+   * Read from the target pane's tabs **with the dragged one removed**, which is what `moveTab`
+   * expects and what removes the off-by-one of a rightwards move: an index taken from a list that
+   * still contains the dragged tab points one slot short the moment it leaves.
+   */
+  private neighbourOf(
+    groupIndex: number,
+    target: TerminalId,
+    moved: TerminalId,
+    side: DropSide,
+  ): TerminalId | null {
+    const tabs = (this.layout.groups[groupIndex]?.tabs ?? []).filter((id) => id !== moved);
+    const at = tabs.indexOf(target);
+    if (at === -1) {
+      return null;
+    }
+    return side === 'before' ? target : (tabs[at + 1] ?? null);
   }
 
   /** Left half means "insert before", right half "insert after". */
@@ -986,21 +1120,26 @@ export class TerminalPane {
   }
 
   private markDropTarget(wrapper: HTMLElement, side: DropSide): void {
-    for (const child of this.tabsHost.children) {
-      child.classList.remove('terminal__tab--drop-before', 'terminal__tab--drop-after');
-    }
+    this.clearDropMarkers();
     wrapper.classList.add(`terminal__tab--drop-${side}`);
+  }
+
+  private clearDropMarkers(): void {
+    for (const strip of this.strips) {
+      strip.classList.remove('terminal__strip--drop');
+      for (const tab of strip.querySelectorAll('.terminal__tab')) {
+        tab.classList.remove(
+          'terminal__tab--dragging',
+          'terminal__tab--drop-before',
+          'terminal__tab--drop-after',
+        );
+      }
+    }
   }
 
   private endDrag(): void {
     this.dragging = null;
-    for (const child of this.tabsHost.children) {
-      child.classList.remove(
-        'terminal__tab--dragging',
-        'terminal__tab--drop-before',
-        'terminal__tab--drop-after',
-      );
-    }
+    this.clearDropMarkers();
   }
 
   /**
@@ -1026,7 +1165,7 @@ export class TerminalPane {
       if (accept) {
         this.actions.onRename(session.id, input.value);
       }
-      this.renderTabs();
+      this.renderStrips();
     };
 
     input.addEventListener('keydown', (event) => {
@@ -1052,20 +1191,23 @@ export class TerminalPane {
   }
 
   /**
-   * The new-tab control: a click opens the default profile, the caret lists the others.
+   * The new-tab control of one pane: a click opens the default profile, the caret lists the others.
    *
-   * Same split as Windows Terminal, because that is the gesture already in the user's hands.
+   * Same split as Windows Terminal, because that is the gesture already in the user's hands. One per
+   * pane, and it opens the tab **in that pane**: with each pane carrying its own strip, a single
+   * global `+` would leave the user guessing where the tab went.
    */
-  private buildNewTabButton(): HTMLElement {
+  private buildNewTabButton(groupIndex: number): HTMLElement {
     const group = createElement('span', { className: 'terminal__new' });
 
     const add = createElement('button', { className: 'terminal__new-button', text: '+' });
     add.type = 'button';
-    add.title = 'Nouvel onglet';
+    add.title = 'Nouvel onglet dans ce panneau';
     add.addEventListener('click', (event) => {
       event.stopPropagation();
       const first = this.profiles[0];
       if (first !== undefined) {
+        this.focused = groupIndex;
         this.actions.onNewShell(first.id);
       }
     });
@@ -1081,20 +1223,20 @@ export class TerminalPane {
       caret.setAttribute('aria-label', 'Choisir un shell');
       caret.addEventListener('click', (event) => {
         event.stopPropagation();
-        this.menuOpen = !this.menuOpen;
-        this.renderTabs();
+        this.menuOpen = this.menuOpen === groupIndex ? null : groupIndex;
+        this.renderStrips();
       });
       group.append(caret);
     }
 
-    if (this.menuOpen) {
-      group.append(this.buildProfileMenu());
+    if (this.menuOpen === groupIndex) {
+      group.append(this.buildProfileMenu(groupIndex));
     }
 
     return group;
   }
 
-  private buildProfileMenu(): HTMLElement {
+  private buildProfileMenu(groupIndex: number): HTMLElement {
     const menu = createElement('div', { className: 'terminal__menu' });
     for (const profile of this.profiles) {
       const item = createElement('button', {
@@ -1105,11 +1247,47 @@ export class TerminalPane {
       item.type = 'button';
       item.addEventListener('click', (event) => {
         event.stopPropagation();
-        this.menuOpen = false;
+        this.menuOpen = null;
+        this.focused = groupIndex;
         this.actions.onNewShell(profile.id);
       });
       menu.append(item);
     }
     return menu;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Grid arithmetic
+ *
+ * A pane occupies two cells: its strip and its view. In a column layout the two live in the two fixed
+ * rows of the grid and a pane is one column; stacked, a pane is two rows of a single column. Pure
+ * functions rather than inline arithmetic because "which line is pane 3 on" is exactly the kind of
+ * off-by-one that shows up as a pane silently drawn on top of another.
+ * ------------------------------------------------------------------ */
+
+/** Grid line of a pane's tab strip: its column when side by side, its row when stacked. */
+export function stripLine(index: number, columns: boolean): number {
+  return columns ? index * 2 + 1 : index * 3 + 1;
+}
+
+/** Grid line of a pane's terminal view. */
+export function viewLine(index: number, columns: boolean): number {
+  return columns ? index * 2 + 1 : index * 3 + 2;
+}
+
+/** Grid line of the splitter sitting after pane `index`. */
+export function splitterLine(index: number, columns: boolean): number {
+  return columns ? index * 2 + 2 : index * 3 + 3;
+}
+
+/** Puts an element on a grid line, on the axis the layout runs along. */
+function place(element: HTMLElement, columns: boolean, line: number, row: string | undefined): void {
+  if (columns) {
+    element.style.gridColumn = String(line);
+    element.style.gridRow = row ?? 'auto';
+  } else {
+    element.style.gridColumn = '1';
+    element.style.gridRow = String(line);
   }
 }

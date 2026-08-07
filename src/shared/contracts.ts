@@ -414,16 +414,17 @@ export interface TerminalSession {
 export type PaneDirection = 'columns' | 'rows';
 
 /**
- * The set of sessions currently on screen.
+ * How the surface is divided, and what each division holds.
  *
- * Held by the main process next to the sessions themselves, for the same reason their order is: the
- * renderer restarts on every hot reload, and a layout kept there would be lost several times a minute
- * in development. It is never empty while a session exists.
+ * Held by the main process next to the sessions themselves, and it is now the **only** record of the
+ * tab order: a group owns its tabs, so there is no second ordering to drift from. The renderer
+ * restarts on every hot reload, so keeping it there would lose it several times a minute in
+ * development. Empty only when no session exists at all.
  */
 export interface TerminalLayout {
   readonly direction: PaneDirection;
-  /** Visible sessions, in display order. */
-  readonly panes: readonly TerminalId[];
+  /** The panes, in display order. Each carries its own tabs. */
+  readonly groups: readonly TerminalGroup[];
 }
 
 /** Chunk of terminal output. */
@@ -532,6 +533,14 @@ export interface AppSettings {
   /** Strip to reopen on, so the app comes back where it was left. */
   activeStrip: StripTab;
   /**
+   * Whether the top strip is folded down to its tab row.
+   *
+   * The tabs stay visible when it is: a control that hides itself leaves no way back, and clicking a
+   * tab is then the natural gesture for "show me that again". Persisted because someone working in
+   * the terminal for an afternoon should not have to fold it again at every launch.
+   */
+  stripCollapsed: boolean;
+  /**
    * Height of the top strip in pixels, per tab.
    *
    * One height each because the two views have different needs: a table of four rows against a
@@ -582,6 +591,50 @@ export interface WindowBounds {
 }
 
 /* ------------------------------------------------------------------ *
+ * Terminal groups
+ * ------------------------------------------------------------------ */
+
+/**
+ * One pane: its own tab strip, and which of those tabs it is showing.
+ *
+ * A pane used to *be* a session, with a single tab strip above the whole surface. Splitting then
+ * split the view rather than the terminal, so the strip kept listing every session in the app while
+ * each pane showed exactly one of them. A group is the fix: split, and you get a complete terminal
+ * on the right, tabs included.
+ *
+ * **Every live session belongs to exactly one group.** That is what makes the layout the single
+ * index of the tab strips instead of a subset of a separately ordered list, and it is enforced in
+ * one place, `normalizeGroups`.
+ */
+export interface TerminalGroup {
+  /** Tab order inside this pane, left to right. Never empty: an empty group is dropped. */
+  readonly tabs: TerminalId[];
+  /** The tab on screen in this pane. Always one of `tabs`. */
+  readonly active: TerminalId;
+}
+
+/* ------------------------------------------------------------------ *
+ * Terminal host
+ * ------------------------------------------------------------------ */
+
+/**
+ * What kind of pty the terminals are actually talking to.
+ *
+ * Handed to xterm as its `windowsPty` option, which is not cosmetic: told nothing, xterm assumes a
+ * Unix pty and reflows its own buffer when the grid is resized. ConPTY *also* reflows and reprints
+ * the screen from the console buffer it owns, so both ends rewrite the same rows from different
+ * ideas of where they start, and the loser leaves characters behind. Told the backend and the build
+ * number, xterm turns off its reflow and grows into the scrollback the way ConPTY expects.
+ *
+ * `null` off Windows, where none of these workarounds apply.
+ */
+export interface TerminalCompat {
+  readonly backend: 'conpty' | 'winpty';
+  /** Windows build, e.g. 26200. The behaviour xterm picks changes at 21376. */
+  readonly buildNumber: number;
+}
+
+/* ------------------------------------------------------------------ *
  * Bootstrap
  * ------------------------------------------------------------------ */
 
@@ -616,6 +669,8 @@ export interface BootstrapState {
    * asking Electron where `userData` is.
    */
   readonly defaultNotesFolder: string;
+  /** Pty backend the terminals run on, so xterm can be configured for it. `null` off Windows. */
+  readonly terminalCompat: TerminalCompat | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -681,8 +736,6 @@ export const IpcChannel = {
   TerminalClose: 'terminal:close',
   /** invoke: (terminalId, title) => void, renames a tab */
   TerminalRename: 'terminal:rename',
-  /** invoke: (orderedIds: TerminalId[]) => void, sets the tab order after a drag */
-  TerminalReorder: 'terminal:reorder',
   /** send: (terminalId, data) => void, keystrokes from xterm to the pty */
   PtyInput: 'pty:input',
   /** send: (terminalId, size) => void */
@@ -691,6 +744,8 @@ export const IpcChannel = {
   PtyOutput: 'pty:output',
   /** invoke: (terminalId) => string, replays buffered output when a tab is first shown */
   PtyBuffer: 'pty:buffer',
+  /** send: (terminalId) => void, tells ConPTY the frontend cleared so it does not reprint the screen */
+  PtyClear: 'pty:clear',
   /** on: (sessions: TerminalSession[]) => void, the tab strip is rebuilt from this */
   TerminalsChanged: 'terminal:sessions-changed',
   /** invoke: (panes: TerminalId[], direction) => void, replaces the whole visible layout */
@@ -814,25 +869,28 @@ export interface RendererApi {
   closeTerminal(terminalId: TerminalId): Promise<void>;
   renameTerminal(terminalId: TerminalId, title: string): Promise<void>;
   /**
-   * Sets the tab order.
+   * Replaces the layout, panes and tab order together.
    *
-   * The order lives in the main process, with the sessions themselves: the renderer restarts on every
-   * hot reload, so an order kept there would be lost several times a minute in development.
+   * The whole structure at once rather than one operation per gesture: splitting, closing a pane,
+   * clicking a tab and dragging one into another pane are all just different groups. The arithmetic
+   * is pure and testable (`shared/terminal-groups.ts`), and the main process validates what it is
+   * handed with the very same functions. It also replaced a separate "reorder the tabs" call, which
+   * was a second authority on where a tab lives and could disagree with this one.
    */
-  reorderTerminals(orderedIds: TerminalId[]): Promise<void>;
-  /**
-   * Replaces the visible layout.
-   *
-   * The whole list at once rather than one operation per gesture: splitting, hiding a pane and showing
-   * a session in place of another are all just a different list, the arithmetic is pure and testable in
-   * the renderer, and the main process only has to validate what it is handed.
-   */
-  setTerminalLayout(panes: TerminalId[], direction: PaneDirection): Promise<void>;
+  setTerminalLayout(groups: readonly TerminalGroup[], direction: PaneDirection): Promise<void>;
   onTerminalLayoutChanged(listener: (layout: TerminalLayout) => void): () => void;
   sendPtyInput(terminalId: TerminalId, data: string): void;
   resizePty(terminalId: TerminalId, size: TerminalSize): void;
   onPtyOutput(listener: (chunk: TerminalChunk) => void): () => void;
   readPtyBuffer(terminalId: TerminalId): Promise<string>;
+  /**
+   * Tells the pty its screen was cleared.
+   *
+   * A no-op outside ConPTY, and mandatory on it: ConPTY keeps its own copy of the console buffer and
+   * happily reprints it after a frontend-only clear, which puts back exactly the text the user asked
+   * to be rid of.
+   */
+  clearPty(terminalId: TerminalId): void;
   onTerminalsChanged(listener: (sessions: TerminalSession[]) => void): () => void;
 
   openFolder(projectId: ProjectId): Promise<void>;

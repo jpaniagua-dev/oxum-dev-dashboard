@@ -8,12 +8,14 @@ import type {
   ProjectAction,
   ProjectId,
   ShellProfile,
+  TerminalGroup,
   TerminalId,
   TerminalKind,
   TerminalLayout,
   TerminalSession,
   TerminalSize,
 } from '@shared/contracts.js';
+import { normalizeGroups } from '@shared/terminal-groups.js';
 import { parseOutputChunk, type ParsedOutput } from '../projects/output-parser.js';
 
 /**
@@ -60,58 +62,52 @@ export class TerminalManager {
   /** Sessions stopped on purpose, so a normal exit is not reported as a crash. */
   private readonly stopping = new Set<TerminalId>();
   private counter = 0;
-  /** Visible panes and their direction. Never empty while a session exists. */
-  private panes: TerminalId[] = [];
+  /**
+   * The panes and what each holds. Also **the** tab order: a group owns its tabs.
+   *
+   * There is no second ordering next to it any more. The strip used to be drawn from the insertion
+   * order of `entries` while `panes` said which of those were on screen, so a tab had two homes and
+   * they could disagree; now a tab is wherever its group says it is.
+   */
+  private groups: TerminalGroup[] = [];
   private direction: PaneDirection = 'columns';
 
   constructor(private readonly hooks: TerminalHooks) {}
 
   layout(): TerminalLayout {
-    return { direction: this.direction, panes: [...this.panes] };
+    return { direction: this.direction, groups: this.snapshot() };
+  }
+
+  /** A copy, so a caller mutating what it received cannot reach into the manager's state. */
+  private snapshot(): TerminalGroup[] {
+    return this.groups.map((group) => ({ tabs: [...group.tabs], active: group.active }));
   }
 
   /**
-   * Replaces the visible layout with what the renderer computed.
+   * Replaces the layout with what the renderer computed.
    *
-   * Validated rather than trusted, because a layout is easy to make nonsensical and the consequence is
-   * a blank surface: unknown ids are dropped (a session can die between the click and the call),
-   * duplicates are collapsed since one session cannot occupy two panes at once, and an empty result
-   * falls back to the most recent session rather than showing nothing at all.
+   * Validated rather than trusted: a layout is easy to make nonsensical, and the consequences are
+   * invisible until they bite. `normalizeGroups` is the whole gate, and it is the same function the
+   * renderer applies, so the two sides cannot drift on what a sane layout is.
    */
-  setLayout(panes: readonly TerminalId[], direction: PaneDirection): void {
-    const seen = new Set<TerminalId>();
-    const next: TerminalId[] = [];
-    for (const id of panes) {
-      if (this.entries.has(id) && !seen.has(id)) {
-        seen.add(id);
-        next.push(id);
-      }
-    }
+  setLayout(groups: readonly TerminalGroup[], direction: PaneDirection): void {
     this.direction = direction;
-    this.panes = next.length > 0 ? next : this.fallbackPanes();
+    this.groups = normalizeGroups(groups, [...this.entries.keys()]);
     this.hooks.onLayoutChanged(this.layout());
-  }
-
-  /** The most recent session, or nothing when there is none at all. */
-  private fallbackPanes(): TerminalId[] {
-    const ids = [...this.entries.keys()];
-    const last = ids[ids.length - 1];
-    return last === undefined ? [] : [last];
   }
 
   /**
    * Keeps the layout coherent after sessions appear or disappear.
    *
-   * A closed session must leave the surface, or its pane would be a hole. A first session has to become
-   * the single pane, since nothing else would ever put it there.
+   * A closed session must leave its strip, and a pane emptied that way must go with it. A newly
+   * spawned one has to land in a group immediately: a session in no group has no tab anywhere, so it
+   * would be running with nothing able to show or stop it. `normalizeGroups` does both, which is why
+   * the renderer only has to say where it *would like* a new tab, never make sure it exists.
    */
   private syncLayout(): void {
-    const before = this.panes.join('|');
-    this.panes = this.panes.filter((id) => this.entries.has(id));
-    if (this.panes.length === 0) {
-      this.panes = this.fallbackPanes();
-    }
-    if (this.panes.join('|') !== before) {
+    const before = JSON.stringify(this.groups);
+    this.groups = normalizeGroups(this.groups, [...this.entries.keys()]);
+    if (JSON.stringify(this.groups) !== before) {
       this.hooks.onLayoutChanged(this.layout());
     }
   }
@@ -259,6 +255,29 @@ export class TerminalManager {
   }
 
   /**
+   * Tells a pty its screen was cleared, and forgets the output it had accumulated.
+   *
+   * `pty.clear()` is a no-op everywhere except ConPTY, and on ConPTY it is the whole point: ConPTY
+   * holds its own copy of the console buffer and reprints it at the next thing that makes it repaint
+   * (a resize, a full-screen program redrawing). Clearing xterm alone therefore erases the screen
+   * until ConPTY puts the very same text back — a full-screen TUI makes that happen within seconds.
+   *
+   * The retained buffer goes with it, or a renderer restart would replay exactly what was cleared.
+   */
+  clear(terminalId: TerminalId): void {
+    const entry = this.entries.get(terminalId);
+    if (entry === undefined) {
+      return;
+    }
+    entry.buffer = '';
+    try {
+      entry.pty?.clear();
+    } catch {
+      // The process can exit between the click and this call; harmless.
+    }
+  }
+
+  /**
    * Drops the tabs a configuration change has left unreachable.
    *
    * Three cases, one rule: a running process must always have a button able to stop it.
@@ -331,40 +350,6 @@ export class TerminalManager {
       ...entry,
       session: { ...entry.session, title: trimmed, renamed: true },
     });
-    this.hooks.onSessionsChanged(this.sessions());
-  }
-
-  /**
-   * Sets the tab order.
-   *
-   * Sessions are stored in an insertion-ordered `Map` and `sessions()` walks it, so the order of the
-   * strip is the order of this map: reordering means rebuilding it. It lives here rather than in the
-   * renderer because the renderer restarts on every hot reload, which would drop the order several
-   * times a minute in development, and because `bootstrap` is what a fresh renderer reads it from.
-   *
-   * Ids the caller did not mention are appended rather than dropped: a tab can be created between the
-   * moment a drag starts and the moment it is released, and losing it would be far worse than placing
-   * it last.
-   */
-  reorder(orderedIds: readonly TerminalId[]): void {
-    const pending = new Map(this.entries);
-    const rebuilt: [TerminalId, Entry][] = [];
-
-    for (const id of orderedIds) {
-      const entry = pending.get(id);
-      if (entry !== undefined) {
-        rebuilt.push([id, entry]);
-        pending.delete(id);
-      }
-    }
-    for (const [id, entry] of pending) {
-      rebuilt.push([id, entry]);
-    }
-
-    this.entries.clear();
-    for (const [id, entry] of rebuilt) {
-      this.entries.set(id, entry);
-    }
     this.hooks.onSessionsChanged(this.sessions());
   }
 

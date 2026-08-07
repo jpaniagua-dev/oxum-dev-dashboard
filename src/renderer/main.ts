@@ -14,7 +14,7 @@ import type {
   ThemeState,
 } from '@shared/contracts.js';
 import { showContextMenu } from './ui/context-menu.js';
-import { requireElement } from './ui/dom.js';
+import { hitsInteractive, requireElement } from './ui/dom.js';
 import { renderJiraList } from './ui/jira-list.js';
 import { NotesPanel } from './ui/notes-panel.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
@@ -52,6 +52,8 @@ class App {
   private jira: JiraState | null = null;
   private selectedJiraView: JiraViewId = 'mine';
   private strip: StripTabs | null = null;
+  /** Whether the top strip is folded down to its tab row. Mirrors `settings.stripCollapsed`. */
+  private stripCollapsed = false;
   private resizer: { setHeight: (height: number) => void } | null = null;
   private notes: NotesPanel | null = null;
   private notesResizer: { setWidth: (width: number) => void } | null = null;
@@ -63,29 +65,31 @@ class App {
     this.profiles = bootstrap.shellProfiles;
     this.applyTheme(bootstrap.theme);
 
-    this.terminal = new TerminalPane(requireElement('terminal-tabs'), requireElement('terminal-surface'), {
-      onInput: (terminalId, data) => window.api.sendPtyInput(terminalId, data),
-      onResize: (terminalId, cols, rows) => window.api.resizePty(terminalId, { cols, rows }),
-      onClose: (terminalId) => void window.api.closeTerminal(terminalId),
-      onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
-      onNewShell: (profileId) => void this.openShell(profileId),
-      // Reported rather than dropped: an `invoke` on a channel the main process does not know rejects,
-      // and a bare `void` would turn that into an unhandled rejection nobody sees. That is precisely
-      // how a stale main process makes a gesture look inert instead of broken.
-      onReorder: (orderedIds) => {
-        window.api.reorderTerminals(orderedIds).catch((error: unknown) => {
-          console.error('[terminal] reordonnancement refuse:', error);
-        });
+    this.terminal = new TerminalPane(
+      requireElement('terminal-surface'),
+      {
+        onInput: (terminalId, data) => window.api.sendPtyInput(terminalId, data),
+        onResize: (terminalId, cols, rows) => window.api.resizePty(terminalId, { cols, rows }),
+        onClose: (terminalId) => void window.api.closeTerminal(terminalId),
+        onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
+        onNewShell: (profileId) => void this.openShell(profileId),
+        // Reported rather than dropped: an `invoke` on a channel the main process does not know
+        // rejects, and a bare `void` would turn that into an unhandled rejection nobody sees. That is
+        // precisely how a stale main process makes a gesture look inert instead of broken.
+        onLayout: (groups, direction) => {
+          window.api.setTerminalLayout(groups, direction).catch((error: unknown) => {
+            console.error('[terminal] disposition refusee:', error);
+          });
+        },
+        onSplitShell: (cwd, direction) => void this.splitShell(cwd, direction),
+        onCopy: (text) => void window.api.writeClipboard(text),
+        onPasteRequest: () => window.api.readClipboard(),
+        // Both ends, or none. ConPTY keeps its own copy of the screen and reprints it at the next
+        // repaint it decides, which puts back the exact text that was just cleared.
+        onClear: (terminalId) => window.api.clearPty(terminalId),
       },
-      onLayout: (panes, direction) => {
-        window.api.setTerminalLayout(panes, direction).catch((error: unknown) => {
-          console.error('[terminal] disposition refusee:', error);
-        });
-      },
-      onSplitShell: (cwd, direction) => void this.splitShell(cwd, direction),
-      onCopy: (text) => void window.api.writeClipboard(text),
-      onPasteRequest: () => window.api.readClipboard(),
-    });
+      bootstrap.terminalCompat,
+    );
     this.terminal.setTheme(this.theme.resolved);
     this.terminal.setFontSize(bootstrap.settings.terminalFontSize);
     this.terminal.setProfiles(this.profiles);
@@ -461,10 +465,6 @@ class App {
       });
     });
 
-    requireElement<HTMLButtonElement>('terminal-clear').addEventListener('click', () => {
-      this.terminal?.clearActive();
-    });
-
     requireElement<HTMLButtonElement>('theme-button').addEventListener('click', () => {
       void this.cycleTheme();
     });
@@ -514,7 +514,11 @@ class App {
 
     this.strip = new StripTabs({
       onChange: (tab) => {
-        if (this.settings !== null) {
+        // Picking a tab while the strip is folded means "show me that one", not "switch an invisible
+        // panel". The gesture is the whole way back, which is why the tab row never folds with it.
+        if (this.stripCollapsed) {
+          this.applyStripCollapsed(false);
+        } else if (this.settings !== null) {
           this.resizer?.setHeight(heightOf(this.settings, tab));
         }
         void window.api.updateSettings({ activeStrip: tab });
@@ -523,6 +527,92 @@ class App {
       },
     });
     this.strip.adopt(settings.activeStrip);
+
+    requireElement<HTMLButtonElement>('strip-collapse').addEventListener('click', () => {
+      this.applyStripCollapsed(!this.stripCollapsed);
+    });
+
+    /*
+     * Double-clicking the tab row folds and unfolds it, the way double-clicking a title bar maximises
+     * a window. The chevron stays: this is the gesture you find by accident once you know the app, not
+     * the one that has to be discoverable.
+     *
+     * `hitsInteractive` is what keeps it from firing on the tabs and on `+ Projet`, which is not a
+     * detail: without it, double-clicking "Jira" would select that tab *and* fold the panel it was
+     * asking to see. No `preventDefault` needed against text selection, the body being
+     * `user-select: none` everywhere but the terminal surface and the note editor.
+     */
+    requireElement('projects-header').addEventListener('dblclick', (event) => {
+      if (hitsInteractive(event)) {
+        return;
+      }
+      this.applyStripCollapsed(!this.stripCollapsed);
+    });
+
+    /*
+     * `Alt+Shift+A`, the same chord family as the terminal's `{d,b,w}` and the notes' `n`, for the
+     * same reasons: capture phase, since a focused xterm would swallow it; `Alt+Shift` rather than
+     * `Ctrl+Alt`, which is AltGr on a Swiss French layout; a letter rather than a digit; and a guard
+     * on `event.repeat`, without which holding the keys folds and unfolds dozens of times.
+     */
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (
+          event.repeat ||
+          !event.altKey ||
+          !event.shiftKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.code !== 'KeyA'
+        ) {
+          return;
+        }
+        event.preventDefault();
+        this.applyStripCollapsed(!this.stripCollapsed);
+      },
+      true,
+    );
+
+    this.applyStripCollapsed(settings.stripCollapsed, { persist: false });
+  }
+
+  /**
+   * Folds the top strip down to its tab row, or unfolds it.
+   *
+   * The height set by `attachPaneResizer` has to be **cleared**, not overridden: it is an inline
+   * pixel value on the pane, and a class alone cannot beat it. Unfolding puts it back through the
+   * resizer rather than by hand, so the stored height goes through the same clamp it always does.
+   *
+   * The terminal is refitted at the end because its geometry just changed while the *window* did not,
+   * so the `resize` listener inside `TerminalPane` never fires. Same reason as the notes panel.
+   */
+  private applyStripCollapsed(collapsed: boolean, options: { persist?: boolean } = {}): void {
+    this.stripCollapsed = collapsed;
+    const pane = requireElement('projects-pane');
+    pane.classList.toggle('projects--collapsed', collapsed);
+    // The separator has nothing left to resize once the strip is folded, and dragging it would fight
+    // the fold by writing a height straight back onto the pane.
+    requireElement('projects-resizer').hidden = collapsed;
+
+    const button = requireElement<HTMLButtonElement>('strip-collapse');
+    button.setAttribute('aria-expanded', String(!collapsed));
+    button.title = collapsed ? 'Déplier la bande (Alt+Shift+A)' : 'Replier la bande (Alt+Shift+A)';
+    button.setAttribute('aria-label', collapsed ? 'Déplier la bande' : 'Replier la bande');
+
+    if (collapsed) {
+      pane.style.height = '';
+    } else if (this.settings !== null) {
+      this.resizer?.setHeight(heightOf(this.settings, this.strip?.active ?? 'projects'));
+    }
+
+    if (options.persist !== false) {
+      if (this.settings !== null) {
+        this.settings = { ...this.settings, stripCollapsed: collapsed };
+      }
+      void window.api.updateSettings({ stripCollapsed: collapsed });
+    }
+    this.terminal?.refit();
   }
 
   /* ------------------------------------------------------------------ notes */

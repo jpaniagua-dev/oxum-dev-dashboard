@@ -11,6 +11,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'pullsHeight',
   'jiraHeight',
   'activeStrip',
+  'stripCollapsed',
   'notesWidth',
   'notesOpen',
 ]);
@@ -44,6 +45,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   ) {
     patch.activeStrip = input.activeStrip;
   }
+  if (typeof input.stripCollapsed === 'boolean') patch.stripCollapsed = input.stripCollapsed;
   if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
   if (typeof input.defaultShellProfileId === 'string') {
     patch.defaultShellProfileId = input.defaultShellProfileId;
