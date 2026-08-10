@@ -26,6 +26,39 @@ import { parseOutputChunk, type ParsedOutput } from '../projects/output-parser.j
  */
 const BUFFER_LIMIT = 200_000;
 
+/**
+ * How long a restart waits for the previous process to be gone.
+ *
+ * `taskkill /T /F` on a dev server tree is done in well under a second, so this is a ceiling for the
+ * pathological case and not an expected delay: the wait ends as soon as the exit event fires.
+ */
+const RESTART_EXIT_TIMEOUT_MS = 8_000;
+
+/**
+ * What a second click on an action's button should do.
+ *
+ * Pure and exported so the rule is pinned by a test rather than read off three branches inside a
+ * method, exactly like `isClosable` and `isUnreachable` below. The interesting case is the middle one:
+ * a **server** that is still running gets restarted, because "Run" that decides on its own to do
+ * nothing is indistinguishable from a broken button, while a **task** that is still running is left
+ * alone, because `Commit` runs hooks that take half a minute and a second click must not kill a commit
+ * in flight.
+ *
+ * A dead session is replaced rather than revived either way: its tab and its scrollback are worth
+ * keeping right up to the moment the same action runs again.
+ */
+export type RerunDecision = 'spawn' | 'reuse' | 'restart';
+
+export function decideRerun(
+  existing: { readonly running: boolean } | undefined,
+  role: ActionRole,
+): RerunDecision {
+  if (existing === undefined || !existing.running) {
+    return 'spawn';
+  }
+  return role === 'server' ? 'restart' : 'reuse';
+}
+
 interface Entry {
   readonly session: TerminalSession;
   readonly pty: IPty | null;
@@ -141,18 +174,36 @@ export class TerminalManager {
    *
    * Reuse rather than a new tab each time: clicking Run twice should not litter the strip, and the
    * previous output of the same action is exactly the history the user wants to keep.
+   *
+   * **For a `server` action, clicking Run means "restart"**: a process still alive is stopped, its exit
+   * awaited, and the action relaunched. The rule it replaces ("already running, hand back the tab and
+   * start nothing") looked harmless and was the opposite: it made Run a button that silently did
+   * nothing in every state where the row disagreed with the sessions, and the user has no way to tell
+   * "nothing to do" from "this is broken". A restart always does something observable, and it is also
+   * the repair for such a disagreement rather than its victim.
+   *
+   * Asynchronous because of that wait, and the wait is the point: relaunching a dev server before the
+   * old one has released its port would fail with `address in use` for a reason that has nothing to do
+   * with the user's code. Bounded all the same — see `stopAndAwaitExit`.
+   *
+   * A `task` keeps the old behaviour, deliberately: `Commit` runs hooks that can take half a minute,
+   * and a second click on it must not kill a commit in flight. See `decideRerun`.
    */
-  runProjectAction(
+  async runProjectAction(
     project: Project,
     action: ProjectAction,
     profile: ShellProfile,
     size: TerminalSize,
-  ): TerminalId | null {
+  ): Promise<TerminalId | null> {
     const existing = this.findActionSession(project.id, action.id);
     if (existing !== undefined) {
-      if (existing.session.running) {
-        // Already running: hand the caller the tab so it can be focused, but start nothing.
+      const decision = decideRerun(existing.session, action.role);
+      if (decision === 'reuse') {
+        // Hand the caller the tab so it can be focused, but start nothing.
         return existing.session.id;
+      }
+      if (decision === 'restart') {
+        await this.stopAndAwaitExit(existing.session.id);
       }
       this.entries.delete(existing.session.id);
     }
@@ -375,6 +426,41 @@ export class TerminalManager {
     return true;
   }
 
+  /**
+   * Stops a session and waits for its process to actually be gone.
+   *
+   * `stop` only asks: `taskkill /T /F` is a request to Windows that returns long before the tree is
+   * down. A restart that spawned immediately after it would race the dying server for its own port, so
+   * this is what makes "stop then run" mean what it says.
+   *
+   * Bounded, and the bound is not a formality: a process that refuses to die must not freeze the
+   * button. Past the deadline the relaunch happens anyway and the truth ends up where it belongs, in
+   * the tab's own output — which is the same trade-off this app already accepts for a port held from
+   * outside. The stale exit that then arrives is dropped by the guard in `onExit`.
+   */
+  private async stopAndAwaitExit(terminalId: TerminalId): Promise<void> {
+    const entry = this.entries.get(terminalId);
+    const child = entry?.pty ?? null;
+    if (entry === undefined || child === null || !entry.session.running) {
+      return;
+    }
+
+    // Subscribed before the kill, or a process that dies instantly would exit between the two lines
+    // and the wait would then run to its full timeout for nothing.
+    const exited = new Promise<void>((resolve) => {
+      const subscription = child.onExit(() => {
+        subscription.dispose();
+        resolve();
+      });
+    });
+
+    this.stop(terminalId);
+    await Promise.race([
+      exited,
+      new Promise<void>((resolve) => setTimeout(resolve, RESTART_EXIT_TIMEOUT_MS)),
+    ]);
+  }
+
   /** Stops a session's process and everything it spawned, keeping the tab and its output. */
   stop(terminalId: TerminalId): void {
     const entry = this.entries.get(terminalId);
@@ -495,10 +581,25 @@ export class TerminalManager {
     child.onExit(({ exitCode }) => {
       const stopped = this.stopping.delete(id);
       const current = this.entries.get(id);
-      if (current !== undefined) {
-        // The tab survives its process: the output is often the reason the user opened it.
-        this.entries.set(id, { ...current, pty: null, session: { ...current.session, running: false } });
+      if (current === undefined) {
+        /*
+         * The session was replaced or closed before its pty got round to exiting, so this exit
+         * describes a process the manager no longer accounts for. Reporting it would be a statement
+         * about the **previous** process applied to the row of the current one: `markExited` is keyed
+         * by project, so the row would flip to `crashed` while a freshly started server is booting
+         * behind it. And that state is a trap rather than a cosmetic glitch — the row then shows `Run`
+         * (nothing looks owned) while a session is very much running, so the click resolved to "reuse
+         * the tab, start nothing" and the button did nothing at all, forever.
+         *
+         * The window is real, not theoretical: `close()` deletes the entry immediately after asking
+         * `taskkill` to bring the tree down, and a restart deletes it on purpose, so every kill has a
+         * few hundred milliseconds during which this callback can still fire.
+         */
+        this.hooks.onSessionsChanged(this.sessions());
+        return;
       }
+      // The tab survives its process: the output is often the reason the user opened it.
+      this.entries.set(id, { ...current, pty: null, session: { ...current.session, running: false } });
       if (options.role === 'server' && options.projectId !== null) {
         this.hooks.onProjectStartExit(options.projectId, exitCode, stopped);
       }

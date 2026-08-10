@@ -77,6 +77,30 @@ export function createIcon(
   return svg;
 }
 
+/**
+ * Builds an icon-only button.
+ *
+ * `label` is not optional, and that is the whole reason this helper exists rather than three call sites
+ * assembling the same four lines: an icon alone says **nothing** to a screen reader, so a button whose
+ * text is a drawing must carry its name in `aria-label`. Making the parameter required is what stops
+ * the next icon button from being unnamed. `title` is the hover tooltip and may say more than the name,
+ * which is where the useful detail goes (the path a terminal will open in, the exact git command).
+ */
+export function createIconButton(
+  path: string,
+  options: { label: string; title: string; className?: string },
+): HTMLButtonElement {
+  const button = createElement('button', {
+    className:
+      options.className === undefined ? 'icon-button' : `icon-button ${options.className}`,
+  });
+  button.type = 'button';
+  button.title = options.title;
+  button.setAttribute('aria-label', options.label);
+  button.append(createIcon(path, { paint: 'stroke' }));
+  return button;
+}
+
 /** Removes every child of a node. */
 export function clearChildren(element: HTMLElement): void {
   element.replaceChildren();

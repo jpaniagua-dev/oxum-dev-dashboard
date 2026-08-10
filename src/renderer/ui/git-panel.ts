@@ -10,7 +10,8 @@ import type {
   ProjectId,
 } from '@shared/contracts.js';
 import { hasStagedChanges, hasWorktreeChange, isStaged } from '@shared/git-changes.js';
-import { clearChildren, createElement, createIcon, hitsInteractive } from './dom.js';
+import { clearChildren, createElement, createIcon, createIconButton, hitsInteractive } from './dom.js';
+import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
 import { presentChange, presentTrack } from './presenters.js';
 
@@ -190,16 +191,6 @@ function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelA
 }
 
 /**
- * A terminal window with a prompt inside it.
- *
- * Drawn as a frame plus a chevron and a caret, and sized against the **rendered** 14px icon like the
- * sync arrows below: the chevron is 2.2 units of a 16-unit box per barb, because anything finer comes
- * out as a hairline and the glyph stops reading as a prompt.
- */
-const TERMINAL_ICON =
-  'M2.4 3.4L13.6 3.4L13.6 12.6L2.4 12.6ZM5 6.2L7.2 8.4L5 10.6M8.8 10.6L11.4 10.6';
-
-/**
  * The per-repository terminal shortcut, next to the project's name.
  *
  * A **sibling** of the row rather than a child of it, and that is the whole reason this column grew a
@@ -214,13 +205,12 @@ const TERMINAL_ICON =
  * like the same entry in the repository menu.
  */
 function buildRepoTerminal(project: Project, actions: GitPanelActions): HTMLButtonElement {
-  const button = createElement('button', { className: 'icon-button git__repo-terminal' });
-  button.type = 'button';
-  button.title = `Ouvrir un nouvel onglet de terminal dans ${project.path}`;
-  // An icon says nothing to a screen reader, and the label has to name the project: there is one of
-  // these per row.
-  button.setAttribute('aria-label', `Ouvrir un terminal dans ${project.label}`);
-  button.append(createIcon(TERMINAL_ICON, { paint: 'stroke' }));
+  const button = createIconButton(TERMINAL_ICON, {
+    // The name has to say which project: there is one of these per row.
+    label: `Ouvrir un terminal dans ${project.label}`,
+    title: `Ouvrir un nouvel onglet de terminal dans ${project.path}`,
+    className: 'icon-button--row',
+  });
   button.addEventListener('click', () => actions.onNewTerminal(project.id));
   return button;
 }

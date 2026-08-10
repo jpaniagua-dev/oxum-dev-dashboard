@@ -412,6 +412,30 @@ body {
   stroke-linejoin: round;
 }
 
+/*
+ * An icon button that lives inside a row of a list.
+ *
+ * Present but quiet until its row is hovered: a column of names should read as names, and one control
+ * per line at full contrast turns a list into a toolbar. Smaller than a chrome icon button, because it
+ * shares a row's height rather than setting it.
+ *
+ * One rule for both lists that have such a control, the pull requests and the Git tab's repositories.
+ * They started as two identical blocks differing only in an opacity nobody had chosen on purpose, which
+ * is exactly how two controls doing the same thing end up looking different.
+ */
+.icon-button--row {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  opacity: 0.4;
+}
+
+.pull:hover .icon-button--row,
+.git__repo-line:hover .icon-button--row,
+.icon-button--row:focus-visible {
+  opacity: 1;
+}
+
 /* A toggled panel button reads as pressed, the way the active strip tab does. */
 .icon-button[aria-pressed='true'] {
   background: var(--surface-inset);
@@ -566,16 +590,10 @@ body {
 }
 
 /* Discreet until the row is hovered: the pills are what the eye is meant to catch first. */
+/* Nothing left but the position: the size and the fade come from `.icon-button--row`. Kept as a hook
+   so the row's own layout can still address this control. */
 .pull__terminal {
-  padding: 1px 7px;
-  font-size: var(--font-xs);
-  white-space: nowrap;
-  opacity: 0.45;
-}
-
-.pull:hover .pull__terminal,
-.pull__terminal:focus-visible {
-  opacity: 1;
+  margin-left: 2px;
 }
 
 /* Sits under the view list, separated from it so it does not read as a third view. */
@@ -1772,17 +1790,6 @@ body {
  * same reason: a column of repository names should read as names, and one control per line at full
  * contrast turns it into a toolbar. Reachable by keyboard all the same, hence the `:focus-visible`.
  */
-.git__repo-terminal {
-  flex: none;
-  width: 22px;
-  height: 22px;
-  opacity: 0.35;
-}
-
-.git__repo-line:hover .git__repo-terminal,
-.git__repo-terminal:focus-visible {
-  opacity: 1;
-}
 
 /*
  * The middle column is itself a grid, in rows: header, sub-tabs, list, commit form.

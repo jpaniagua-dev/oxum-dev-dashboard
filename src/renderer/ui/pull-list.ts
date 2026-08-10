@@ -1,5 +1,6 @@
 import type { ProjectId, PullRequest, RepoPulls } from '@shared/contracts.js';
-import { clearChildren, createElement, hitsInteractive } from './dom.js';
+import { clearChildren, createElement, createIconButton, hitsInteractive } from './dom.js';
+import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
 import { presentInvolvement, presentPullChecks, presentReview } from './presenters.js';
 
@@ -145,12 +146,20 @@ function buildPullRow(
   row.append(buildPill(presentPullChecks(pull)));
   row.append(createElement('span', { className: 'pull__age', text: describeAge(pull.updatedAt) }));
 
-  const terminal = createElement('button', {
-    className: 'button button--quiet pull__terminal',
-    text: 'Terminal',
+  /*
+   * An icon rather than the word `Terminal`.
+   *
+   * The label was the widest thing on the row after the title, and it was spending that width to say
+   * something the row already implies — every gesture in this app ends in a terminal tab. The glyph is
+   * the same one the Git tab's repository column uses (`TERMINAL_ICON`), because it is the same gesture:
+   * a new tab in that repository's folder. What the words carried moves to `aria-label` and `title`, so
+   * nothing is lost for a screen reader or on hover.
+   */
+  const terminal = createIconButton(TERMINAL_ICON, {
+    label: 'Ouvrir un terminal',
+    title: 'Ouvrir un nouvel onglet dans ce dossier',
+    className: 'icon-button--row pull__terminal',
   });
-  terminal.type = 'button';
-  terminal.title = 'Ouvrir un nouvel onglet dans ce dossier';
   terminal.addEventListener('click', () => actions.onNewTerminal(projectId));
   row.append(terminal);
 

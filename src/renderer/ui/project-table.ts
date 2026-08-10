@@ -1,6 +1,6 @@
 import type { ProjectId, ProjectRow } from '@shared/contracts.js';
 import { clearChildren, createElement, hitsInteractive } from './dom.js';
-import { canStart, canStop, presentChecks, presentGit, presentServer, type Pill } from './presenters.js';
+import { canStop, presentChecks, presentGit, presentServer, type Pill } from './presenters.js';
 
 export interface TableActions {
   /** Runs one of the project's configured actions. */
@@ -179,16 +179,22 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
       continue;
     }
 
+    /*
+     * Never disabled, and that is a fix rather than a relaxation.
+     *
+     * It used to be greyed out whenever the row claimed a process was owned, with a tooltip blaming a
+     * server started outside the dashboard — a message left over from the port probe that no longer
+     * exists, and simply false in the state that actually reached it. Worse, the states where a row
+     * and the sessions disagree are exactly the ones a user needs a way out of, and a dead button is
+     * the opposite of a way out. Run is a **restart** now (the main process stops what is running
+     * first), so there is no state left where refusing to start is the right answer.
+     */
     const start = createElement('button', {
       className: 'button button--primary',
       text: action.label,
     });
     start.type = 'button';
-    start.disabled = !canStart(row.server);
-    // Explains the disabled button instead of leaving the user guessing.
-    start.title = canStart(row.server)
-      ? action.command
-      : 'Un serveur tourne déjà hors du dashboard';
+    start.title = `${action.command}\n(relance : un processus encore en cours est arrêté d’abord)`;
     start.addEventListener('click', () => actions.onRunAction(row.project.id, action.id));
     fragment.append(start);
   }

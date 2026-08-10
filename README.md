@@ -79,8 +79,8 @@ The pull request tab lists the watched repositories on the left with a counter, 
 the selected one on the right, one line each:
 
 ```
-#580  PROJ 412 user profile detail page   [auteur] [à relire] [OK 4]   33 min
-#575  PROJ-1607: Invoice lifecycle actions       [à relire] [sans review] [aucun check]  18 min
+#580  PROJ 412 user profile detail page   [auteur] [à relire] [OK 4]   33 min  >_
+#575  PROJ-1607: Invoice lifecycle actions       [à relire] [sans review] [aucun check]  18 min  >_
 ```
 
 - **Which repositories**: derived from each project's `git remote get-url origin`, with a
@@ -91,8 +91,13 @@ the selected one on the right, one line each:
   `gh pr list` call per repository brings everything, and the filter is applied locally.
 - **`sans review` is not an approval.** `gh` reports an empty `reviewDecision` when the repository
   requires no review at all, and painting that green would claim something GitHub never said.
-- Clicking a line opens the pull request in your browser. The poll runs every 180 s by default
-  (`pullsPollSeconds`), one call per followed repository, which is far below any rate limit.
+- Clicking a line opens the pull request in your browser. The **terminal icon** at the end of the row
+  opens a new tab in that repository's folder instead — the same glyph the Git tab's repository column
+  uses, because it is the same gesture. It said `Terminal` in words until the icon existed, which was
+  the widest thing on the row after the title, spent on saying what every gesture in this app implies.
+  Both are quiet until the row is hovered, and both keep their name in `aria-label`.
+- The poll runs every 180 s by default (`pullsPollSeconds`), one call per followed repository, which is
+  far below any rate limit.
 
 ## Jira
 
@@ -198,7 +203,7 @@ demotes the previous holder.
 Defaults on a new project, and why each ships with the shell it does:
 
 - **Run** → `npm run start` in **cmd**, because a pty does not resolve the `.cmd` shims that make a
-  bare `npm` work. Disabled when a server is already running outside the dashboard.
+  bare `npm` work. Never disabled: see **Run restarts** below.
 - **Commit** → `commit` in **Git Bash**, because it is a shell **alias**: bash does not expand aliases
   in a non-interactive shell, so it is run with `-ic`. It is a full-screen prompt_toolkit TUI, which is
   the reason this app embeds a real pseudo-terminal rather than a log view.
@@ -208,6 +213,19 @@ survive. An unrecognised shell falls back to cmd's `/c` rather than guessing a f
 
 Two buttons are not actions, because they open something instead of running a command: **PR** (the
 pull request in your browser, disabled when there is none) and **`>_`** (a shell in the repository).
+
+**Run restarts.** Clicking it on a `server` action that is still running stops that process, waits for
+it to actually be gone, and relaunches — a dev server does not release its port the instant it is
+killed, so starting without the wait would fail on `address in use` for a reason that has nothing to do
+with your code. The wait is capped at 8 seconds, after which the relaunch happens anyway and the tab's
+own output tells the story. `Stop` is unchanged: while a process of ours is alive the button is `Stop`,
+so a server can still be ended at any moment. And a `task` in flight is never restarted, only a server
+is: `Commit` runs hooks for half a minute and a second click must not kill a commit halfway.
+
+The button also stopped being disabled. It used to grey out whenever the row believed it owned a
+process, blaming a server started outside the dashboard — a message left from a port probe that no
+longer exists, and false in the state that actually reached it. A row whose state disagrees with the
+sessions is precisely when you need a way out, and a dead button is the opposite of one.
 
 **Stop** kills the process tree with `taskkill /T`. A plain kill would only reach the `cmd.exe`
 wrapper and leave `ng serve` holding the port. Deleting an action closes its tab for the same reason:

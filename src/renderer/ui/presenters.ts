@@ -64,21 +64,17 @@ export function presentServer(server: ServerState): Pill {
   }
 }
 
-/** True when the dashboard is allowed to stop this process. */
+/**
+ * True when the dashboard is allowed to stop this process.
+ *
+ * Unchanged, and deliberately so: while a process of ours is alive the button is `Stop`, so a server
+ * can be ended at any moment. It is also the only condition in the row, since its counterpart
+ * disappeared — there used to be a `canStart` deciding whether `Run` was allowed to fire, back when
+ * the dashboard probed ports to spot servers started elsewhere. That probe is gone, `Run` is a restart
+ * (the main process stops what is running first), and a button that refuses to run has no case left.
+ */
 export function canStop(server: ServerState): boolean {
   return server.owned && server.phase !== 'stopped' && server.phase !== 'crashed';
-}
-
-/**
- * True when starting makes sense: nothing of ours is already running.
- *
- * Deliberately says nothing about who else might hold the port. The dashboard used to detect servers
- * started elsewhere and disable the button; now that every launch goes through its own terminal, that
- * detection was noise. The trade-off is explicit: if something outside still holds the port, the
- * action starts and fails with the address already in use, visibly, in its own tab.
- */
-export function canStart(server: ServerState): boolean {
-  return !server.owned;
 }
 
 /**

@@ -411,7 +411,9 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return null;
       }
 
-      const terminalId = deps.terminals.runProjectAction(
+      // Awaited: for a `server` action this call now stops a process still running and waits for it to
+      // be gone before relaunching, so `markStarting` below must land after that stop, never before.
+      const terminalId = await deps.terminals.runProjectAction(
         project,
         action,
         profile,

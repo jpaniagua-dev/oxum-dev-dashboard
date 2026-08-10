@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  decideRerun,
   isClosable,
   isUnreachable,
   resolveActionCommand,
@@ -58,6 +59,37 @@ describe('isClosable', () => {
 
   it('allows closing a server tab once it has stopped', () => {
     expect(isClosable(session({ running: false }), 'server')).toBe(true);
+  });
+});
+
+describe('decideRerun', () => {
+  it('spawns when the action has no tab yet', () => {
+    expect(decideRerun(undefined, 'server')).toBe('spawn');
+    expect(decideRerun(undefined, 'task')).toBe('spawn');
+  });
+
+  it('replaces a tab whose process has ended, whatever its role', () => {
+    // The tab and its scrollback are kept right up to the moment the same action runs again: that
+    // output is usually the reason the tab is still there.
+    expect(decideRerun({ running: false }, 'server')).toBe('spawn');
+    expect(decideRerun({ running: false }, 'task')).toBe('spawn');
+  });
+
+  it('restarts a server that is still running', () => {
+    /*
+     * The regression this locks. The old rule handed back the existing tab and started nothing, which
+     * read as reasonable and was a trap: in any state where the row and the sessions disagreed (a
+     * stale exit reported for a replaced session, so the row said "crashed" over a live process), the
+     * row showed `Run` and clicking it did **nothing, forever**. A restart always does something
+     * observable, and it repairs that disagreement instead of being stuck behind it.
+     */
+    expect(decideRerun({ running: true }, 'server')).toBe('restart');
+  });
+
+  it('leaves a running task alone', () => {
+    // `Commit` runs husky and lint-staged, which can take half a minute. A second click must not kill
+    // a commit in flight, so the tab is handed back and nothing is started.
+    expect(decideRerun({ running: true }, 'task')).toBe('reuse');
   });
 });
 
@@ -137,6 +169,85 @@ describe('stopProjectServer', () => {
     });
     expect(manager.stopProjectServer('web-app')).toBe(false);
   });
+});
+
+/*
+ * The two tests below drive a **real** pty, unlike everything else in this file.
+ *
+ * They earn the exception: what they cover is a race between a `taskkill` and a `Map.delete`, which no
+ * pure function can express and which cost a genuinely puzzling bug — a red `Run` button that did
+ * nothing at all, in a row whose server was running the whole time. Windows-only, like `killTree`
+ * itself, so they are skipped elsewhere rather than failing for the wrong reason.
+ */
+const onWindows = process.platform === 'win32';
+const CMD = 'C:/WINDOWS/System32/cmd.exe';
+
+function serverProject(command: string): { project: Project; action: ProjectAction } {
+  const serverAction = action({ command });
+  return {
+    project: {
+      id: 'demo',
+      label: 'Demo',
+      path: process.cwd(),
+      actions: [serverAction],
+      kind: 'server',
+      expectedPort: 4200,
+    },
+    action: serverAction,
+  };
+}
+
+describe.runIf(onWindows)('exit reporting', () => {
+  it('reports the exit of a session it still owns', async () => {
+    const exits: { code: number; stopped: boolean }[] = [];
+    const manager = new TerminalManager({
+      onOutput: () => {},
+      onParsed: () => {},
+      onProjectStartExit: (_projectId, code, stopped) => exits.push({ code, stopped }),
+      onSessionsChanged: () => {},
+      onLayoutChanged: () => {},
+    });
+
+    const { project, action: serverAction } = serverProject('exit 1');
+    await manager.runProjectAction(project, serverAction, profile(CMD), { cols: 80, rows: 24 });
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // A non-zero exit nobody asked for: this is what paints the row `crash`, and it must keep working.
+    expect(exits).toEqual([{ code: 1, stopped: false }]);
+    manager.stopAll();
+  }, 15_000);
+
+  it('drops the exit of a session that was closed before its process died', async () => {
+    /*
+     * The regression. `close()` fires `taskkill /T /F` and deletes the entry straight away, so the pty
+     * exits a few hundred milliseconds later with nothing left to attach it to. Reported, that exit
+     * described the dead process while landing on the row of whatever is running now: the row went
+     * `crashed` over a live server, and from there `Run` was displayed, enabled, and permanently inert.
+     */
+    const exits: number[] = [];
+    const manager = new TerminalManager({
+      onOutput: () => {},
+      onParsed: () => {},
+      onProjectStartExit: (_projectId, code) => exits.push(code),
+      onSessionsChanged: () => {},
+      onLayoutChanged: () => {},
+    });
+
+    // Something that stays alive long enough to still be running when the tab is closed.
+    const { project, action: serverAction } = serverProject('ping -n 30 127.0.0.1');
+    const first = await manager.runProjectAction(project, serverAction, profile(CMD), {
+      cols: 80,
+      rows: 24,
+    });
+    expect(first).not.toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    manager.close(first as string);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    expect(exits).toEqual([]);
+    manager.stopAll();
+  }, 15_000);
 });
 
 describe('resolveActionCommand', () => {

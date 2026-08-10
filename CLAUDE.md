@@ -70,7 +70,21 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   qui laisse ces onglets sans `projectId` : invisibles pour la recherche de réutilisation de la ligne,
   et jamais fermés par `reconcile`. Le bouton avait été retiré une fois comme redondant avec le clic,
   ce qu'il n'était pas : cette lecture supprimait le seul moyen d'ouvrir un deuxième shell sur un même
-  dépôt. Le bouton de la liste des PR porte le même libellé et donc le même comportement, exprès.
+  dépôt.
+- **Trois contrôles ouvrent un terminal dans un dépôt, et ils sont volontairement identiques** : le
+  bouton `Terminal` du tableau, l'icône de la liste des PR et celle de la colonne de dépôts du Git. Même
+  geste, donc même glyphe : `TERMINAL_ICON` vit dans `renderer/ui/icons.ts`, qui n'existe que pour les
+  icônes à plus d'un consommateur (les flèches de sync restent dans `git-panel.ts`, le chevron dans
+  `terminal-pane.ts`). Deux copies d'un tracé finissent en deux glyphes légèrement différents pour la
+  même action, et une icône vaut précisément par sa reconnaissance avant lecture. Les deux icônes
+  passent par `createIconButton`, dont le paramètre `label` est **obligatoire** : une icône seule ne dit
+  rien à un lecteur d'écran, et rendre le nom facultatif serait la garantie que la prochaine icône n'en
+  aura pas. La liste des PR disait `Terminal` en mots jusque-là ; c'était la chose la plus large de la
+  ligne après le titre, pour énoncer ce que toute l'app implique déjà.
+- **`.icon-button--row` porte les contrôles d'icône d'une ligne de liste** (taille réduite, discrets
+  jusqu'au survol de leur ligne). Une seule règle pour les deux listes : c'étaient deux blocs identiques
+  qui ne différaient que par une opacité que personne n'avait choisie, ce qui est exactement la façon
+  dont deux contrôles faisant la même chose finissent par ne plus se ressembler.
 - **Cliquer une ligne ouvre le shell du dépôt, et le réutilise.** Le geste est trop facile à
   déclencher pour empiler un onglet par clic. Un shell de dépôt porte donc un `projectId` **et** pas
   d'`actionId` : tout code qui parcourt ces deux champs doit accepter ce couple. La règle de
@@ -245,6 +259,31 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **`Run` est amorcé sur `cmd`, `Commit` sur Git Bash**, et ce n'est pas cosmétique : un pty ne résout
   pas les shims `.cmd` (donc `npm` nu échoue) et bash n'expanse aucun alias en non-interactif (donc
   `commit` n'existe pas sans `-ic`). Voir `resolveActionCommand`.
+- **`Run` est un REDÉMARRAGE, `Stop` est inchangé.** Un clic sur `Run` d'une action `server` arrête le
+  processus encore vivant, **attend sa sortie**, puis relance. La règle d'avant (« déjà en cours : je
+  rends l'onglet et je ne lance rien ») avait l'air inoffensive et faisait l'inverse : dans tout état où
+  la ligne et les sessions se contredisaient, `Run` s'affichait et ne faisait **rien du tout**, sans que
+  l'utilisateur puisse distinguer « rien à faire » de « c'est cassé ». Un redémarrage fait toujours
+  quelque chose d'observable, et il *répare* cette contradiction au lieu de la subir. Corollaire :
+  `canStart` a disparu du renderer et le bouton n'est plus jamais désactivé — son infobulle accusait un
+  « serveur hors du dashboard », vestige de la sonde de port supprimée, et fausse dans l'état qui
+  l'atteignait vraiment. Tant qu'un processus tourne, le bouton reste `Stop` : on peut donc toujours
+  arrêter à la main, c'est `canStop` qui ne change pas.
+- **Un `task` en cours n'est jamais redémarré**, seul un `server` l'est. `Commit` déclenche husky et
+  lint-staged pendant une demi-minute : un second clic ne doit pas tuer un commit en vol. La règle vit
+  dans `decideRerun`, pure et testée, parce qu'elle a trois branches dont deux se ressemblent.
+- **L'attente avant relance n'est pas décorative.** `taskkill /T /F` est une *demande* qui rend la main
+  bien avant que l'arbre soit tombé : relancer tout de suite ferait courir le nouveau serveur de dev
+  contre le port que l'ancien tient encore, et l'échec parlerait de `address in use` pour une raison
+  étrangère au code de l'utilisateur. Bornée à 8 s quand même (`RESTART_EXIT_TIMEOUT_MS`) : un processus
+  qui refuse de mourir ne doit pas figer le bouton.
+- **Une sortie de pty n'est rapportée que si le manager détient encore la session.** Sans ce garde dans
+  `onExit`, l'exit d'une session déjà supprimée décrivait l'**ancien** processus tout en atterrissant
+  sur la ligne du nouveau (`markExited` est indexé par projet) : la ligne passait `crashed` au-dessus
+  d'un serveur bien vivant, et depuis cet état `Run` était affiché, actif, et définitivement inerte.
+  La fenêtre est réelle et pas théorique : `close()` supprime l'entrée juste après avoir demandé le
+  `taskkill`, et un redémarrage la supprime exprès. Reproduit par un test qui pilote un vrai pty
+  (`test/terminal-manager.test.ts`, « exit reporting »), vérifié rouge sans le garde.
 - **`Stop` se demande par projet, jamais par terminal.** `stopProjectServer` résout la session dans le
   main, qui est le seul côté à détenir à la fois les sessions et les rôles. Quand le renderer faisait
   ce travail (trouver l'action `server`, puis la session portant son id), les deux sauts renvoyaient
