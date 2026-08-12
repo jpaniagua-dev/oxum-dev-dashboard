@@ -31,7 +31,7 @@ const GROUPS: readonly (readonly ButtonSpec[])[] = [
     { command: 'italic', label: 'Italique', face: { kind: 'glyph', text: 'I', modifier: 'italic' } },
     {
       command: 'strikethrough',
-      label: 'Barré',
+      label: 'Strikethrough',
       face: { kind: 'glyph', text: 'S', modifier: 'strike' },
     },
     {
@@ -48,7 +48,7 @@ const GROUPS: readonly (readonly ButtonSpec[])[] = [
   [
     {
       command: 'bulletList',
-      label: 'Liste à puces',
+      label: 'Bulleted list',
       face: {
         kind: 'icon',
         path: 'M3 4h.01M3 8h.01M3 12h.01M6.5 4H13M6.5 8H13M6.5 12H13',
@@ -56,7 +56,7 @@ const GROUPS: readonly (readonly ButtonSpec[])[] = [
     },
     {
       command: 'orderedList',
-      label: 'Liste numérotée',
+      label: 'Numbered list',
       face: {
         kind: 'icon',
         path: 'M2 3.5h1V6M2 6h2M2 9.5h2v1.2L2 12h2M6.5 4H13M6.5 8H13M6.5 12H13',
@@ -64,7 +64,7 @@ const GROUPS: readonly (readonly ButtonSpec[])[] = [
     },
     {
       command: 'taskList',
-      label: 'Case à cocher',
+      label: 'Checkbox',
       face: {
         kind: 'icon',
         path: 'M2 3h3.4v3.4H2zM2.6 4.7l1 1 1.6-1.9M2 9.6h3.4V13H2M7.6 4.7H14M7.6 11.3H14',
@@ -79,7 +79,7 @@ const GROUPS: readonly (readonly ButtonSpec[])[] = [
     },
     {
       command: 'codeBlock',
-      label: 'Bloc de code',
+      label: 'Code block',
       face: { kind: 'icon', path: 'M5.8 4.5L2.5 8l3.3 3.5M10.2 4.5L13.5 8l-3.3 3.5' },
     },
     {

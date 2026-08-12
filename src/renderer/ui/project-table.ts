@@ -45,7 +45,7 @@ export function renderProjectTable(
   if (rows.length === 0) {
     const row = createElement('tr');
     const cell = createElement('td', {
-      text: 'Aucun projet trouvé. Vérifie les chemins dans le registre.',
+      text: 'No project found. Check the paths in the registry.',
     });
     cell.colSpan = 6;
     row.append(cell);
@@ -61,7 +61,7 @@ export function renderProjectTable(
 function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
   const tr = createElement('tr');
   tr.className = 'table__row';
-  tr.title = 'Clic : ouvrir le terminal de ce dépôt';
+  tr.title = 'Click: open this repository\'s terminal';
   // The guard covers two conflicts: a click on an action button would otherwise both run the action and
   // open a shell, and the double-click that renames a project fires two clicks, so the row would steal
   // the focus from the input that just appeared.
@@ -121,7 +121,7 @@ function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
       createElement('span', {
         className: 'badge-warn',
         text: gitSummary.warning,
-        title: 'Écart avec la branche distante',
+        title: 'Gap with the remote branch',
       }),
     );
   }
@@ -130,7 +130,7 @@ function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
       createElement('span', {
         className: 'badge-warn',
         text: 'local',
-        title: 'Branche jamais poussée',
+        title: 'Branch never pushed',
       }),
     );
   }
@@ -173,7 +173,7 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
     if (canStop(row.server)) {
       const stop = createElement('button', { className: 'button', text: 'Stop' });
       stop.type = 'button';
-      stop.title = `Arrête « ${action.label} »`;
+      stop.title = `Stops "${action.label}"`;
       stop.addEventListener('click', () => actions.onStop(row.project.id));
       fragment.append(stop);
       continue;
@@ -194,7 +194,7 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
       text: action.label,
     });
     start.type = 'button';
-    start.title = `${action.command}\n(relance : un processus encore en cours est arrêté d’abord)`;
+    start.title = `${action.command}\n(restart: a process still running is stopped first)`;
     start.addEventListener('click', () => actions.onRunAction(row.project.id, action.id));
     fragment.append(start);
   }
@@ -209,13 +209,13 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
    */
   const terminal = createElement('button', { className: 'button', text: 'Terminal' });
   terminal.type = 'button';
-  terminal.title = 'Ouvrir un nouvel onglet dans ce dossier';
+  terminal.title = 'Open a new tab in this folder';
   terminal.addEventListener('click', () => actions.onNewTerminal(row.project.id));
   fragment.append(terminal);
 
   const folder = createElement('button', { className: 'button button--quiet', text: '…' });
   folder.type = 'button';
-  folder.title = 'Ouvrir le dossier';
+  folder.title = 'Open the folder';
   folder.addEventListener('click', () => actions.onOpenFolder(row.project.id));
   fragment.append(folder);
 
@@ -247,7 +247,7 @@ function buildProjectName(row: ProjectRow, actions: TableActions): HTMLElement {
     const input = createElement('input', { className: 'cell-project__input' });
     input.type = 'text';
     input.value = row.project.label;
-    input.setAttribute('aria-label', 'Renommer le projet');
+    input.setAttribute('aria-label', 'Rename the project');
 
     let settled = false;
     const finish = (accept: boolean): void => {

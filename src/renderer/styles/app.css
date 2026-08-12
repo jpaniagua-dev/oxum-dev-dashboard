@@ -535,7 +535,7 @@ body {
   font: inherit;
   font-size: var(--font-sm);
   cursor: pointer;
-  /* Wide enough for "Prénom Nom (12)" without stretching to the width of the longest name in the sprint. */
+  /* Wide enough for "First Last (12)" without stretching to the width of the longest name in the sprint. */
   max-width: 260px;
 }
 
@@ -1077,7 +1077,7 @@ body {
 
 /*
  * A placeholder must never be mistaken for a saved value: where one remains, it is an inferred fallback
- * (`déduit 4200`, `aucun`), and it says so in italics and much dimmer than real text.
+ * (`inferred 4200`, `none`), and it says so in italics and much dimmer than real text.
  */
 .settings-field__input::placeholder {
   color: var(--text-faint);

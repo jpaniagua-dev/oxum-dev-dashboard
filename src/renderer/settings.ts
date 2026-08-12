@@ -75,5 +75,5 @@ function applyTheme(state: ThemeState): void {
 }
 
 void start().catch((error: unknown) => {
-  console.error('[settings] echec du demarrage de la fenetre de reglages:', error);
+  console.error('[settings] settings window failed to start:', error);
 });

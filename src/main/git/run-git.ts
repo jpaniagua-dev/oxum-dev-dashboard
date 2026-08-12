@@ -98,7 +98,7 @@ export async function tryGit(
     );
     // git says most of what it did on stderr even when it succeeded, and that is the interesting
     // half: "Switched to branch 'x'", "Everything up-to-date".
-    return { ok: true, stdout, message: firstLine(stderr) || firstLine(stdout) || 'Fait' };
+    return { ok: true, stdout, message: firstLine(stderr) || firstLine(stdout) || 'Done' };
   } catch (error) {
     return { ok: false, stdout: '', message: describeGitError(error) };
   }

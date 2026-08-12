@@ -8,10 +8,10 @@ import { presentInvolvement, presentPullChecks, presentReview } from './presente
 export const PULL_SCOPES: readonly { id: PullScope; label: string; hint: string }[] = [
   {
     id: 'mine',
-    label: 'Les miennes',
-    hint: 'Les PR dont vous êtes auteur ou relecteur demandé',
+    label: 'Mine',
+    hint: 'The PRs you authored or are a requested reviewer on',
   },
-  { id: 'all', label: 'Toutes', hint: 'Toutes les PR ouvertes de ce dépôt' },
+  { id: 'all', label: 'All', hint: 'Every open PR in this repository' },
 ];
 
 export interface PullListActions {
@@ -80,7 +80,7 @@ export function renderPullList(
     hosts.repos.append(
       createElement('p', {
         className: 'pulls__empty',
-        text: 'Aucun dépôt suivi. Coche « Suivre les pull requests » sur un projet dans les réglages.',
+        text: 'No repository followed. Tick "Follow pull requests" on a project in the settings.',
       }),
     );
     return;
@@ -103,7 +103,7 @@ export function renderPullList(
       row.title = repo.error;
     } else if (repo.slug === null) {
       row.append(createElement('span', { className: 'pulls__repo-count', text: '—' }));
-      row.title = 'Ce dépôt n’a pas de remote GitHub';
+      row.title = 'This repository has no GitHub remote';
     } else {
       // The count follows the selected scope, or the badge would contradict the list next to it.
       row.append(
@@ -112,7 +112,7 @@ export function renderPullList(
           text: String(scopedPulls(repo, scope).length),
         }),
       );
-      row.title = `${repo.slug}\n${repo.pulls.length} PR ouverte(s), ${mine.length} qui vous concerne(nt)`;
+      row.title = `${repo.slug}\n${repo.pulls.length} open PR(s), ${mine.length} involving you`;
     }
 
     row.addEventListener('click', () => actions.onSelect(repo.projectId));
@@ -191,14 +191,14 @@ function renderScopes(
  */
 function emptyMessage(repo: RepoPulls, scope: PullScope): string {
   if (repo.checkedAt === null) {
-    return 'Lecture en cours…';
+    return 'Reading...';
   }
   if (scope === 'all') {
-    return 'Aucune PR ouverte sur ce dépôt.';
+    return 'No open PR in this repository.';
   }
   return repo.pulls.length === 0
-    ? 'Aucune PR ouverte sur ce dépôt.'
-    : `Aucune PR qui vous concerne, sur ${repo.pulls.length} ouverte(s). Voir « Toutes ».`;
+    ? 'No open PR in this repository.'
+    : `No PR involving you, out of ${repo.pulls.length} open. See "All".`;
 }
 
 /**
@@ -214,7 +214,7 @@ function buildPullRow(
   actions: PullListActions,
 ): HTMLElement {
   const row = createElement('div', { className: 'pull' });
-  row.title = `${pull.title}\n${pull.branch}\n(clic : ouvrir la PR sur GitHub)`;
+  row.title = `${pull.title}\n${pull.branch}\n(click: open the PR on GitHub)`;
 
   row.append(createElement('span', { className: 'pull__number', text: `#${pull.number}` }));
   // `textContent` everywhere: titles and branch names come from outside the app.
@@ -224,7 +224,7 @@ function buildPullRow(
    * The author, whenever it is not the user.
    *
    * Written for the widened view, where every row would otherwise be an anonymous title, but it earns
-   * its place in "mine" too: a pull request waiting on your review says "à relire" without saying
+   * its place in "mine" too: a pull request waiting on your review says "review requested" without saying
    * whose it is, which is the first thing you want to know. Omitted when it *is* yours — a column
    * repeating your own name down the whole list is what the assignee column already taught us not to do.
    */
@@ -233,7 +233,7 @@ function buildPullRow(
       createElement('span', {
         className: 'pull__author',
         text: pull.authorLogin,
-        title: `Ouverte par ${pull.authorLogin}`,
+        title: `Opened by ${pull.authorLogin}`,
       }),
     );
   }
@@ -260,8 +260,8 @@ function buildPullRow(
    * nothing is lost for a screen reader or on hover.
    */
   const terminal = createIconButton(TERMINAL_ICON, {
-    label: 'Ouvrir un terminal',
-    title: 'Ouvrir un nouvel onglet dans ce dossier',
+    label: 'Open a terminal',
+    title: 'Open a new tab in this folder',
     className: 'icon-button--row pull__terminal',
   });
   terminal.addEventListener('click', () => actions.onNewTerminal(projectId));

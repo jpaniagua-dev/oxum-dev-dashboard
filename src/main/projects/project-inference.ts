@@ -134,10 +134,10 @@ export function validateProjectPath(repoPath: string): PathIssue[] {
     return [{ level: 'error', message: 'Chemin vide' }];
   }
   if (!existsSync(repoPath)) {
-    return [{ level: 'error', message: 'Ce dossier n’existe pas' }];
+    return [{ level: 'error', message: 'This folder does not exist' }];
   }
   if (!existsSync(join(repoPath, '.git'))) {
-    issues.push({ level: 'warning', message: 'Pas un dépôt git : la colonne git restera vide' });
+    issues.push({ level: 'warning', message: 'Not a git repository: the git column stays empty' });
   }
 
   return issues;
@@ -158,13 +158,13 @@ export function validateActions(
   const issues: PathIssue[] = [];
 
   if (actions.length === 0) {
-    issues.push({ level: 'warning', message: 'Aucune action : la ligne n’aura pas de bouton' });
+    issues.push({ level: 'warning', message: 'No action: the row will have no button' });
     return issues;
   }
   if (actions.filter((action) => action.role === 'server').length > 1) {
     issues.push({
       level: 'error',
-      message: 'Deux actions « serveur » : une seule peut piloter l’état du serveur',
+      message: 'Two "server" actions: only one can drive the server state',
     });
   }
 
@@ -177,7 +177,7 @@ export function validateActions(
     if (script !== null && manifest[script] === undefined) {
       issues.push({
         level: 'warning',
-        message: `« ${action.label} » : le script « ${script} » n’existe pas dans package.json`,
+        message: `"${action.label}": the "${script}" script does not exist in package.json`,
       });
     }
   }

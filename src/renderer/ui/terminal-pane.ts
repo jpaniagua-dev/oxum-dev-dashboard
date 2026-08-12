@@ -840,8 +840,8 @@ export class TerminalPane {
 
     this.showMenu(x, y, [
       {
-        label: 'Copier',
-        hint: 'Ctrl+C avec une sélection, ou Ctrl+Shift+C',
+        label: 'Copy',
+        hint: 'Ctrl+C with a selection, or Ctrl+Shift+C',
         // Same rule as the shortcut: nothing selected means nothing to copy, not "copy the screen".
         disabled: !view.term.hasSelection(),
         run: () => {
@@ -850,7 +850,7 @@ export class TerminalPane {
         },
       },
       {
-        label: 'Coller',
+        label: 'Paste',
         hint: 'Ctrl+V',
         run: () => {
           this.pasteInto(view.term);
@@ -858,27 +858,27 @@ export class TerminalPane {
         },
       },
       {
-        label: 'Diviser à droite',
+        label: 'Split right',
         hint: 'Alt+Shift+D',
         run: () => this.actions.onSplitShell(session.cwd, 'columns'),
       },
       {
-        label: 'Diviser en bas',
+        label: 'Split down',
         hint: 'Alt+Shift+B',
         run: () => this.actions.onSplitShell(session.cwd, 'rows'),
       },
       {
-        label: 'Fermer ce panneau',
+        label: 'Close this pane',
         // Nothing to close when it is the only one, and its terminals must not die here.
         disabled: groups.length <= 1,
-        hint: 'Alt+Shift+W : les onglets passent au panneau voisin',
+        hint: 'Alt+Shift+W: the tabs move to the neighbouring pane',
         run: () => {
           this.focused = at;
           this.closeFocusedGroup();
         },
       },
       {
-        label: 'Réunir en un seul panneau',
+        label: 'Merge into a single pane',
         disabled: groups.length <= 1,
         run: () => {
           const tabs = groups.flatMap((group) => group.tabs);
@@ -910,40 +910,40 @@ export class TerminalPane {
 
     this.showMenu(x, y, [
       {
-        label: 'Déplacer dans un panneau à droite',
+        label: 'Move to a pane on the right',
         // The only tab of its pane is already alone: moving it would close one pane to open another.
         disabled: alone,
         run: () => this.moveToOwnPane(session.id, 'columns'),
       },
       {
-        label: 'Déplacer dans un panneau en bas',
+        label: 'Move to a pane below',
         disabled: alone,
         run: () => this.moveToOwnPane(session.id, 'rows'),
       },
       {
-        label: 'Renommer',
+        label: 'Rename',
         run: () => {
           this.renaming = session.id;
           this.renderStrips();
         },
       },
       {
-        label: 'Fermer l’onglet',
-        hint: 'Ctrl+Alt+W sur l’onglet actif',
+        label: 'Close the tab',
+        hint: 'Ctrl+Alt+W on the active tab',
         disabled: !session.closable,
         run: () => this.actions.onClose(session.id),
       },
       {
         label:
           closable.length > 0
-            ? `Fermer les onglets vers la droite (${closable.length})`
-            : 'Fermer les onglets vers la droite',
+            ? `Close tabs to the right (${closable.length})`
+            : 'Close tabs to the right',
         // Nothing to the right, or nothing there that can be closed: either way there is no gesture.
         disabled: closable.length === 0,
         hint:
           kept > 0
-            ? `${kept} onglet(s) restent : un serveur qui tourne ne se ferme pas ici, il s’arrête avec « Stop ».`
-            : 'Ferme les onglets suivants de ce panneau seulement, pas ceux d’un panneau voisin.',
+            ? `${kept} tab(s) stay: a running server does not close here, it stops with "Stop".`
+            : 'Closes the following tabs of this pane only, not those of a neighbouring pane.',
         run: () => {
           for (const entry of closable) {
             this.actions.onClose(entry.id);
@@ -989,10 +989,10 @@ export class TerminalPane {
 
       const clear = createElement('button', {
         className: 'button button--quiet terminal__strip-clear',
-        text: 'Vider',
+        text: 'Clear',
       });
       clear.type = 'button';
-      clear.title = 'Effacer la sortie de cet onglet';
+      clear.title = 'Erase this tab\'s output';
       clear.addEventListener('click', (event) => {
         event.stopPropagation();
         this.clear(group.active);
@@ -1025,7 +1025,7 @@ export class TerminalPane {
         className: 'terminal__tab-label',
         text: session.title,
         // The working directory is the one thing you always want to know about a shell tab.
-        title: `${session.cwd}\n(double-clic pour renommer, glisser pour réordonner ou changer de panneau)`,
+        title: `${session.cwd}\n(double-click to rename, drag to reorder or change pane)`,
       });
       label.type = 'button';
       label.setAttribute('aria-selected', String(session.id === this.activeId));
@@ -1054,7 +1054,7 @@ export class TerminalPane {
     if (session.closable) {
       const close = createElement('button', { className: 'terminal__tab-close', text: '×' });
       close.type = 'button';
-      close.title = 'Fermer cet onglet';
+      close.title = 'Close this tab';
       close.addEventListener('click', (event) => {
         event.stopPropagation();
         this.actions.onClose(session.id);
@@ -1219,7 +1219,7 @@ export class TerminalPane {
     const input = createElement('input', { className: 'terminal__tab-input' });
     input.type = 'text';
     input.value = session.title;
-    input.setAttribute('aria-label', 'Renommer cet onglet');
+    input.setAttribute('aria-label', 'Rename this tab');
 
     let settled = false;
     const commit = (accept: boolean): void => {
@@ -1268,7 +1268,7 @@ export class TerminalPane {
 
     const add = createElement('button', { className: 'terminal__new-button', text: '+' });
     add.type = 'button';
-    add.title = 'Nouvel onglet dans ce panneau';
+    add.title = 'New tab in this pane';
     add.addEventListener('click', (event) => {
       event.stopPropagation();
       const first = this.profiles[0];
@@ -1285,8 +1285,8 @@ export class TerminalPane {
       // A drawn chevron rather than the `⌄` character: as text it renders at whatever size and
       // baseline the font decides, which is why it looked like a stray mark next to the `+`.
       caret.append(chevronDown());
-      caret.title = 'Choisir un shell';
-      caret.setAttribute('aria-label', 'Choisir un shell');
+      caret.title = 'Choose a shell';
+      caret.setAttribute('aria-label', 'Choose a shell');
       caret.addEventListener('click', (event) => {
         event.stopPropagation();
         this.menuOpen = this.menuOpen === groupIndex ? null : groupIndex;

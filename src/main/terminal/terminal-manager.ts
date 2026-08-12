@@ -555,7 +555,7 @@ export class TerminalManager {
         pty: null,
         role: options.role,
         // A session that failed to launch still gets a tab and a pane: its buffer carries the reason.
-        buffer: `\u001b[31mImpossible de lancer ${options.file}\u001b[39m\r\n${message}\r\n`,
+        buffer: `\u001b[31mCould not launch ${options.file}\u001b[39m\r\n${message}\r\n`,
       });
       this.hooks.onSessionsChanged(this.sessions());
       return id;

@@ -7,7 +7,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'"
     />
-    <title>Réglages</title>
+    <title>Settings</title>
     <link rel="stylesheet" href="./styles/app.css" />
   </head>
   <body>
@@ -17,7 +17,7 @@
     -->
     <div class="settings-page">
       <header class="settings__header">
-        <h1 class="settings__title">Réglages</h1>
+        <h1 class="settings__title">Settings</h1>
       </header>
 
       <div class="settings__body">
@@ -28,18 +28,19 @@
         <section class="settings__section">
           <h2 class="settings__section-title">Interface</h2>
           <p class="settings__note">
-            Cette taille est la base de toute la typographie de l’app : tout le reste (badges,
-            en-têtes, listes) garde ses proportions autour d’elle. Le terminal, lui, a sa propre
-            taille dans la section ci-dessous.
+            This size is the base of the whole app's typography: everything else (badges, headers,
+            lists) keeps its proportions around it. The terminal has its own size, in the section
+            below.
           </p>
           <div id="settings-interface"></div>
         </section>
 
         <section class="settings__section">
-          <h2 class="settings__section-title">Projets</h2>
+          <h2 class="settings__section-title">Projects</h2>
           <p class="settings__note">
-            Un dossier suffit. Le type et le port sont déduits du <code>package.json</code> du dépôt
-            quand il y en a un ; laisse-les vides pour suivre le projet automatiquement.
+            A folder is enough. The kind and the port are inferred from the repository's
+            <code>package.json</code> when there is one; leave them empty to follow the project
+            automatically.
           </p>
           <div id="settings-projects"></div>
         </section>
@@ -47,8 +48,8 @@
         <section class="settings__section">
           <h2 class="settings__section-title">Terminal</h2>
           <p class="settings__note">
-            Les profils sont détectés sur la machine. Modifier un chemin le marque comme
-            personnalisé et il primera sur la détection.
+            Profiles are detected on this machine. Editing a path marks it as custom, and the custom
+            value then wins over detection.
           </p>
           <div id="settings-terminal"></div>
         </section>
@@ -56,9 +57,9 @@
         <section class="settings__section">
           <h2 class="settings__section-title">Notes</h2>
           <p class="settings__note">
-            Une note est un fichier <code>.md</code> dans ce dossier, dont le titre est la première
-            ligne. Le dossier reste lisible en dehors de l’app. Laisse le champ vide pour utiliser le
-            dossier de l’application.
+            A note is a <code>.md</code> file in this folder, and its title is the first line. The
+            folder stays readable outside the app. Leave the field empty to use the application
+            folder.
           </p>
           <div id="settings-notes"></div>
         </section>
@@ -66,9 +67,9 @@
         <section class="settings__section">
           <h2 class="settings__section-title">Jira</h2>
           <p class="settings__note">
-            Le jeton d’API est chiffré par Windows pour ton compte et rangé à part, jamais dans
-            <code>settings.json</code>. Il n’est jamais relu vers cette fenêtre : pour le changer, saisis-en
-            un nouveau. Un jeton donne accès à tout ton Jira, pas seulement en lecture.
+            The API token is encrypted by Windows for your account and stored separately, never in
+            <code>settings.json</code>. It is never read back into this window: to change it, type a new
+            one. A token grants access to all of your Jira, and not read-only access either.
           </p>
           <div id="settings-jira"></div>
         </section>

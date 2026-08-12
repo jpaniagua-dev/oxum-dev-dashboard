@@ -29,7 +29,7 @@ export interface EditorCallbacks {
   onChange: (text: string) => void;
 }
 
-const PLACEHOLDER_TEXT = 'Écris ta note ici. Elle est enregistrée toute seule.';
+const PLACEHOLDER_TEXT = 'Write your note here. It saves itself.';
 
 /** Holds the per-theme extension so it can be swapped without rebuilding the editor. */
 const themeCompartment = new Compartment();

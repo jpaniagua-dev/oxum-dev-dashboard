@@ -165,11 +165,11 @@ export function validateProjects(configs: readonly ProjectConfig[]): ProjectVali
     const server = serverAction(config.actions);
     const issues = validateProjectPath(config.path);
     if (config.label.trim().length === 0) {
-      issues.push({ level: 'error', message: 'Le nom est vide' });
+      issues.push({ level: 'error', message: 'The name is empty' });
     }
     if ((seenPaths.get(normalise(config.path)) ?? 0) > 1) {
       // Two rows on one repository would fight over the same terminal and the same server state.
-      issues.push({ level: 'error', message: 'Ce dossier est déjà utilisé par un autre projet' });
+      issues.push({ level: 'error', message: 'That folder is already used by another project' });
     }
     issues.push(...validateActions(config.path, config.actions));
 

@@ -24,7 +24,7 @@ const BODY = {
       key: 'PROJ-1674',
       fields: {
         summary: 'User profile detail page',
-        status: { name: 'En cours', statusCategory: { key: 'indeterminate' } },
+        status: { name: 'In progress', statusCategory: { key: 'indeterminate' } },
         assignee: { displayName: 'Julio P.', emailAddress: 'dev@example.com' },
         issuetype: { name: 'Story' },
         updated: '2026-08-04T15:00:00.000+0200',
@@ -34,7 +34,7 @@ const BODY = {
       key: 'PROJ-1651',
       fields: {
         summary: 'Invoice list filters',
-        status: { name: 'À faire', statusCategory: { key: 'new' } },
+        status: { name: 'To do', statusCategory: { key: 'new' } },
         assignee: null,
         issuetype: { name: 'Task' },
         updated: '2026-08-01T09:00:00.000+0200',
@@ -50,7 +50,7 @@ describe('parseIssues', () => {
     expect(issues[0]).toMatchObject({
       key: 'PROJ-1674',
       summary: 'User profile detail page',
-      status: 'En cours',
+      status: 'In progress',
       stage: 'in-progress',
       type: 'Story',
       assignee: 'Julio P.',
@@ -138,13 +138,13 @@ describe('parseTransitions', () => {
     // The transition's own name is a verb ("Start progress"); the destination is what the user chooses.
     const body = {
       transitions: [
-        { id: '21', name: 'Start progress', to: { name: 'En cours' } },
-        { id: '31', name: 'Done', to: { name: 'Terminé' } },
+        { id: '21', name: 'Start progress', to: { name: 'In progress' } },
+        { id: '31', name: 'Done', to: { name: 'Done' } },
       ],
     };
     expect(parseTransitions(body)).toEqual([
-      { id: '21', label: 'En cours' },
-      { id: '31', label: 'Terminé' },
+      { id: '21', label: 'In progress' },
+      { id: '31', label: 'Done' },
     ]);
   });
 
@@ -165,13 +165,13 @@ describe('parseTransitions', () => {
 
 describe('presentStage', () => {
   it('shows the status as written, with a tone from the category', () => {
-    expect(presentStage('in-progress', 'En review')).toMatchObject({ label: 'En review', tone: 'busy' });
-    expect(presentStage('todo', 'À faire')).toMatchObject({ tone: 'neutral' });
-    expect(presentStage('done', 'Terminé')).toMatchObject({ tone: 'ok' });
+    expect(presentStage('in-progress', 'In review')).toMatchObject({ label: 'In review', tone: 'busy' });
+    expect(presentStage('todo', 'To do')).toMatchObject({ tone: 'neutral' });
+    expect(presentStage('done', 'Done')).toMatchObject({ tone: 'ok' });
   });
 
   it('never shows an empty pill', () => {
-    expect(presentStage('unknown', '').label).toBe('sans statut');
+    expect(presentStage('unknown', '').label).toBe('no status');
   });
 });
 
@@ -249,10 +249,10 @@ describe('filtering and sorting the list', () => {
   }
 
   const sprint = [
-    issue({ key: 'PROJ-999', assignee: 'Alex Martin', status: 'En review', stage: 'in-progress' }),
-    issue({ key: 'PROJ-1000', assignee: '', status: 'À faire' }),
-    issue({ key: 'PROJ-12', assignee: 'Julio Paniagua', status: 'En cours', stage: 'in-progress' }),
-    issue({ key: 'PROJ-1001', assignee: 'Alex Martin', status: 'À faire' }),
+    issue({ key: 'PROJ-999', assignee: 'Alex Martin', status: 'In review', stage: 'in-progress' }),
+    issue({ key: 'PROJ-1000', assignee: '', status: 'To do' }),
+    issue({ key: 'PROJ-12', assignee: 'Julio Paniagua', status: 'In progress', stage: 'in-progress' }),
+    issue({ key: 'PROJ-1001', assignee: 'Alex Martin', status: 'To do' }),
   ];
 
   it('lists the assignees present, and only them', () => {
@@ -307,13 +307,13 @@ describe('filtering and sorting the list', () => {
 
   it('reverses by comparison and not by reversing the array', () => {
     /*
-     * Reversing would also reverse the ties: the two "À faire" issues would swap places on a direction
+     * Reversing would also reverse the ties: the two "To do" issues would swap places on a direction
      * change, which makes a list look like it is shuffling rows nobody sorted.
      */
     const ascending = sortIssues(sprint, { key: 'status', direction: 'asc' });
     const descending = sortIssues(sprint, { key: 'status', direction: 'desc' });
-    const tiedAsc = ascending.filter((entry) => entry.status === 'À faire').map((e) => e.key);
-    const tiedDesc = descending.filter((entry) => entry.status === 'À faire').map((e) => e.key);
+    const tiedAsc = ascending.filter((entry) => entry.status === 'To do').map((e) => e.key);
+    const tiedDesc = descending.filter((entry) => entry.status === 'To do').map((e) => e.key);
 
     expect(tiedAsc).toEqual(tiedDesc);
   });

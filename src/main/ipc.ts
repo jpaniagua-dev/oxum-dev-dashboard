@@ -182,7 +182,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       const project = resolveProject(deps.projects(), projectId);
       const parsed = asDiffTarget(target);
       if (project === undefined || parsed === null) {
-        return { title: '', lines: [], note: 'Projet ou fichier introuvable.' };
+        return { title: '', lines: [], note: 'Project or file not found.' };
       }
       return readDiff(project.path, parsed);
     },
@@ -193,7 +193,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, projectId: unknown, name: unknown, checkout: unknown): Promise<GitResult> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined || typeof name !== 'string') {
-        return { ok: false, message: 'Projet introuvable' };
+        return { ok: false, message: 'Project not found' };
       }
       return createBranch(project.path, name, checkout === true);
     },
@@ -204,7 +204,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, projectId: unknown, name: unknown): Promise<GitResult> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined || typeof name !== 'string') {
-        return { ok: false, message: 'Projet introuvable' };
+        return { ok: false, message: 'Project not found' };
       }
       return checkoutBranch(project.path, name);
     },
@@ -215,7 +215,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, projectId: unknown, paths: unknown, staged: unknown): Promise<GitResult> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
-        return { ok: false, message: 'Projet introuvable' };
+        return { ok: false, message: 'Project not found' };
       }
       const list = Array.isArray(paths)
         ? paths.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
@@ -242,10 +242,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
-        return { terminalId: null, result: { ok: false, message: 'Projet introuvable' } };
+        return { terminalId: null, result: { ok: false, message: 'Project not found' } };
       }
       if (typeof message !== 'string' || message.trim().length === 0) {
-        return { terminalId: null, result: { ok: false, message: 'Message de commit vide' } };
+        return { terminalId: null, result: { ok: false, message: 'Empty commit message' } };
       }
 
       const file = await deps.writeCommitMessage(project.id, message);
@@ -264,8 +264,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         terminalId,
         result:
           terminalId === null
-            ? { ok: false, message: 'Impossible d’ouvrir l’onglet de commit' }
-            : { ok: true, message: 'Commit lancé dans un onglet' },
+            ? { ok: false, message: 'Could not open the commit tab' }
+            : { ok: true, message: 'Commit launched in a tab' },
       };
     },
   );
@@ -276,7 +276,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       const project = resolveProject(deps.projects(), projectId);
       const operation = op === 'fetch' || op === 'pull' || op === 'push' ? op : null;
       if (project === undefined || operation === null) {
-        return { ok: false, message: 'Opération inconnue' };
+        return { ok: false, message: 'Unknown operation' };
       }
       // Re-read rather than trusting what the renderer last saw: `push` needs to know whether the
       // branch has an upstream, and a stale answer is what turns a first push into a puzzling refusal.
@@ -290,7 +290,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, projectId: unknown, sha: unknown, noCommit: unknown): Promise<GitResult> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined || typeof sha !== 'string') {
-        return { ok: false, message: 'Projet introuvable' };
+        return { ok: false, message: 'Project not found' };
       }
       return cherryPick(project.path, sha, noCommit === true);
     },
@@ -310,7 +310,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       const operation: GitSequencerOp | null =
         op === 'continue' || op === 'abort' ? op : null;
       if (project === undefined || operation === null) {
-        return { ok: false, message: 'Opération inconnue' };
+        return { ok: false, message: 'Unknown operation' };
       }
       return resolveSequencer(project.path, await readSequencer(project.path), operation);
     },
@@ -326,7 +326,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     ): Promise<GitResult> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
-        return { ok: false, message: 'Projet introuvable' };
+        return { ok: false, message: 'Project not found' };
       }
       return stashPush(
         project.path,
@@ -343,7 +343,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       const operation: GitStashOp | null =
         op === 'apply' || op === 'pop' || op === 'drop' ? op : null;
       if (project === undefined || operation === null || typeof sha !== 'string') {
-        return { ok: false, message: 'Opération inconnue' };
+        return { ok: false, message: 'Unknown operation' };
       }
       return applyStash(project.path, sha, operation);
     },
@@ -368,11 +368,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
-        return { terminalId: null, result: { ok: false, message: 'Projet introuvable' } };
+        return { terminalId: null, result: { ok: false, message: 'Project not found' } };
       }
       const key = typeof issueKey === 'string' ? issueKey.trim().toUpperCase() : '';
       if (!ISSUE_KEY_PATTERN.test(key)) {
-        return { terminalId: null, result: { ok: false, message: 'Clé de ticket invalide' } };
+        return { terminalId: null, result: { ok: false, message: 'Invalid issue key' } };
       }
 
       const profile = resolveBashProfile(
@@ -382,7 +382,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       if (profile === undefined) {
         return {
           terminalId: null,
-          result: { ok: false, message: 'Aucun profil bash : l’alias « dev » ne peut pas être lancé' },
+          result: { ok: false, message: 'No bash profile: the "dev" alias cannot be launched' },
         };
       }
 
@@ -401,8 +401,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         terminalId,
         result:
           terminalId === null
-            ? { ok: false, message: 'Impossible d’ouvrir l’onglet' }
-            : { ok: true, message: `dev ${key} lancé dans ${project.label}` },
+            ? { ok: false, message: 'Could not open the tab' }
+            : { ok: true, message: `dev ${key} launched in ${project.label}` },
       };
     },
   );
@@ -460,7 +460,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
       // An absent token leaves the stored one alone: the form never receives it, so it cannot send it
       // back, and an empty string would otherwise wipe a working credential on every save.
-      let message = 'Connexion enregistrée';
+      let message = 'Connection saved';
       if (typeof token === 'string' && token.length > 0) {
         const result = await deps.saveJiraToken(token);
         message = result.message;
@@ -486,7 +486,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, key: unknown, transitionId: unknown): Promise<{ ok: boolean; message: string }> => {
       const credentials = await deps.jiraCredentials();
       if (credentials === null || typeof key !== 'string' || typeof transitionId !== 'string') {
-        return { ok: false, message: 'Connexion Jira incomplète' };
+        return { ok: false, message: 'Incomplete Jira connection' };
       }
       const result = await applyTransition(credentials, key, transitionId);
       if (result.ok) {
@@ -501,7 +501,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, key: unknown): Promise<{ ok: boolean; message: string }> => {
       const credentials = await deps.jiraCredentials();
       if (credentials === null || typeof key !== 'string') {
-        return { ok: false, message: 'Connexion Jira incomplète' };
+        return { ok: false, message: 'Incomplete Jira connection' };
       }
       // The account id comes from the token's own account, so "assign to me" cannot target anyone else.
       const { accountId, error } = await readMyAccountId(credentials);
@@ -606,7 +606,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     if (!stopped) {
       // Logged rather than swallowed: a `Stop` that finds nothing to stop means the row and the
       // session list disagree, and that must be findable instead of looking like a dead button.
-      console.log(`[stop] aucune action serveur en cours pour ${projectId}`);
+      console.log(`[stop] no running server action for ${projectId}`);
     }
     return stopped;
   });
@@ -757,7 +757,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
   ipcMain.handle(IpcChannel.PickFolder, async (event, title: unknown): Promise<string | null> =>
     deps.pickFolder(
-      typeof title === 'string' ? title : 'Choisir un dossier',
+      typeof title === 'string' ? title : 'Choose a folder',
       BrowserWindow.fromWebContents(event.sender),
     ),
   );

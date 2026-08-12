@@ -116,7 +116,7 @@ describe('inferProject on a repository on disk', () => {
 describe('validateProjectPath', () => {
   it('rejects an empty or missing path', () => {
     expect(validateProjectPath('')[0]?.level).toBe('error');
-    expect(validateProjectPath('C:/definitely/not/here')[0]?.message).toMatch(/n’existe pas/);
+    expect(validateProjectPath('C:/definitely/not/here')[0]?.message).toMatch(/does not exist/);
   });
 
   it('treats a folder with no package.json as usable', () => {
@@ -162,7 +162,7 @@ describe('validateActions', () => {
 
   it('warns on an empty list rather than accepting a row with no buttons', () => {
     expect(validateActions(ROOT, [])).toEqual([
-      { level: 'warning', message: 'Aucune action : la ligne n’aura pas de bouton' },
+      { level: 'warning', message: 'No action: the row will have no button' },
     ]);
   });
 

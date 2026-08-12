@@ -3,10 +3,6 @@
 An embedded terminal with, above it, a status strip over your front-end projects (dev server, git,
 GitHub checks). Every action a row offers runs in a tab of that terminal.
 
-> French strings appear throughout this document inside quotes or backticks (`arrêté`,
-> « Les miennes », `Rafraîchir`). They are quoted verbatim because they are the text the app actually
-> displays: the code and its comments are in English, the interface is in French. See Conventions.
-
 ## Public repository: keep it anonymous
 
 This repository is **public**, while at runtime the app handles branch names, PR titles, issue keys
@@ -41,7 +37,7 @@ exceptions:
   it (`port-probe.ts`, `Get-NetTCPConnection` plus `CommandLine` to the repository path) were removed:
   once everything launches inside the embedded terminal, that was a state nobody could act on, for a
   situation that had stopped happening. The trade-off is accepted: if a server is still running outside
-  the dashboard, the row says `arrêté` and the action fails visibly on "address in use" in its own tab.
+  the dashboard, the row says `stopped` and the action fails visibly on "address in use" in its own tab.
   If that starts happening again, the probe is what to bring back (it knew two non-obvious things:
   probe `localhost` and never `127.0.0.1`, since Angular servers only listen on IPv6; and the array
   wrapping of PowerShell 5.1).
@@ -68,7 +64,7 @@ exceptions:
 - **What the settings window writes comes back by broadcast.** The main process sends `SettingsChanged`
   to every window and the dashboard rebuilds from that event. Corollary: the form receives the echo of
   its own save, hence the configuration signature that tells an echo from a genuine external change.
-  Without it, the "enregistré" confirmation was wiped immediately.
+  Without it, the "changes saved" confirmation was wiped immediately.
 - **The "unsaved changes" prompt lives in the main process.** Only the window's `close` handler can
   still cancel the close, so the renderer reports its state through `SettingsDirty`; the question is
   asked with `showMessageBoxSync`, since an answer awaited with `await` would arrive too late.
@@ -313,7 +309,7 @@ exceptions:
   view means an entry in `STRIP_TABS`, two elements in `index.html`, and a height in `AppSettings`, and
   that height must be added to `asPatch` **and** to `LOCAL_ONLY_KEYS`, or it is dropped in silence (see
   the note on `settings-patch.ts`).
-- **There is no application title bar any more.** Everything it carried (last refresh, `Rafraîchir`,
+- **There is no application title bar any more.** Everything it carried (last refresh, `Refresh`,
   notes, settings, theme) lives in the strip's tab row, which was already a chrome row: two chrome rows
   above a terminal is one too many when the terminal is the subject of the window. The application title
   went with it, the native title bar already saying it. Benefit of the move: that row is the one that
@@ -343,7 +339,7 @@ exceptions:
   two gestures were the other way round until use settled it: faced with a list of pull requests, the
   reflex is to go read the PR, and the terminal is the deliberate gesture. The `hitsInteractive` guard is
   what stops the button from also opening the browser as it leaves the row.
-- **The Jira tab's "Ouvrir <KEY>" button points at `/browse/<KEY>`**, never at a `/jira/software/...`
+- **The Jira tab's "Open <KEY>" button points at `/browse/<KEY>`**, never at a `/jira/software/...`
   path. A board path needs two things the app does not have: the numeric board id *and* the project's
   style. Verified on a real site: a team-managed project (`style: next-gen`) has its boards under
   `/jira/software/projects/...` while a company-managed one uses `/jira/software/c/projects/...`.
@@ -356,7 +352,7 @@ exceptions:
   fields. Filtering on GitHub's side would have cost two calls per repository, its search syntax being
   unable to express that `OR`. The full payload is therefore in the main process, and that is **exactly**
   what made the second sub-view free: do not reintroduce a GitHub-side filter for either of them.
-- **Two sub-tabs, « Les miennes » and « Toutes »**, rather than one widened filter: the two counts
+- **Two sub-tabs, `Mine` and `All`**, rather than one widened filter: the two counts
   differ, so a single list would have to choose which one to show in the repository column, and that
   count is the at-a-glance answer the tab exists to give. Both counts therefore sit **on the sub-tabs**,
   because "0 mine / 3 total" answers "is this repository quiet, or am I just not in it?" without
@@ -366,10 +362,10 @@ exceptions:
 - **`.subtab` is shared by the Git tab and the PR tab.** It was `.git__view`, renamed: a class named
   after one panel is a class the next panel copies instead of reusing. Same reason as
   `.icon-button--row`.
-- **The author is shown as soon as it is not the user**, not only under « Toutes »: a PR waiting for
-  your review says "à relire" without saying whose it is, which is the first thing you want to know.
-  Hidden when it is yours, for the reason that makes the assignee column disappear under « Mes
-  tickets ».
+- **The author is shown as soon as it is not the user**, not only under `All`: a PR waiting for
+  your review says "review requested" without saying whose it is, which is the first thing you want to know.
+  Hidden when it is yours, for the reason that makes the assignee column disappear under `My
+  issues`.
 - **Three payload traps, all met for real**: an empty `reviewDecision` means "no review required" and
   is **not** an approval; a review requested from a **team** has no `login` and must be ignored without
   crashing; an empty `statusCheckRollup` is `no-checks`, never `passing`.
@@ -390,7 +386,7 @@ exceptions:
 - **The token never travels back to the renderer.** The form receives `hasToken: boolean`, never the
   value; an empty field on save means "keep the stored one", not "clear it".
 - **An issue's stage comes from `statusCategory`, not from the status name.** Names are per-project and
-  renamed at will ("En review", "Ready for QA"); only the category (`new`, `indeterminate`, `done`)
+  renamed at will ("In review", "Ready for QA"); only the category (`new`, `indeterminate`, `done`)
   means the same thing everywhere. The name stays what is **displayed**, because it is the word the team
   uses.
 - **`sprint in openSprints()`** lets Jira answer "which sprint is current" itself, instead of looking up
@@ -399,7 +395,7 @@ exceptions:
   `GET /rest/api/3/search/jql`, and instances migrate at their own pace. The service tries the new one,
   falls back once to the old one on 404/410, then remembers the answer. Do not "simplify" this down to
   one without checking against a real site.
-- **The "Tester" button runs a real search**, not a ping: only a real request validates both the
+- **The "Test" button runs a real search**, not a ping: only a real request validates both the
   credentials and the project keys, which are what fails in practice.
 - Nothing is queried until site, email and token are all three filled in: an unconfigured install makes
   no request at all.
@@ -410,11 +406,11 @@ exceptions:
   per right-click is the right price for never lying.
 - **A transition is labelled by the status it lands on**, not by its own name: the name is a verb
   ("Start progress") while the user is choosing a destination.
-- **« M’assigner ce ticket » goes through the `accountId` of the token's account**
+- **"Assign this issue to me" goes through the `accountId` of the token's account**
   (`/rest/api/3/myself`), never through an email: emails are hidden by privacy settings on many sites,
   and the id guarantees the action cannot target anyone else.
 - **The display order puts "in progress" first, and it is a stable LOCAL sort.** `orderIssues` sorts on
-  the `stage` (so on `statusCategory`, same reason as `presentStage`: "En review" and "Ready for QA" must
+  the `stage` (so on `statusCategory`, same reason as `presentStage`: "In review" and "Ready for QA" must
   both count as work in progress) and on that key alone, so that the JQL's `ORDER BY` remains the order
   **inside** each group. Without that stability there would be two authorities on the order and the
   second one would be invisible. Done locally and not in JQL: `ORDER BY statusCategory DESC` reads as
@@ -428,10 +424,10 @@ exceptions:
 - **The assignee filter and the column sort are NOT persisted**, unlike `pullScope`. A hidden filter
   that comes back on the next launch is a list that silently stops showing half the sprint, and the
   cause is a dropdown nobody remembers setting. A PR tab's scope is a preference; a filter is a question
-  asked once. The filter is also **reset when the view changes**: « Mes tickets » has no assignee column,
+  asked once. The filter is also **reset when the view changes**: `My issues` has no assignee column,
   so a carried-over filter would hide rows there with no way to see it or remove it.
 - **A column sort REPLACES the default order, it does not refine it.** Sorting by name *inside* the "in
-  progress" group would keep the tab's habit, but it would make the sort lie: whoever clicked "Assigné"
+  progress" group would keep the tab's habit, but it would make the sort lie: whoever clicked "Assignee"
   expects the names to run in order down the whole list. One authority on the order at a time, the one
   that was asked for. Corollary: a header's cycle has **three** states (ascending, descending, back to
   default), otherwise there is no way back to "in progress first".
@@ -448,7 +444,7 @@ exceptions:
   it would shift by the width of the scrollbar as soon as the list overflows, and a column misaligned
   with its values is worse than no header. It reuses the `.issue` grid, the only way for a label to stay
   above the column it names.
-- **"Créer une branche" runs the `dev <ISSUE>` alias, never a command assembled in the renderer.** The
+- **"Create a branch" runs the `dev <ISSUE>` alias, never a command assembled in the renderer.** The
   channel takes a project and a key; the main process assembles `dev <KEY>` after validating the key
   against `ISSUE_KEY_PATTERN`. This is the only place in the app where input from the renderer reaches a
   shell, so the pattern is anchored and deliberately narrow: letters, hyphen, digits. It also requires an
@@ -459,7 +455,7 @@ exceptions:
   submenu. A modal is excluded on principle here (a `mousedown` inside released outside fires a `click`
   on the common ancestor: the bug that got the settings modal removed). A real submenu would need hover
   timers, edge flipping and a keyboard model, that is a menu framework for a list of four repositories.
-  And a flat "Créer une branche dans X" list in the first menu would push the transitions off screen by
+  And a flat "Create a branch in X" list in the first menu would push the transitions off screen by
   ten projects. The last used project is at the top and says so; it is **session-local**, like a
   shortcut and not like a setting.
 - **`context-menu.ts` has no side effect at import time.** Its dismissal listeners are attached on the
@@ -631,7 +627,7 @@ exceptions:
   the branch name is no longer a glance. Right click on the header line, plus a `⋯` button kept for the
   reason that kept the chevron next to the fold double-click: the expert gesture does not have to be the
   discoverable one, but there has to be one. The menu is **rebuilt on every open**, like the Jira
-  transitions: its labels depend on the state (`Push` becomes « Push et publier la branche » with no
+  transitions: its labels depend on the state (`Push` becomes "Push and publish the branch" with no
   upstream).
 - **`gitPanelState()` and `gitPanelActions()` are extracted for that.** The menu needs exactly the same
   snapshot as the panel; two places assembling it would end up disagreeing, and the failure would be a
@@ -740,7 +736,7 @@ pattern are left ready.
 - **A project is a folder, not necessarily an npm project.** Only an empty or non-existent path is a
   validation `error`; a missing `package.json`, or a missing script an action points at, is a `warning`.
   Those cases break one button, while git status, the terminal and `commit` all work. As an `error`, a
-  single row of that kind blocked the "Enregistrer" button for the whole settings dialog.
+  single row of that kind blocked the "Save" button for the whole settings dialog.
 - **The renderer does not build a project configuration.** `buildProjectConfig` (IPC) builds it in the
   main process, so a project added from the table and a project added from the settings are identical:
   same id derivation, same label, same default actions. It used to be duplicated in both places, and
@@ -748,7 +744,7 @@ pattern are left ready.
 - **Changing the list rebuilds the monitor** and closes the terminals that have become unreachable
   (`reconcile`). The monitor keys its state by project, so mutating it in place would leave phantom rows.
 - **`expectedPort` no longer drives anything** since the probe was removed: it only serves the settings
-  display. The port shown by the `sert :4201` badge comes from the process output, not from that setting.
+  display. The port shown by the `serving :4201` badge comes from the process output, not from that setting.
   Still to decide: remove it or make it read-only.
 
 ## Verified traps
@@ -815,7 +811,10 @@ npm run dist       # installer in release/
 ## Conventions
 
 - Strict TypeScript, `noUncheckedIndexedAccess`, no `any`.
-- Code, comments and documentation **in English**. Displayed text **in French**.
+- Code, comments, documentation and **displayed text all in English**. The interface was in
+  French until 4.3.0 and was translated wholesale: a dashboard whose repository, docs and
+  commits are English had no reason to answer in another language. No string is translated at
+  runtime, there is no i18n layer, and adding one would be a feature nobody has asked for.
 - **Commit messages in English**, present tense and imperative (`Add`, `Fix`, `Refactor`), first
   letter capitalised, no trailing period, no emoji. The history was rewritten on 2026-08-12 to apply
   this rule, so do not take an old commit's style as licence to break it.

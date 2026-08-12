@@ -44,10 +44,10 @@
       -->
       <section class="projects" id="projects-pane">
         <!-- Double-clicking this row folds the strip, the way a title bar maximises a window. -->
-        <div class="projects__header" id="projects-header" title="Double-clic : replier ou déplier">
+        <div class="projects__header" id="projects-header" title="Double-click: fold or unfold">
           <div class="strip__tabs" role="tablist">
             <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
-              Projets
+              Projects
             </button>
             <button type="button" id="strip-tab-pulls" class="strip__tab" role="tab">
               Pull requests
@@ -57,16 +57,16 @@
           </div>
           <div class="projects__header-actions">
             <span id="last-refresh" class="strip__meta"></span>
-            <button type="button" id="refresh-button" class="button">Rafraîchir</button>
-            <button type="button" id="add-project" class="button" title="Ajouter un dossier de projet">
-              + Projet
+            <button type="button" id="refresh-button" class="button">Refresh</button>
+            <button type="button" id="add-project" class="button" title="Add a project folder">
+              + Project
             </button>
             <button
               type="button"
               id="notes-button"
               class="icon-button"
               title="Notes (Alt+Shift+N)"
-              aria-label="Afficher les notes"
+              aria-label="Show the notes"
               aria-pressed="false"
             >
               <!-- A sheet with three lines of writing, drawn in strokes like the other panel icons. -->
@@ -78,8 +78,8 @@
               type="button"
               id="settings-button"
               class="icon-button"
-              title="Réglages"
-              aria-label="Ouvrir les réglages"
+              title="Settings"
+              aria-label="Open the settings"
             >
               <!--
                 A solid eight-tooth gear with the hub punched out by `evenodd`.
@@ -98,8 +98,8 @@
               type="button"
               id="theme-button"
               class="icon-button"
-              title="Thème"
-              aria-label="Changer de thème"
+              title="Theme"
+              aria-label="Switch theme"
             >
               <svg id="theme-icon" viewBox="0 0 16 16" aria-hidden="true"></svg>
             </button>
@@ -111,8 +111,8 @@
               type="button"
               id="strip-collapse"
               class="icon-button"
-              title="Replier la bande (Alt+Shift+A)"
-              aria-label="Replier la bande"
+              title="Fold the strip (Alt+Shift+A)"
+              aria-label="Fold the strip"
               aria-expanded="true"
               aria-controls="projects-pane"
             >
@@ -134,10 +134,10 @@
           <table class="table" id="project-table">
             <thead>
               <tr>
-                <th scope="col">Projet</th>
-                <th scope="col">Serveur</th>
-                <th scope="col">Fichiers</th>
-                <th scope="col">Branche</th>
+                <th scope="col">Project</th>
+                <th scope="col">Server</th>
+                <th scope="col">Files</th>
+                <th scope="col">Branch</th>
                 <th scope="col">Checks</th>
                 <th scope="col" class="table__actions-head">Actions</th>
               </tr>
@@ -150,7 +150,7 @@
           Repositories on the left, then a column of its own: the two scope sub-tabs above the list.
 
           The sub-tabs are a row inside the detail column rather than more entries in the repository
-          column, because they are orthogonal to it — "les miennes" and "toutes" are two readings of
+          column, because they are orthogonal to it — "mine" and "all" are two readings of
           whichever repository is selected, not two more things to select. Same grammar as the Git
           tab's own sub-tabs, and the same `.subtab` rule paints both.
         -->
@@ -200,7 +200,7 @@
             id="git-resizer"
             role="separator"
             aria-orientation="vertical"
-            aria-label="Redimensionner le diff"
+            aria-label="Resize the diff"
             tabindex="0"
           ></div>
           <div class="git__diff" id="git-diff"></div>
@@ -212,7 +212,7 @@
         id="projects-resizer"
         role="separator"
         aria-orientation="horizontal"
-        aria-label="Redimensionner la liste des projets"
+        aria-label="Resize the project list"
         tabindex="0"
       ></div>
 
@@ -230,7 +230,7 @@
           id="notes-resizer"
           role="separator"
           aria-orientation="vertical"
-          aria-label="Redimensionner les notes"
+          aria-label="Resize the notes"
           tabindex="0"
           hidden
         ></div>
@@ -238,7 +238,7 @@
         <aside class="notes" id="notes-panel" aria-label="Notes" hidden>
           <div class="notes__header">
             <span class="notes__title">Notes</span>
-            <button type="button" id="notes-new" class="button" title="Nouvelle note (Ctrl+N)">
+            <button type="button" id="notes-new" class="button" title="New note (Ctrl+N)">
               + Note
             </button>
           </div>

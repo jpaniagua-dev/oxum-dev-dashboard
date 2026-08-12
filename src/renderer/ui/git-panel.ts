@@ -149,14 +149,14 @@ export function renderGitPanel(
 
   if (state.projects.length === 0) {
     hosts.list.append(
-      createElement('p', { className: 'pulls__empty', text: 'Aucun projet configuré.' }),
+      createElement('p', { className: 'pulls__empty', text: 'No project configured.' }),
     );
     return;
   }
 
   const repo = state.repo;
   if (repo === null) {
-    hosts.list.append(createElement('p', { className: 'pulls__empty', text: 'Lecture en cours…' }));
+    hosts.list.append(createElement('p', { className: 'pulls__empty', text: 'Reading...' }));
     return;
   }
   if (repo.error !== null) {
@@ -219,7 +219,7 @@ function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelA
           text: count === 0 ? '—' : String(count),
         }),
       );
-      row.title = `${state.repo.branch}\n${count} fichier(s) modifié(s)`;
+      row.title = `${state.repo.branch}\n${count} modified file(s)`;
     } else {
       row.title = project.path;
     }
@@ -247,8 +247,8 @@ function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelA
 function buildRepoTerminal(project: Project, actions: GitPanelActions): HTMLButtonElement {
   const button = createIconButton(TERMINAL_ICON, {
     // The name has to say which project: there is one of these per row.
-    label: `Ouvrir un terminal dans ${project.label}`,
-    title: `Ouvrir un nouvel onglet de terminal dans ${project.path}`,
+    label: `Open a terminal in ${project.label}`,
+    title: `Open a new terminal tab in ${project.path}`,
     className: 'icon-button--row',
   });
   button.addEventListener('click', () => actions.onNewTerminal(project.id));
@@ -280,7 +280,7 @@ function buildHeader(
     createElement('span', {
       className: 'git__branch',
       text: repo.branch,
-      title: `Branche courante de ${repo.label}`,
+      title: `Current branch of ${repo.label}`,
     }),
   );
 
@@ -297,18 +297,18 @@ function buildHeader(
         buildPill({
           label: marks.join(' '),
           tone: repo.behind > 0 ? 'busy' : 'info',
-          title: `${repo.ahead} commit(s) d’avance, ${repo.behind} de retard`,
+          title: `${repo.ahead} commit(s) ahead, ${repo.behind} behind`,
         }),
       );
     }
   } else {
     header.append(
       buildPill({
-        label: 'pas d’upstream',
+        label: 'no upstream',
         tone: 'neutral',
         // Not an error: it is simply the state of every branch before its first push, and `Push`
         // below is precisely the button that fixes it.
-        title: 'La branche n’a jamais été poussée. « Push » la publiera avec -u origin.',
+        title: 'The branch has never been pushed. "Push" will publish it with -u origin.',
       }),
     );
   }
@@ -324,9 +324,9 @@ function buildHeader(
   if (repo.sequencer !== 'none') {
     header.append(
       buildPill({
-        label: `${SEQUENCER_LABELS[repo.sequencer]} en cours`,
+        label: `${SEQUENCER_LABELS[repo.sequencer]} in progress`,
         tone: 'error',
-        title: `Le dépôt est au milieu d’un ${SEQUENCER_LABELS[repo.sequencer]}. Continue ou abandonne depuis le menu du dépôt (clic droit).`,
+        title: `The repository is in the middle of a ${SEQUENCER_LABELS[repo.sequencer]}. Continue or abort from the repository menu (right click).`,
       }),
     );
   }
@@ -336,11 +336,11 @@ function buildHeader(
   const menu = createElement('button', {
     className: 'button button--quiet git__menu-button',
     text: '⋯',
-    title: 'Actions du dépôt : fetch, pull, push, terminal (ou clic droit sur cette ligne)',
+    title: 'Repository actions: fetch, pull, push, terminal (or right click this row)',
   });
   menu.type = 'button';
   menu.disabled = state.busy;
-  menu.setAttribute('aria-label', 'Actions du dépôt');
+  menu.setAttribute('aria-label', 'Repository actions');
   menu.addEventListener('click', (event) => {
     /*
      * `stopPropagation` is what makes this button work at all.
@@ -401,14 +401,14 @@ export function buildRepoMenuItems(
       ? []
       : [
           {
-            label: `Abandonner le ${SEQUENCER_LABELS[repo.sequencer]}`,
-            hint: `git ${repo.sequencer} --abort : le dépôt revient où il était avant.`,
+            label: `Abort the ${SEQUENCER_LABELS[repo.sequencer]}`,
+            hint: `git ${repo.sequencer} --abort: the repository goes back to where it was.`,
             disabled: state.busy,
             run: () => actions.onSequencer('abort'),
           },
           {
-            label: `Continuer le ${SEQUENCER_LABELS[repo.sequencer]}`,
-            hint: `git ${repo.sequencer} --continue, une fois les conflits résolus et ajoutés à l’index.`,
+            label: `Continue the ${SEQUENCER_LABELS[repo.sequencer]}`,
+            hint: `git ${repo.sequencer} --continue, once the conflicts are resolved and staged.`,
             disabled: state.busy,
             run: () => actions.onSequencer('continue'),
           },
@@ -424,19 +424,19 @@ export function buildRepoMenuItems(
     },
     {
       label: 'Pull (fast-forward seulement)',
-      hint: 'git pull --ff-only. Une branche divergée doit passer par le terminal : cet onglet ne sait pas finir un rebase.',
+      hint: 'git pull --ff-only. A diverged branch has to go through the terminal: this tab cannot finish a rebase.',
       disabled: state.busy,
       run: () => actions.onSync('pull'),
     },
     {
-      label: repo.hasUpstream ? 'Push' : 'Push et publier la branche',
+      label: repo.hasUpstream ? 'Push' : 'Push and publish the branch',
       hint: repo.hasUpstream ? 'git push' : `git push -u origin ${repo.branch}`,
       disabled: state.busy,
       run: () => actions.onSync('push'),
     },
     {
-      label: 'Ouvrir un terminal ici',
-      hint: `Nouvel onglet dans ${repo.path}`,
+      label: 'Open a terminal here',
+      hint: `New tab in ${repo.path}`,
       disabled: false,
       run: () => actions.onNewTerminal(repo.projectId),
     },
@@ -467,10 +467,10 @@ const SYNC_ICONS: Record<GitSyncOp, string> = {
 };
 
 const SYNC_LABELS: Record<GitSyncOp, { label: string; hint: string }> = {
-  fetch: { label: 'Fetch', hint: 'Récupère les références distantes (git fetch --prune)' },
+  fetch: { label: 'Fetch', hint: 'Fetches the remote refs (git fetch --prune)' },
   pull: {
     label: 'Pull',
-    hint: 'git pull --ff-only. Une branche divergée doit passer par le terminal : cet onglet ne sait pas finir un rebase.',
+    hint: 'git pull --ff-only. A diverged branch has to go through the terminal: this tab cannot finish a rebase.',
   },
   push: { label: 'Push', hint: 'git push' },
 };
@@ -528,7 +528,7 @@ function buildSyncIcon(
   // reader, and `push -u` is worth spelling out the first time a branch is published.
   button.title =
     op === 'push' && !repo.hasUpstream
-      ? `Push et publier la branche : git push -u origin ${repo.branch}`
+      ? `Push and publish the branch: git push -u origin ${repo.branch}`
       : `${label} — ${hint}`;
   button.setAttribute('aria-label', label);
   button.append(createIcon(SYNC_ICONS[op], { paint: 'stroke' }));
@@ -568,7 +568,7 @@ function renderChanges(
 ): void {
   if (repo.changes.length === 0) {
     host.append(
-      createElement('p', { className: 'pulls__empty', text: 'Rien à committer, tout est propre.' }),
+      createElement('p', { className: 'pulls__empty', text: 'Nothing to commit, everything is clean.' }),
     );
     return;
   }
@@ -593,8 +593,8 @@ function buildStagingBar(
 
   const addAll = createElement('button', {
     className: 'button button--quiet',
-    text: `Tout ajouter (${unstaged.length})`,
-    title: 'git add sur tous les fichiers modifiés',
+    text: `Stage all (${unstaged.length})`,
+    title: 'git add on every modified file',
   });
   addAll.type = 'button';
   addAll.disabled = state.busy || unstaged.length === 0;
@@ -604,8 +604,8 @@ function buildStagingBar(
 
   const removeAll = createElement('button', {
     className: 'button button--quiet',
-    text: `Tout retirer (${staged.length})`,
-    title: 'git restore --staged sur tout l’index',
+    text: `Unstage all (${staged.length})`,
+    title: 'git restore --staged on the whole index',
   });
   removeAll.type = 'button';
   removeAll.disabled = state.busy || staged.length === 0;
@@ -628,14 +628,14 @@ function buildChangeRow(
       ? ' git__row--selected'
       : '';
   const row = createElement('div', { className: `git__row git__change${selected}` });
-  row.title = `${change.path}\n${label.title}\n(clic : voir le diff)`;
+  row.title = `${change.path}\n${label.title}\n(click: see the diff)`;
 
   const box = document.createElement('input');
   box.type = 'checkbox';
   box.className = 'git__check';
   box.checked = isStaged(change);
   box.disabled = state.busy;
-  box.title = box.checked ? 'Retirer de l’index' : 'Ajouter à l’index';
+  box.title = box.checked ? 'Unstage' : 'Stage';
   box.addEventListener('change', () => actions.onStage([change.path], box.checked));
   row.append(box);
 
@@ -668,7 +668,7 @@ function renderCommitForm(
   const area = document.createElement('textarea');
   area.className = 'git__message';
   area.rows = 3;
-  area.placeholder = 'Message de commit';
+  area.placeholder = 'Commit message';
   area.value = state.message;
   area.addEventListener('input', () => actions.onMessage(area.value));
   // The panel is rebuilt on every poll; while this has the focus, the refresh holds off.
@@ -680,8 +680,8 @@ function renderCommitForm(
   button.type = 'button';
   button.disabled = state.busy || !staged || state.message.trim().length === 0;
   button.title = staged
-    ? 'git commit -F, lancé dans un onglet du terminal pour que les hooks soient visibles'
-    : 'Rien dans l’index : coche au moins un fichier';
+    ? 'git commit -F, launched in a terminal tab so the hooks stay visible'
+    : 'Nothing staged: tick at least one file';
   button.addEventListener('click', () => actions.onCommit());
 
   const footer = createElement('div', { className: 'git__commit-actions' });
@@ -689,7 +689,7 @@ function renderCommitForm(
     createElement('span', {
       className: 'strip__meta',
       text: staged
-        ? `${repo.changes.filter(isStaged).length} fichier(s) dans l’index`
+        ? `${repo.changes.filter(isStaged).length} staged file(s)`
         : 'index vide',
     }),
     button,
@@ -715,7 +715,7 @@ function renderBranches(
   host.append(buildBranchForm(state, actions));
 
   if (repo.branches.length === 0) {
-    host.append(createElement('p', { className: 'pulls__empty', text: 'Aucune branche locale.' }));
+    host.append(createElement('p', { className: 'pulls__empty', text: 'No local branch.' }));
     return;
   }
 
@@ -744,8 +744,8 @@ function buildBranchForm(state: GitPanelState, actions: GitPanelActions): HTMLEl
 
   const create = createElement('button', {
     className: 'button',
-    text: 'Créer et basculer',
-    title: 'git checkout -b, depuis la branche courante. Le nom est validé par git lui-même.',
+    text: 'Create and switch',
+    title: 'git checkout -b, from the current branch. The name is validated by git itself.',
   });
   create.type = 'button';
   create.disabled = state.busy || state.branchDraft.trim().length === 0;
@@ -804,7 +804,7 @@ function renderHistory(
   actions: GitPanelActions,
 ): void {
   if (repo.commits.length === 0) {
-    host.append(createElement('p', { className: 'pulls__empty', text: 'Aucun commit.' }));
+    host.append(createElement('p', { className: 'pulls__empty', text: 'No commit.' }));
     return;
   }
 
@@ -839,28 +839,28 @@ export function buildCommitMenuItems(
 
   return [
     {
-      label: `Cherry-pick sur ${repo.branch}`,
+      label: `Cherry-pick onto ${repo.branch}`,
       hint: dirty
-        ? 'git cherry-pick, mais l’arbre de travail n’est pas propre : git refusera.'
-        : `git cherry-pick ${commit.sha} : rejoue ce commit sur la branche courante.`,
+        ? 'git cherry-pick, but the working tree is not clean: git will refuse.'
+        : `git cherry-pick ${commit.sha}: replays this commit on the current branch.`,
       disabled: blocked,
       run: () => actions.onCherryPick(commit.sha, false),
     },
     {
-      label: 'Cherry-pick sans committer',
-      hint: `git cherry-pick -n ${commit.sha} : les modifications arrivent dans l’index, à toi de committer.`,
+      label: 'Cherry-pick without committing',
+      hint: `git cherry-pick -n ${commit.sha}: the changes land in the index, committing is up to you.`,
       disabled: blocked,
       run: () => actions.onCherryPick(commit.sha, true),
     },
     {
-      label: 'Copier le sha',
+      label: 'Copy the sha',
       hint: commit.sha,
       disabled: false,
       run: () => actions.onCopy(commit.sha),
     },
     {
-      label: 'Voir le diff',
-      hint: 'Même chose qu’un clic sur la ligne.',
+      label: 'See the diff',
+      hint: 'Same as clicking the row.',
       disabled: false,
       run: () => actions.onSelectTarget({ kind: 'commit', sha: commit.sha }),
     },
@@ -881,7 +881,7 @@ function buildCommitRow(
   // The refs are in the tooltip because the badge is capped: on a merge commit the decoration is
   // longer than the row, and truncating it in the view must not make it unreadable altogether.
   const refs = commit.refs.length > 0 ? `\n${commit.refs}` : '';
-  row.title = `${commit.subject}\n${commit.author} — ${commit.date}${refs}\n(clic : voir le diff, clic droit : agir)`;
+  row.title = `${commit.subject}\n${commit.author}, ${commit.date}${refs}\n(click: see the diff, right click: act)`;
 
   row.addEventListener('contextmenu', (event) => {
     event.preventDefault();
@@ -929,7 +929,7 @@ function renderStashes(
     host.append(
       createElement('p', {
         className: 'pulls__empty',
-        text: 'Aucun stash. Le formulaire ci-dessus met de côté ce qui est modifié.',
+        text: 'No stash. The form above sets aside what is modified.',
       }),
     );
     return;
@@ -963,7 +963,7 @@ function buildStashForm(
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'git__input';
-  input.placeholder = 'Nom du stash (optionnel)';
+  input.placeholder = 'Stash name (optional)';
   input.value = state.stashDraft;
   input.addEventListener('input', () => actions.onStashDraft(input.value));
   input.addEventListener('focus', () => actions.onEditing(true));
@@ -982,8 +982,8 @@ function buildStashForm(
   toggle.append(box, createElement('span', { text: `+ nouveaux (${untracked})` }));
   toggle.title =
     untracked === 0
-      ? 'Aucun fichier non suivi à inclure'
-      : 'git stash push --include-untracked : emporte aussi les fichiers que git ne suit pas encore';
+      ? 'No untracked file to include'
+      : 'git stash push --include-untracked: also takes the files git does not track yet';
 
   // Untracked files count towards "is there anything to stash" only when they are included: with the
   // box unticked, a repository whose only changes are new files has nothing for `git stash` to take.
@@ -993,8 +993,8 @@ function buildStashForm(
     text: 'Stasher',
     title:
       stashable === 0
-        ? 'Rien à mettre de côté'
-        : `git stash push sur ${stashable} fichier(s). L’arbre de travail revient à HEAD.`,
+        ? 'Nothing to set aside'
+        : `git stash push on ${stashable} file(s). The working tree goes back to HEAD.`,
   });
   push.type = 'button';
   push.disabled = state.busy || stashable === 0;
@@ -1015,7 +1015,7 @@ function buildStashRow(
       : '';
   const row = createElement('div', { className: `git__row git__stash-row${selected}` });
   const from = stash.branch.length > 0 ? `\nDepuis ${stash.branch}` : '';
-  row.title = `${stash.ref} · ${stash.subject}${from}\n${stash.date}\n(clic : voir le diff, clic droit : appliquer, retirer, supprimer)`;
+  row.title = `${stash.ref} · ${stash.subject}${from}\n${stash.date}\n(click: see the diff, right click: apply, pop, drop)`;
 
   // The ref is shown because it is what `git stash` prints and what the user would type in a terminal,
   // and it is shown *knowing* it is positional: everything this app does with the entry goes by sha.
@@ -1060,20 +1060,20 @@ export function buildStashMenuItems(
   const blocked = state.busy || (state.repo !== null && state.repo.sequencer !== 'none');
   return [
     {
-      label: 'Appliquer (et garder)',
-      hint: `git stash apply : les modifications reviennent dans l’arbre de travail, ${stash.ref} reste dans la liste.`,
+      label: 'Apply (and keep)',
+      hint: `git stash apply: the changes come back into the working tree, ${stash.ref} stays in the list.`,
       disabled: blocked,
       run: () => actions.onStash(stash, 'apply'),
     },
     {
-      label: 'Appliquer et retirer',
-      hint: `git stash pop : comme « appliquer », mais ${stash.ref} quitte la liste si ça se passe bien.`,
+      label: 'Apply and pop',
+      hint: `git stash pop: like "apply", but ${stash.ref} leaves the list if all goes well.`,
       disabled: blocked,
       run: () => actions.onStash(stash, 'pop'),
     },
     {
-      label: 'Supprimer',
-      hint: 'git stash drop : le contenu est perdu, et cet onglet ne sait pas le retrouver.',
+      label: 'Delete',
+      hint: 'git stash drop: the content is lost, and this tab cannot get it back.',
       disabled: blocked,
       run: () => actions.onStash(stash, 'drop'),
     },
@@ -1094,7 +1094,7 @@ function renderDiff(host: HTMLElement, state: GitPanelState, actions: GitPanelAc
     host.append(
       createElement('p', {
         className: 'pulls__empty',
-        text: 'Sélectionne un fichier ou un commit pour voir son diff.',
+        text: 'Select a file or a commit to see its diff.',
       }),
     );
     return;
@@ -1102,7 +1102,7 @@ function renderDiff(host: HTMLElement, state: GitPanelState, actions: GitPanelAc
 
   const diff = state.diff;
   if (diff === null) {
-    host.append(createElement('p', { className: 'pulls__empty', text: 'Lecture du diff…' }));
+    host.append(createElement('p', { className: 'pulls__empty', text: 'Reading the diff...' }));
     return;
   }
 
@@ -1136,7 +1136,7 @@ function renderDiff(host: HTMLElement, state: GitPanelState, actions: GitPanelAc
     host.append(
       createElement('p', {
         className: 'pulls__empty',
-        text: `Diff tronqué : ${MAX_DIFF_LINES} lignes sur ${diff.lines.length}. Ouvre-le dans le terminal pour la suite.`,
+        text: `Diff truncated: ${MAX_DIFF_LINES} lines out of ${diff.lines.length}. Open it in the terminal for the rest.`,
       }),
     );
   }
@@ -1170,10 +1170,10 @@ function buildDiffHeader(
   header.append(createElement('span', { className: 'git__spacer' }));
   const toggle = createElement('button', {
     className: 'button button--quiet',
-    text: target.staged ? 'Voir le disque' : 'Voir l’index',
+    text: target.staged ? 'Show the disk' : 'Show the index',
     title: target.staged
-      ? 'Affiche les modifications non indexées (git diff)'
-      : 'Affiche ce qui est indexé (git diff --cached)',
+      ? 'Shows the unstaged changes (git diff)'
+      : 'Shows what is staged (git diff --cached)',
   });
   toggle.type = 'button';
   toggle.addEventListener('click', () =>
@@ -1203,12 +1203,14 @@ export function defaultTargetFor(change: GitChange): GitDiffTarget {
  * A commit's date, short enough for a list.
  *
  * Absolute rather than relative, unlike a pull request's age: the question in front of a history is
- * "when was this", and "il y a 34 j" is a worse answer to it than a date.
+ * "when was this", and "34 days ago" is a worse answer to it than a date.
  */
 export function describeDay(iso: string): string {
   const at = Date.parse(iso);
   if (Number.isNaN(at)) {
     return '';
   }
-  return new Date(at).toLocaleDateString('fr-CH', { day: '2-digit', month: '2-digit' });
+  // en-GB for the same reason as the refresh clock: day before month, which is what the
+  // rest of the strip and every branch name in this window already assume.
+  return new Date(at).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' });
 }

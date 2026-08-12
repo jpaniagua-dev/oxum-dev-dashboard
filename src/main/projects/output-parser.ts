@@ -64,7 +64,7 @@ export function parseOutputChunk(chunk: string, kind: ProjectKind): ParsedOutput
   if (buildError !== null) {
     return {
       phase: 'build-error',
-      errorSummary: buildError[1]?.trim() ?? 'Erreur de build',
+      errorSummary: buildError[1]?.trim() ?? 'Build error',
       errorCount: countErrors(text),
       port: null,
     };
@@ -75,7 +75,7 @@ export function parseOutputChunk(chunk: string, kind: ProjectKind): ParsedOutput
   if (/Lint(?:ing)? errors found|\d+ problems? \(\d+ errors?/i.test(text)) {
     return {
       phase: 'lint-error',
-      errorSummary: firstMeaningfulLine(text) ?? 'Erreur de lint',
+      errorSummary: firstMeaningfulLine(text) ?? 'Lint error',
       errorCount: countErrors(text),
       port: null,
     };

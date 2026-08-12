@@ -31,7 +31,7 @@ export class SecretStore {
     } catch (error) {
       // A token encrypted under another Windows account, or a corrupted file: treated as absent rather
       // than fatal, so the app starts and the settings can simply be filled in again.
-      console.error('[secrets] jeton illisible, il faudra le ressaisir', error);
+      console.error('[secrets] token unreadable, it will have to be entered again', error);
       return '';
     }
   }
@@ -46,15 +46,15 @@ export class SecretStore {
     const trimmed = token.trim();
     if (trimmed.length === 0) {
       await atomicWriteFile(this.filePath, '');
-      return { ok: true, message: 'Jeton effacé' };
+      return { ok: true, message: 'Token cleared' };
     }
     if (!this.available()) {
       return {
         ok: false,
-        message: 'Chiffrement indisponible sur ce poste : le jeton n’a pas été enregistré',
+        message: 'Encryption unavailable on this machine: the token was not saved',
       };
     }
     await atomicWriteFile(this.filePath, safeStorage.encryptString(trimmed).toString('base64'));
-    return { ok: true, message: 'Jeton enregistré' };
+    return { ok: true, message: 'Token saved' };
   }
 }

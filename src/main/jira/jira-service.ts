@@ -36,7 +36,7 @@ export async function searchIssues(
 ): Promise<{ issues: JiraIssue[]; error: string | null }> {
   const base = credentials.siteUrl.replace(/\/+$/, '');
   if (base.length === 0 || credentials.email.length === 0 || credentials.token.length === 0) {
-    return { issues: [], error: 'Connexion Jira incomplète' };
+    return { issues: [], error: 'Incomplete Jira connection' };
   }
 
   const attempts: ('jql' | 'legacy')[] = endpoint === null ? ['jql', 'legacy'] : [endpoint];
@@ -100,13 +100,13 @@ async function request(
 function describeStatus(status: number): string {
   switch (status) {
     case 401:
-      return 'Jira refuse l’authentification : vérifie l’email et le jeton';
+      return 'Jira refused the authentication: check the email and the token';
     case 403:
-      return 'Jira refuse l’accès : le compte n’a pas les droits';
+      return 'Jira refused access: the account lacks the rights';
     case 400:
-      return 'Requête JQL refusée : vérifie les clés de projet';
+      return 'JQL query refused: check the project keys';
     default:
-      return `Jira a répondu ${status}`;
+      return `Jira answered ${status}`;
   }
 }
 
@@ -217,7 +217,7 @@ export async function applyTransition(
     { method: 'POST', body: { transition: { id: transitionId } } },
   );
   return result.status === 'ok'
-    ? { ok: true, message: `${key} déplacé` }
+    ? { ok: true, message: `${key} moved` }
     : { ok: false, message: result.message };
 }
 
@@ -238,7 +238,7 @@ export async function assignIssue(
     { method: 'PUT', body: { accountId } },
   );
   return result.status === 'ok'
-    ? { ok: true, message: `${key} assigné` }
+    ? { ok: true, message: `${key} assigned` }
     : { ok: false, message: result.message };
 }
 
@@ -253,7 +253,7 @@ export async function readMyAccountId(
   const id = asRecord(result.body).accountId;
   return typeof id === 'string' && id.length > 0
     ? { accountId: id, error: null }
-    : { accountId: '', error: 'Jira n’a pas renvoyé d’identifiant de compte' };
+    : { accountId: '', error: 'Jira returned no account id' };
 }
 
 /** One authenticated call, shared by every read and write above. */

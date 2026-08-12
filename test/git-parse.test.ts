@@ -92,7 +92,7 @@ describe('parseBranchLines', () => {
 describe('parseLogLines', () => {
   it('reads the fields of a commit', () => {
     const [commit] = parseLogLines(
-      ['abc1234', 'Julio', '2026-08-07T10:00:00+02:00', 'HEAD -> main', 'feat: ajoute la tab Git'].join(
+      ['abc1234', 'Julio', '2026-08-07T10:00:00+02:00', 'HEAD -> main', 'feat: add the Git tab'].join(
         SEP,
       ),
     );
@@ -102,17 +102,17 @@ describe('parseLogLines', () => {
       author: 'Julio',
       date: '2026-08-07T10:00:00+02:00',
       refs: 'HEAD -> main',
-      subject: 'feat: ajoute la tab Git',
+      subject: 'feat: add the Git tab',
     });
   });
 
   it('keeps a subject containing the separator whole', () => {
     // Why the subject is the last field and is rejoined rather than taken as `rest[0]`.
     const [commit] = parseLogLines(
-      ['abc1234', 'Julio', '', '', `fix: retire un${SEP}caractere`].join(SEP),
+      ['abc1234', 'Julio', '', '', `fix: remove one${SEP}character`].join(SEP),
     );
 
-    expect(commit?.subject).toBe(`fix: retire un${SEP}caractere`);
+    expect(commit?.subject).toBe(`fix: remove one${SEP}character`);
   });
 });
 
@@ -218,9 +218,9 @@ describe('describeStash', () => {
   });
 
   it('passes an unrecognised message through whole rather than inventing a branch', () => {
-    expect(describeStash('quelque chose de bizarre')).toEqual({
+    expect(describeStash('something odd')).toEqual({
       branch: '',
-      subject: 'quelque chose de bizarre',
+      subject: 'something odd',
     });
   });
 
@@ -238,7 +238,7 @@ describe('parseStashLines', () => {
   it('reads the ref, the sha and the message', () => {
     const stashes = parseStashLines(
       [
-        line('stash@{0}', 'a'.repeat(40), '2026-08-12T09:00:00+02:00', 'On main: en cours'),
+        line('stash@{0}', 'a'.repeat(40), '2026-08-12T09:00:00+02:00', 'On main: work in progress'),
         line('stash@{1}', 'b'.repeat(40), '2026-08-11T09:00:00+02:00', 'WIP on main: 1a2b3c4 feat: x'),
       ].join('\n'),
     );
@@ -249,7 +249,7 @@ describe('parseStashLines', () => {
         sha: 'a'.repeat(40),
         date: '2026-08-12T09:00:00+02:00',
         branch: 'main',
-        subject: 'en cours',
+        subject: 'work in progress',
       },
       {
         ref: 'stash@{1}',

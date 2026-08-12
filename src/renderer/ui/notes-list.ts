@@ -30,7 +30,7 @@ export function renderNotesList(
 
   if (state.notes.length === 0) {
     host.append(
-      createElement('p', { className: 'notes__empty', text: 'Aucune note. Clique sur « + Note ».' }),
+      createElement('p', { className: 'notes__empty', text: 'No note. Click "+ Note".' }),
     );
     return;
   }
@@ -48,10 +48,10 @@ export function renderNotesList(
     const remove = createElement('button', {
       className: 'note-row__delete',
       text: '×',
-      title: 'Supprimer cette note',
+      title: 'Delete this note',
     });
     remove.type = 'button';
-    remove.setAttribute('aria-label', `Supprimer ${note.title}`);
+    remove.setAttribute('aria-label', `Delete ${note.title}`);
     remove.addEventListener('click', () => actions.onDelete(note.id));
     row.append(remove);
 

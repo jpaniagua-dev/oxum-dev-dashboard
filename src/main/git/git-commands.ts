@@ -286,12 +286,12 @@ export async function createBranch(
 ): Promise<GitResult> {
   const trimmed = name.trim();
   if (trimmed.length === 0) {
-    return { ok: false, message: 'Nom de branche vide' };
+    return { ok: false, message: 'Empty branch name' };
   }
 
   const valid = await tryGit(repoPath, ['check-ref-format', '--branch', trimmed]);
   if (!valid.ok) {
-    return { ok: false, message: `Nom de branche invalide : ${trimmed}` };
+    return { ok: false, message: `Invalid branch name: ${trimmed}` };
   }
 
   const result = checkout
@@ -299,7 +299,7 @@ export async function createBranch(
     : await tryGit(repoPath, ['branch', trimmed]);
   return {
     ok: result.ok,
-    message: result.ok ? `Branche ${trimmed} créée` : result.message,
+    message: result.ok ? `Branch ${trimmed} created` : result.message,
   };
 }
 
@@ -314,10 +314,10 @@ export async function createBranch(
 export async function checkoutBranch(repoPath: string, name: string): Promise<GitResult> {
   const trimmed = name.trim();
   if (trimmed.length === 0) {
-    return { ok: false, message: 'Aucune branche indiquée' };
+    return { ok: false, message: 'No branch given' };
   }
   const result = await tryGit(repoPath, ['checkout', trimmed]);
-  return { ok: result.ok, message: result.ok ? `Sur la branche ${trimmed}` : result.message };
+  return { ok: result.ok, message: result.ok ? `On branch ${trimmed}` : result.message };
 }
 
 /**
@@ -333,7 +333,7 @@ export async function stagePaths(
   staged: boolean,
 ): Promise<GitResult> {
   if (paths.length === 0) {
-    return { ok: false, message: 'Aucun fichier sélectionné' };
+    return { ok: false, message: 'No file selected' };
   }
 
   const result = staged
@@ -344,7 +344,7 @@ export async function stagePaths(
   return {
     ok: result.ok,
     message: result.ok
-      ? `${count} fichier${count > 1 ? 's' : ''} ${staged ? 'ajouté' : 'retiré'}${count > 1 ? 's' : ''}`
+      ? `${count} file${count > 1 ? 's' : ''} ${staged ? 'staged' : 'unstaged'}`
       : result.message,
   };
 }
@@ -387,8 +387,8 @@ export async function cherryPick(
     return {
       ok: true,
       message: noCommit
-        ? `${trimmed} appliqué dans l’index, pas encore committé`
-        : `${trimmed} repris sur la branche courante`,
+        ? `${trimmed} applied to the index, not committed yet`
+        : `${trimmed} replayed on the current branch`,
     };
   }
   /*
@@ -402,7 +402,7 @@ export async function cherryPick(
     ok: false,
     message:
       sequencer === 'cherry-pick'
-        ? `Conflit : ${result.message}. Résous-le puis « Continuer », ou « Abandonner ».`
+        ? `Conflict: ${result.message}. Resolve it then "Continue", or "Abort".`
         : result.message,
   };
 }
@@ -426,7 +426,7 @@ export async function resolveSequencer(
   op: GitSequencerOp,
 ): Promise<GitResult> {
   if (state === 'none') {
-    return { ok: false, message: 'Aucune opération en cours' };
+    return { ok: false, message: 'No operation in progress' };
   }
 
   const result = await tryGit(repoPath, [state, `--${op}`], {
@@ -438,8 +438,8 @@ export async function resolveSequencer(
     ok: result.ok,
     message: result.ok
       ? op === 'abort'
-        ? `${state} abandonné`
-        : `${state} terminé`
+        ? `${state} aborted`
+        : `${state} finished`
       : result.message,
   };
 }
@@ -472,7 +472,7 @@ export async function stashPush(
     return result;
   }
   // git says "No local changes to save" on stdout and still exits 0, so success is not the same thing
-  // as something having been stashed. Repeating git's own sentence is more honest than "Stash créé".
+  // as something having been stashed. Repeating git's own sentence is more honest than "Stash created".
   return { ok: true, message: result.message };
 }
 
@@ -493,7 +493,7 @@ export async function applyStash(
   const stashes = await readStashes(repoPath);
   const entry = stashes.find((candidate) => candidate.sha === sha);
   if (entry === undefined) {
-    return { ok: false, message: 'Ce stash n’existe plus : rafraîchis la liste' };
+    return { ok: false, message: 'That stash is gone: refresh the list' };
   }
 
   const result = await tryGit(repoPath, ['stash', op, entry.ref]);
@@ -502,11 +502,11 @@ export async function applyStash(
   }
   switch (op) {
     case 'apply':
-      return { ok: true, message: `${entry.ref} appliqué, et conservé dans la liste` };
+      return { ok: true, message: `${entry.ref} applied, and kept in the list` };
     case 'pop':
-      return { ok: true, message: `${entry.ref} appliqué et retiré de la liste` };
+      return { ok: true, message: `${entry.ref} applied and removed from the list` };
     case 'drop':
-      return { ok: true, message: `${entry.ref} supprimé` };
+      return { ok: true, message: `${entry.ref} dropped` };
   }
 }
 
@@ -533,7 +533,7 @@ export async function sync(
 
   if (op === 'fetch') {
     const result = await tryGit(repoPath, ['fetch', '--prune'], options);
-    return { ok: result.ok, message: result.ok ? 'Fetch terminé' : result.message };
+    return { ok: result.ok, message: result.ok ? 'Fetch done' : result.message };
   }
 
   if (op === 'pull') {
@@ -562,10 +562,10 @@ function buildDiff(title: string, out: string): GitDiff {
   const content = lines.some((line) => line.kind === 'add' || line.kind === 'del');
 
   if (out.includes('Binary files ')) {
-    return { title, lines: [], note: 'Fichier binaire, pas de diff à afficher.' };
+    return { title, lines: [], note: 'Binary file, no diff to show.' };
   }
   if (!content && lines.length === 0) {
-    return { title, lines: [], note: 'Aucune modification à afficher.' };
+    return { title, lines: [], note: 'No change to show.' };
   }
   return { title, lines, note: null };
 }

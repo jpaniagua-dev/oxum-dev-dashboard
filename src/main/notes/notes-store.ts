@@ -255,7 +255,7 @@ export class NotesStore {
     try {
       const info = await stat(file);
       if (info.size > MAX_INDEXED_BYTES) {
-        return { id, title: '(fichier trop volumineux)', updatedAt: info.mtime.toISOString(), size: info.size };
+        return { id, title: '(file too large)', updatedAt: info.mtime.toISOString(), size: info.size };
       }
       const text = await readFile(file, 'utf8');
       return { id, title: deriveNoteTitle(text), updatedAt: info.mtime.toISOString(), size: info.size };
@@ -270,10 +270,10 @@ export class NotesStore {
 function describeFolderError(error: unknown, path: string): string {
   const code = (error as NodeJS.ErrnoException).code ?? '';
   if (code === 'ENOENT') {
-    return `Dossier de notes introuvable : ${path}`;
+    return `Notes folder not found: ${path}`;
   }
   if (code === 'EACCES' || code === 'EPERM') {
-    return `Dossier de notes inaccessible : ${path}`;
+    return `Notes folder not readable: ${path}`;
   }
-  return `Lecture des notes impossible : ${error instanceof Error ? error.message : String(error)}`;
+  return `Could not read the notes: ${error instanceof Error ? error.message : String(error)}`;
 }

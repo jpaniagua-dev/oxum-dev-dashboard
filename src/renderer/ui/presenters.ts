@@ -29,38 +29,38 @@ export interface Pill {
 export function presentServer(server: ServerState): Pill {
   switch (server.phase) {
     case 'stopped':
-      return { label: 'arrêté', tone: 'neutral', title: 'Aucun processus' };
+      return { label: 'stopped', tone: 'neutral', title: 'No process' };
     case 'starting':
-      return { label: 'démarrage', tone: 'busy', title: 'Processus lancé, en attente de sortie' };
+      return { label: 'starting', tone: 'busy', title: 'Process launched, waiting for output' };
     case 'linting':
       // Visible on purpose: the `start` scripts lint before serving, so this window is normal and
       // must not look like a failure.
-      return { label: 'lint', tone: 'busy', title: 'Étape de lint avant le build' };
+      return { label: 'lint', tone: 'busy', title: 'Lint step, before the build' };
     case 'building':
-      return { label: 'build', tone: 'busy', title: 'Compilation en cours' };
+      return { label: 'build', tone: 'busy', title: 'Compiling' };
     case 'serving':
       return {
-        label: server.port === null ? 'sert' : `sert :${server.port}`,
+        label: server.port === null ? 'serving' : `serving :${server.port}`,
         tone: 'ok',
-        title: 'Serveur de dev opérationnel',
+        title: 'Dev server up',
       };
     case 'watching':
       return {
         label: 'watch',
         tone: 'ok',
-        // No port to show, and saying "sert" would promise something observable that does not exist.
-        title: 'Build en watch, sans serveur HTTP',
+        // No port to show, and saying "serving" would promise something observable that does not exist.
+        title: 'Watch build, no HTTP server',
       };
     case 'lint-error':
-      return { label: 'lint KO', tone: 'error', title: server.errorSummary ?? 'Erreur de lint' };
+      return { label: 'lint failed', tone: 'error', title: server.errorSummary ?? 'Lint error' };
     case 'build-error':
       return {
-        label: server.errorCount > 1 ? `build KO (${server.errorCount})` : 'build KO',
+        label: server.errorCount > 1 ? `build failed (${server.errorCount})` : 'build failed',
         tone: 'error',
-        title: server.errorSummary ?? 'Erreur de build',
+        title: server.errorSummary ?? 'Build error',
       };
     case 'crashed':
-      return { label: 'crash', tone: 'error', title: 'Le processus s’est arrêté seul' };
+      return { label: 'crashed', tone: 'error', title: 'The process exited on its own' };
   }
 }
 
@@ -86,17 +86,17 @@ export function canStop(server: ServerState): boolean {
 export function presentReview(review: PrReview): Pill {
   switch (review) {
     case 'approved':
-      return { label: 'approuvée', tone: 'ok', title: 'Au moins une approbation, rien à corriger' };
+      return { label: 'approved', tone: 'ok', title: 'At least one approval, nothing to change' };
     case 'changes-requested':
       return {
-        label: 'à corriger',
+        label: 'changes requested',
         tone: 'error',
-        title: 'Un relecteur a demandé des changements',
+        title: 'A reviewer requested changes',
       };
     case 'review-required':
-      return { label: 'à relire', tone: 'busy', title: 'En attente de relecture' };
+      return { label: 'review requested', tone: 'busy', title: 'Waiting for review' };
     case 'none':
-      return { label: 'sans review', tone: 'neutral', title: 'Aucune relecture requise' };
+      return { label: 'no review', tone: 'neutral', title: 'No review required' };
   }
 }
 
@@ -109,20 +109,20 @@ export function presentReview(review: PrReview): Pill {
 export function presentPullChecks(pull: PullRequest): Pill {
   switch (pull.checks) {
     case 'passing':
-      return { label: `OK ${pull.passed}`, tone: 'ok', title: `${pull.passed} check(s) au vert` };
+      return { label: `OK ${pull.passed}`, tone: 'ok', title: `${pull.passed} check(s) green` };
     case 'failing':
-      return { label: `KO ${pull.failed}`, tone: 'error', title: `${pull.failed} check(s) en échec` };
+      return { label: `KO ${pull.failed}`, tone: 'error', title: `${pull.failed} check(s) failing` };
     case 'pending':
       return {
-        label: `en cours ${pull.pending}`,
+        label: `running ${pull.pending}`,
         tone: 'busy',
-        title: `${pull.pending} check(s) en cours`,
+        title: `${pull.pending} check(s) running`,
       };
     case 'no-checks':
-      return { label: 'aucun check', tone: 'info', title: 'Aucun check rapporté' };
+      return { label: 'no checks', tone: 'info', title: 'No check reported' };
     case 'no-pr':
     case 'unknown':
-      return { label: '?', tone: 'neutral', title: 'État des checks inconnu' };
+      return { label: '?', tone: 'neutral', title: 'Unknown check state' };
   }
 }
 
@@ -134,13 +134,13 @@ export function presentPullChecks(pull: PullRequest): Pill {
  */
 export function presentInvolvement(pull: PullRequest): Pill | null {
   if (pull.isAuthor && pull.isReviewer) {
-    return { label: 'à moi', tone: 'info', title: 'Vous êtes auteur et relecteur demandé' };
+    return { label: 'mine', tone: 'info', title: 'You are the author and a requested reviewer' };
   }
   if (pull.isAuthor) {
-    return { label: 'auteur', tone: 'neutral', title: 'Vous êtes l’auteur' };
+    return { label: 'auteur', tone: 'neutral', title: 'You are the author' };
   }
   if (pull.isReviewer) {
-    return { label: 'à relire', tone: 'busy', title: 'Votre relecture est demandée' };
+    return { label: 'review requested', tone: 'busy', title: 'Your review is requested' };
   }
   return null;
 }
@@ -149,43 +149,43 @@ export function presentInvolvement(pull: PullRequest): Pill | null {
 export function presentChecks(checks: ChecksState | null, git: GitState | null): Pill {
   if (git !== null && !git.hasUpstream) {
     // Not an error: the branch was never pushed, so no pull request can exist.
-    return { label: 'pas poussée', tone: 'neutral', title: 'La branche n’a pas d’upstream' };
+    return { label: 'not pushed', tone: 'neutral', title: 'The branch has no upstream' };
   }
   if (checks === null) {
-    return { label: '…', tone: 'neutral', title: 'Pas encore interrogé' };
+    return { label: '…', tone: 'neutral', title: 'Not queried yet' };
   }
 
   switch (checks.verdict) {
     case 'no-pr':
-      return { label: 'pas de PR', tone: 'neutral', title: 'Aucune PR pour cette branche' };
+      return { label: 'no PR', tone: 'neutral', title: 'No PR for this branch' };
     case 'no-checks':
       // Deliberately distinct from `passing`: two real open PRs returned an empty rollup, and
       // painting that green would be a lie.
       return {
-        label: 'aucun check',
+        label: 'no checks',
         tone: 'info',
-        title: 'PR ouverte, mais aucun check rapporté',
+        title: 'PR open, but no check reported',
       };
     case 'pending':
       return {
-        label: `en cours ${checks.pending}`,
+        label: `running ${checks.pending}`,
         tone: 'busy',
-        title: `${checks.pending} check(s) en cours`,
+        title: `${checks.pending} check(s) running`,
       };
     case 'passing':
       return {
         label: `OK ${checks.passed}`,
         tone: 'ok',
-        title: `${checks.passed} check(s) au vert`,
+        title: `${checks.passed} check(s) green`,
       };
     case 'failing':
       return {
         label: `KO ${checks.failed}`,
         tone: 'error',
-        title: `${checks.failed} check(s) en échec`,
+        title: `${checks.failed} check(s) failing`,
       };
     case 'unknown':
-      return { label: '?', tone: 'neutral', title: checks.error ?? 'État inconnu' };
+      return { label: '?', tone: 'neutral', title: checks.error ?? 'Unknown state' };
   }
 }
 
@@ -206,7 +206,7 @@ export function presentGit(git: GitState | null): GitSummary {
     return { parts: [{ label: '…', kind: 'plain' }], warning: null };
   }
   if (git.error !== null) {
-    return { parts: [{ label: 'erreur git', kind: 'dirty' }], warning: null };
+    return { parts: [{ label: 'git error', kind: 'dirty' }], warning: null };
   }
 
   const parts: GitSummary['parts'] = [];
@@ -214,13 +214,13 @@ export function presentGit(git: GitState | null): GitSummary {
     parts.push({ label: `${git.staged} staged`, kind: 'dirty' });
   }
   if (git.modified > 0) {
-    parts.push({ label: `${git.modified} modifiés`, kind: 'dirty' });
+    parts.push({ label: `${git.modified} modified`, kind: 'dirty' });
   }
   if (git.untracked > 0) {
     parts.push({ label: `${git.untracked} nouveaux`, kind: 'dirty' });
   }
   if (parts.length === 0) {
-    parts.push({ label: 'propre', kind: 'clean' });
+    parts.push({ label: 'clean', kind: 'clean' });
   }
 
   const flags: string[] = [];
@@ -254,12 +254,12 @@ export function presentChange(change: GitChange): Pill {
   const label = `${normalizeColumn(change.index)}${normalizeColumn(change.worktree)}`;
 
   if (change.untracked) {
-    return { label: '??', tone: 'info', title: 'Nouveau fichier, pas encore suivi par git' };
+    return { label: '??', tone: 'info', title: 'New file, not tracked by git yet' };
   }
   if (change.index === 'U' || change.worktree === 'U' || label === 'AA' || label === 'DD') {
     // Conflicts are the one state this tab cannot resolve, so they are painted as an error rather
     // than hidden among the modifications.
-    return { label, tone: 'error', title: 'Conflit à résoudre, dans un terminal' };
+    return { label, tone: 'error', title: 'Conflict to resolve, in a terminal' };
   }
 
   const staged = isStaged(change);
@@ -270,27 +270,27 @@ export function presentChange(change: GitChange): Pill {
     return {
       label,
       tone: 'busy',
-      title: `Ajouté à l’index puis modifié à nouveau : le commit ne prendra que la version indexée${source}`,
+      title: `Staged then modified again: the commit will only take the staged version${source}`,
     };
   }
   if (staged) {
-    return { label, tone: 'ok', title: `Prêt à être committé${source}` };
+    return { label, tone: 'ok', title: `Ready to commit${source}` };
   }
-  return { label, tone: 'neutral', title: `Modifié, pas encore ajouté à l’index${source}` };
+  return { label, tone: 'neutral', title: `Modified, not staged yet${source}` };
 }
 
 /**
  * How far a branch stands from its upstream, in the shortest readable form.
  *
  * Empty when there is nothing to say, so the caller can skip the element entirely: a badge reading
- * "à jour" on every line of a list is noise that hides the two lines that are not.
+ * "up to date" on every line of a list is noise that hides the two lines that are not.
  */
 export function presentTrack(branch: GitBranch): string {
   if (branch.upstream === null) {
     return 'locale';
   }
   if (branch.gone) {
-    return 'upstream supprimée';
+    return 'upstream gone';
   }
   const marks: string[] = [];
   if (branch.ahead > 0) {

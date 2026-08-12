@@ -12,7 +12,7 @@ import { buildJql, searchIssues } from './jira-service.js';
 export class JiraMonitor {
   private views: JiraView[] = [
     { id: 'sprint', label: 'Sprint courant', issues: [], checkedAt: null, error: null },
-    { id: 'mine', label: 'Mes tickets', issues: [], checkedAt: null, error: null },
+    { id: 'mine', label: 'My issues', issues: [], checkedAt: null, error: null },
   ];
 
   private timer: NodeJS.Timeout | null = null;
@@ -57,7 +57,7 @@ export class JiraMonitor {
     if (token.length === 0) {
       this.views = this.views.map((view) => ({
         ...view,
-        error: 'Aucun jeton Jira enregistré',
+        error: 'No Jira token saved',
       }));
       this.onChange(this.state());
       return;
@@ -75,7 +75,7 @@ export class JiraMonitor {
 
     this.views = [
       { id: 'sprint', label: 'Sprint courant', issues: sprint.issues, checkedAt: at, error: sprint.error },
-      { id: 'mine', label: 'Mes tickets', issues: mine.issues, checkedAt: at, error: mine.error },
+      { id: 'mine', label: 'My issues', issues: mine.issues, checkedAt: at, error: mine.error },
     ];
     this.onChange(this.state());
   }

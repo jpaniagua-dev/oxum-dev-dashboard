@@ -167,7 +167,7 @@ describe('the commit path', () => {
     write('committed.ts', 'const x = 1;\n');
     run(['add', 'committed.ts']);
 
-    const message = 'feat: accentué et multi-ligne\n\nUn corps avec un « détail ».\n\n\n';
+    const message = 'feat: accented and multi-line\n\nA body with a « détail » in it.\n\n\n';
     const file = await writeCommitMessage(join(repo, '.messages'), 'fixture', message);
 
     execFileSync('git', ['-C', repo, 'commit', '--cleanup=strip', '-F', file], {
@@ -177,13 +177,13 @@ describe('the commit path', () => {
 
     const [commit] = await readCommits(repo);
     // Accents survive: the file is UTF-8 with no BOM, which is what git assumes for a message.
-    expect(commit?.subject).toBe('feat: accentué et multi-ligne');
+    expect(commit?.subject).toBe('feat: accented and multi-line');
 
     const body = execFileSync('git', ['-C', repo, 'log', '-1', '--format=%b'], {
       windowsHide: true,
       encoding: 'utf8',
     });
-    expect(body).toContain('Un corps avec un « détail ».');
+    expect(body).toContain('A body with a « détail » in it.');
     // `--cleanup=strip` plus the store's own trim: no trailing blank lines survive.
     expect(body.endsWith('\n\n\n')).toBe(false);
   });
@@ -230,7 +230,7 @@ describe('branches', () => {
     expect(await checkoutBranch(repo, 'main')).toMatchObject({ ok: true });
     expect((await readBranches(repo)).find((branch) => branch.current)?.name).toBe('main');
 
-    const missing = await checkoutBranch(repo, 'jamais-creee');
+    const missing = await checkoutBranch(repo, 'never-created');
     expect(missing.ok).toBe(false);
     // git's own words, not ours: they say what to do next.
     expect(missing.message.length).toBeGreaterThan(0);
@@ -312,10 +312,10 @@ describe('stashes', () => {
     writeFileSync(join(sandbox, 'base.ts'), 'const base = 3;\n', 'utf8');
     writeFileSync(join(sandbox, 'neuf.ts'), 'const neuf = 1;\n', 'utf8');
 
-    await stashPush(sandbox, 'sans les nouveaux', false);
+    await stashPush(sandbox, 'without the new ones', false);
     expect((await readChanges(sandbox)).map((change) => change.path)).toEqual(['neuf.ts']);
 
-    await stashPush(sandbox, 'avec les nouveaux', true);
+    await stashPush(sandbox, 'with the new ones', true);
     expect(await readChanges(sandbox)).toEqual([]);
   });
 
@@ -344,7 +344,7 @@ describe('stashes', () => {
     const result = await applyStash(sandbox, '0'.repeat(40), 'drop');
 
     expect(result.ok).toBe(false);
-    expect(result.message).toContain('n’existe plus');
+    expect(result.message).toContain('is gone');
   });
 
   it('pops and drops, each shortening the list by one', async () => {
@@ -435,7 +435,7 @@ describe('cherry-pick', () => {
 
     const result = await cherryPick(sandbox, conflicting?.sha ?? '', false);
     expect(result.ok).toBe(false);
-    expect(result.message).toContain('Conflit');
+    expect(result.message).toContain('Conflict');
     expect(await readSequencer(sandbox)).toBe('cherry-pick');
 
     expect(await resolveSequencer(sandbox, 'cherry-pick', 'abort')).toMatchObject({ ok: true });

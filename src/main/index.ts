@@ -71,7 +71,7 @@ async function bootstrap(): Promise<void> {
     // dashboard would start with an empty table and no error, which is exactly how this failed once.
     const root = settings.projectsRoot.trim().length > 0 ? settings.projectsRoot : DEFAULT_PROJECTS_ROOT;
     const seeded = seedProjects(root);
-    console.log(`[projects] amorcage depuis ${root}: ${seeded.length} projet(s)`);
+    console.log(`[projects] seeded from ${root}: ${seeded.length} project(s)`);
     if (seeded.length > 0) {
       await settingsStore.update({ projects: seeded, projectsRoot: root });
     }
@@ -247,7 +247,7 @@ async function bootstrap(): Promise<void> {
       const { siteUrl, email, projectKeys } = settingsStore.get().jira;
       const token = await secrets.read();
       if (siteUrl.length === 0 || email.length === 0 || token.length === 0) {
-        return { ok: false, message: 'Site, email et jeton sont tous nécessaires' };
+        return { ok: false, message: 'Site, email and token are all required' };
       }
       // One real query rather than a ping: only an actual search proves the credentials and the project
       // keys together, which is what fails in practice.
@@ -257,7 +257,7 @@ async function bootstrap(): Promise<void> {
         email,
       );
       return error === null
-        ? { ok: true, message: `Connexion réussie, ${issues.length} ticket(s) assigné(s)` }
+        ? { ok: true, message: `Connection succeeded, ${issues.length} issue(s) assigned to you` }
         : { ok: false, message: error };
     },
     writeCommitMessage: (projectId, message) =>
@@ -267,13 +267,13 @@ async function bootstrap(): Promise<void> {
     confirmNoteDelete: (title) => {
       const options: Electron.MessageBoxSyncOptions = {
         type: 'warning',
-        buttons: ['Supprimer', 'Annuler'],
+        buttons: ['Delete', 'Cancel'],
         // Cancel is the default: this dialog is one keystroke away from destroying a note.
         defaultId: 1,
         cancelId: 1,
-        title: 'Supprimer la note',
-        message: `Supprimer « ${title} » ?`,
-        detail: 'Le fichier est effacé du dossier de notes. Cette action est définitive.',
+        title: 'Delete note',
+        message: `Delete "${title}"?`,
+        detail: 'The file is erased from the notes folder. This cannot be undone.',
       };
       // Two distinct overloads, as in `pickFolder`: they cannot be collapsed into one optional argument.
       const parent = dashboardWindow.browserWindow;
@@ -411,15 +411,15 @@ async function bootstrap(): Promise<void> {
 async function confirmQuit(window: BrowserWindow, count: number): Promise<boolean> {
   const { response } = await dialog.showMessageBox(window, {
     type: 'warning',
-    buttons: ['Quitter et arrêter', 'Annuler'],
+    buttons: ['Quit and stop', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
-    title: 'Quitter le dashboard',
+    title: 'Quit the dashboard',
     message:
       count === 1
-        ? '1 serveur lancé par le dashboard va être arrêté.'
-        : `${count} serveurs lancés par le dashboard vont être arrêtés.`,
-    detail: 'Les serveurs lancés depuis un terminal externe ne sont pas concernés.',
+        ? '1 server started by the dashboard will be stopped.'
+        : `${count} servers started by the dashboard will be stopped.`,
+    detail: 'Servers started from an external terminal are not affected.',
   });
   return response === 0;
 }

@@ -213,7 +213,7 @@ export class SettingsForm {
     const row = createElement('div', { className: 'settings-terminal-row' });
     row.append(
       this.field(
-        'Taille de police de l’interface',
+        'Interface font size',
         String(this.uiFontSize),
         (value) => {
           const parsed = Number.parseInt(value, 10);
@@ -222,7 +222,7 @@ export class SettingsForm {
           this.uiFontSize = Number.isFinite(parsed) ? parsed : UI_FONT_SIZE.default;
           this.touch();
         },
-        `${UI_FONT_SIZE.min} à ${UI_FONT_SIZE.max}, défaut ${UI_FONT_SIZE.default}`,
+        `${UI_FONT_SIZE.min} to ${UI_FONT_SIZE.max}, default ${UI_FONT_SIZE.default}`,
       ),
     );
     this.hosts.interface.append(row);
@@ -241,7 +241,7 @@ export class SettingsForm {
     const row = createElement('div', { className: 'settings-card__path' });
     row.append(
       this.field(
-        'Dossier des notes',
+        'Notes folder',
         this.notesFolder,
         (value) => {
           this.notesFolder = value;
@@ -253,9 +253,9 @@ export class SettingsForm {
 
     const browse = createElement('button', { className: 'button', text: '…' });
     browse.type = 'button';
-    browse.title = 'Choisir un dossier';
+    browse.title = 'Choose a folder';
     browse.addEventListener('click', () => {
-      void window.api.pickFolder('Dossier des notes').then((picked) => {
+      void window.api.pickFolder('Notes folder').then((picked) => {
         if (picked !== null) {
           this.notesFolder = picked;
           this.touch();
@@ -287,14 +287,14 @@ export class SettingsForm {
       }),
     );
     grid.append(
-      this.field('Email du compte', this.jira.email, (value) => {
+      this.field('Account email', this.jira.email, (value) => {
         this.jira = { ...this.jira, email: value };
         this.touch();
       }),
     );
     grid.append(
       this.field(
-        'Clés de projet',
+        'Project keys',
         this.jira.projectKeys.join(', '),
         (value) => {
           this.jira = {
@@ -314,7 +314,7 @@ export class SettingsForm {
     // The label carries the state, not a placeholder: a token can never be shown, so the field is always
     // empty and only its label can say whether one is stored.
     const token = this.field(
-      this.jira.hasToken ? 'Jeton enregistré — en saisir un nouveau pour le remplacer' : 'Jeton d’API',
+      this.jira.hasToken ? 'Token saved, enter a new one to replace it' : 'Jeton d’API',
       '',
       (value) => {
         this.jiraToken = value;
@@ -329,9 +329,9 @@ export class SettingsForm {
     }
     secret.append(token);
 
-    const test = createElement('button', { className: 'button', text: 'Tester' });
+    const test = createElement('button', { className: 'button', text: 'Test' });
     test.type = 'button';
-    test.title = 'Lance une vraie recherche pour vérifier le jeton et les clés de projet';
+    test.title = 'Runs a real search to check the token and the project keys';
     test.addEventListener('click', () => {
       test.disabled = true;
       void window.api
@@ -364,7 +364,7 @@ export class SettingsForm {
       this.hosts.projects.append(
         createElement('p', {
           className: 'settings__empty',
-          text: 'Aucun projet. Utilise « Détecter » pour trouver les dépôts, ou « Ajouter » pour choisir un dossier.',
+          text: 'No project. Use "Detect" to find repositories, or "Add" to choose a folder.',
         }),
       );
     }
@@ -375,12 +375,12 @@ export class SettingsForm {
 
     const actions = createElement('div', { className: 'settings__row-actions' });
 
-    const add = createElement('button', { className: 'button', text: '+ Ajouter un dossier' });
+    const add = createElement('button', { className: 'button', text: '+ Add a folder' });
     add.type = 'button';
     add.addEventListener('click', () => void this.addByPicker());
     actions.append(add);
 
-    const detect = createElement('button', { className: 'button', text: 'Détecter les dépôts' });
+    const detect = createElement('button', { className: 'button', text: 'Detect repositories' });
     detect.type = 'button';
     detect.addEventListener('click', () => void this.detect());
     actions.append(detect);
@@ -408,9 +408,9 @@ export class SettingsForm {
       }),
     );
 
-    const remove = createElement('button', { className: 'button button--quiet', text: 'Supprimer' });
+    const remove = createElement('button', { className: 'button button--quiet', text: 'Delete' });
     remove.type = 'button';
-    remove.title = 'Retirer ce projet du tableau';
+    remove.title = 'Remove this project from the table';
     remove.addEventListener('click', () => {
       this.projects = this.projects.filter((entry) => entry !== project);
       this.touch();
@@ -421,16 +421,16 @@ export class SettingsForm {
 
     const pathRow = createElement('div', { className: 'settings-card__path' });
     pathRow.append(
-      this.field('Dossier', project.path, (value) => {
+      this.field('Folder', project.path, (value) => {
         project.path = value;
         this.touch();
       }),
     );
     const browse = createElement('button', { className: 'button', text: '…' });
     browse.type = 'button';
-    browse.title = 'Choisir un dossier';
+    browse.title = 'Choose a folder';
     browse.addEventListener('click', () => {
-      void window.api.pickFolder('Dossier du projet').then((picked) => {
+      void window.api.pickFolder('Project folder').then((picked) => {
         if (picked !== null) {
           project.path = picked;
           this.touch();
@@ -449,7 +449,7 @@ export class SettingsForm {
       this.select(
         'Type',
         [
-          { value: '', label: `déduit (${validation?.inferredKind ?? '?'})` },
+          { value: '', label: `inferred (${validation?.inferredKind ?? '?'})` },
           { value: 'server', label: 'server' },
           { value: 'watch', label: 'watch' },
         ],
@@ -471,14 +471,14 @@ export class SettingsForm {
           this.touch();
         },
         validation?.inferredPort === null || validation?.inferredPort === undefined
-          ? 'aucun'
-          : `déduit ${validation.inferredPort}`,
+          ? 'none'
+          : `inferred ${validation.inferredPort}`,
       ),
     );
 
     card.append(grid);
     card.append(
-      this.checkbox('Suivre les pull requests', project.followPulls, (checked) => {
+      this.checkbox('Follow pull requests', project.followPulls, (checked) => {
         project.followPulls = checked;
         this.touch();
       }),
@@ -530,7 +530,7 @@ export class SettingsForm {
       box.append(
         createElement('p', {
           className: 'settings-actions__empty',
-          text: 'Aucune action : la ligne n’aura aucun bouton.',
+          text: 'No action: the row will have no button.',
         }),
       );
     }
@@ -541,7 +541,7 @@ export class SettingsForm {
 
     const add = createElement('button', { className: 'button', text: '+ Action' });
     add.type = 'button';
-    add.title = 'Ajouter une commande à lancer sur ce projet';
+    add.title = 'Add a command to run on this project';
     add.addEventListener('click', () => {
       project.actions.push({
         id: nextActionId('action', project.actions),
@@ -586,7 +586,7 @@ export class SettingsForm {
         },
         action.role === 'server' && validation?.serverCommand !== undefined
           ? 'npm run start'
-          : 'commande à lancer',
+          : 'command to run',
       ),
     );
 
@@ -594,7 +594,7 @@ export class SettingsForm {
       this.select(
         'Shell',
         [
-          { value: '', label: 'profil par défaut' },
+          { value: '', label: 'default profile' },
           ...this.profiles.map((profile) => ({ value: profile.id, label: profile.label })),
         ],
         action.profileId ?? '',
@@ -607,10 +607,10 @@ export class SettingsForm {
 
     row.append(
       this.select(
-        'Rôle',
+        'Role',
         [
-          { value: 'task', label: 'tâche' },
-          { value: 'server', label: 'serveur' },
+          { value: 'task', label: 'task' },
+          { value: 'server', label: 'server' },
         ],
         action.role,
         (value) => {
@@ -633,7 +633,7 @@ export class SettingsForm {
 
     const remove = createElement('button', { className: 'button button--quiet', text: '×' });
     remove.type = 'button';
-    remove.title = `Supprimer « ${action.label} »`;
+    remove.title = `Delete "${action.label}"`;
     remove.addEventListener('click', () => {
       project.actions = project.actions.filter((entry) => entry !== action);
       this.touch();
@@ -648,7 +648,7 @@ export class SettingsForm {
     const box = createElement('div', { className: 'settings-candidates' });
     if (this.candidates.length === 0) {
       box.append(
-        createElement('p', { className: 'settings__empty', text: 'Aucun dépôt candidat trouvé.' }),
+        createElement('p', { className: 'settings__empty', text: 'No candidate repository found.' }),
       );
       return box;
     }
@@ -668,7 +668,7 @@ export class SettingsForm {
 
       const add = createElement('button', {
         className: 'button',
-        text: candidate.alreadyAdded ? 'déjà ajouté' : 'Ajouter',
+        text: candidate.alreadyAdded ? 'already added' : 'Add',
       });
       add.type = 'button';
       add.disabled = candidate.alreadyAdded;
@@ -683,7 +683,7 @@ export class SettingsForm {
     clearChildren(this.hosts.terminal);
 
     const defaults = this.select(
-      'Profil par défaut',
+      'Default profile',
       this.profiles.map((profile) => ({ value: profile.id, label: profile.label })),
       this.defaultProfileId,
       (value) => {
@@ -698,7 +698,7 @@ export class SettingsForm {
     row.append(defaults);
     row.append(
       this.field(
-        'Taille de police du terminal',
+        'Terminal font size',
         String(this.fontSize),
         (value) => {
           const parsed = Number.parseInt(value, 10);
@@ -707,7 +707,7 @@ export class SettingsForm {
           this.fontSize = Number.isFinite(parsed) ? parsed : TERMINAL_FONT_SIZE.default;
           this.touch();
         },
-        `${TERMINAL_FONT_SIZE.min} à ${TERMINAL_FONT_SIZE.max}`,
+        `${TERMINAL_FONT_SIZE.min} to ${TERMINAL_FONT_SIZE.max}`,
       ),
     );
     this.hosts.terminal.append(row);
@@ -726,14 +726,14 @@ export class SettingsForm {
         createElement('span', {
           className: 'settings-card__badge',
           // Says where the value came from, so an overridden profile is obviously deliberate.
-          text: profile.detected ? 'détecté' : 'personnalisé',
+          text: profile.detected ? 'detected' : 'custom',
         }),
       );
       card.append(header);
 
       const row = createElement('div', { className: 'settings-card__path' });
       row.append(
-        this.field('Chemin du binaire', profile.file, (value) => {
+        this.field('Binary path', profile.file, (value) => {
           profile.file = value;
           profile.detected = false;
           this.touch();
@@ -742,7 +742,7 @@ export class SettingsForm {
       const browse = createElement('button', { className: 'button', text: '…' });
       browse.type = 'button';
       browse.addEventListener('click', () => {
-        void window.api.pickFolder(`Binaire de ${profile.label}`).then((picked) => {
+        void window.api.pickFolder(`${profile.label} binary`).then((picked) => {
           if (picked !== null) {
             profile.file = picked;
             profile.detected = false;
@@ -762,7 +762,7 @@ export class SettingsForm {
         }),
       );
       grid.append(
-        this.field('Dossier de départ', profile.cwd, (value) => {
+        this.field('Starting folder', profile.cwd, (value) => {
           profile.cwd = value;
           this.touch();
         }),
@@ -778,19 +778,19 @@ export class SettingsForm {
     const status = createElement('span', {
       className: this.dirty ? 'settings__status' : 'settings__status settings__status--ok',
       text: this.dirty
-        ? 'modifications non enregistrées'
+        ? 'unsaved changes'
         : this.saved
-          ? 'modifications enregistrées'
+          ? 'changes saved'
           : '',
     });
     this.hosts.footer.append(status);
 
-    const close = createElement('button', { className: 'button', text: 'Fermer' });
+    const close = createElement('button', { className: 'button', text: 'Close' });
     close.type = 'button';
     close.addEventListener('click', () => this.actions.onRequestClose());
     this.hosts.footer.append(close);
 
-    const save = createElement('button', { className: 'button button--primary', text: 'Enregistrer' });
+    const save = createElement('button', { className: 'button button--primary', text: 'Save' });
     save.type = 'button';
     // Saving a configuration with a broken path would produce a row that can never run.
     const blocked = this.validations.some((entry) =>
@@ -798,7 +798,7 @@ export class SettingsForm {
     );
     save.disabled = blocked;
     if (blocked) {
-      save.title = 'Corrige les erreurs signalées avant d’enregistrer';
+      save.title = 'Fix the reported errors before saving';
     }
     save.addEventListener('click', () => void this.save());
     this.hosts.footer.append(save);
@@ -807,7 +807,7 @@ export class SettingsForm {
   /* --------------------------------------------------------------- actions */
 
   private async addByPicker(): Promise<void> {
-    const picked = await window.api.pickFolder('Dossier du projet');
+    const picked = await window.api.pickFolder('Project folder');
     if (picked !== null) {
       await this.addPath(picked);
     }

@@ -79,7 +79,7 @@ export function attachGitSplitter(options: {
    * zero-sized box. Both halves of this guard are needed, and both are real failures rather than
    * theory:
    * - clamping a stored 460 against zero available room yields the **minimum**, so a dashboard that
-   *   started on the Projets tab would have silently thrown away the width the user had chosen;
+   *   started on the Projects tab would have silently thrown away the width the user had chosen;
    * - the window `resize` listener re-applies `currentWidth()`, which reads zero while hidden, so a
    *   resize with the tab closed would have written a width of nothing at all.
    *

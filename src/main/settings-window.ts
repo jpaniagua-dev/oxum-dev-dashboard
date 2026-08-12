@@ -22,7 +22,7 @@ export const SETTINGS_WINDOW_BOUNDS: WindowBounds = { x: -1, y: -1, width: 880, 
  * the rows update behind it.
  *
  * Deliberately not an Electron child window: a `parent` would keep it pinned above the dashboard and
- * drag it along when the dashboard is minimised, which is the opposite of "fenêtre à part entière".
+ * drag it along when the dashboard is minimised, which is the opposite of a window in its own right.
  */
 export class SettingsWindow {
   private window: BrowserWindow | null = null;
@@ -67,7 +67,7 @@ export class SettingsWindow {
       minWidth: 620,
       minHeight: 480,
       show: false,
-      title: 'Réglages — Oxum Dev Dashboard',
+      title: 'Settings - Oxum Dev Dashboard',
       ...windowIcon(),
       backgroundColor: this.options.backgroundColor(),
       webPreferences: {
@@ -146,12 +146,12 @@ export class SettingsWindow {
 function dialogSync(window: BrowserWindow): { response: number } {
   const response = dialog.showMessageBoxSync(window, {
     type: 'warning',
-    buttons: ['Fermer sans enregistrer', 'Annuler'],
+    buttons: ['Close without saving', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
-    title: 'Réglages',
-    message: 'Des modifications ne sont pas enregistrées.',
-    detail: 'Fermer maintenant les perdra.',
+    title: 'Settings',
+    message: 'Some changes are not saved.',
+    detail: 'Closing now will lose them.',
   });
   return { response };
 }

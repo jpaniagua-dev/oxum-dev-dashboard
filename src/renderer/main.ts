@@ -143,7 +143,7 @@ class App {
         // precisely how a stale main process makes a gesture look inert instead of broken.
         onLayout: (groups, direction) => {
           window.api.setTerminalLayout(groups, direction).catch((error: unknown) => {
-            console.error('[terminal] disposition refusee:', error);
+            console.error('[terminal] layout refused:', error);
           });
         },
         onSplitShell: (cwd, direction) => void this.splitShell(cwd, direction),
@@ -327,7 +327,7 @@ class App {
     const transitions = await window.api.jiraTransitions(issue.key);
     const items = [
       {
-        label: issue.isMine ? 'Déjà assigné à toi' : 'M’assigner ce ticket',
+        label: issue.isMine ? 'Already assigned to you' : 'Assign this issue to me',
         disabled: issue.isMine,
         run: () => void this.runJiraWrite(() => window.api.assignJiraToMe(issue.key)),
       },
@@ -339,17 +339,17 @@ class App {
        * transitions below are the ones done later, one at a time.
        */
       {
-        label: 'Créer une branche…',
-        hint: `Lance l’alias « dev ${issue.key} » dans un onglet de terminal, sur le projet choisi`,
+        label: 'Create a branch...',
+        hint: `Runs the "dev ${issue.key}" alias in a terminal tab, on the chosen project`,
         run: () => this.openBranchProjectMenu(issue, x, y),
       },
       ...transitions.map((transition) => ({
-        label: `Passer en « ${transition.label} »`,
+        label: `Move to "${transition.label}"`,
         run: () =>
           void this.runJiraWrite(() => window.api.transitionJira(issue.key, transition.id)),
       })),
       {
-        label: 'Ouvrir dans le navigateur',
+        label: 'Open in the browser',
         run: () => void window.api.openExternal(issue.url),
       },
     ];
@@ -357,7 +357,7 @@ class App {
       items.splice(1, 0, {
         // Says why rather than showing a menu that looks broken: no transitions usually means the
         // connection failed, not that the issue is frozen.
-        label: 'Aucune transition disponible',
+        label: 'No transition available',
         disabled: true,
         run: () => {},
       });
@@ -372,7 +372,7 @@ class App {
    * this app's own. A modal is out on principle here: a `mousedown` inside an overlay released outside
    * it fires a `click` on the common ancestor, which is the bug that got the settings modal removed. A
    * true submenu would mean hover timers, edge flipping and a keyboard model — a menu framework, for a
-   * list of four repositories. And a flat list of "Créer une branche dans X" entries inside the first
+   * list of four repositories. And a flat list of "Create a branch in X" entries inside the first
    * menu would push the transitions below the fold on a machine with ten projects.
    *
    * Two clicks, same place, no new widget. The last project used comes first and says so, because
@@ -388,7 +388,7 @@ class App {
 
     if (ordered.length === 0) {
       showContextMenu(x, y, [
-        { label: 'Aucun projet configuré', disabled: true, run: () => {} },
+        { label: 'No project configured', disabled: true, run: () => {} },
       ]);
       return;
     }
@@ -399,7 +399,7 @@ class App {
       ordered.map((project) => ({
         label:
           project.id === this.lastBranchProject ? `${project.label} (dernier)` : project.label,
-        hint: `dev ${issue.key} dans ${project.path}`,
+        hint: `dev ${issue.key} in ${project.path}`,
         run: () => void this.startBranch(project.id, issue.key),
       })),
     );
@@ -777,7 +777,7 @@ class App {
   }
 
   private stampRefresh(): void {
-    requireElement('last-refresh').textContent = `maj ${new Date().toLocaleTimeString('fr-CH', {
+    requireElement('last-refresh').textContent = `updated ${new Date().toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
@@ -805,7 +805,7 @@ class App {
   private async stopProject(projectId: ProjectId): Promise<void> {
     const stopped = await window.api.stopProjectServer(projectId);
     if (!stopped) {
-      console.warn(`[stop] rien à arrêter pour ${projectId}`);
+      console.warn(`[stop] nothing to stop for ${projectId}`);
     }
   }
 
@@ -900,7 +900,7 @@ class App {
    * built by the main process, which is the single definition of what a new project looks like.
    */
   private async addProject(): Promise<void> {
-    const picked = await window.api.pickFolder('Dossier du projet à ajouter');
+    const picked = await window.api.pickFolder('Project folder to add');
     if (picked === null || this.settings === null) {
       return;
     }
@@ -1074,7 +1074,7 @@ class App {
      * a window. The chevron stays: this is the gesture you find by accident once you know the app, not
      * the one that has to be discoverable.
      *
-     * `hitsInteractive` is what keeps it from firing on the tabs and on `+ Projet`, which is not a
+     * `hitsInteractive` is what keeps it from firing on the tabs and on `+ Project`, which is not a
      * detail: without it, double-clicking "Jira" would select that tab *and* fold the panel it was
      * asking to see. No `preventDefault` needed against text selection, the body being
      * `user-select: none` everywhere but the terminal surface and the note editor.
@@ -1134,8 +1134,8 @@ class App {
 
     const button = requireElement<HTMLButtonElement>('strip-collapse');
     button.setAttribute('aria-expanded', String(!collapsed));
-    button.title = collapsed ? 'Déplier la bande (Alt+Shift+A)' : 'Replier la bande (Alt+Shift+A)';
-    button.setAttribute('aria-label', collapsed ? 'Déplier la bande' : 'Replier la bande');
+    button.title = collapsed ? 'Unfold the strip (Alt+Shift+A)' : 'Fold the strip (Alt+Shift+A)';
+    button.setAttribute('aria-label', collapsed ? 'Unfold the strip' : 'Fold the strip');
 
     if (collapsed) {
       pane.style.height = '';
@@ -1242,7 +1242,7 @@ class App {
     panel.hidden = !open;
     handle.hidden = !open;
     button.setAttribute('aria-pressed', String(open));
-    button.setAttribute('aria-label', open ? 'Masquer les notes' : 'Afficher les notes');
+    button.setAttribute('aria-label', open ? 'Hide the notes' : 'Show the notes');
 
     if (open) {
       this.notesResizer?.setWidth(this.settings?.notesWidth ?? 340);
@@ -1275,7 +1275,7 @@ class App {
 
   private renderThemeIcon(): void {
     const button = requireElement<HTMLButtonElement>('theme-button');
-    button.title = `Thème : ${describeThemeMode(this.theme.mode)}`;
+    button.title = `Theme: ${describeThemeMode(this.theme.mode)}`;
 
     const icon = document.getElementById('theme-icon');
     if (icon === null) {
@@ -1366,16 +1366,16 @@ function nextThemeMode(mode: ThemeMode): ThemeMode {
 function describeThemeMode(mode: ThemeMode): string {
   switch (mode) {
     case 'light':
-      return 'clair';
+      return 'light';
     case 'dark':
-      return 'sombre';
+      return 'dark';
     case 'system':
-      return 'système';
+      return 'system';
   }
 }
 
 // A rejected bootstrap used to fail silently, leaving the window up but half-initialised with no
 // trace anywhere. Reporting it is what makes such a failure findable.
 void new App().start().catch((error: unknown) => {
-  console.error('[bootstrap] echec du demarrage du renderer:', error);
+  console.error('[bootstrap] renderer failed to start:', error);
 });

@@ -42,17 +42,17 @@ in Electron unchanged.
 
 On first launch the dashboard looks under your repositories root for a few common folder names
 (`web-app`, `admin-front`, `design-system`) and seeds a row for each one it finds. That is only a
-starting point, and an unrecognised layout simply starts empty: `+ Projet` adds a folder,
+starting point, and an unrecognised layout simply starts empty: `+ Project` adds a folder,
 **double-clicking a project name renames it**, and everything else is editable in the settings
 dialog.
 
-The port is not shown in the list: the server pill already says `sert :4201` when it matters.
+The port is not shown in the list: the server pill already says `serving :4201` when it matters.
 
 | Column | Reads |
 | --- | --- |
-| Serveur | The dev process phase, read from its own terminal output |
-| Fichiers | Staged / modified / untracked, counted separately |
-| Branche | Current branch, with `↑↓` divergence and a `local` badge when never pushed |
+| Server | The dev process phase, read from its own terminal output |
+| Files | Staged / modified / untracked, counted separately |
+| Branch | Current branch, with `↑↓` divergence and a `local` badge when never pushed |
 | Checks | Pull request check rollup, or why there is nothing to show |
 
 ### Server phases
@@ -60,13 +60,13 @@ The port is not shown in the list: the server pill already says `sert :4201` whe
 Not a boolean, because the `start` scripts run `npm run lint` before serving and a two-state model
 would report that healthy window as "down".
 
-`arrêté` · `démarrage` · `lint` · `build` · `sert :port` · `watch` · `lint KO` · `build KO` · `crash`
+`stopped` · `starting` · `lint` · `build` · `serving :port` · `watch` · `lint failed` · `build failed` · `crashed`
 
-Every one of them describes a process **the dashboard owns**. There used to be an `externe` state,
+Every one of them describes a process **the dashboard owns**. There used to be an `external` state,
 fed by a port probe that mapped listening ports back to repositories; it went away once every launch
 went through the embedded terminal. It was a state nobody could act on, for a situation that had
 stopped happening. The trade-off is explicit: if something outside still holds the port, the row says
-`arrêté` and the action fails on "address already in use", visibly, in its own tab.
+`stopped` and the action fails on "address already in use", visibly, in its own tab.
 
 `watch` exists because **a component library is not a server**: its `start` typically runs
 `ng build --watch`, which opens no port. Nothing about it can be observed from the outside, which is
@@ -74,24 +74,24 @@ precisely why the dashboard spawns it and reads its output.
 
 ## Pull requests
 
-The top strip has four tabs, `Projets`, `Pull requests`, `Jira` and `Git`. Only the strip changes: the terminal below
+The top strip has four tabs, `Projects`, `Pull requests`, `Jira` and `Git`. Only the strip changes: the terminal below
 keeps its space whichever is selected, and each tab remembers its own height.
 
 The pull request tab lists the watched repositories on the left with a counter, and the pull requests of
 the selected one on the right, one line each:
 
 ```
-#128  PROJ 412 user profile detail page      [auteur] [à relire] [OK 4]   33 min  >_
-#127  PROJ-408: invoice lifecycle actions    [à relire] [sans review] [aucun check]  18 min  >_
+#128  PROJ 412 user profile detail page      [author] [review requested] [4 green]  33 min  >_
+#127  PROJ-408: invoice lifecycle actions    [review requested] [no review] [no checks]  18 min  >_
 ```
 
 - **Which repositories**: derived from each project's `git remote get-url origin`, with a
-  `Suivre les pull requests` checkbox per project in the settings. Nothing to maintain twice, and the
+  `Follow pull requests` checkbox per project in the settings. Nothing to maintain twice, and the
   trade-off is explicit: a repository you have not cloned cannot be followed.
 - **Which pull requests**: the open ones that involve you, as author or with your review requested. That
   is the question the tab exists to answer; on an active repository the full list buries it. One
   `gh pr list` call per repository brings everything, and the filter is applied locally.
-- **`sans review` is not an approval.** `gh` reports an empty `reviewDecision` when the repository
+- **`no review` is not an approval.** `gh` reports an empty `reviewDecision` when the repository
   requires no review at all, and painting that green would claim something GitHub never said.
 - Clicking a line opens the pull request in your browser. The **terminal icon** at the end of the row
   opens a new tab in that repository's folder instead — the same glyph the Git tab's repository column
@@ -103,7 +103,7 @@ the selected one on the right, one line each:
 
 ## Jira
 
-A third strip tab, same master-detail grammar: `Sprint courant` and `Mes tickets` on the left with their
+A third strip tab, same master-detail grammar: `Current sprint` and `My issues` on the left with their
 counts, the issues of the selected view on the right. Clicking an issue opens it in the browser, there
 being no local equivalent of a ticket.
 
@@ -114,7 +114,7 @@ settings: site URL, account email, project keys, and an Atlassian API token.
   file, never in `settings.json`. It is never read back towards the settings window: to change it, type a
   new one, and an empty field means "keep the stored one".
 - **If the platform cannot encrypt, the token is refused** rather than written in the clear.
-- **`Tester`** runs one real search, because only that proves the credentials and the project keys
+- **`Test`** runs one real search, because only that proves the credentials and the project keys
   together.
 - The status shown is the one your team configured; the colour comes from Jira's status **category**,
   which is the only part of a workflow that means the same thing on every board.
@@ -123,10 +123,10 @@ settings: site URL, account email, project keys, and an Atlassian API token.
   status, and a remembered list would offer moves Jira then refuses. Assigning goes through the account id
   behind your token, so it cannot target anyone else. Both write straight to Jira and the view refreshes
   at once.
-- Issues are laid out in columns, assignee then status. `Mes tickets` drops the assignee column, since
+- Issues are laid out in columns, assignee then status. `My issues` drops the assignee column, since
   every row would carry your name.
 - **What is in progress comes first**, in both views. Grouped by Jira's status *category*, never by the
-  status name, so "En review" and "Ready for QA" rank with everything else the team is working on. Inside
+  status name, so "In review" and "Ready for QA" rank with everything else the team is working on. Inside
   each group the order the search returned is preserved: `status, key` for the sprint, most recently
   updated first for yours.
 - Nothing is queried until the site, the email and the token are all set. Poll every 300 s by default
@@ -179,10 +179,10 @@ terminal.
 
 ### Checks verdicts
 
-`pas poussée` (no upstream, so no pull request can exist) · `pas de PR` · `aucun check` ·
+`not pushed` (no upstream, so no pull request can exist) · `no PR` · `no checks` ·
 `en cours` · `OK n` · `KO n`
 
-`aucun check` is deliberately distinct from `OK`: two real open pull requests returned an empty
+`no checks` is deliberately distinct from a green rollup: two real open pull requests returned an empty
 rollup, and painting that green would be a lie.
 
 ## Actions
@@ -254,7 +254,7 @@ command and following one level of `npm run` indirection so a delegating start s
 correctly. Both stay overridable, and leaving them blank means "keep following the manifest", so a
 project whose start script changes needs no edit.
 
-`Détecter les dépôts` scans the projects root and offers every folder with a runnable `start` script,
+`Detect repositories` scans the projects root and offers every folder with a runnable `start` script,
 marking the ones already added. Validation runs as you type and blocks saving only on something
 structurally broken (missing folder, two projects on the same repository, two `server` actions). A
 repository without `.git`, a missing `package.json` or an action pointing at a script that does not
@@ -275,7 +275,7 @@ go through the same validation.
 The terminal is the centre of the window, not a drawer: it takes every pixel the projects strip does
 not need. Dragging the separator resizes the strip above (its height is remembered), and the strip
 folds away entirely when you want the window to be nothing but terminals: the chevron beside
-`+ Projet`, `Alt+Shift+A`, or a **double-click on the tab row** itself, the way a title bar maximises
+`+ Project`, `Alt+Shift+A`, or a **double-click on the tab row** itself, the way a title bar maximises
 a window. Its tab row stays visible when folded, and clicking a tab unfolds it.
 
 **A pane is a whole terminal, tabs included.** Splitting gives you a second tab strip with its own
@@ -313,7 +313,7 @@ to another by dragging it there.
   nested trees. Drag the separator between two panes to give one more room.
 - Every pane shows one of its tabs; the brighter tab is the pane where the keyboard goes. Clicking a
   tab shows it **in its own pane**, so browsing the tabs never disturbs a layout.
-- **"Vider"** clears a pane at both ends, xterm and the pty, so ConPTY cannot reprint what you just
+- **"Clear"** clears a pane at both ends, xterm and the pty, so ConPTY cannot reprint what you just
   cleared.
 - A tab can be closed as soon as it has nothing left to do: shells always, a `task` action always, a
   `server` action once it has stopped. A running server has no close button because `Stop` is the

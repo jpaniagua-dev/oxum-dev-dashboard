@@ -14,7 +14,7 @@ import type { Note, NotesState } from '../src/shared/contracts.js';
 
 describe('deriveNoteTitle', () => {
   it('takes the first meaningful line', () => {
-    expect(deriveNoteTitle('Réunion produit\nle reste du corps')).toBe('Réunion produit');
+    expect(deriveNoteTitle('Product meeting\nthe rest of the body')).toBe('Product meeting');
   });
 
   it('strips markdown heading markers, one to six', () => {
@@ -128,13 +128,13 @@ describe('NotesStore', () => {
     expect(id).not.toBeNull();
     if (id === null) return;
 
-    store.update(id, '# Réunion produit\nle corps');
+    store.update(id, '# Product meeting\nthe body');
     await store.flush();
 
     expect(await readFile(join(folder, noteFileName(id)), 'utf8')).toBe(
-      '# Réunion produit\nle corps',
+      '# Product meeting\nthe body',
     );
-    expect(store.state().notes[0]?.title).toBe('Réunion produit');
+    expect(store.state().notes[0]?.title).toBe('Product meeting');
 
     await store.delete(id);
     expect(store.state().notes).toHaveLength(0);
@@ -143,23 +143,23 @@ describe('NotesStore', () => {
 
   it('reads a note back through open, flushing first', async () => {
     const id = await store.create();
-    if (id === null) throw new Error('création impossible');
+    if (id === null) throw new Error('could not create');
 
     // No flush here on purpose: `open` has to do it, or a note switch inside the debounce window
     // would read the previous content.
-    store.update(id, 'texte non encore écrit');
+    store.update(id, 'text not written yet');
     expect(store.hasPending()).toBe(true);
 
-    expect(await store.open(id)).toEqual({ id, text: 'texte non encore écrit' });
+    expect(await store.open(id)).toEqual({ id, text: 'text not written yet' });
     expect(store.hasPending()).toBe(false);
   });
 
   it('does not resurrect a note deleted right after a keystroke', async () => {
     // The race this store is most likely to lose: a debounced write landing after the unlink.
     const id = await store.create();
-    if (id === null) throw new Error('création impossible');
+    if (id === null) throw new Error('could not create');
 
-    store.update(id, 'du texte qui ne doit pas revenir');
+    store.update(id, 'text that must not come back');
     await store.delete(id);
     await new Promise((resolve) => setTimeout(resolve, 400));
     await store.flush();
@@ -169,13 +169,13 @@ describe('NotesStore', () => {
   });
 
   it('indexes existing files and ignores foreign ones', async () => {
-    await writeFile(join(folder, '20260806T143012123.md'), '# Une note', 'utf8');
-    await writeFile(join(folder, 'README.md'), 'pas une note', 'utf8');
-    await writeFile(join(folder, '.abc.1.2.tmp'), 'écriture en cours', 'utf8');
+    await writeFile(join(folder, '20260806T143012123.md'), '# A note', 'utf8');
+    await writeFile(join(folder, 'README.md'), 'not a note', 'utf8');
+    await writeFile(join(folder, '.abc.1.2.tmp'), 'write in flight', 'utf8');
 
     const state = await store.refresh();
     expect(state.notes).toHaveLength(1);
-    expect(state.notes[0]?.title).toBe('Une note');
+    expect(state.notes[0]?.title).toBe('A note');
     expect(state.error).toBeNull();
   });
 
@@ -188,13 +188,13 @@ describe('NotesStore', () => {
 
     const state = await guarded.refresh();
     expect(state.notes).toHaveLength(0);
-    expect(state.error).toContain('introuvable');
+    expect(state.error).toContain('not found');
     expect(await readdir(folder)).not.toContain('disparu');
   });
 
   it('pushes a state on every change so the renderer never polls', async () => {
     const id = await store.create();
-    if (id === null) throw new Error('création impossible');
+    if (id === null) throw new Error('could not create');
     store.update(id, 'a');
     await store.flush();
 
@@ -204,7 +204,7 @@ describe('NotesStore', () => {
 
   it('skips a write when the text has not changed', async () => {
     const id = await store.create();
-    if (id === null) throw new Error('création impossible');
+    if (id === null) throw new Error('could not create');
     store.update(id, 'stable');
     await store.flush();
     const before = states.length;
