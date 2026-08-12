@@ -7,6 +7,8 @@ import {
   type GitDiffTarget,
   type GitRepoState,
   type GitResult,
+  type GitSequencerOp,
+  type GitStashOp,
   type GitSyncOp,
   type IssueTransition,
   type JiraConfig,
@@ -84,6 +86,24 @@ const api: RendererApi = {
   gitSync: (projectId: ProjectId, op: GitSyncOp): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitSync, projectId, op),
 
+  gitCherryPick: (projectId: ProjectId, sha: string, noCommit: boolean): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitCherryPick, projectId, sha, noCommit),
+
+  gitSequencer: (projectId: ProjectId, op: GitSequencerOp): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitSequencer, projectId, op),
+
+  gitStashPush: (
+    projectId: ProjectId,
+    message: string,
+    includeUntracked: boolean,
+  ): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitStashPush, projectId, message, includeUntracked),
+
+  // The sha, never the `stash@{n}`: the main process resolves it against a fresh list, so a stale
+  // position cannot make a drop hit the wrong entry.
+  gitStash: (projectId: ProjectId, sha: string, op: GitStashOp): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitStashApply, projectId, sha, op),
+
   refreshNotes: (): Promise<NotesState> => ipcRenderer.invoke(IpcChannel.NotesRefresh),
 
   onNotesChanged: (listener: (state: NotesState) => void): (() => void) => {
@@ -130,6 +150,12 @@ const api: RendererApi = {
 
   assignJiraToMe: (key: string): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(IpcChannel.JiraAssignMe, key),
+
+  startTicketBranch: (
+    projectId: ProjectId,
+    issueKey: string,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
+    ipcRenderer.invoke(IpcChannel.JiraBranch, projectId, issueKey),
 
   onRowsChanged: (listener: (rows: ProjectRow[]) => void): (() => void) => {
     const handler = (_event: unknown, rows: ProjectRow[]): void => listener(rows);

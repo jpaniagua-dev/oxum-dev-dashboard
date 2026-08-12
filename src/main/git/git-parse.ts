@@ -1,4 +1,4 @@
-import type { GitBranch, GitChange, GitCommit, GitDiffLine } from '@shared/contracts.js';
+import type { GitBranch, GitChange, GitCommit, GitDiffLine, GitStash } from '@shared/contracts.js';
 
 /**
  * Field separator asked of `git log --format`.
@@ -115,6 +115,59 @@ export function parseLogLines(stdout: string): GitCommit[] {
   }
 
   return commits;
+}
+
+/**
+ * Reads the `git stash list --format` output used by `readStashes`.
+ *
+ * Fields: ref (`%gd`), sha (`%H`), date (`%cI`), message (`%gs`). The message comes **last** for the
+ * reason `parseLogLines` puts the subject there: it is the only field a user writes freely, so a
+ * stray separator inside it can only damage itself.
+ *
+ * There is no branch field to ask for — git records where a stash was taken in the reflog message and
+ * nowhere else — so it is read out of the message by `describeStash`.
+ */
+export function parseStashLines(stdout: string): GitStash[] {
+  const stashes: GitStash[] = [];
+
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.trim().length === 0) {
+      continue;
+    }
+    const [ref, sha, date, ...rest] = line.split(FIELD_SEPARATOR);
+    if (ref === undefined || ref.length === 0 || sha === undefined || sha.length === 0) {
+      continue;
+    }
+    const { branch, subject } = describeStash(rest.join(FIELD_SEPARATOR));
+    stashes.push({ ref, sha, date: date ?? '', branch, subject });
+  }
+
+  return stashes;
+}
+
+/**
+ * Splits a stash's reflog message into the branch it was taken from and what it is about.
+ *
+ * Two shapes, both real and both produced by git itself: `WIP on <branch>: <sha> <subject>` for a
+ * bare `git stash`, and `On <branch>: <message>` for one given a message. A pattern matching only the
+ * first loses the branch of every named stash, which is the half people actually type.
+ *
+ * The prefix is **removed** from the subject rather than left in it: the branch is shown in its own
+ * column, and repeating it inside every line is how a narrow list stops being readable. A message
+ * that matches neither shape is passed through whole, with no branch — that is what a stash created
+ * by a tool other than git's own porcelain looks like, and inventing a branch for it would be worse
+ * than admitting there is none.
+ */
+export function describeStash(message: string): { branch: string; subject: string } {
+  const wip = /^WIP on ([^:]+): [0-9a-f]{4,40} (.*)$/s.exec(message);
+  if (wip !== null) {
+    return { branch: wip[1] ?? '', subject: wip[2] ?? '' };
+  }
+  const named = /^On ([^:]+): (.*)$/s.exec(message);
+  if (named !== null) {
+    return { branch: named[1] ?? '', subject: named[2] ?? '' };
+  }
+  return { branch: '', subject: message };
 }
 
 /**

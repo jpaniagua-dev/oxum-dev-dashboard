@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   FIELD_SEPARATOR as SEP,
+  describeStash,
   parseBranchLines,
   parseLogLines,
+  parseStashLines,
   parseStatusZ,
   parseUnifiedDiff,
 } from '../src/main/git/git-parse.js';
@@ -198,5 +200,81 @@ describe('git-changes', () => {
   it('answers whether a commit would contain anything', () => {
     expect(hasStagedChanges([change(' ', 'M'), change('?', '?')])).toBe(false);
     expect(hasStagedChanges([change(' ', 'M'), change('A', ' ')])).toBe(true);
+  });
+});
+
+describe('describeStash', () => {
+  it('reads the branch out of both messages git writes', () => {
+    // Two shapes, both produced by git itself, and a pattern matching only the first loses the branch
+    // of every *named* stash — which is the half people actually type.
+    expect(describeStash('WIP on main: 1a2b3c4 feat: quelque chose')).toEqual({
+      branch: 'main',
+      subject: 'feat: quelque chose',
+    });
+    expect(describeStash('On PROJ-1601-essai: mon brouillon')).toEqual({
+      branch: 'PROJ-1601-essai',
+      subject: 'mon brouillon',
+    });
+  });
+
+  it('passes an unrecognised message through whole rather than inventing a branch', () => {
+    expect(describeStash('quelque chose de bizarre')).toEqual({
+      branch: '',
+      subject: 'quelque chose de bizarre',
+    });
+  });
+
+  it('does not mistake a colon inside a subject for the branch separator', () => {
+    // `[^:]+` before the first colon is what keeps `feat: x` from being read as the branch name.
+    expect(describeStash('On main: feat: deux points').branch).toBe('main');
+    expect(describeStash('On main: feat: deux points').subject).toBe('feat: deux points');
+  });
+});
+
+describe('parseStashLines', () => {
+  const line = (ref: string, sha: string, date: string, message: string): string =>
+    [ref, sha, date, message].join(SEP);
+
+  it('reads the ref, the sha and the message', () => {
+    const stashes = parseStashLines(
+      [
+        line('stash@{0}', 'a'.repeat(40), '2026-08-12T09:00:00+02:00', 'On main: en cours'),
+        line('stash@{1}', 'b'.repeat(40), '2026-08-11T09:00:00+02:00', 'WIP on main: 1a2b3c4 feat: x'),
+      ].join('\n'),
+    );
+
+    expect(stashes).toEqual([
+      {
+        ref: 'stash@{0}',
+        sha: 'a'.repeat(40),
+        date: '2026-08-12T09:00:00+02:00',
+        branch: 'main',
+        subject: 'en cours',
+      },
+      {
+        ref: 'stash@{1}',
+        sha: 'b'.repeat(40),
+        date: '2026-08-11T09:00:00+02:00',
+        branch: 'main',
+        subject: 'feat: x',
+      },
+    ]);
+  });
+
+  it('keeps a message containing the separator whole', () => {
+    // Same reason the commit subject is the last field: it is the one a user writes freely, so a stray
+    // separator inside it can only damage itself.
+    const stashes = parseStashLines(
+      line('stash@{0}', 'c'.repeat(40), '2026-08-12T09:00:00+02:00', `On main: a${SEP}b`),
+    );
+    expect(stashes[0]?.subject).toBe(`a${SEP}b`);
+  });
+
+  it('drops a line with no ref or no sha rather than emitting an unusable entry', () => {
+    // Without a sha there is nothing to resolve a write against, so such an entry could only produce a
+    // button that acts on the wrong stash.
+    expect(parseStashLines(`${SEP}${SEP}${SEP}On main: x`)).toEqual([]);
+    expect(parseStashLines(`stash@{0}${SEP}${SEP}${SEP}On main: x`)).toEqual([]);
+    expect(parseStashLines('')).toEqual([]);
   });
 });

@@ -208,6 +208,42 @@ export interface GitChange {
   readonly from: string | null;
 }
 
+/**
+ * One entry of `git stash list`.
+ *
+ * Carries **both** its ref and its sha, and that pair is the whole point. `stash@{0}` is a position,
+ * not an identity: dropping an entry renumbers every one below it, so a ref read a minute ago can
+ * name a different stash by the time a button is pressed. The sha is the stable handle, and every
+ * write resolves it back to a fresh ref before touching anything.
+ */
+export interface GitStash {
+  /** `stash@{0}`, as of the read that produced this entry. */
+  readonly ref: string;
+  /** Commit sha of the stash entry, which is what identifies it across a renumbering. */
+  readonly sha: string;
+  /** Branch it was taken from, as git records it in the entry's own message. */
+  readonly branch: string;
+  /** What the user typed, or git's own `WIP on <branch>: <sha> <subject>`. */
+  readonly subject: string;
+  readonly date: string;
+}
+
+/** What can be done to an existing stash. Creating one is `GitStashPush`, which takes a message. */
+export type GitStashOp = 'apply' | 'pop' | 'drop';
+
+/**
+ * An operation git has left half-finished in this repository.
+ *
+ * Read because the Git tab now *starts* one of them: a cherry-pick that hits a conflict stops with
+ * `CHERRY_PICK_HEAD` on disk, and from there every other button in the tab fails for a reason that
+ * has nothing to do with what was clicked. The other three are read at the same cost from the same
+ * place, and a repository left mid-rebase misleads exactly as badly.
+ */
+export type GitSequencer = 'none' | 'cherry-pick' | 'merge' | 'revert' | 'rebase';
+
+/** The two ways out of a half-finished operation, both non-interactive. */
+export type GitSequencerOp = 'continue' | 'abort';
+
 /** A local branch, with how far it stands from its upstream. */
 export interface GitBranch {
   readonly name: string;
@@ -261,7 +297,16 @@ export interface GitDiffLine {
  */
 export type GitDiffTarget =
   | { readonly kind: 'file'; readonly path: string; readonly staged: boolean }
-  | { readonly kind: 'commit'; readonly sha: string };
+  | { readonly kind: 'commit'; readonly sha: string }
+  /**
+   * A stash entry, read by its **sha**.
+   *
+   * `git show` is not an option here: a stash is a merge commit, and `git show` prints nothing at all
+   * for one unless asked for a combined diff. `git stash show -p` is the command that answers the
+   * question, and it takes any commit-ish, so the sha keeps this target stable across a renumbering
+   * exactly as the writes do.
+   */
+  | { readonly kind: 'stash'; readonly sha: string; readonly ref: string };
 
 export interface GitDiff {
   /** Heading of the column: a path, or a sha and its subject. */
@@ -286,6 +331,9 @@ export interface GitRepoState {
   readonly branches: readonly GitBranch[];
   readonly changes: readonly GitChange[];
   readonly commits: readonly GitCommit[];
+  readonly stashes: readonly GitStash[];
+  /** `none` unless git has left a cherry-pick, a merge, a revert or a rebase half-finished. */
+  readonly sequencer: GitSequencer;
   readonly ahead: number;
   readonly behind: number;
   readonly hasUpstream: boolean;
@@ -311,16 +359,36 @@ export interface GitResult {
 export type GitSyncOp = 'fetch' | 'pull' | 'push';
 
 /**
- * Action id prefix reserved for tabs the Git tab opens.
+ * Action id prefix reserved for tabs the **app itself** opens.
  *
  * A `commit` tab is tied to a project but is **not** one of its configured actions, so it must be
  * exempt from the reconciliation that closes tabs whose action has disappeared. Without the exemption
  * every settings save would kill a commit in progress. See `isUnreachable`.
+ *
+ * The prefix reads `git:` for history rather than for meaning: the Git tab minted the first of these
+ * ids, and renaming it now would orphan the tabs of a running instance for nothing.
  */
 export const RESERVED_ACTION_PREFIX = 'git:';
 
 /** Action id of the commit tab, one per project so a rerun reuses it. */
 export const GIT_COMMIT_ACTION_ID = `${RESERVED_ACTION_PREFIX}commit`;
+
+/**
+ * Action id of the tab that runs `dev <TICKET>` from the Jira tab.
+ *
+ * Reserved like the commit tab, and for the same reason: it belongs to no configured action, so
+ * without the prefix every settings save would close it mid-run.
+ */
+export const TICKET_BRANCH_ACTION_ID = `${RESERVED_ACTION_PREFIX}branch`;
+
+/**
+ * Shape a Jira key must have before it is put on a command line.
+ *
+ * The key travels into `dev <KEY>` inside an interactive bash, which is the one place in this app
+ * where renderer input reaches a shell. Anchored and deliberately narrow — letters, then a dash,
+ * then digits — so nothing that is not a ticket key can get through, whatever the list it came from.
+ */
+export const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 /* ------------------------------------------------------------------ *
  * GitHub checks
@@ -391,6 +459,17 @@ export interface PullRequest {
   readonly isReviewer: boolean;
   readonly updatedAt: string;
 }
+
+/**
+ * Which pull requests the tab lists.
+ *
+ * `mine` is the question the tab was built to answer ("does this need me?"), `all` is the one it kept
+ * failing to answer ("what is open on this repository?"). Two sub-tabs rather than a widened filter,
+ * because the counts differ and a single list would have to pick which number to show. Both are
+ * computed from the **same payload**: `gh pr list` already returns every open pull request, so the
+ * second view costs no extra call.
+ */
+export type PullScope = 'mine' | 'all';
 
 /** Pull requests of one watched repository, plus why there might be none. */
 export interface RepoPulls {
@@ -702,6 +781,8 @@ export interface AppSettings {
   projectsHeight: number;
   pullsHeight: number;
   jiraHeight: number;
+  /** Sub-tab the pull request view reopens on, so the app comes back where it was left. */
+  pullScope: PullScope;
   /**
    * Height of the Git tab, and the tallest default of the four.
    *
@@ -897,6 +978,27 @@ export const IpcChannel = {
   GitCommit: 'git:commit',
   /** invoke: (projectId, op: GitSyncOp) => GitResult, the three network operations */
   GitSync: 'git:sync',
+  /** invoke: (projectId, sha, noCommit: boolean) => GitResult, replays a commit onto the branch */
+  GitCherryPick: 'git:cherry-pick',
+  /** invoke: (projectId, op: GitSequencerOp) => GitResult, finishes or abandons a half-done operation */
+  GitSequencer: 'git:sequencer',
+  /** invoke: (projectId, message, includeUntracked: boolean) => GitResult, creates a stash */
+  GitStashPush: 'git:stash-push',
+  /**
+   * invoke: (projectId, sha, op: GitStashOp) => GitResult
+   *
+   * Takes the **sha**, never the `stash@{n}` the renderer last saw: the main process re-reads the
+   * list and resolves it, so a stale position cannot make this act on the wrong entry.
+   */
+  GitStashApply: 'git:stash-apply',
+  /**
+   * invoke: (projectId, issueKey) => { terminalId, result }
+   *
+   * Runs the `dev <TICKET>` alias in an interactive Git Bash tab, in the chosen project's folder.
+   * The command is **built in the main process** from a key matched against `ISSUE_KEY_PATTERN`:
+   * the renderer names a ticket and a project, never a command line.
+   */
+  JiraBranch: 'jira:branch',
   /** on: (state: NotesState) => void, pushed whenever the note list changes */
   NotesChanged: 'notes:changed',
   /** invoke: () => NotesState, re-reads the folder from disk */
@@ -1001,6 +1103,17 @@ export interface RendererApi {
   jiraTransitions(key: string): Promise<IssueTransition[]>;
   transitionJira(key: string, transitionId: string): Promise<{ ok: boolean; message: string }>;
   assignJiraToMe(key: string): Promise<{ ok: boolean; message: string }>;
+  /**
+   * Starts a ticket's branch in a terminal tab, by running the `dev <TICKET>` alias.
+   *
+   * A tab rather than a silent `execFile`, for the same reason a commit gets one: the alias is a
+   * script that talks back, and the branch it creates is the user's to watch being created. Returns
+   * the tab so the caller can bring it forward, exactly like `gitCommit`.
+   */
+  startTicketBranch(
+    projectId: ProjectId,
+    issueKey: string,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   /** Opens a pull request in the real browser. Only http(s) is followed, checked in the main process. */
   openExternal(url: string): Promise<void>;
 
@@ -1030,6 +1143,20 @@ export interface RendererApi {
     message: string,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   gitSync(projectId: ProjectId, op: GitSyncOp): Promise<GitResult>;
+  /**
+   * Replays a commit onto the current branch.
+   *
+   * `noCommit` maps to `-n`: the changes land staged and uncommitted, which is what "take this commit
+   * but let me adjust it" means. A conflict leaves the repository mid-cherry-pick, which is why
+   * `GitRepoState.sequencer` exists and why the header grows a way out of it.
+   */
+  gitCherryPick(projectId: ProjectId, sha: string, noCommit: boolean): Promise<GitResult>;
+  /** Finishes (`--continue --no-edit`) or abandons (`--abort`) whatever git left half-done. */
+  gitSequencer(projectId: ProjectId, op: GitSequencerOp): Promise<GitResult>;
+  /** Stashes the working tree. An empty message lets git write its own `WIP on <branch>`. */
+  gitStashPush(projectId: ProjectId, message: string, includeUntracked: boolean): Promise<GitResult>;
+  /** Applies, pops or drops a stash, identified by its sha rather than by its position. */
+  gitStash(projectId: ProjectId, sha: string, op: GitStashOp): Promise<GitResult>;
 
   refreshNotes(): Promise<NotesState>;
   onNotesChanged(listener: (state: NotesState) => void): () => void;

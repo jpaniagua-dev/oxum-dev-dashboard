@@ -153,3 +153,25 @@ export function resolveDefaultProfile(
 ): ShellProfile | undefined {
   return profiles.find((profile) => profile.id === preferredId) ?? profiles[0];
 }
+
+/**
+ * Picks a profile whose shell can expand a `.bashrc` alias.
+ *
+ * The Jira tab runs `dev <TICKET>`, which is an **alias** and therefore exists in exactly one place:
+ * an interactive bash. Falling back to the default profile would not degrade gracefully, it would
+ * fail with `dev: command not found` in a tab that looks like it worked — so no bash means no command
+ * at all, and a message saying which shell is missing.
+ *
+ * The preferred id is honoured when it happens to be a bash, so a user who pointed `git-bash` at a
+ * custom install keeps it. Pure and exported for testing: the branch that matters is the one where
+ * the default profile is PowerShell, which is a perfectly ordinary configuration.
+ */
+export function resolveBashProfile(
+  profiles: readonly ShellProfile[],
+  preferredId: string,
+): ShellProfile | undefined {
+  const isBash = (profile: ShellProfile): boolean =>
+    /(^|[\\/])(bash|sh|zsh)(\.exe)?$/i.test(profile.file);
+  const preferred = profiles.find((profile) => profile.id === preferredId);
+  return preferred !== undefined && isBash(preferred) ? preferred : profiles.find(isBash);
+}

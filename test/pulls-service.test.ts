@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parsePullPayload } from '../src/main/github/pulls-service.js';
 import { parseRemoteSlug } from '../src/main/git/git-service.js';
-import { describeAge, ownPulls } from '../src/renderer/ui/pull-list.js';
+import { describeAge, ownPulls, scopedPulls } from '../src/renderer/ui/pull-list.js';
 
 const ME = 'jpaniagua-dev';
 
@@ -149,6 +149,24 @@ describe('ownPulls', () => {
   it('keeps only what involves the user', () => {
     const repo = { ...base, pulls: [pull({ isAuthor: true }), pull({}), pull({ isReviewer: true })] };
     expect(ownPulls(repo as never)).toHaveLength(2);
+  });
+
+  it('widens to every open pull request without a second call', () => {
+    /*
+     * The two sub-tabs read the **same payload**: `gh pr list` returns every open pull request and the
+     * "mine" filter has always been local, which is why the widened view costs no request. Pinned here
+     * so nobody adds a GitHub-side filter for it later.
+     */
+    const repo = { ...base, pulls: [pull({ isAuthor: true }), pull({}), pull({ isReviewer: true })] };
+    expect(scopedPulls(repo as never, 'all')).toHaveLength(3);
+    expect(scopedPulls(repo as never, 'mine')).toHaveLength(2);
+  });
+
+  it('hands back a copy, so a caller cannot reach into the pushed state', () => {
+    const repo = { ...base, pulls: [pull({ isAuthor: true })] };
+    const all = scopedPulls(repo as never, 'all');
+    all.pop();
+    expect(repo.pulls).toHaveLength(1);
   });
 });
 

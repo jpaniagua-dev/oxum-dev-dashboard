@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { buildJql, parseIssues, parseTransitions } from '../src/main/jira/jira-service.js';
-import { boardUrl, orderIssues, presentStage } from '../src/renderer/ui/jira-list.js';
-import type { IssueStage, JiraIssue } from '../src/shared/contracts.js';
+import {
+  ASSIGNEE_NONE,
+  DEFAULT_JIRA_SORT,
+  assigneesOf,
+  boardUrl,
+  compareIssueKeys,
+  filterByAssignee,
+  nextSort,
+  orderIssues,
+  presentStage,
+  sortIssues,
+} from '../src/renderer/ui/jira-list.js';
+import { ISSUE_KEY_PATTERN, type IssueStage, type JiraIssue } from '../src/shared/contracts.js';
 
 const SITE = 'https://example.atlassian.net';
 const ME = 'dev@example.com';
@@ -219,6 +230,138 @@ describe('orderIssues', () => {
     const source = [issue('PROJ-1', 'todo'), issue('PROJ-2', 'in-progress')];
     orderIssues(source);
     expect(source.map((entry) => entry.key)).toEqual(['PROJ-1', 'PROJ-2']);
+  });
+});
+
+describe('filtering and sorting the list', () => {
+  function issue(fields: Partial<JiraIssue> & { key: string }): JiraIssue {
+    return {
+      summary: '',
+      status: '',
+      stage: 'todo',
+      type: '',
+      assignee: '',
+      isMine: false,
+      url: '',
+      updatedAt: '',
+      ...fields,
+    };
+  }
+
+  const sprint = [
+    issue({ key: 'PROJ-999', assignee: 'Alex Martin', status: 'En review', stage: 'in-progress' }),
+    issue({ key: 'PROJ-1000', assignee: '', status: 'À faire' }),
+    issue({ key: 'PROJ-12', assignee: 'Julio Paniagua', status: 'En cours', stage: 'in-progress' }),
+    issue({ key: 'PROJ-1001', assignee: 'Alex Martin', status: 'À faire' }),
+  ];
+
+  it('lists the assignees present, and only them', () => {
+    // Read off the issues rather than from a user directory: the question is who is on this sprint.
+    // The unassigned issue contributes no name, its option being a state and not a person.
+    expect(assigneesOf(sprint)).toEqual(['Alex Martin', 'Julio Paniagua']);
+  });
+
+  it('filters on a person, on nobody, and on everybody', () => {
+    expect(filterByAssignee(sprint, '').map((entry) => entry.key)).toHaveLength(4);
+    expect(filterByAssignee(sprint, 'Alex Martin').map((entry) => entry.key)).toEqual([
+      'PROJ-999',
+      'PROJ-1001',
+    ]);
+    // The case an `=== assignee` comparison gets wrong by accident: an unassigned issue carries an
+    // empty string, and `''` is also the value that means "no filter at all".
+    expect(filterByAssignee(sprint, ASSIGNEE_NONE).map((entry) => entry.key)).toEqual(['PROJ-1000']);
+  });
+
+  it('sorts issue keys by number, not as text', () => {
+    // `localeCompare` puts PROJ-1000 before PROJ-999, which for a counter is simply wrong. Invisible
+    // until a project passes a power of ten, which any long-lived project does.
+    expect(compareIssueKeys('PROJ-999', 'PROJ-1000')).toBeLessThan(0);
+    expect(compareIssueKeys('PROJ-1001', 'PROJ-1000')).toBeGreaterThan(0);
+    expect(compareIssueKeys('ABC-1', 'PROJ-1')).toBeLessThan(0);
+  });
+
+  it('falls back to the default order when no column is chosen', () => {
+    expect(sortIssues(sprint, DEFAULT_JIRA_SORT).map((entry) => entry.key)).toEqual(
+      orderIssues(sprint).map((entry) => entry.key),
+    );
+  });
+
+  it('replaces the default order when a column is chosen', () => {
+    // A column sort is not a refinement of "in progress first": someone who clicked a header expects
+    // that column to run in order down the whole list, groups included.
+    expect(sortIssues(sprint, { key: 'key', direction: 'asc' }).map((entry) => entry.key)).toEqual([
+      'PROJ-12',
+      'PROJ-999',
+      'PROJ-1000',
+      'PROJ-1001',
+    ]);
+  });
+
+  it('puts the unassigned last whichever direction is asked for', () => {
+    const ascending = sortIssues(sprint, { key: 'assignee', direction: 'asc' });
+    const descending = sortIssues(sprint, { key: 'assignee', direction: 'desc' });
+
+    expect(ascending[ascending.length - 1]?.key).toBe('PROJ-1000');
+    expect(descending[descending.length - 1]?.key).toBe('PROJ-1000');
+  });
+
+  it('reverses by comparison and not by reversing the array', () => {
+    /*
+     * Reversing would also reverse the ties: the two "À faire" issues would swap places on a direction
+     * change, which makes a list look like it is shuffling rows nobody sorted.
+     */
+    const ascending = sortIssues(sprint, { key: 'status', direction: 'asc' });
+    const descending = sortIssues(sprint, { key: 'status', direction: 'desc' });
+    const tiedAsc = ascending.filter((entry) => entry.status === 'À faire').map((e) => e.key);
+    const tiedDesc = descending.filter((entry) => entry.status === 'À faire').map((e) => e.key);
+
+    expect(tiedAsc).toEqual(tiedDesc);
+  });
+
+  it('does not touch the list it was given', () => {
+    const source = [...sprint];
+    sortIssues(source, { key: 'key', direction: 'desc' });
+    filterByAssignee(source, 'Alex Martin');
+    expect(source.map((entry) => entry.key)).toEqual(sprint.map((entry) => entry.key));
+  });
+
+  it('cycles a header through ascending, descending, then back to the default', () => {
+    // Three states rather than two: a toggle would leave no way back to "in progress first" short of
+    // switching views and returning, and that is the order this tab is normally read in.
+    const first = nextSort(DEFAULT_JIRA_SORT, 'assignee');
+    expect(first).toEqual({ key: 'assignee', direction: 'asc' });
+
+    const second = nextSort(first, 'assignee');
+    expect(second).toEqual({ key: 'assignee', direction: 'desc' });
+
+    expect(nextSort(second, 'assignee')).toEqual(DEFAULT_JIRA_SORT);
+    // Another column starts over, ascending, rather than inheriting the previous direction.
+    expect(nextSort(second, 'status')).toEqual({ key: 'status', direction: 'asc' });
+  });
+});
+
+describe('ISSUE_KEY_PATTERN', () => {
+  it('accepts a real key and refuses anything that could reach a shell', () => {
+    /*
+     * This pattern is the only thing between the Jira list and a command line: the key is
+     * interpolated into `dev <KEY>` inside an interactive bash. It is anchored and narrow on purpose,
+     * so what it lets through cannot be a flag, a path, or a second command.
+     */
+    expect(ISSUE_KEY_PATTERN.test('PROJ-1601')).toBe(true);
+    expect(ISSUE_KEY_PATTERN.test('WEB_API-42')).toBe(true);
+
+    for (const bad of [
+      'PROJ-1601; rm -rf /',
+      'PROJ-1601 && whoami',
+      '$(whoami)',
+      '--version',
+      'proj-412',
+      'PROJ-',
+      '-1601',
+      'PROJ-1601\n',
+    ]) {
+      expect(ISSUE_KEY_PATTERN.test(bad)).toBe(false);
+    }
   });
 });
 

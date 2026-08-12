@@ -5,6 +5,10 @@ import type {
   GitDiff,
   GitDiffTarget,
   GitRepoState,
+  GitSequencer,
+  GitSequencerOp,
+  GitStash,
+  GitStashOp,
   GitSyncOp,
   Project,
   ProjectId,
@@ -22,12 +26,25 @@ import { presentChange, presentTrack } from './presenters.js';
  * separate questions ("what have I changed", "where am I", "what happened") and only one of them is
  * ever being asked. The diff column serves all three, which is what keeps them one tab.
  */
-export type GitViewId = 'changes' | 'branches' | 'history';
+export type GitViewId = 'changes' | 'branches' | 'history' | 'stashes';
 
 export const GIT_VIEWS: readonly { id: GitViewId; label: string }[] = [
   { id: 'changes', label: 'Changements' },
   { id: 'branches', label: 'Branches' },
   { id: 'history', label: 'Historique' },
+  /*
+   * The stash list, added last and on the right for a reason: it is the view you go to on purpose,
+   * whereas the first three are where the tab lands.
+   *
+   * It is also the one thing this tab used to refuse to do, and the refusal deserves its epitaph. The
+   * argument was that a stash leaves the repository in a state the strip can neither show nor finish —
+   * which was true of the *gesture* nobody wanted (an automatic stash behind a checkout) and false of
+   * the object: a stash is a named, listed, complete snapshot, and creating one leaves a clean tree.
+   * The states that argument really protects against are conflicts and rebases, and those are still
+   * out. What did have to come with this view is the way back out of a conflicted `pop`, which is what
+   * `sequencer` is for.
+   */
+  { id: 'stashes', label: 'Stash' },
 ];
 
 /**
@@ -67,6 +84,10 @@ export interface GitPanelState {
   readonly message: string;
   /** Draft branch name, held for the same reason. */
   readonly branchDraft: string;
+  /** Draft stash label, held for the same reason. */
+  readonly stashDraft: string;
+  /** Whether a new stash should sweep up untracked files. Off by default: see `buildStashForm`. */
+  readonly stashUntracked: boolean;
   /** True while a write is in flight, so a double click cannot launch two checkouts. */
   readonly busy: boolean;
 }
@@ -83,10 +104,26 @@ export interface GitPanelActions {
   onMessage: (value: string) => void;
   onBranchDraft: (value: string) => void;
   onSync: (op: GitSyncOp) => void;
+  /** Replays a commit onto the current branch. `noCommit` is `-n`: staged, not committed. */
+  onCherryPick: (sha: string, noCommit: boolean) => void;
+  /** Finishes or abandons whatever git left half-done. Only offered when something is. */
+  onSequencer: (op: GitSequencerOp) => void;
+  onStashDraft: (value: string) => void;
+  onStashUntracked: (include: boolean) => void;
+  /** Stashes the working tree under the current draft label. */
+  onStashPush: () => void;
+  /** Applies, pops or drops a stash. Named by sha, never by its position in the list. */
+  onStash: (stash: GitStash, op: GitStashOp) => void;
+  /** Puts a short sha on the clipboard: the one thing a commit row is asked for outside this app. */
+  onCopy: (text: string) => void;
   /** Opens a new terminal tab in the repository, same gesture as everywhere else in the app. */
   onNewTerminal: (projectId: ProjectId) => void;
   /** Opens the repository's action menu, from the `⋯` button or from a right-click on the header. */
   onMenu: (x: number, y: number) => void;
+  /** Opens a commit's action menu, from a right-click on its row in the history. */
+  onCommitMenu: (commit: GitCommit, x: number, y: number) => void;
+  /** Opens a stash's action menu, from a right-click on its row. */
+  onStashMenu: (stash: GitStash, x: number, y: number) => void;
   /**
    * Reports that a text field has the focus.
    *
@@ -141,6 +178,9 @@ export function renderGitPanel(
       break;
     case 'history':
       renderHistory(hosts.list, repo, state, actions);
+      break;
+    case 'stashes':
+      renderStashes(hosts.list, repo, state, actions);
       break;
   }
 
@@ -273,6 +313,24 @@ function buildHeader(
     );
   }
 
+  /*
+   * A half-finished operation is said out loud, right next to the branch.
+   *
+   * This is the state where every other button of the tab fails for a reason that has nothing to do
+   * with what was clicked: mid-cherry-pick, a checkout refuses, a commit commits the wrong thing, and
+   * git's message talks about a sequencer nobody mentioned. The pill is `error`-toned on purpose — it
+   * is not a mode you meant to be in, and the way out is one right-click away in the repository menu.
+   */
+  if (repo.sequencer !== 'none') {
+    header.append(
+      buildPill({
+        label: `${SEQUENCER_LABELS[repo.sequencer]} en cours`,
+        tone: 'error',
+        title: `Le dépôt est au milieu d’un ${SEQUENCER_LABELS[repo.sequencer]}. Continue ou abandonne depuis le menu du dépôt (clic droit).`,
+      }),
+    );
+  }
+
   header.append(createElement('span', { className: 'git__spacer' }));
 
   const menu = createElement('button', {
@@ -304,6 +362,20 @@ function buildHeader(
 }
 
 /**
+ * How each half-finished operation is named to the user.
+ *
+ * git's own words, not translations: `cherry-pick` and `rebase` are what the command prints and what
+ * every answer found online calls them, so renaming them here would make the message harder to act on
+ * rather than friendlier.
+ */
+const SEQUENCER_LABELS: Record<Exclude<GitSequencer, 'none'>, string> = {
+  'cherry-pick': 'cherry-pick',
+  merge: 'merge',
+  revert: 'revert',
+  rebase: 'rebase',
+};
+
+/**
  * The repository's actions, as a menu.
  *
  * Built here rather than in `main.ts` so the labels and the reasons stay next to the view that
@@ -316,7 +388,34 @@ export function buildRepoMenuItems(
   state: GitPanelState,
   actions: GitPanelActions,
 ): { label: string; hint: string; disabled: boolean; run: () => void }[] {
+  /*
+   * The way out of a half-finished operation, first in the list when there is one.
+   *
+   * First because in that state it is the only thing worth doing: fetch, pull and push all fail from
+   * there, and a menu that opens on them is a menu that wastes a click. Abandoning comes before
+   * continuing, which is the reverse of how they read but the right order for how they are used — you
+   * open this menu because something went wrong, and `--abort` is the one that cannot make it worse.
+   */
+  const sequencer =
+    repo.sequencer === 'none'
+      ? []
+      : [
+          {
+            label: `Abandonner le ${SEQUENCER_LABELS[repo.sequencer]}`,
+            hint: `git ${repo.sequencer} --abort : le dépôt revient où il était avant.`,
+            disabled: state.busy,
+            run: () => actions.onSequencer('abort'),
+          },
+          {
+            label: `Continuer le ${SEQUENCER_LABELS[repo.sequencer]}`,
+            hint: `git ${repo.sequencer} --continue, une fois les conflits résolus et ajoutés à l’index.`,
+            disabled: state.busy,
+            run: () => actions.onSequencer('continue'),
+          },
+        ];
+
   return [
+    ...sequencer,
     {
       label: 'Fetch',
       hint: 'git fetch --prune',
@@ -393,7 +492,7 @@ function renderViews(
   for (const view of GIT_VIEWS) {
     const active = view.id === state.view;
     const button = createElement('button', {
-      className: `git__view${active ? ' git__view--active' : ''}`,
+      className: `subtab${active ? ' subtab--active' : ''}`,
     });
     button.type = 'button';
     button.setAttribute('role', 'tab');
@@ -402,7 +501,7 @@ function renderViews(
 
     const count = countFor(view.id, repo);
     if (count !== null) {
-      button.append(createElement('span', { className: 'git__view-count', text: String(count) }));
+      button.append(createElement('span', { className: 'subtab__count', text: String(count) }));
     }
 
     button.addEventListener('click', () => actions.onSelectView(view.id));
@@ -443,6 +542,10 @@ function countFor(view: GitViewId, repo: GitRepoState): number | null {
       return repo.changes.length;
     case 'branches':
       return repo.branches.length;
+    case 'stashes':
+      // Shown even at zero, unlike the history: "how many stashes do I have here" is exactly the
+      // question this view answers, and the answer is often none.
+      return repo.stashes.length;
     case 'history':
       return null;
   }
@@ -706,12 +809,67 @@ function renderHistory(
   }
 
   for (const commit of repo.commits) {
-    host.append(buildCommitRow(commit, state, actions));
+    host.append(buildCommitRow(commit, repo, state, actions));
   }
+}
+
+/**
+ * A commit's own actions, as a menu.
+ *
+ * A right-click and not a button, and that is the same judgement the checkout button records in
+ * reverse: a checkout changes the disk, so it must not be reachable by a stray click on a list; a
+ * cherry-pick changes the *history*, so it must not be reachable at all without asking for it. The
+ * history column is scrolled and clicked all day to read diffs, and a visible `Cherry-pick` sitting on
+ * every row of it would be one mis-click away from a commit nobody wanted.
+ *
+ * Rebuilt at each opening like the repository menu, because it too depends on live state: the target
+ * branch is in the labels, and a menu built once would name the branch you have since left. Exported
+ * for the same reason `buildRepoMenuItems` is — the labels and the reasons belong next to the view.
+ */
+export function buildCommitMenuItems(
+  commit: GitCommit,
+  repo: GitRepoState,
+  state: GitPanelState,
+  actions: GitPanelActions,
+): { label: string; hint: string; disabled: boolean; run: () => void }[] {
+  // A cherry-pick onto a dirty tree is refused by git itself, and the refusal is worth pre-empting:
+  // the item says why rather than letting the button produce an error two clicks later.
+  const dirty = repo.changes.length > 0;
+  const blocked = state.busy || repo.sequencer !== 'none';
+
+  return [
+    {
+      label: `Cherry-pick sur ${repo.branch}`,
+      hint: dirty
+        ? 'git cherry-pick, mais l’arbre de travail n’est pas propre : git refusera.'
+        : `git cherry-pick ${commit.sha} : rejoue ce commit sur la branche courante.`,
+      disabled: blocked,
+      run: () => actions.onCherryPick(commit.sha, false),
+    },
+    {
+      label: 'Cherry-pick sans committer',
+      hint: `git cherry-pick -n ${commit.sha} : les modifications arrivent dans l’index, à toi de committer.`,
+      disabled: blocked,
+      run: () => actions.onCherryPick(commit.sha, true),
+    },
+    {
+      label: 'Copier le sha',
+      hint: commit.sha,
+      disabled: false,
+      run: () => actions.onCopy(commit.sha),
+    },
+    {
+      label: 'Voir le diff',
+      hint: 'Même chose qu’un clic sur la ligne.',
+      disabled: false,
+      run: () => actions.onSelectTarget({ kind: 'commit', sha: commit.sha }),
+    },
+  ];
 }
 
 function buildCommitRow(
   commit: GitCommit,
+  repo: GitRepoState,
   state: GitPanelState,
   actions: GitPanelActions,
 ): HTMLElement {
@@ -723,7 +881,12 @@ function buildCommitRow(
   // The refs are in the tooltip because the badge is capped: on a merge commit the decoration is
   // longer than the row, and truncating it in the view must not make it unreadable altogether.
   const refs = commit.refs.length > 0 ? `\n${commit.refs}` : '';
-  row.title = `${commit.subject}\n${commit.author} — ${commit.date}${refs}\n(clic : voir le diff)`;
+  row.title = `${commit.subject}\n${commit.author} — ${commit.date}${refs}\n(clic : voir le diff, clic droit : agir)`;
+
+  row.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    actions.onCommitMenu(commit, event.clientX, event.clientY);
+  });
 
   row.append(createElement('span', { className: 'git__sha', text: commit.sha }));
   row.append(createElement('span', { className: 'git__label', text: commit.subject }));
@@ -741,6 +904,180 @@ function buildCommitRow(
   });
 
   return row;
+}
+
+/* --------------------------------------------------------------- stashes */
+
+/**
+ * The stash list, with the creation form above it.
+ *
+ * Same shape as the branches view (a form, then the list) because it is the same grammar: a list of
+ * named things you can create one of. What differs is that every action on an entry is behind a
+ * right-click rather than a button — `pop` and `drop` both *remove* the entry, and `drop` removes it
+ * with nothing on screen able to bring it back, so neither belongs on a row that is also clicked to
+ * read a diff.
+ */
+function renderStashes(
+  host: HTMLElement,
+  repo: GitRepoState,
+  state: GitPanelState,
+  actions: GitPanelActions,
+): void {
+  host.append(buildStashForm(repo, state, actions));
+
+  if (repo.stashes.length === 0) {
+    host.append(
+      createElement('p', {
+        className: 'pulls__empty',
+        text: 'Aucun stash. Le formulaire ci-dessus met de côté ce qui est modifié.',
+      }),
+    );
+    return;
+  }
+
+  for (const stash of repo.stashes) {
+    host.append(buildStashRow(stash, state, actions));
+  }
+}
+
+/**
+ * The creation form: a label, the untracked switch, and the button.
+ *
+ * The label is optional and the placeholder says so, because git writes a perfectly usable
+ * `WIP on <branch>: <sha> <subject>` by itself; forcing a name would be asking for one at the moment
+ * someone is in a hurry to switch branches, which is when a stash is made.
+ *
+ * `--include-untracked` is a **choice and off by default**, and that is the load-bearing half. A
+ * checkout already refuses to overwrite tracked changes, so those are the ones a stash is for; new
+ * files are the ones a checkout carries across happily, so sweeping them away by default would move
+ * work nobody asked to move. Off, the count next to the button says how many files are being left
+ * behind, which is the honest way to offer the switch.
+ */
+function buildStashForm(
+  repo: GitRepoState,
+  state: GitPanelState,
+  actions: GitPanelActions,
+): HTMLElement {
+  const bar = createElement('div', { className: 'git__bar' });
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'git__input';
+  input.placeholder = 'Nom du stash (optionnel)';
+  input.value = state.stashDraft;
+  input.addEventListener('input', () => actions.onStashDraft(input.value));
+  input.addEventListener('focus', () => actions.onEditing(true));
+  input.addEventListener('blur', () => actions.onEditing(false));
+
+  const untracked = repo.changes.filter((change) => change.untracked).length;
+  const tracked = repo.changes.length - untracked;
+
+  const toggle = createElement('label', { className: 'git__toggle' });
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'git__check';
+  box.checked = state.stashUntracked;
+  box.disabled = state.busy || untracked === 0;
+  box.addEventListener('change', () => actions.onStashUntracked(box.checked));
+  toggle.append(box, createElement('span', { text: `+ nouveaux (${untracked})` }));
+  toggle.title =
+    untracked === 0
+      ? 'Aucun fichier non suivi à inclure'
+      : 'git stash push --include-untracked : emporte aussi les fichiers que git ne suit pas encore';
+
+  // Untracked files count towards "is there anything to stash" only when they are included: with the
+  // box unticked, a repository whose only changes are new files has nothing for `git stash` to take.
+  const stashable = state.stashUntracked ? repo.changes.length : tracked;
+  const push = createElement('button', {
+    className: 'button',
+    text: 'Stasher',
+    title:
+      stashable === 0
+        ? 'Rien à mettre de côté'
+        : `git stash push sur ${stashable} fichier(s). L’arbre de travail revient à HEAD.`,
+  });
+  push.type = 'button';
+  push.disabled = state.busy || stashable === 0;
+  push.addEventListener('click', () => actions.onStashPush());
+
+  bar.append(input, toggle, push);
+  return bar;
+}
+
+function buildStashRow(
+  stash: GitStash,
+  state: GitPanelState,
+  actions: GitPanelActions,
+): HTMLElement {
+  const selected =
+    state.target?.kind === 'stash' && state.target.sha === stash.sha
+      ? ' git__row--selected'
+      : '';
+  const row = createElement('div', { className: `git__row git__stash-row${selected}` });
+  const from = stash.branch.length > 0 ? `\nDepuis ${stash.branch}` : '';
+  row.title = `${stash.ref} · ${stash.subject}${from}\n${stash.date}\n(clic : voir le diff, clic droit : appliquer, retirer, supprimer)`;
+
+  // The ref is shown because it is what `git stash` prints and what the user would type in a terminal,
+  // and it is shown *knowing* it is positional: everything this app does with the entry goes by sha.
+  row.append(createElement('span', { className: 'git__sha', text: stash.ref }));
+  row.append(createElement('span', { className: 'git__label', text: stash.subject }));
+
+  if (stash.branch.length > 0) {
+    row.append(createElement('span', { className: 'git__refs', text: stash.branch }));
+  }
+  row.append(createElement('span', { className: 'pull__age', text: describeDay(stash.date) }));
+
+  row.addEventListener('click', (event) => {
+    if (hitsInteractive(event)) {
+      return;
+    }
+    actions.onSelectTarget({ kind: 'stash', sha: stash.sha, ref: stash.ref });
+  });
+  row.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    actions.onStashMenu(stash, event.clientX, event.clientY);
+  });
+
+  return row;
+}
+
+/**
+ * A stash's actions, as a menu.
+ *
+ * Three verbs that are easy to confuse and easy to regret, so each hint says what happens to the entry
+ * itself and not only to the working tree. `drop` is last and says it cannot be undone: git keeps the
+ * commit reachable through its reflog for a while, but nothing in this tab can find it again, and
+ * promising a recovery it does not offer would be worse than saying it is final.
+ */
+export function buildStashMenuItems(
+  stash: GitStash,
+  state: GitPanelState,
+  actions: GitPanelActions,
+): { label: string; hint: string; disabled: boolean; run: () => void }[] {
+  // Blocked mid-operation, and spelled out rather than written as `state.repo?.sequencer !== 'none'`:
+  // that form also blocks when there is no repository at all, which happens to be right here and would
+  // be wrong the first time someone reuses it.
+  const blocked = state.busy || (state.repo !== null && state.repo.sequencer !== 'none');
+  return [
+    {
+      label: 'Appliquer (et garder)',
+      hint: `git stash apply : les modifications reviennent dans l’arbre de travail, ${stash.ref} reste dans la liste.`,
+      disabled: blocked,
+      run: () => actions.onStash(stash, 'apply'),
+    },
+    {
+      label: 'Appliquer et retirer',
+      hint: `git stash pop : comme « appliquer », mais ${stash.ref} quitte la liste si ça se passe bien.`,
+      disabled: blocked,
+      run: () => actions.onStash(stash, 'pop'),
+    },
+    {
+      label: 'Supprimer',
+      hint: 'git stash drop : le contenu est perdu, et cet onglet ne sait pas le retrouver.',
+      disabled: blocked,
+      run: () => actions.onStash(stash, 'drop'),
+    },
+  ];
 }
 
 /* ------------------------------------------------------------------ diff */

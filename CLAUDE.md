@@ -351,7 +351,22 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   peut pas être suivi.
 - **Un seul appel `gh pr list` par dépôt**, filtrage « les miennes » en local sur les `login`. Filtrer côté
   GitHub aurait coûté deux appels par dépôt, sa syntaxe de recherche ne sachant pas faire ce `OR`. La
-  charge utile complète est donc en main : élargir le filtre plus tard ne coûtera aucun appel.
+  charge utile complète est donc en main, et c'est **exactement** ce qui a rendu la seconde sous-vue
+  gratuite : ne pas réintroduire de filtre côté GitHub pour l'une ou pour l'autre.
+- **Deux sous-onglets, « Les miennes » et « Toutes »**, et pas un filtre élargi : les deux comptes
+  diffèrent, donc une liste unique devrait choisir lequel afficher dans la colonne des dépôts — et ce
+  compte est la réponse d'un coup d'œil que l'onglet existe pour donner. Les deux comptes sont donc
+  **sur les sous-onglets**, parce que « 0 miennes / 3 toutes » répond à « ce dépôt est calme ou je n'y
+  suis pas ? » sans changer de vue. Le compte de la colonne suit la sous-vue active, sinon la pastille
+  contredit la liste à côté d'elle. `pullScope` est persisté (donc dans `asPatch` **et**
+  `LOCAL_ONLY_KEYS`, voir la note sur `settings-patch.ts`).
+- **`.subtab` est partagé par l'onglet Git et l'onglet PR.** C'était `.git__view`, renommé : une classe
+  nommée d'après un panneau est une classe que le panneau suivant recopie au lieu de la réutiliser. Même
+  raison que `.icon-button--row`.
+- **L'auteur s'affiche dès qu'il n'est pas l'utilisateur**, pas seulement dans « Toutes » : une PR en
+  attente de votre relecture dit « à relire » sans dire de qui, ce qui est la première chose qu'on veut
+  savoir. Masqué quand c'est la vôtre, pour la raison qui fait disparaître la colonne « assigné » dans
+  « Mes tickets ».
 - **Trois pièges du payload, tous rencontrés en vrai** : un `reviewDecision` vide veut dire « aucune review
   requise » et **n'est pas** une approbation ; une review demandée à une **équipe** n'a pas de `login` et
   doit être ignorée sans planter ; un `statusCheckRollup` vide est `no-checks`, jamais `passing`.
@@ -408,6 +423,44 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 - **Les lignes de tickets sont une grille**, pas une ligne flex : leurs badges sont conditionnels, donc en
   flex aucune ligne n'était d'accord sur l'emplacement du statut. L'assigné vient avant le statut, et la
   colonne disparaît dans « Mes tickets » où chaque ligne porterait le même nom.
+- **Le filtre par assigné et le tri des colonnes ne sont PAS persistés**, contrairement à `pullScope`.
+  Un filtre caché qui revient au lancement suivant, c'est une liste qui cesse silencieusement de montrer
+  la moitié du sprint, avec pour cause une liste déroulante que personne ne se souvient d'avoir réglée.
+  Le scope d'un onglet PR est une préférence ; un filtre est une question posée une fois. Le filtre est
+  aussi **remis à zéro au changement de vue** : « Mes tickets » n'a pas de colonne assigné, donc un
+  filtre reporté y masquerait des lignes sans offrir le moyen de le voir ni de l'enlever.
+- **Un tri par colonne REMPLACE l'ordre par défaut, il ne l'affine pas.** Trier par nom *à l'intérieur*
+  du groupe « en cours » garderait l'habitude de l'onglet, mais ferait mentir le tri : qui a cliqué
+  « Assigné » attend que les noms se suivent sur toute la liste. Une seule autorité sur l'ordre à la
+  fois, celle qu'on a demandée. Corollaire : le cycle d'un en-tête a **trois** états (croissant,
+  décroissant, retour au défaut), sinon il n'y a plus de chemin de retour vers « en cours d'abord ».
+- **Le sens du tri s'applique à la comparaison, jamais en inversant le tableau.** Inverser inverse aussi
+  les ex æquo : deux tickets au même statut échangeraient leur place à chaque changement de sens, ce qui
+  donne l'impression que la liste brasse des lignes que personne n'a triées.
+- **Les clés de tickets se comparent sur leur nombre, pas comme du texte.** `localeCompare` place
+  `PROJ-1000` avant `PROJ-999`. Invisible jusqu'à ce qu'un projet passe une puissance de dix, ce que tout projet a
+  fait depuis longtemps.
+- **`ASSIGNEE_NONE` est un caractère de contrôle**, pas le mot « none » : les valeurs de ce filtre sont
+  des noms affichés lus dans Jira, et tout sentinelle lisible est un nom que quelqu'un peut porter. `''`
+  voulant déjà dire « tout le monde », le non-assigné a besoin d'une valeur qui ne peut pas collisionner.
+- **L'en-tête triable est DANS le défilement, en `position: sticky`.** Sorti dans une boîte à part, il se
+  décalerait de la largeur de l'ascenseur dès que la liste déborde, et une colonne mal alignée avec ses
+  valeurs est pire que pas d'en-tête. Il réutilise la grille `.issue`, seule façon qu'un libellé reste
+  au-dessus de la colonne qu'il nomme.
+- **« Créer une branche » lance l'alias `dev <TICKET>`, jamais une commande construite côté renderer.**
+  Le canal prend un projet et une clé ; le main assemble `dev <KEY>` après avoir validé la clé contre
+  `ISSUE_KEY_PATTERN`. C'est le seul endroit de l'app où une saisie venue du renderer atteint un shell,
+  donc le motif est ancré et volontairement étroit : lettres, tiret, chiffres. Il exige aussi un **bash
+  interactif** (`resolveBashProfile`), parce que `dev` est un alias de `.bashrc` : pas de bash → pas de
+  commande et un message qui nomme le shell manquant, plutôt qu'un `command not found` dans un onglet
+  qui a l'air d'avoir marché.
+- **Le choix du projet est un SECOND menu contextuel au même endroit**, pas une modale ni un vrai
+  sous-menu. Une modale est exclue par principe ici (un `mousedown` dedans relâché dehors déclenche un
+  `click` sur l'ancêtre commun : le bug qui a fait retirer la modale des réglages). Un vrai sous-menu
+  demanderait minuteries de survol, retournement aux bords et modèle clavier, soit un framework de menus
+  pour une liste de quatre dépôts. Et une liste plate « Créer une branche dans X » dans le premier menu
+  pousserait les transitions hors de l'écran dès dix projets. Le dernier projet utilisé est en tête et le
+  dit ; il est **session-local**, comme un raccourci et non comme un réglage.
 - **`context-menu.ts` n'a aucun effet de bord à l'import.** Ses écouteurs de fermeture sont posés à la
   première ouverture : au chargement du module, deux fichiers de tests sans DOM cassaient.
 - **Pas de placeholder d'exemple dans les réglages.** Un exemple grisé se lit comme une valeur déjà
@@ -609,10 +662,58 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   **sélectionne pas** le dépôt, donc ça ne déclenche aucune lecture git d'un repo que personne n'a ouvert.
   Elle n'est pas désactivée par `state.busy`, comme la même entrée du menu du dépôt : elle ne lance aucune
   commande git.
-- **Ce que cet onglet ne fait pas, et pourquoi** : pas de stash, pas de résolution de conflit, pas de
-  rebase, pas de staging par morceaux. Tous partagent la même raison : ils laissent le dépôt dans un
-  état intermédiaire que cette bande ne saurait ni montrer ni terminer. Les conflits sont affichés en
+- **Le cherry-pick est au CLIC DROIT sur un commit, jamais un bouton de ligne.** C'est le même jugement
+  que le bouton `Checkout` enregistre dans l'autre sens : un checkout change le disque, donc il ne doit
+  pas être atteignable par un clic perdu dans une liste ; un cherry-pick change l'**historique**, donc il
+  ne doit pas être atteignable du tout sans l'avoir demandé. La colonne d'historique est défilée et
+  cliquée toute la journée pour lire des diffs. Le menu est reconstruit à chaque ouverture, comme celui
+  du dépôt : la branche cible est dans les libellés.
+- **Un sha se valide, faute de `--` derrière quoi se cacher.** `cherry-pick` prend des révisions et pas
+  des chemins, donc il n'y a pas de séparateur pour neutraliser une valeur commençant par `-` : la garde
+  est le motif hexadécimal lui-même. Ça ne coûte rien, ces shas venant de notre propre `git log`.
+- **`GitRepoState.sequencer` est la moitié obligatoire du cherry-pick.** Un cherry-pick en conflit
+  s'arrête avec `CHERRY_PICK_HEAD` sur le disque, et depuis cet état *tous* les autres boutons de
+  l'onglet échouent pour une raison qui n'a rien à voir avec ce qu'on a cliqué. L'état est donc lu, dit
+  en pastille `error` à côté de la branche, et le menu du dépôt propose la sortie (`--abort` avant
+  `--continue` : on ouvre ce menu parce que quelque chose a mal tourné, et `--abort` est celui qui ne peut
+  pas empirer les choses). Les marqueurs sont lus via `git rev-parse --absolute-git-dir` et **jamais** en
+  joignant `.git/` au chemin du dépôt : dans un worktree, `.git` est un *fichier*, donc la version naïve
+  répondrait « rien en cours » pour tous les worktrees. Merge, revert et rebase sont lus au même prix,
+  et un dépôt laissé au milieu d'un rebase trompe exactement autant.
+- **`--continue` tourne avec `GIT_EDITOR=true`.** Sans ça git ouvre l'éditeur de `core.editor` pour
+  confirmer le message, et un éditeur ouvert par un `execFile` silencieux est une commande qui ne rend
+  jamais la main : l'appel resterait là jusqu'au timeout, dépôt toujours au milieu de l'opération et rien
+  à l'écran pour le dire. L'orthographe du drapeau varie selon l'opération (`--no-edit` existe pour
+  certaines), la variable d'environnement marche pour toutes.
+- **Un stash se désigne par son SHA, jamais par `stash@{n}`.** Le ref est une **position** dans une liste
+  qui se renumérote à chaque `drop` et chaque `pop` : un ref lu il y a trente secondes peut nommer une
+  autre entrée au moment du clic, et un `drop` sur la mauvaise entrée est du travail perdu que rien ici
+  ne sait retrouver. `applyStash` relit donc la liste et y cherche le sha ; une entrée disparue est
+  **refusée**, pas approximée. Le ref reste affiché parce que c'est ce que `git stash` imprime et ce
+  qu'on retaperait dans un terminal.
+- **`--include-untracked` est un choix, décoché par défaut.** Un checkout refuse déjà d'écraser des
+  modifications suivies : ce sont celles-là qu'un stash sert à mettre de côté. Les fichiers neufs, un
+  checkout les emporte sans broncher, donc les balayer par défaut déplacerait du travail que personne
+  n'a demandé de déplacer. Piège vérifié qui va avec : avec **uniquement** des fichiers non suivis,
+  `git stash` ne sauve rien du tout et sort quand même en 0 — donc « succès » n'est pas « quelque chose a
+  été stashé », et le message rendu est la phrase de git elle-même.
+- **Le diff d'un stash passe par `git stash show -p`, pas par `git show`.** Une entrée de stash est un
+  commit de merge, et `git show` n'imprime *rien* pour un merge sans demander un diff combiné :
+  réutiliser la branche « commit » afficherait un diff vide pour chaque stash, ce qui se lit « rien de
+  stashé ». Corollaire : la cible de diff `stash` porte le sha, comme les écritures.
+- **Les actions d'un stash sont un menu, pas des boutons.** `pop` et `drop` *retirent* l'entrée, et
+  `drop` la retire sans que rien à l'écran sache la ramener : ni l'un ni l'autre n'a sa place sur une
+  ligne qu'on clique aussi pour lire un diff. Et le libellé de `drop` dit que c'est définitif — le
+  reflog garde le commit un temps, mais **cet onglet** ne sait pas le retrouver, et promettre une
+  récupération qu'on n'offre pas serait pire que d'annoncer la perte.
+- **Ce que cet onglet ne fait toujours pas, et pourquoi** : pas de résolution de conflit, pas de rebase
+  interactif, pas de staging par morceaux. La raison n'a pas changé : ils laissent le dépôt dans un état
+  intermédiaire que cette bande ne saurait ni montrer ni terminer, et les conflits restent affichés en
   `error` dans la liste plutôt que noyés parmi les modifications, précisément pour renvoyer au terminal.
+  Le **stash**, lui, a quitté cette liste, et l'argument mérite son épitaphe : il visait le *geste* dont
+  personne ne voulait (un stash automatique derrière un checkout) et pas l'objet — un stash est un
+  instantané nommé, listé, complet, et en créer un laisse un arbre propre. Ce qui a dû venir avec la vue,
+  c'est la sortie d'un `pop` en conflit, d'où `sequencer`.
 
 ## Mails et Teams : pourquoi ils ne sont pas là
 

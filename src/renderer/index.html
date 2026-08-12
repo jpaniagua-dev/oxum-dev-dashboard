@@ -146,15 +146,33 @@
           </table>
         </div>
 
+        <!--
+          Repositories on the left, then a column of its own: the two scope sub-tabs above the list.
+
+          The sub-tabs are a row inside the detail column rather than more entries in the repository
+          column, because they are orthogonal to it — "les miennes" and "toutes" are two readings of
+          whichever repository is selected, not two more things to select. Same grammar as the Git
+          tab's own sub-tabs, and the same `.subtab` rule paints both.
+        -->
         <div class="pulls" id="strip-panel-pulls" role="tabpanel" hidden>
           <div class="pulls__repos" id="pulls-repos"></div>
-          <div class="pulls__list" id="pulls-list"></div>
+          <div class="pulls__main">
+            <div class="pulls__views" id="pulls-views" role="tablist"></div>
+            <div class="pulls__list" id="pulls-list"></div>
+          </div>
         </div>
 
-        <!-- Same master-detail grammar as the pull requests, so there is nothing new to learn. -->
+        <!--
+          Same master-detail grammar as the pull requests, so there is nothing new to learn. The bar
+          above the list holds the assignee filter; the sortable column headers live *inside* the list,
+          stuck to its top, so they cannot drift out of line with the rows they name.
+        -->
         <div class="pulls" id="strip-panel-jira" role="tabpanel" hidden>
           <div class="pulls__repos" id="jira-views"></div>
-          <div class="pulls__list" id="jira-list"></div>
+          <div class="pulls__main">
+            <div class="pulls__bar" id="jira-filter"></div>
+            <div class="pulls__list" id="jira-list"></div>
+          </div>
         </div>
 
         <!--

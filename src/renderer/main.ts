@@ -11,6 +11,7 @@ import type {
   Project,
   ProjectId,
   ProjectRow,
+  PullScope,
   RepoPulls,
   ShellProfile,
   StripTab,
@@ -20,7 +21,9 @@ import type {
 import { showContextMenu } from './ui/context-menu.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
+  buildCommitMenuItems,
   buildRepoMenuItems,
+  buildStashMenuItems,
   defaultTargetFor,
   renderGitPanel,
   type GitPanelActions,
@@ -28,7 +31,13 @@ import {
   type GitViewId,
 } from './ui/git-panel.js';
 import { attachGitSplitter } from './ui/git-split.js';
-import { renderJiraList } from './ui/jira-list.js';
+import {
+  DEFAULT_JIRA_SORT,
+  nextSort,
+  renderJiraList,
+  type JiraSort,
+  type JiraSortKey,
+} from './ui/jira-list.js';
 import { NotesPanel } from './ui/notes-panel.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
@@ -63,8 +72,27 @@ class App {
   private pulls: readonly RepoPulls[] = [];
   /** Repository selected in the pull request tab, so a refresh does not jump back to the first. */
   private selectedRepo: ProjectId | null = null;
+  /** Which pull requests the tab lists. Mirrors `settings.pullScope`, so it survives a restart. */
+  private pullScope: PullScope = 'mine';
   private jira: JiraState | null = null;
   private selectedJiraView: JiraViewId = 'mine';
+  /*
+   * Jira filter and sort.
+   *
+   * Deliberately **not** persisted, unlike the pull request scope. A hidden filter that comes back at
+   * the next launch is how a list silently stops showing half the sprint, and the reason would be a
+   * dropdown nobody remembers setting. The scope of a pull request tab is a preference; a filter is a
+   * question you asked once.
+   */
+  private jiraAssignee = '';
+  private jiraSort: JiraSort = DEFAULT_JIRA_SORT;
+  /**
+   * Project the last branch was created in, offered first the next time.
+   *
+   * Session-local for the same reason: it is a shortcut, not a setting, and a stale one would put the
+   * wrong repository at the top of a menu whose whole point is picking the right one.
+   */
+  private lastBranchProject: ProjectId | null = null;
   /*
    * Git tab state.
    *
@@ -79,6 +107,8 @@ class App {
   private gitDiff: GitDiff | null = null;
   private gitMessage = '';
   private gitBranchDraft = '';
+  private gitStashDraft = '';
+  private gitStashUntracked = false;
   private gitBusy = false;
   private gitEditing = false;
   private strip: StripTabs | null = null;
@@ -134,6 +164,7 @@ class App {
     this.terminal.setLayout(bootstrap.layout);
 
     this.pulls = bootstrap.pulls;
+    this.pullScope = bootstrap.settings.pullScope;
     this.jira = bootstrap.jira;
     this.bindChrome();
     this.bindStrip(bootstrap.settings);
@@ -252,16 +283,31 @@ class App {
       return;
     }
     renderJiraList(
-      { views: requireElement('jira-views'), list: requireElement('jira-list') },
+      {
+        views: requireElement('jira-views'),
+        filter: requireElement('jira-filter'),
+        list: requireElement('jira-list'),
+      },
       this.jira,
-      this.selectedJiraView,
+      { selected: this.selectedJiraView, assignee: this.jiraAssignee, sort: this.jiraSort },
       {
         onOpen: (url) => void window.api.openExternal(url),
         onSelect: (view) => {
           this.selectedJiraView = view;
+          // The filter belongs to the list it was applied to: "Mes tickets" has no assignee column, so
+          // a filter carried over would silently narrow a view that offers no way to see or clear it.
+          this.jiraAssignee = '';
           this.renderJira();
         },
         onMenu: (issue, x, y) => void this.openIssueMenu(issue, x, y),
+        onFilterAssignee: (assignee) => {
+          this.jiraAssignee = assignee;
+          this.renderJira();
+        },
+        onSort: (key: JiraSortKey) => {
+          this.jiraSort = nextSort(this.jiraSort, key);
+          this.renderJira();
+        },
       },
       {
         siteUrl: this.settings?.jira.siteUrl ?? '',
@@ -285,6 +331,18 @@ class App {
         disabled: issue.isMine,
         run: () => void this.runJiraWrite(() => window.api.assignJiraToMe(issue.key)),
       },
+      /*
+       * The branch, second in the list and above the transitions.
+       *
+       * Position is not decoration here: "assign it to me, create its branch" is the pair of gestures
+       * that start a ticket, and they are the two things done from this menu in the same minute. The
+       * transitions below are the ones done later, one at a time.
+       */
+      {
+        label: 'Créer une branche…',
+        hint: `Lance l’alias « dev ${issue.key} » dans un onglet de terminal, sur le projet choisi`,
+        run: () => this.openBranchProjectMenu(issue, x, y),
+      },
       ...transitions.map((transition) => ({
         label: `Passer en « ${transition.label} »`,
         run: () =>
@@ -307,6 +365,63 @@ class App {
     showContextMenu(x, y, items);
   }
 
+  /**
+   * Asks which project the branch goes in, then runs `dev <TICKET>` there.
+   *
+   * A **second menu at the same spot** rather than a dialog or an inline submenu, and the reasons are
+   * this app's own. A modal is out on principle here: a `mousedown` inside an overlay released outside
+   * it fires a `click` on the common ancestor, which is the bug that got the settings modal removed. A
+   * true submenu would mean hover timers, edge flipping and a keyboard model — a menu framework, for a
+   * list of four repositories. And a flat list of "Créer une branche dans X" entries inside the first
+   * menu would push the transitions below the fold on a machine with ten projects.
+   *
+   * Two clicks, same place, no new widget. The last project used comes first and says so, because
+   * branch after branch lands in the same repository for days at a time.
+   */
+  private openBranchProjectMenu(issue: JiraIssue, x: number, y: number): void {
+    const ordered = [...this.projects].sort((left, right) => {
+      if (left.id === this.lastBranchProject) {
+        return -1;
+      }
+      return right.id === this.lastBranchProject ? 1 : 0;
+    });
+
+    if (ordered.length === 0) {
+      showContextMenu(x, y, [
+        { label: 'Aucun projet configuré', disabled: true, run: () => {} },
+      ]);
+      return;
+    }
+
+    showContextMenu(
+      x,
+      y,
+      ordered.map((project) => ({
+        label:
+          project.id === this.lastBranchProject ? `${project.label} (dernier)` : project.label,
+        hint: `dev ${issue.key} dans ${project.path}`,
+        run: () => void this.startBranch(project.id, issue.key),
+      })),
+    );
+  }
+
+  /**
+   * Runs the ticket's `dev` alias in a terminal tab and brings it forward.
+   *
+   * Focused straight away for the reason the commit tab is: the alias prints what it did and can ask
+   * something, and a tab created behind the current one would be invisible until it had finished.
+   */
+  private async startBranch(projectId: ProjectId, issueKey: string): Promise<void> {
+    const { terminalId, result } = await window.api.startTicketBranch(projectId, issueKey);
+    this.stampMessage(result.message);
+    if (terminalId === null) {
+      console.warn('[branch]', result.message);
+      return;
+    }
+    this.lastBranchProject = projectId;
+    await this.focusTerminal(terminalId);
+  }
+
   /** Runs a Jira write and reports its outcome where the user is looking. */
   private async runJiraWrite(write: () => Promise<{ ok: boolean; message: string }>): Promise<void> {
     const result = await write();
@@ -324,9 +439,14 @@ class App {
 
   private renderPulls(): void {
     renderPullList(
-      { repos: requireElement('pulls-repos'), list: requireElement('pulls-list') },
+      {
+        repos: requireElement('pulls-repos'),
+        views: requireElement('pulls-views'),
+        list: requireElement('pulls-list'),
+      },
       this.pulls,
       this.selectedRepo,
+      this.pullScope,
       {
         // Same gesture as a click on a project row, and it goes through the same reuse path: seeing a
         // pull request usually means going to work on it.
@@ -334,6 +454,16 @@ class App {
         onOpenPull: (url) => void window.api.openExternal(url),
         onSelect: (projectId) => {
           this.selectedRepo = projectId;
+          this.renderPulls();
+        },
+        onSelectScope: (scope) => {
+          this.pullScope = scope;
+          if (this.settings !== null) {
+            this.settings = { ...this.settings, pullScope: scope };
+          }
+          // Local-only, like the strip heights: it is written from this window and echoing it back
+          // would rebuild the list under the click that produced it.
+          void window.api.updateSettings({ pullScope: scope });
           this.renderPulls();
         },
       },
@@ -374,6 +504,8 @@ class App {
       diff: this.gitDiff,
       message: this.gitMessage,
       branchDraft: this.gitBranchDraft,
+      stashDraft: this.gitStashDraft,
+      stashUntracked: this.gitStashUntracked,
       busy: this.gitBusy,
     };
   }
@@ -392,6 +524,7 @@ class App {
           this.gitDiff = null;
           this.gitMessage = '';
           this.gitBranchDraft = '';
+          this.gitStashDraft = '';
           this.renderGit();
           void this.loadGit();
         },
@@ -428,8 +561,58 @@ class App {
           this.gitBranchDraft = value;
         },
         onSync: (op) => void this.syncGit(op),
+        onCherryPick: (sha, noCommit) =>
+          void this.runGitWrite(() =>
+            window.api.gitCherryPick(this.requireGitProject(), sha, noCommit),
+          ),
+        onSequencer: (op) =>
+          void this.runGitWrite(() => window.api.gitSequencer(this.requireGitProject(), op)),
+        onStashDraft: (value) => {
+          this.gitStashDraft = value;
+        },
+        onStashUntracked: (include) => {
+          this.gitStashUntracked = include;
+          // Re-rendered, unlike a text draft: the switch changes the button's own label and enablement,
+          // so the panel has to be repainted for the checkbox to mean anything.
+          this.renderGit();
+        },
+        onStashPush: () => {
+          void this.runGitWrite(async () => {
+            const result = await window.api.gitStashPush(
+              this.requireGitProject(),
+              this.gitStashDraft,
+              this.gitStashUntracked,
+            );
+            if (result.ok) {
+              this.gitStashDraft = '';
+            }
+            return result;
+          });
+        },
+        onStash: (stash, op) =>
+          void this.runGitWrite(() =>
+            window.api.gitStash(this.requireGitProject(), stash.sha, op),
+          ),
+        onCopy: (text) => void window.api.writeClipboard(text),
         onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
         onMenu: (x, y) => this.openGitMenu(x, y),
+        onCommitMenu: (commit, x, y) => {
+          if (this.gitRepo === null || this.gitRepo.error !== null) {
+            return;
+          }
+          showContextMenu(
+            x,
+            y,
+            buildCommitMenuItems(commit, this.gitRepo, this.gitPanelState(), this.gitPanelActions()),
+          );
+        },
+        onStashMenu: (stash, x, y) => {
+          showContextMenu(
+            x,
+            y,
+            buildStashMenuItems(stash, this.gitPanelState(), this.gitPanelActions()),
+          );
+        },
         onEditing: (editing) => {
           this.gitEditing = editing;
         },
@@ -473,6 +656,15 @@ class App {
     if (this.gitTarget?.kind === 'file') {
       const path = this.gitTarget.path;
       if (!(this.gitRepo?.changes.some((change) => change.path === path) ?? false)) {
+        this.gitTarget = null;
+        this.gitDiff = null;
+      }
+    }
+    // Same rule for a stash, and it is not hypothetical here: `pop` and `drop` both remove the entry
+    // the diff column is showing, so this is the normal outcome of using the view rather than an edge.
+    if (this.gitTarget?.kind === 'stash') {
+      const sha = this.gitTarget.sha;
+      if (!(this.gitRepo?.stashes.some((stash) => stash.sha === sha) ?? false)) {
         this.gitTarget = null;
         this.gitDiff = null;
       }

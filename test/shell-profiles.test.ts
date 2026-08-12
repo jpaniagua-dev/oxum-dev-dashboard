@@ -5,6 +5,7 @@ import {
   detectProfiles,
   expandHome,
   mergeProfiles,
+  resolveBashProfile,
   resolveDefaultProfile,
   sanitizeProfile,
 } from '../src/main/terminal/shell-profiles.js';
@@ -128,5 +129,36 @@ describe('resolveDefaultProfile', () => {
 
   it('returns nothing when there is no profile at all', () => {
     expect(resolveDefaultProfile([], 'git-bash')).toBeUndefined();
+  });
+});
+
+describe('resolveBashProfile', () => {
+  const bash = profile({ id: 'git-bash', file: 'C:/Program Files/Git/bin/bash.exe' });
+  const powershell = profile({ id: 'powershell', file: 'C:/Windows/System32/powershell.exe' });
+  const cmd = profile({ id: 'cmd', file: 'C:/Windows/System32/cmd.exe' });
+
+  it('honours the preferred profile when it is a bash', () => {
+    // So a Git Bash installed somewhere unusual, pointed at from the settings, keeps being used.
+    expect(resolveBashProfile([powershell, bash], 'git-bash')?.id).toBe('git-bash');
+  });
+
+  it('ignores a preference that cannot expand an alias', () => {
+    /*
+     * The branch that matters. `dev` is a `.bashrc` alias, so PowerShell being the default profile
+     * must not make it the shell here: `resolveDefaultProfile` would happily return it and the command
+     * would fail with `dev: command not found` in a tab that looks like it worked.
+     */
+    expect(resolveBashProfile([powershell, cmd, bash], 'powershell')?.id).toBe('git-bash');
+  });
+
+  it('returns nothing rather than a shell that cannot run the command', () => {
+    // No bash means no command at all, and a message naming the missing shell.
+    expect(resolveBashProfile([powershell, cmd], 'powershell')).toBeUndefined();
+    expect(resolveBashProfile([], 'git-bash')).toBeUndefined();
+  });
+
+  it('recognises sh and zsh, and is not fooled by a name that merely contains "sh"', () => {
+    expect(resolveBashProfile([profile({ id: 'z', file: '/usr/bin/zsh' })], 'z')?.id).toBe('z');
+    expect(resolveBashProfile([profile({ id: 'p', file: 'C:/tools/pwsh.exe' })], 'p')).toBeUndefined();
   });
 });

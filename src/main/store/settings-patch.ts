@@ -13,6 +13,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'gitHeight',
   'gitListWidth',
   'activeStrip',
+  'pullScope',
   'stripCollapsed',
   'notesWidth',
   'notesOpen',
@@ -50,6 +51,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   ) {
     patch.activeStrip = input.activeStrip;
   }
+  if (input.pullScope === 'mine' || input.pullScope === 'all') patch.pullScope = input.pullScope;
   if (typeof input.stripCollapsed === 'boolean') patch.stripCollapsed = input.stripCollapsed;
   if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
   // Broadcast, and deliberately not in `LOCAL_ONLY_KEYS`: it is written by the settings window and has

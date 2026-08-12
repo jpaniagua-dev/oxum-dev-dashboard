@@ -1,8 +1,18 @@
-import type { ProjectId, PullRequest, RepoPulls } from '@shared/contracts.js';
+import type { ProjectId, PullRequest, PullScope, RepoPulls } from '@shared/contracts.js';
 import { clearChildren, createElement, createIconButton, hitsInteractive } from './dom.js';
 import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
 import { presentInvolvement, presentPullChecks, presentReview } from './presenters.js';
+
+/** The two sub-tabs, in display order. Labelled here so the view and its counts stay together. */
+export const PULL_SCOPES: readonly { id: PullScope; label: string; hint: string }[] = [
+  {
+    id: 'mine',
+    label: 'Les miennes',
+    hint: 'Les PR dont vous êtes auteur ou relecteur demandé',
+  },
+  { id: 'all', label: 'Toutes', hint: 'Toutes les PR ouvertes de ce dépôt' },
+];
 
 export interface PullListActions {
   /**
@@ -22,33 +32,48 @@ export interface PullListActions {
   onOpenPull: (url: string) => void;
   /** Remembers which repository is selected, so a refresh does not jump back to the first. */
   onSelect: (projectId: ProjectId) => void;
+  /** Switches between "the ones that need me" and "everything open here". */
+  onSelectScope: (scope: PullScope) => void;
 }
 
 /**
- * Pull requests to show for one repository.
+ * Pull requests that involve the user: author, or review requested.
  *
- * Only the ones that involve the user: author, or review requested. That is the question the tab exists
- * to answer, and on an active repository the full list buries it. The payload carries every open pull
- * request anyway, so widening this later costs nothing.
+ * The question the tab was built to answer, and on an active repository the full list buries it.
+ * Kept as its own function rather than folded into `scopedPulls` because the count it produces is
+ * shown next to the widened list too, which is what makes the widened list readable.
  */
 export function ownPulls(repo: RepoPulls): PullRequest[] {
   return repo.pulls.filter((pull) => pull.isAuthor || pull.isReviewer);
 }
 
 /**
- * Renders the repository column and the pull requests of the selected one.
+ * Pull requests for a scope.
+ *
+ * Both scopes come out of the **same payload**: `gh pr list` returns every open pull request in one
+ * call, and the "mine" filter has always been local. That is why the second sub-tab costs no request
+ * at all — the widening had been paid for since the tab was written, it simply had no way in.
+ */
+export function scopedPulls(repo: RepoPulls, scope: PullScope): PullRequest[] {
+  return scope === 'all' ? [...repo.pulls] : ownPulls(repo);
+}
+
+/**
+ * Renders the repository column, the two scope sub-tabs, and the pull requests of the selection.
  *
  * A master-detail rather than one flat list: the counter per repository is itself the glance-level
  * answer ("three of mine are waiting on web-app"), and the detail stays readable in a strip
  * that is only a few hundred pixels tall.
  */
 export function renderPullList(
-  hosts: { repos: HTMLElement; list: HTMLElement },
+  hosts: { repos: HTMLElement; views: HTMLElement; list: HTMLElement },
   repos: readonly RepoPulls[],
   selected: ProjectId | null,
+  scope: PullScope,
   actions: PullListActions,
 ): void {
   clearChildren(hosts.repos);
+  clearChildren(hosts.views);
   clearChildren(hosts.list);
 
   if (repos.length === 0) {
@@ -80,7 +105,13 @@ export function renderPullList(
       row.append(createElement('span', { className: 'pulls__repo-count', text: '—' }));
       row.title = 'Ce dépôt n’a pas de remote GitHub';
     } else {
-      row.append(createElement('span', { className: 'pulls__repo-count', text: String(mine.length) }));
+      // The count follows the selected scope, or the badge would contradict the list next to it.
+      row.append(
+        createElement('span', {
+          className: 'pulls__repo-count',
+          text: String(scopedPulls(repo, scope).length),
+        }),
+      );
       row.title = `${repo.slug}\n${repo.pulls.length} PR ouverte(s), ${mine.length} qui vous concerne(nt)`;
     }
 
@@ -91,28 +122,83 @@ export function renderPullList(
   if (active === undefined) {
     return;
   }
+
+  renderScopes(hosts.views, active, scope, actions);
+
   if (active.error !== null) {
     hosts.list.append(createElement('p', { className: 'pulls__error', text: active.error }));
     return;
   }
 
-  const mine = ownPulls(active);
-  if (mine.length === 0) {
+  const pulls = scopedPulls(active, scope);
+  if (pulls.length === 0) {
     hosts.list.append(
       createElement('p', {
         className: 'pulls__empty',
-        text:
-          active.checkedAt === null
-            ? 'Lecture en cours…'
-            : 'Aucune PR ouverte qui vous concerne sur ce dépôt.',
+        text: emptyMessage(active, scope),
       }),
     );
     return;
   }
 
-  for (const pull of mine) {
+  for (const pull of pulls) {
     hosts.list.append(buildPullRow(pull, active.projectId, actions));
   }
+}
+
+/**
+ * The two scope sub-tabs, each carrying the count it would show.
+ *
+ * Counts on the tabs rather than only in the list, because that is the whole reason the second view
+ * exists: "0 miennes / 3 toutes" is the answer to "is this repository quiet or am I just not in it",
+ * and it is readable without switching.
+ *
+ * Same shape as the Git tab's sub-tabs and deliberately so: one grammar for "this panel has views",
+ * so there is nothing new to learn between two neighbouring tabs.
+ */
+function renderScopes(
+  host: HTMLElement,
+  repo: RepoPulls,
+  scope: PullScope,
+  actions: PullListActions,
+): void {
+  for (const entry of PULL_SCOPES) {
+    const active = entry.id === scope;
+    const button = createElement('button', {
+      className: `subtab${active ? ' subtab--active' : ''}`,
+      title: entry.hint,
+    });
+    button.type = 'button';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(active));
+    button.append(createElement('span', { text: entry.label }));
+    button.append(
+      createElement('span', {
+        className: 'subtab__count',
+        text: String(scopedPulls(repo, entry.id).length),
+      }),
+    );
+    button.addEventListener('click', () => actions.onSelectScope(entry.id));
+    host.append(button);
+  }
+}
+
+/**
+ * Why the list is empty, which is three different things.
+ *
+ * "Not read yet", "nothing open at all" and "plenty open, none of them yours" ask for three different
+ * next moves, and one sentence covering all three would be the useless one.
+ */
+function emptyMessage(repo: RepoPulls, scope: PullScope): string {
+  if (repo.checkedAt === null) {
+    return 'Lecture en cours…';
+  }
+  if (scope === 'all') {
+    return 'Aucune PR ouverte sur ce dépôt.';
+  }
+  return repo.pulls.length === 0
+    ? 'Aucune PR ouverte sur ce dépôt.'
+    : `Aucune PR qui vous concerne, sur ${repo.pulls.length} ouverte(s). Voir « Toutes ».`;
 }
 
 /**
@@ -133,6 +219,24 @@ function buildPullRow(
   row.append(createElement('span', { className: 'pull__number', text: `#${pull.number}` }));
   // `textContent` everywhere: titles and branch names come from outside the app.
   row.append(createElement('span', { className: 'pull__title', text: pull.title }));
+
+  /*
+   * The author, whenever it is not the user.
+   *
+   * Written for the widened view, where every row would otherwise be an anonymous title, but it earns
+   * its place in "mine" too: a pull request waiting on your review says "à relire" without saying
+   * whose it is, which is the first thing you want to know. Omitted when it *is* yours — a column
+   * repeating your own name down the whole list is what the assignee column already taught us not to do.
+   */
+  if (!pull.isAuthor && pull.authorLogin.length > 0) {
+    row.append(
+      createElement('span', {
+        className: 'pull__author',
+        text: pull.authorLogin,
+        title: `Ouverte par ${pull.authorLogin}`,
+      }),
+    );
+  }
 
   if (pull.isDraft) {
     row.append(createElement('span', { className: 'badge-warn', text: 'brouillon' }));

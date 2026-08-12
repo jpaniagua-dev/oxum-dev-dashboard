@@ -38,6 +38,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Taller than the project table: a master-detail list needs the room.
   pullsHeight: 360,
   jiraHeight: 360,
+  // "Mine" is the question the tab was built for; "all" is one click away when it is not the question.
+  pullScope: 'mine',
   // Taller still, and on purpose: three columns ending in a diff is the one tab of this strip where
   // the user stops glancing and starts working. 250 pixels would show four lines of a diff.
   gitHeight: 460,
@@ -130,6 +132,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     jiraPollSeconds: clamp(asNumber(input.jiraPollSeconds, DEFAULT_SETTINGS.jiraPollSeconds), 60, 3600),
     jira: asJira(input.jira),
     activeStrip: asStrip(input.activeStrip),
+    pullScope: input.pullScope === 'all' ? 'all' : 'mine',
     stripCollapsed: input.stripCollapsed === true,
     // Clamped so a hand-edited value cannot hide the strip or swallow the terminal.
     projectsHeight: clamp(asNumber(input.projectsHeight, DEFAULT_SETTINGS.projectsHeight), 90, 1200),

@@ -238,10 +238,13 @@ export class TerminalManager {
    * the user typed in a form, and inventing a fake action to carry it would put a phantom button in
    * the settings window.
    *
-   * The executable is spawned **directly**, with no shell in between. That is the difference from
-   * `runProjectAction`, and it is the point: a commit message is arbitrary text, so passing it
-   * through `bash -ic` would mean quoting it correctly against a shell, forever. There is no shell to
-   * quote against here, and the message travels through a file rather than the command line anyway.
+   * Whatever the caller names is spawned as given, with **no shell inserted here**. That is the
+   * difference from `runProjectAction`, and it is the point for the commit: a commit message is
+   * arbitrary text, so passing it through `bash -ic` would mean quoting it correctly against a shell,
+   * forever. There is no shell to quote against, and the message travels through a file anyway. A
+   * caller that genuinely needs a shell (the Jira tab's `dev <TICKET>`, an alias) resolves one with
+   * `resolveShellCommand` and hands the result in, which keeps that decision at the call site instead
+   * of making this method guess.
    *
    * Reuse follows the same rule as an action: one tab per `actionId`, replaced once its process has
    * ended, so committing twice does not litter the strip.
@@ -254,6 +257,8 @@ export class TerminalManager {
     file: string;
     args: readonly string[];
     size: TerminalSize;
+    /** Profile the command was resolved against, recorded so a split inherits the same shell. */
+    profileId?: string | null;
   }): TerminalId | null {
     const existing = this.findActionSession(options.project.id, options.actionId);
     if (existing !== undefined) {
@@ -271,7 +276,7 @@ export class TerminalManager {
       actionId: options.actionId,
       // `task`, so the tab is closable at any moment and its output is never parsed as build markers.
       role: 'task',
-      profileId: null,
+      profileId: options.profileId ?? null,
       cwd: options.project.path,
       file: options.file,
       args: [...options.args],
@@ -731,18 +736,33 @@ export function resolveActionCommand(
   action: ProjectAction,
   profile: ShellProfile,
 ): { file: string; args: string[] } {
+  return resolveShellCommand(profile, action.command);
+}
+
+/**
+ * Same resolution, for a command line the app built rather than one the user configured.
+ *
+ * Split out for the Jira tab's `dev <TICKET>`, which is an alias and therefore needs the very same
+ * `-ic` reasoning an action's `commit` needs. A second copy of this table would be a second answer to
+ * "how does a command line reach a shell here", and the two would drift on the detail that matters:
+ * bash refuses to expand aliases without `-i`.
+ */
+export function resolveShellCommand(
+  profile: ShellProfile,
+  command: string,
+): { file: string; args: string[] } {
   const exe = profile.file.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
 
   if (/^(bash|sh|zsh)\.exe$/.test(exe) || /^(bash|sh|zsh)$/.test(exe)) {
-    return { file: profile.file, args: ['-ic', action.command] };
+    return { file: profile.file, args: ['-ic', command] };
   }
   if (exe === 'powershell.exe' || exe === 'pwsh.exe') {
-    return { file: profile.file, args: ['-NoLogo', '-Command', action.command] };
+    return { file: profile.file, args: ['-NoLogo', '-Command', command] };
   }
   if (exe === 'wsl.exe') {
-    return { file: profile.file, args: ['-e', 'bash', '-ic', action.command] };
+    return { file: profile.file, args: ['-e', 'bash', '-ic', command] };
   }
-  return { file: exe === 'cmd.exe' ? profile.file : 'cmd.exe', args: ['/c', action.command] };
+  return { file: exe === 'cmd.exe' ? profile.file : 'cmd.exe', args: ['/c', command] };
 }
 
 /**

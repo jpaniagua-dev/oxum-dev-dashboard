@@ -5,14 +5,20 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { writeCommitMessage } from '../src/main/git/commit-message.js';
 import {
+  applyStash,
   checkoutBranch,
+  cherryPick,
   createBranch,
   readBranches,
   readChanges,
   readCommits,
   readDiff,
   readRepoState,
+  readSequencer,
+  readStashes,
+  resolveSequencer,
   stagePaths,
+  stashPush,
 } from '../src/main/git/git-commands.js';
 import type { Project } from '../src/shared/contracts.js';
 
@@ -228,5 +234,242 @@ describe('branches', () => {
     expect(missing.ok).toBe(false);
     // git's own words, not ours: they say what to do next.
     expect(missing.message.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * A repository of its own for each of the two blocks below.
+ *
+ * The shared fixture above is mutated in order by its own tests, and both stash and cherry-pick care
+ * about whether the working tree is clean — coupling them to whatever the previous block left behind
+ * would make a failure here mean "something changed upstairs" rather than "this is broken".
+ */
+function freshRepo(): string {
+  const path = mkdtempSync(join(tmpdir(), 'oxum-git-'));
+  execFileSync('git', ['init', '-b', 'main', path], { windowsHide: true, stdio: 'pipe' });
+  const local = (args: string[]): void => {
+    execFileSync('git', ['-C', path, ...args], { windowsHide: true, stdio: 'pipe' });
+  };
+  local(['config', 'user.email', 'test@example.com']);
+  local(['config', 'user.name', 'Test']);
+  writeFileSync(join(path, 'base.ts'), 'const base = 1;\n', 'utf8');
+  local(['add', '.']);
+  local(['commit', '-m', 'feat: base']);
+  return path;
+}
+
+describe('stashes', () => {
+  let sandbox = '';
+  const local = (args: string[]): void => {
+    execFileSync('git', ['-C', sandbox, ...args], { windowsHide: true, stdio: 'pipe' });
+  };
+
+  beforeAll(() => {
+    sandbox = freshRepo();
+  });
+  afterAll(() => {
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it('has no stash ref at all on a fresh repository, and says so without failing', async () => {
+    // `git stash list` on a repository that never stashed exits 0 with nothing, but the read is
+    // wrapped anyway: this is the case that must never surface as an error in the view.
+    expect(await readStashes(sandbox)).toEqual([]);
+  });
+
+  it('creates a named stash and leaves the working tree clean', async () => {
+    writeFileSync(join(sandbox, 'base.ts'), 'const base = 2;\n', 'utf8');
+
+    expect(await stashPush(sandbox, 'essai', false)).toMatchObject({ ok: true });
+    expect(await readChanges(sandbox)).toEqual([]);
+
+    const [entry] = await readStashes(sandbox);
+    expect(entry?.ref).toBe('stash@{0}');
+    // The branch is read out of git's own `On main: essai`, there being no placeholder for it.
+    expect(entry?.branch).toBe('main');
+    expect(entry?.subject).toBe('essai');
+    // A real sha, which is what every write below resolves against.
+    expect(entry?.sha).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it('reads a stash diff with `stash show`, which `git show` cannot do for a merge commit', async () => {
+    const [entry] = await readStashes(sandbox);
+    const diff = await readDiff(sandbox, {
+      kind: 'stash',
+      sha: entry?.sha ?? '',
+      ref: entry?.ref ?? '',
+    });
+
+    expect(diff.note).toBeNull();
+    expect(diff.lines.some((line) => line.kind === 'add' && line.text.includes('const base = 2'))).toBe(
+      true,
+    );
+  });
+
+  it('leaves untracked files behind unless asked, which is the whole point of the switch', async () => {
+    // A tracked change *and* a new file, because that is the only pair that tells the two behaviours
+    // apart: with untracked files alone, `git stash` saves nothing at all and still exits 0.
+    writeFileSync(join(sandbox, 'base.ts'), 'const base = 3;\n', 'utf8');
+    writeFileSync(join(sandbox, 'neuf.ts'), 'const neuf = 1;\n', 'utf8');
+
+    await stashPush(sandbox, 'sans les nouveaux', false);
+    expect((await readChanges(sandbox)).map((change) => change.path)).toEqual(['neuf.ts']);
+
+    await stashPush(sandbox, 'avec les nouveaux', true);
+    expect(await readChanges(sandbox)).toEqual([]);
+  });
+
+  it('applies a stash by sha even after the positions have shifted', async () => {
+    /*
+     * The regression this whole sha business exists for. Three stashes are on the list and the oldest
+     * one — created first, so now `stash@{2}` — is applied by its sha. A code path trusting the ref it
+     * was first read under (`stash@{0}`) would apply the newest instead, silently.
+     */
+    const stashes = await readStashes(sandbox);
+    expect(stashes).toHaveLength(3);
+    const oldest = stashes[stashes.length - 1];
+    expect(oldest?.subject).toBe('essai');
+
+    expect(await applyStash(sandbox, oldest?.sha ?? '', 'apply')).toMatchObject({ ok: true });
+    // Its content is back, and `apply` kept the entry.
+    expect((await readChanges(sandbox)).map((change) => change.path)).toEqual(['base.ts']);
+    expect(await readStashes(sandbox)).toHaveLength(3);
+
+    local(['checkout', '--', 'base.ts']);
+  });
+
+  it('refuses a sha that is no longer in the list rather than acting on a neighbour', async () => {
+    // A list read before someone else dropped an entry is the realistic version of this, and the
+    // wrong answer would be to drop whatever now sits at that position.
+    const result = await applyStash(sandbox, '0'.repeat(40), 'drop');
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('n’existe plus');
+  });
+
+  it('pops and drops, each shortening the list by one', async () => {
+    const before = await readStashes(sandbox);
+    const top = before[0];
+
+    expect(await applyStash(sandbox, top?.sha ?? '', 'pop')).toMatchObject({ ok: true });
+    expect(await readStashes(sandbox)).toHaveLength(before.length - 1);
+
+    local(['stash', 'push', '-m', 'jetable', '--include-untracked']);
+    const [disposable] = await readStashes(sandbox);
+    expect(await applyStash(sandbox, disposable?.sha ?? '', 'drop')).toMatchObject({ ok: true });
+    expect(await readStashes(sandbox)).toHaveLength(before.length - 1);
+  });
+});
+
+describe('cherry-pick', () => {
+  let sandbox = '';
+  const local = (args: string[]): void => {
+    execFileSync('git', ['-C', sandbox, ...args], { windowsHide: true, stdio: 'pipe' });
+  };
+
+  beforeAll(() => {
+    sandbox = freshRepo();
+  });
+  afterAll(() => {
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it('replays a commit from another branch onto the current one', async () => {
+    local(['checkout', '-b', 'source']);
+    writeFileSync(join(sandbox, 'apporte.ts'), 'const apporte = 1;\n', 'utf8');
+    local(['add', '.']);
+    local(['commit', '-m', 'feat: a reprendre']);
+    const [source] = await readCommits(sandbox);
+    local(['checkout', 'main']);
+
+    expect(await cherryPick(sandbox, source?.sha ?? '', false)).toMatchObject({ ok: true });
+    expect((await readCommits(sandbox))[0]?.subject).toBe('feat: a reprendre');
+    expect(await readSequencer(sandbox)).toBe('none');
+  });
+
+  it('stages without committing under -n', async () => {
+    local(['checkout', 'source']);
+    writeFileSync(join(sandbox, 'apporte.ts'), 'const apporte = 2;\n', 'utf8');
+    local(['add', '.']);
+    local(['commit', '-m', 'feat: seconde passe']);
+    const [source] = await readCommits(sandbox);
+    local(['checkout', 'main']);
+
+    expect(await cherryPick(sandbox, source?.sha ?? '', true)).toMatchObject({ ok: true });
+    // In the index, and the branch tip has not moved.
+    expect((await readChanges(sandbox)).map((change) => change.index)).toEqual(['M']);
+    expect((await readCommits(sandbox))[0]?.subject).toBe('feat: a reprendre');
+
+    /*
+     * `-n` still records `CHERRY_PICK_HEAD`, so `git commit` can reuse the original message — which is
+     * why the tab keeps reporting a cherry-pick in progress until you commit, and that is honest. The
+     * marker is removed by hand rather than with `--quit`, whose behaviour with nothing in progress
+     * varies by git version, and this cleanup must not be the thing that fails.
+     */
+    local(['reset', '--hard', 'HEAD']);
+    rmSync(join(sandbox, '.git', 'CHERRY_PICK_HEAD'), { force: true });
+  });
+
+  it('refuses anything that is not a sha, having no `--` to hide behind', async () => {
+    expect(await cherryPick(sandbox, '--help', false)).toMatchObject({ ok: false });
+    expect(await cherryPick(sandbox, '', false)).toMatchObject({ ok: false });
+  });
+
+  it('reports a conflict as a state to get out of, and gets out of it', async () => {
+    /*
+     * The half of this feature that had to come with it. Two branches change the same line, so the
+     * cherry-pick stops mid-flight: what matters is that the failure names the situation (rather than
+     * repeating git's advice for a terminal), that the state is readable, and that `--abort` actually
+     * puts the repository back.
+     */
+    local(['checkout', 'source']);
+    writeFileSync(join(sandbox, 'base.ts'), 'const base = "source";\n', 'utf8');
+    local(['add', '.']);
+    local(['commit', '-m', 'feat: conflit']);
+    const [conflicting] = await readCommits(sandbox);
+
+    local(['checkout', 'main']);
+    writeFileSync(join(sandbox, 'base.ts'), 'const base = "main";\n', 'utf8');
+    local(['add', '.']);
+    local(['commit', '-m', 'feat: divergence']);
+
+    const result = await cherryPick(sandbox, conflicting?.sha ?? '', false);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('Conflit');
+    expect(await readSequencer(sandbox)).toBe('cherry-pick');
+
+    expect(await resolveSequencer(sandbox, 'cherry-pick', 'abort')).toMatchObject({ ok: true });
+    expect(await readSequencer(sandbox)).toBe('none');
+    expect(await readChanges(sandbox)).toEqual([]);
+  });
+
+  it('answers "nothing in progress" instead of running a --continue that would talk about something else', async () => {
+    expect(await resolveSequencer(sandbox, 'none', 'continue')).toMatchObject({ ok: false });
+  });
+
+  it('finishes a conflicted cherry-pick without opening an editor', async () => {
+    /*
+     * `--continue` normally opens `core.editor` to confirm the message, and an editor opened by a
+     * silent `execFile` never returns: the call would hang to its timeout with the repository still
+     * mid-operation. `GIT_EDITOR=true` is what this asserts, and it can only be asserted by driving a
+     * real conflict to its end.
+     */
+    // The very commit the previous test aborted, so the conflict is the same one and genuinely one:
+    // `source` and `main` changed the same line from a shared ancestor.
+    const conflicting = execFileSync('git', ['-C', sandbox, 'rev-parse', '--short', 'source'], {
+      windowsHide: true,
+      encoding: 'utf8',
+    }).trim();
+
+    expect(await cherryPick(sandbox, conflicting, false)).toMatchObject({ ok: false });
+    expect(await readSequencer(sandbox)).toBe('cherry-pick');
+
+    // Resolve it the way a user would, in the terminal this tab keeps sending them to.
+    writeFileSync(join(sandbox, 'base.ts'), 'const base = "resolu";\n', 'utf8');
+    local(['add', 'base.ts']);
+
+    expect(await resolveSequencer(sandbox, 'cherry-pick', 'continue')).toMatchObject({ ok: true });
+    expect(await readSequencer(sandbox)).toBe('none');
+    expect(await readChanges(sandbox)).toEqual([]);
   });
 });

@@ -3,12 +3,16 @@ import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
 import {
   GIT_COMMIT_ACTION_ID,
   IpcChannel,
+  ISSUE_KEY_PATTERN,
+  TICKET_BRANCH_ACTION_ID,
   type AppSettings,
   type BootstrapState,
   type GitDiff,
   type GitDiffTarget,
   type GitRepoState,
   type GitResult,
+  type GitSequencerOp,
+  type GitStashOp,
   type OpenShellRequest,
   type Project,
   type ProjectCandidate,
@@ -30,11 +34,16 @@ import {
   type ThemeState,
 } from '@shared/contracts.js';
 import {
+  applyStash,
   checkoutBranch,
+  cherryPick,
   createBranch,
   readDiff,
   readRepoState,
+  readSequencer,
+  resolveSequencer,
   stagePaths,
+  stashPush,
   sync,
 } from './git/git-commands.js';
 import {
@@ -57,8 +66,8 @@ import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
-import { resolveDefaultProfile } from './terminal/shell-profiles.js';
-import type { TerminalManager } from './terminal/terminal-manager.js';
+import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
+import { resolveShellCommand, type TerminalManager } from './terminal/terminal-manager.js';
 import type { ThemeController } from './theme.js';
 
 export interface IpcDependencies {
@@ -273,6 +282,128 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       // branch has an upstream, and a stale answer is what turns a first push into a puzzling refusal.
       const state = await readRepoState(project);
       return sync(project.path, operation, state.branch, state.hasUpstream);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitCherryPick,
+    async (_event, projectId: unknown, sha: unknown, noCommit: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined || typeof sha !== 'string') {
+        return { ok: false, message: 'Projet introuvable' };
+      }
+      return cherryPick(project.path, sha, noCommit === true);
+    },
+  );
+
+  /**
+   * Finishes or abandons a half-done operation.
+   *
+   * The state is **re-read here** rather than taken from the renderer, and that is the same reasoning
+   * as `push` re-reading its upstream: the panel's copy is up to a poll old, and `git merge --abort`
+   * fired at a repository that is actually mid-rebase fails with a message about the wrong operation.
+   */
+  ipcMain.handle(
+    IpcChannel.GitSequencer,
+    async (_event, projectId: unknown, op: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const operation: GitSequencerOp | null =
+        op === 'continue' || op === 'abort' ? op : null;
+      if (project === undefined || operation === null) {
+        return { ok: false, message: 'Opération inconnue' };
+      }
+      return resolveSequencer(project.path, await readSequencer(project.path), operation);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitStashPush,
+    async (
+      _event,
+      projectId: unknown,
+      message: unknown,
+      includeUntracked: unknown,
+    ): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { ok: false, message: 'Projet introuvable' };
+      }
+      return stashPush(
+        project.path,
+        typeof message === 'string' ? message : '',
+        includeUntracked === true,
+      );
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitStashApply,
+    async (_event, projectId: unknown, sha: unknown, op: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const operation: GitStashOp | null =
+        op === 'apply' || op === 'pop' || op === 'drop' ? op : null;
+      if (project === undefined || operation === null || typeof sha !== 'string') {
+        return { ok: false, message: 'Opération inconnue' };
+      }
+      return applyStash(project.path, sha, operation);
+    },
+  );
+
+  /**
+   * Starts a ticket's branch by running the `dev <TICKET>` alias in a terminal tab.
+   *
+   * Three decisions worth keeping. The command is **assembled here**, from a key matched against
+   * `ISSUE_KEY_PATTERN`: the renderer names a ticket and a project, never a command line, so this
+   * channel cannot become a general "run anything" hole in an otherwise sandboxed renderer. It needs
+   * an **interactive bash** because `dev` is an alias, and no bash means no command rather than a
+   * `command not found` in a tab that looks like it worked. And it lands in a tab, like the commit,
+   * because the alias talks: it prints what it created and sometimes asks something.
+   */
+  ipcMain.handle(
+    IpcChannel.JiraBranch,
+    async (
+      _event,
+      projectId: unknown,
+      issueKey: unknown,
+    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { terminalId: null, result: { ok: false, message: 'Projet introuvable' } };
+      }
+      const key = typeof issueKey === 'string' ? issueKey.trim().toUpperCase() : '';
+      if (!ISSUE_KEY_PATTERN.test(key)) {
+        return { terminalId: null, result: { ok: false, message: 'Clé de ticket invalide' } };
+      }
+
+      const profile = resolveBashProfile(
+        deps.profiles(),
+        deps.settings.get().defaultShellProfileId,
+      );
+      if (profile === undefined) {
+        return {
+          terminalId: null,
+          result: { ok: false, message: 'Aucun profil bash : l’alias « dev » ne peut pas être lancé' },
+        };
+      }
+
+      const resolved = resolveShellCommand(profile, `dev ${key}`);
+      const terminalId = deps.terminals.runProjectCommand({
+        project,
+        actionId: TICKET_BRANCH_ACTION_ID,
+        title: `${project.label} · ${key}`,
+        file: resolved.file,
+        args: resolved.args,
+        size: deps.terminalSize(),
+        profileId: profile.id,
+      });
+
+      return {
+        terminalId,
+        result:
+          terminalId === null
+            ? { ok: false, message: 'Impossible d’ouvrir l’onglet' }
+            : { ok: true, message: `dev ${key} lancé dans ${project.label}` },
+      };
     },
   );
 
@@ -702,6 +833,14 @@ function asDiffTarget(value: unknown): GitDiffTarget | null {
   }
   if (input.kind === 'file' && typeof input.path === 'string' && input.path.length > 0) {
     return { kind: 'file', path: input.path, staged: input.staged === true };
+  }
+  if (
+    input.kind === 'stash' &&
+    typeof input.sha === 'string' &&
+    input.sha.length > 0 &&
+    typeof input.ref === 'string'
+  ) {
+    return { kind: 'stash', sha: input.sha, ref: input.ref };
   }
   return null;
 }

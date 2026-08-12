@@ -97,9 +97,18 @@ describe('LOCAL_ONLY_KEYS', () => {
       'notesOpen',
       'notesWidth',
       'projectsHeight',
+      'pullScope',
       'pullsHeight',
       'stripCollapsed',
     ]);
+  });
+
+  it('lets the dashboard persist the pull request scope', () => {
+    // Written from the dashboard on every sub-tab click, so it belongs to the local-only set for the
+    // same reason `activeStrip` does: echoed back, it would rebuild the list under the click.
+    expect(asPatch({ pullScope: 'all' })).toEqual({ pullScope: 'all' });
+    expect(asPatch({ pullScope: 'mine' })).toEqual({ pullScope: 'mine' });
+    expect(asPatch({ pullScope: 'theirs' })).toEqual({});
   });
 
   it('lets the dashboard persist the folded strip', () => {

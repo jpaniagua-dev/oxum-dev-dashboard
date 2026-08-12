@@ -25,6 +25,14 @@ const DIFF_BUFFER = 16 * 1024 * 1024;
 export interface GitRunOptions {
   readonly timeoutMs?: number;
   readonly maxBuffer?: number;
+  /**
+   * Variables added on top of the process environment, never replacing it.
+   *
+   * Exists for `GIT_EDITOR=true`, which is what keeps a `--continue` from opening an editor nobody
+   * can see. Merged rather than substituted because git needs the ambient environment to work at all:
+   * `PATH` finds its own helpers, and on Windows `HOME` is where the global config lives.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -42,12 +50,23 @@ export async function git(
   args: readonly string[],
   options: GitRunOptions = {},
 ): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], {
+  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], runOptions(options));
+  return stdout;
+}
+
+/** The `execFile` options every call shares, so the two runners cannot drift on a budget or a variable. */
+function runOptions(options: GitRunOptions): {
+  timeout: number;
+  windowsHide: boolean;
+  maxBuffer: number;
+  env?: NodeJS.ProcessEnv;
+} {
+  return {
     timeout: options.timeoutMs ?? GIT_TIMEOUT_MS,
     windowsHide: true,
     maxBuffer: options.maxBuffer ?? 4 * 1024 * 1024,
-  });
-  return stdout;
+    ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+  };
 }
 
 /** Same, with the buffer a diff needs. */
@@ -72,11 +91,11 @@ export async function tryGit(
   options: GitRunOptions = {},
 ): Promise<{ ok: boolean; stdout: string; message: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync('git', ['-C', repoPath, ...args], {
-      timeout: options.timeoutMs ?? GIT_TIMEOUT_MS,
-      windowsHide: true,
-      maxBuffer: options.maxBuffer ?? 4 * 1024 * 1024,
-    });
+    const { stdout, stderr } = await execFileAsync(
+      'git',
+      ['-C', repoPath, ...args],
+      runOptions(options),
+    );
     // git says most of what it did on stderr even when it succeeded, and that is the interesting
     // half: "Switched to branch 'x'", "Everything up-to-date".
     return { ok: true, stdout, message: firstLine(stderr) || firstLine(stdout) || 'Fait' };

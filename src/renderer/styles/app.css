@@ -505,6 +505,40 @@ body {
   overflow-y: auto;
 }
 
+/*
+ * The detail column, now that it holds a row of chrome above its list.
+ *
+ * `min-height: 0` is the load-bearing line, same as on `.workspace`: without it a flex child refuses to
+ * shrink below its content, so a long list would push the strip past its own height instead of
+ * scrolling inside it — and the scrollbar belongs to `.pulls__list`, not to this box.
+ */
+.pulls__main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 6px;
+}
+
+/* The filter row of the Jira tab: outside the scroller, so it stays put as the list moves. */
+.pulls__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jira__filter-select {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+  /* Wide enough for "Prénom Nom (12)" without stretching to the width of the longest name in the sprint. */
+  max-width: 260px;
+}
+
 .pulls__repos {
   display: flex;
   flex-direction: column;
@@ -596,6 +630,23 @@ body {
   margin-left: 2px;
 }
 
+/*
+ * The author of a pull request that is not yours.
+ *
+ * Dimmed and capped: in the widened view it appears on nearly every row, so at full contrast it would
+ * compete with the titles it is meant to annotate. Never wider than a name needs, because the space it
+ * takes comes straight out of the title's.
+ */
+.pull__author {
+  flex: none;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
 /* Sits under the view list, separated from it so it does not read as a third view. */
 .jira__board {
   margin-top: 8px;
@@ -664,6 +715,55 @@ body {
 .issue__assignee--none {
   color: var(--warning);
   font-style: italic;
+}
+
+/*
+ * The sortable column headers.
+ *
+ * The same `.issue` grid as a row, which is the only way a label can sit over the column it names, plus
+ * three overrides: no pointer (the row itself does nothing), no hover, and `position: sticky` so it
+ * survives the scroll. Sticky rather than hoisted out of the scroller, because a header in a separate
+ * box drifts by exactly the width of the scrollbar the moment the list overflows.
+ */
+.issue--head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-top: 0;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  cursor: default;
+}
+
+.issue--head:hover {
+  background: var(--surface);
+  border-color: transparent;
+  border-bottom-color: var(--border);
+}
+
+.issue__head {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  /* Small caps, like the project table's own column heads: a label is not a value. */
+  font-size: var(--font-3xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.issue__head:hover {
+  color: var(--text);
+}
+
+.issue__head--active {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .pull__age {
@@ -1829,7 +1929,15 @@ body {
   font-family: var(--font-mono);
 }
 
-.git__views {
+/*
+ * The row of sub-tabs of a panel, in the Git tab and in the pull requests tab alike.
+ *
+ * One rule for both, in the spirit of `.icon-button--row`: two panels that both say "here are the
+ * readings of what is selected" have no business looking slightly different, and two blocks differing
+ * only by a gap nobody chose is exactly how they end up doing so.
+ */
+.git__views,
+.pulls__views {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1847,7 +1955,14 @@ body {
   height: 22px;
 }
 
-.git__view {
+/*
+ * A sub-tab: the Git tab's views and the pull requests tab's scopes.
+ *
+ * Named for what it is rather than for where it first appeared, which is the whole reason the Git
+ * tab's `.git__view` was renamed to it: a class named after one panel is a class the next panel
+ * copies instead of reusing.
+ */
+.subtab {
   display: flex;
   align-items: center;
   gap: 5px;
@@ -1861,17 +1976,17 @@ body {
   cursor: pointer;
 }
 
-.git__view:hover {
+.subtab:hover {
   color: var(--text);
 }
 
-.git__view--active {
+.subtab--active {
   color: var(--text);
   border-bottom-color: var(--primary);
   font-weight: 600;
 }
 
-.git__view-count {
+.subtab__count {
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
   font-size: var(--font-xs);
@@ -1912,6 +2027,23 @@ body {
 .git__row--selected {
   background: var(--surface-inset);
   border-color: var(--border);
+}
+
+/*
+ * The untracked switch of the stash form.
+ *
+ * A `<label>` wrapping its own checkbox, so the text is part of the hit target: a checkbox this small
+ * with its caption outside is a control you miss twice before hitting it.
+ */
+.git__toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .git__check {
