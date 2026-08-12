@@ -816,5 +816,8 @@ npm run dist       # installer in release/
 
 - Strict TypeScript, `noUncheckedIndexedAccess`, no `any`.
 - Code, comments and documentation **in English**. Displayed text **in French**.
+- **Commit messages in English**, present tense and imperative (`Add`, `Fix`, `Refactor`), first
+  letter capitalised, no trailing period, no emoji. The history was rewritten on 2026-08-12 to apply
+  this rule, so do not take an old commit's style as licence to break it.
 - Comments explain the *why* of a non-obvious choice.
 - Presentation logic lives in `presenters.ts`, pure and tested, separate from the DOM.
