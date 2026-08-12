@@ -1,6 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   expandScript,
   inferProject,
@@ -9,9 +10,44 @@ import {
   validateActions,
   validateProjectPath,
 } from '../src/main/projects/project-inference.js';
-import { makeId, shortLabel } from '../src/main/projects/registry.js';
+import { defaultLabel, makeId } from '../src/main/projects/registry.js';
 
-const ROOT = join(homedir(), 'oxum', 'projects');
+/**
+ * Repositories root, built on a temporary directory.
+ *
+ * These tests used to point at the author's own repositories root and skip themselves when a folder
+ * was missing, so on any other machine three of them asserted nothing at all while still counting as
+ * passed. Writing the manifests here means the inference is exercised everywhere, and each fixture
+ * states the shape it stands for.
+ */
+let ROOT = '';
+
+/** Writes a folder with a `package.json` holding the given scripts. */
+function fixture(folder: string, scripts: Record<string, string>): void {
+  const path = join(ROOT, folder);
+  mkdirSync(path, { recursive: true });
+  writeFileSync(join(path, 'package.json'), JSON.stringify({ name: folder, scripts }), 'utf8');
+}
+
+beforeAll(() => {
+  ROOT = mkdtempSync(join(tmpdir(), 'dashboard-projects-'));
+  // A plain Angular server on the framework default port.
+  fixture('web-app', { start: 'ng serve' });
+  // Same, with the port written into the command rather than left implicit.
+  fixture('admin-front', { start: 'ng serve --port 4201' });
+  // A watch build: healthy, and opens no port at all. Its nature only shows one level down.
+  fixture('design-system', {
+    start: 'npm run lint && npm run build:lib -- --watch',
+    lint: 'ng lint',
+    'build:lib': 'ng build',
+  });
+  // A folder the dashboard can still watch, with no manifest to read.
+  mkdirSync(join(ROOT, 'plain-folder'), { recursive: true });
+});
+
+afterAll(() => {
+  rmSync(ROOT, { recursive: true, force: true });
+});
 
 describe('interpretCommand', () => {
   it('reads a bare ng serve as a server on Angular default port', () => {
@@ -56,35 +92,24 @@ describe('expandScript', () => {
   });
 });
 
-describe('inferProject on the real repositories', () => {
-  it('reads web-app as a server on 4200', () => {
+describe('inferProject on a repository on disk', () => {
+  it('reads a bare ng serve as a server on 4200', () => {
     const inferred = inferProject(join(ROOT, 'web-app'));
-    if (!inferred.found) {
-      return; // Repository absent on this machine; nothing to assert.
-    }
     expect(inferred.kind).toBe('server');
     expect(inferred.port).toBe(4200);
     expect(inferred.scripts).toContain('start');
   });
 
-  it('reads the explicit port of admin-front', () => {
-    const inferred = inferProject(join(ROOT, 'admin-front'));
-    if (!inferred.found) {
-      return;
-    }
-    expect(inferred).toMatchObject({ kind: 'server', port: 4201 });
+  it('reads the explicit port written in the start script', () => {
+    expect(inferProject(join(ROOT, 'admin-front'))).toMatchObject({ kind: 'server', port: 4201 });
   });
 
-  it('reads design-system as a watch build with no port', () => {
-    const inferred = inferProject(join(ROOT, 'design-system'));
-    if (!inferred.found) {
-      return;
-    }
-    expect(inferred).toMatchObject({ kind: 'watch', port: null });
+  it('reads a delegating watch build as having no port', () => {
+    expect(inferProject(join(ROOT, 'design-system'))).toMatchObject({ kind: 'watch', port: null });
   });
 
   it('reports nothing for a folder without a manifest', () => {
-    expect(inferProject(join(ROOT, 'documentation')).found).toBe(false);
+    expect(inferProject(join(ROOT, 'plain-folder')).found).toBe(false);
   });
 });
 
@@ -145,9 +170,6 @@ describe('validateActions', () => {
     const issues = validateActions(join(ROOT, 'web-app'), [
       { label: 'Nope', command: 'npm run nope', role: 'task' },
     ]);
-    if (issues.length === 0) {
-      return; // Repository absent on this machine.
-    }
     expect(issues[0]?.level).toBe('warning');
     expect(issues[0]?.message).toMatch(/Nope/);
     expect(issues[0]?.message).toMatch(/nope/);
@@ -160,11 +182,12 @@ describe('validateActions', () => {
 });
 
 describe('label and id derivation', () => {
-  it('drops the shared prefix but keeps the rest readable', () => {
-    // Stripping `-front` too would leave a bare `shared`, which says less than the folder did.
-    expect(shortLabel('web-app')).toBe('shared-front');
-    expect(shortLabel('admin-front')).toBe('rating-acquisition-front');
-    expect(shortLabel('design-system')).toBe('design-system');
+  it('keeps the folder name as the default label', () => {
+    // No shortening rule: guessing which part of someone else's folder name is noise removes the
+    // word that told two projects apart. Renaming is a gesture, not an inference.
+    expect(defaultLabel('web-app')).toBe('web-app');
+    expect(defaultLabel('admin-front')).toBe('admin-front');
+    expect(defaultLabel('design-system')).toBe('design-system');
   });
 
   it('builds a stable id from a folder name', () => {

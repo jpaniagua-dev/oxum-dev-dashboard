@@ -61,13 +61,14 @@ export function makeActionId(label: string, taken: readonly string[]): string {
 }
 
 /**
- * Shortens a folder name for the table.
+ * Default label for a freshly added project: its folder name, unchanged.
  *
- * Only the shared prefix is dropped, not the `-front` suffix: stripping both turned
- * `web-app` into a bare `shared`, which says less than it should. This is a starting
- * point anyway, since the label is editable in the settings dialog.
+ * There used to be a shortening rule here, stripping the prefix shared by one particular set of
+ * repositories. It only ever made sense for that naming scheme: applied elsewhere, guessing which
+ * part of a folder name is noise removes the very word that told the projects apart. The label is
+ * editable in the settings dialog and by double-clicking the name in the table, which is the right
+ * place for a judgement no rule can make.
  */
-export function shortLabel(folder: string): string {
-  const trimmed = folder.replace(/^example-/, '');
-  return trimmed.length > 0 ? trimmed : folder;
+export function defaultLabel(folder: string): string {
+  return folder;
 }

@@ -129,7 +129,7 @@ describe('buildJql', () => {
   });
 
   it('cannot be broken out of by a quote in a project key', () => {
-    expect(buildJql(['TE"C']).sprint).toContain('"PROJ"');
+    expect(buildJql(['PR"OJ']).sprint).toContain('"PROJ"');
   });
 });
 
@@ -274,7 +274,7 @@ describe('filtering and sorting the list', () => {
 
   it('sorts issue keys by number, not as text', () => {
     // `localeCompare` puts PROJ-1000 before PROJ-999, which for a counter is simply wrong. Invisible
-    // until a project passes a power of ten, which any long-lived project does.
+    // until a project passes a power of ten, which PROJ did long ago.
     expect(compareIssueKeys('PROJ-999', 'PROJ-1000')).toBeLessThan(0);
     expect(compareIssueKeys('PROJ-1001', 'PROJ-1000')).toBeGreaterThan(0);
     expect(compareIssueKeys('ABC-1', 'PROJ-1')).toBeLessThan(0);
@@ -369,7 +369,7 @@ describe('boardUrl', () => {
   it('builds the project shortcut Jira resolves for any project style', () => {
     /*
      * `/browse/<KEY>` on purpose, and pinned here so nobody "improves" it into a board path. A board
-     * path needs the numeric board id AND the project style, neither of which this app holds: a team-managed project is
+     * path needs the numeric board id AND the project style, neither of which this app holds: PROJ is
      * team-managed (`/jira/software/projects/...`) while a company-managed project uses
      * `/jira/software/c/projects/...`, so a hardcoded guess would 404 half the time.
      */

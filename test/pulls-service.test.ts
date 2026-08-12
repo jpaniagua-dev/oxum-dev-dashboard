@@ -21,7 +21,7 @@ const REAL = JSON.stringify([
       { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
       { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' },
     ],
-    title: 'PROJ 412 user profile detail page',
+    title: 'PROJ 1674 user profile detail page',
     updatedAt: '2026-08-04T15:15:06Z',
     url: 'https://github.com/example-org/web-app/pull/580',
   },

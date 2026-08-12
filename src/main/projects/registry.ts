@@ -12,14 +12,14 @@ import { inferProject, validateActions, validateProjectPath } from './project-in
 import {
   DEFAULT_PROJECTS_ROOT,
   defaultActions,
+  defaultLabel,
   FOLLOW_PULLS_DEFAULT,
   makeActionId,
   makeId,
-  shortLabel,
 } from './project-id.js';
 
 // Re-exported so existing importers and tests keep one obvious entry point.
-export { DEFAULT_PROJECTS_ROOT, defaultActions, makeActionId, makeId, shortLabel };
+export { DEFAULT_PROJECTS_ROOT, defaultActions, defaultLabel, makeActionId, makeId };
 
 /**
  * The command a project's server action runs, or an empty string when it has none.
@@ -33,15 +33,15 @@ export function serverAction(actions: readonly ProjectAction[]): ProjectAction |
 }
 
 /**
- * Folder names seeded on a fresh install.
+ * Folder names looked for under the repositories root on a fresh install.
  *
- * Only a starting point, not a hardcoded list: everything about a project is editable afterwards and
- * new ones are added from the settings dialog. The seed exists so the app is useful on first launch
- * without asking the user to configure anything.
+ * Placeholders, deliberately: they are common enough names to seed a row now and then, and a folder
+ * that is missing is skipped rather than shown broken (see `seedProjects`), so an unrecognised layout
+ * simply starts with an empty table. Adjust this list to your own folders, or add projects from the
+ * settings dialog, which is how every project is meant to be managed after the first launch.
  */
 const SEED_FOLDERS: readonly { folder: string; label: string }[] = [
   { folder: 'web-app', label: 'Web' },
-  // A short label reads better in a column than a long folder name.
   { folder: 'admin-front', label: 'Admin' },
   { folder: 'design-system', label: 'Design' },
 ];
@@ -83,8 +83,8 @@ export function findProject(projects: readonly Project[], id: ProjectId): Projec
 export function seedProjects(root: string): ProjectConfig[] {
   return SEED_FOLDERS.filter((seed) => existsSync(join(root, seed.folder))).map((seed) => ({
     ...configFromPath(join(root, seed.folder)),
-    // The seed carries the short working names rather than the folder names, which is how these
-    // projects are actually referred to day to day. Still editable afterwards.
+    // The seed carries a short label rather than the folder name: a column of names is read at a
+    // glance, and a long folder name is the thing that stops being readable first. Still editable.
     label: seed.label,
   }));
 }
@@ -141,7 +141,7 @@ export function configFromPath(path: string): ProjectConfig {
   const label = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'projet';
   return {
     id: makeId(label),
-    label: shortLabel(label),
+    label: defaultLabel(label),
     path,
     actions: defaultActions(),
     // Left null so the values follow the repository's own manifest until the user overrides them.

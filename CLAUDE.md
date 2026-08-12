@@ -3,19 +3,33 @@
 Terminal embarqué avec, au-dessus, une bande de statut sur les projets front (serveur de dev, git,
 checks GitHub). Toutes les actions des lignes se lancent dans un onglet de ce terminal.
 
-## Repo privé, mais prudence quand même
+## Dépôt public : le garder anonyme
 
-Ce dépôt manipule des noms de branches `PROJ-XXXX`, des titres de PR et des chemins de repos
-internes. Il est **privé** : ne pas le passer en public, et ne jamais y committer de capture
-montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
+Ce dépôt est **public**, alors que l'app manipule à l'exécution des noms de branches, des titres de
+PR, des clés de tickets et des chemins de dépôts qui appartiennent à celui qui l'utilise. Rien de
+tout ça n'a sa place ici. Règles, sans exception :
+
+- **Aucune donnée réelle dans les fixtures ni les commentaires** : pas de clé de ticket réelle, pas
+  de nom de collègue, pas de login GitHub d'un tiers, pas de nom d'organisation, pas de dossier de
+  dépôt interne. Les fixtures utilisent `web-app`, `admin-front`, `design-system`, `example-org`,
+  `PROJ-123`, `dev@example.com`.
+- **Aucune capture montrant un écran réel.** `docs/screenshot.png` est prise sur une configuration de
+  démonstration ; une capture de travail montre en un coup d'œil des branches, des tickets et des
+  titres de PR que dix greps ne trouveraient pas.
+- **Les tests ne lisent jamais le disque de l'auteur.** Ils écrivent leurs propres fixtures dans un
+  dossier temporaire (voir `test/project-inference.test.ts`). Un test qui se contente de sortir quand
+  un dossier est absent compte comme réussi tout en n'affirmant rien, et c'est exactement ce qui s'est
+  produit ici : trois tests d'inférence ne vérifiaient rien ailleurs que sur une seule machine.
+- Les tokens de couleur restent nommés `--brand-*`.
 
 ## Invariants à ne pas casser
 
 - **Un booléen ne suffit pas pour l'état serveur.** Les scripts `start` lancent `npm run lint` avant
   de servir : `lint` et `lint-error` sont des états réels. Les réduire ferait afficher « ne tourne
   pas » pendant une phase saine.
-- **`design-system` n'est pas un serveur** (`ng build --watch`, aucun port). Son état ne peut venir que
-  de sa sortie, donc le dashboard doit posséder le processus. Ne pas lui inventer de port.
+- **Un projet en `build --watch` n'est pas un serveur** (aucun port ouvert : le cas typique est une
+  bibliothèque de composants). Son état ne peut venir que de sa sortie, donc le dashboard doit posséder
+  le processus. Ne pas lui inventer de port.
 - **L'identité d'une ligne est le chemin du repo**, jamais le port. Un worktree du même projet tourne
   sur un autre port et doit rester distinct.
 - **`taskkill /T /F` pour arrêter**, pas `pty.kill()` : ce dernier ne touche que le `cmd.exe`
@@ -341,8 +355,8 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   `hitsInteractive` est ce qui empêche le bouton d'ouvrir aussi le navigateur en sortant de la ligne.
 - **Le bouton « Ouvrir <CLÉ> » de l'onglet Jira pointe sur `/browse/<CLÉ>`**, jamais sur un chemin
   `/jira/software/...`. Un chemin de board exige l'id numérique du board *et* le style du projet, deux
-  choses que l'app n'a pas : vérifié sur le site réel, `PROJ` est **team-managed** (`style: next-gen`,
-  donc `/jira/software/projects/...`) alors qu'un projet company-managed utilise
+  choses que l'app n'a pas : vérifié sur un site réel, un projet team-managed (`style: next-gen`) se
+  trouve sous `/jira/software/projects/...` alors qu'un projet company-managed utilise
   `/jira/software/c/projects/...`. Deviner entre les deux donnerait un 404 une fois sur deux.
   `/browse/<CLÉ>` est la seule forme que Jira Cloud résout pour tous les types de projet. Épinglé par
   un test pour que personne ne l'« améliore » en chemin de board.
@@ -438,7 +452,7 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
   les ex æquo : deux tickets au même statut échangeraient leur place à chaque changement de sens, ce qui
   donne l'impression que la liste brasse des lignes que personne n'a triées.
 - **Les clés de tickets se comparent sur leur nombre, pas comme du texte.** `localeCompare` place
-  `PROJ-1000` avant `PROJ-999`. Invisible jusqu'à ce qu'un projet passe une puissance de dix, ce que tout projet a
+  `PROJ-1000` avant `PROJ-999`. Invisible jusqu'à ce qu'un projet passe une puissance de dix, ce que PROJ a
   fait depuis longtemps.
 - **`ASSIGNEE_NONE` est un caractère de contrôle**, pas le mot « none » : les valeurs de ce filtre sont
   des noms affichés lus dans Jira, et tout sentinelle lisible est un nom que quelqu'un peut porter. `''`
@@ -719,15 +733,15 @@ montrant du contenu client. Les tokens de couleur restent nommés `--brand-*`.
 
 Demandés en V3, écartés après mesure, pas par manque de temps :
 
-- **Outlook classique en COM est mort sur ce poste.** `HKCU\...\Outlook\Preferences\UseNewOutlook = 1`
-  fait que le lancement d'`OUTLOOK.EXE` passe la main au nouveau Outlook puis se termine **sans
-  enregistrer sa classe COM** ; l'activation échoue après ~31 s en `CO_E_SERVER_EXEC_FAILURE`.
-  Reproduit deux fois, et confirmé par le démarrage d'`olk.exe` à l'instant de la sonde.
-- **Microsoft Graph passe par un admin Entra.** Mesuré sur le tenant :
-  `defaultUserRolePermissions.allowedToCreateApps = false`, aucune politique de consentement
-  utilisateur, et aucun rôle d'annuaire actif pour ce compte. Le claim `scp` du token du CLI Azure
-  (`Application.ReadWrite.All`…) est celui de **l'application CLI**, pas les droits de l'utilisateur :
-  il fait croire à tort qu'on peut créer une app registration en ligne de commande.
+- **Outlook classique en COM peut être indisponible** alors qu'Outlook est installé. Quand le nouveau
+  client est actif (`Outlook\Preferences\UseNewOutlook = 1` côté utilisateur), lancer `OUTLOOK.EXE`
+  passe la main au nouveau Outlook puis se termine **sans enregistrer sa classe COM** : l'activation
+  échoue après une trentaine de secondes en `CO_E_SERVER_EXEC_FAILURE`. Reproduit deux fois.
+- **Microsoft Graph demande une app registration**, donc un tenant qui l'autorise. Beaucoup
+  d'entreprises la refusent (`defaultUserRolePermissions.allowedToCreateApps = false`, aucune
+  politique de consentement utilisateur), et le piège est le token du CLI Azure : son claim `scp`
+  (`Application.ReadWrite.All`…) est celui de **l'application CLI**, pas les droits de l'utilisateur,
+  ce qui fait croire à tort qu'on peut en créer une en ligne de commande. À vérifier avant de coder.
 - **La cloche d'activité Teams n'a aucune API de lecture**, même avec Graph. Le maximum lisible serait
   `GET /me/chats` + `viewpoint.lastMessageReadDateTime`, ce qui exclut déjà les mentions en canal.
 

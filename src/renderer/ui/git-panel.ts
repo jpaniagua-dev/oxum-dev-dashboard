@@ -730,7 +730,7 @@ function buildBranchForm(state: GitPanelState, actions: GitPanelActions): HTMLEl
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'git__input';
-  input.placeholder = 'PROJ-0000-description';
+  input.placeholder = 'PROJ-000-description';
   input.value = state.branchDraft;
   input.addEventListener('input', () => actions.onBranchDraft(input.value));
   input.addEventListener('focus', () => actions.onEditing(true));

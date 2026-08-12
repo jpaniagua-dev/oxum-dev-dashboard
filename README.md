@@ -40,9 +40,11 @@ in Electron unchanged.
 
 ## What each column means
 
-The three projects are seeded on first launch as **Web**, **Admin** and **Design**. They are only a
-starting point: `+ Projet` adds a folder, **double-clicking a project name renames it**, and
-everything else is editable in the settings dialog.
+On first launch the dashboard looks under your repositories root for a few common folder names
+(`web-app`, `admin-front`, `design-system`) and seeds a row for each one it finds. That is only a
+starting point, and an unrecognised layout simply starts empty: `+ Projet` adds a folder,
+**double-clicking a project name renames it**, and everything else is editable in the settings
+dialog.
 
 The port is not shown in the list: the server pill already says `sert :4201` when it matters.
 
@@ -66,9 +68,9 @@ went through the embedded terminal. It was a state nobody could act on, for a si
 stopped happening. The trade-off is explicit: if something outside still holds the port, the row says
 `arrêté` and the action fails on "address already in use", visibly, in its own tab.
 
-`watch` exists because **`design-system` is not a server**: its `start` runs `ng build --watch`, which
-opens no port. Nothing about it can be observed from the outside, which is precisely why the
-dashboard spawns it and reads its output.
+`watch` exists because **a component library is not a server**: its `start` typically runs
+`ng build --watch`, which opens no port. Nothing about it can be observed from the outside, which is
+precisely why the dashboard spawns it and reads its output.
 
 ## Pull requests
 
@@ -79,8 +81,8 @@ The pull request tab lists the watched repositories on the left with a counter, 
 the selected one on the right, one line each:
 
 ```
-#580  PROJ 412 user profile detail page   [auteur] [à relire] [OK 4]   33 min  >_
-#575  PROJ-1607: Invoice lifecycle actions       [à relire] [sans review] [aucun check]  18 min  >_
+#128  PROJ 412 user profile detail page      [auteur] [à relire] [OK 4]   33 min  >_
+#127  PROJ-408: invoice lifecycle actions    [à relire] [sans review] [aucun check]  18 min  >_
 ```
 
 - **Which repositories**: derived from each project's `git remote get-url origin`, with a
@@ -338,9 +340,8 @@ id**, so pointing at a Git Bash installed somewhere unusual takes three lines:
 
 Verified rather than assumed, and each one changed the design:
 
-- **A port does not identify a checkout.** `web-app` served on 4200 while a
-  `web-app-tec1455` worktree served on 4202, which is why a row is keyed on its repository
-  path and never on a port.
+- **A port does not identify a checkout.** A repository served on 4200 while one of its worktrees
+  served on 4202, which is why a row is keyed on its repository path and never on a port.
 - **ANSI must be stripped with the escape anchor.** A bracket pattern without it eats `[ERROR]`
   itself, destroying the markers the parser exists to find.
 - **A hot-reloaded renderer will happily talk to a stale main.** `electron-vite dev` only watches the
@@ -386,3 +387,11 @@ Covered where the risk actually is: the porcelain and ahead/behind parsers, the 
 against real Angular output, the action list (migration, one-server invariant, unique ids), the
 shell-per-action mapping, and the resizer geometry, whose direction had inverted once and is now
 locked by a test rather than by eye.
+
+Every test is self-contained: those that need repositories on disk write their own manifests into a
+temporary directory, so the suite behaves the same on a fresh clone as on the machine it was written
+on.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

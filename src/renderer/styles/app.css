@@ -1925,7 +1925,7 @@ body {
   font-weight: 600;
   font-size: var(--font-md);
   color: var(--text);
-  /* A branch name is an identifier: the mono face keeps `PROJ-1601-x` from being read as prose. */
+  /* A branch name is an identifier: the mono face keeps `PROJ-412-x` from being read as prose. */
   font-family: var(--font-mono);
 }
 
@@ -2077,7 +2077,7 @@ body {
 /*
  * A branch name or a commit subject truncates from the right, the ordinary way.
  *
- * Deliberately not `.git__path`: those two are read from the start (`PROJ-1601-…`, "feat: …"), so the
+ * Deliberately not `.git__path`: those two are read from the start (`PROJ-412-…`, "feat: …"), so the
  * rule that helps a path actively hurts them.
  */
 .git__label {
