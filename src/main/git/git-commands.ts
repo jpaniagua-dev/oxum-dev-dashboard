@@ -376,7 +376,7 @@ export async function cherryPick(
    * `git log`, so anything that fails this test did not come from the history column.
    */
   if (!/^[0-9a-f]{4,40}$/i.test(trimmed)) {
-    return { ok: false, message: 'Commit invalide' };
+    return { ok: false, message: 'Invalid commit sha' };
   }
 
   const result = await tryGit(

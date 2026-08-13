@@ -217,7 +217,7 @@ export function presentGit(git: GitState | null): GitSummary {
     parts.push({ label: `${git.modified} modified`, kind: 'dirty' });
   }
   if (git.untracked > 0) {
-    parts.push({ label: `${git.untracked} nouveaux`, kind: 'dirty' });
+    parts.push({ label: `${git.untracked} untracked`, kind: 'dirty' });
   }
   if (parts.length === 0) {
     parts.push({ label: 'clean', kind: 'clean' });

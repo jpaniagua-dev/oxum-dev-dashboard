@@ -642,7 +642,7 @@ class App {
    * The repository's actions: the three network operations and a terminal.
    *
    * Rebuilt at each opening rather than held, for the same reason the Jira transitions are read when
-   * their menu opens: the labels depend on live state (`Push` becomes `Push et publier la branche`
+   * their menu opens: the labels depend on live state (`Push` becomes `Push and publish the branch`
    * without an upstream) and a menu built once would eventually offer the wrong one.
    */
   private openGitMenu(x: number, y: number): void {

@@ -29,9 +29,9 @@ import { presentChange, presentTrack } from './presenters.js';
 export type GitViewId = 'changes' | 'branches' | 'history' | 'stashes';
 
 export const GIT_VIEWS: readonly { id: GitViewId; label: string }[] = [
-  { id: 'changes', label: 'Changements' },
+  { id: 'changes', label: 'Changes' },
   { id: 'branches', label: 'Branches' },
-  { id: 'history', label: 'Historique' },
+  { id: 'history', label: 'History' },
   /*
    * The stash list, added last and on the right for a reason: it is the view you go to on purpose,
    * whereas the first three are where the tab lands.
@@ -580,7 +580,7 @@ function renderChanges(
   }
 }
 
-/** "Tout ajouter" / "Tout retirer", the two gestures a per-file checkbox makes tedious. */
+/** "Stage all" / "Unstage all", the two gestures a per-file checkbox makes tedious. */
 function buildStagingBar(
   repo: GitRepoState,
   state: GitPanelState,
@@ -979,7 +979,7 @@ function buildStashForm(
   box.checked = state.stashUntracked;
   box.disabled = state.busy || untracked === 0;
   box.addEventListener('change', () => actions.onStashUntracked(box.checked));
-  toggle.append(box, createElement('span', { text: `+ nouveaux (${untracked})` }));
+  toggle.append(box, createElement('span', { text: `+ untracked (${untracked})` }));
   toggle.title =
     untracked === 0
       ? 'No untracked file to include'
@@ -990,7 +990,7 @@ function buildStashForm(
   const stashable = state.stashUntracked ? repo.changes.length : tracked;
   const push = createElement('button', {
     className: 'button',
-    text: 'Stasher',
+    text: 'Stash',
     title:
       stashable === 0
         ? 'Nothing to set aside'

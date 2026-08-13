@@ -811,7 +811,7 @@ body {
   min-height: 0;
   overflow-y: auto;
   /* Centred with a ceiling: cards stretched across a maximised window would put the label and the
-     Supprimer button a screen apart. */
+     Delete button a screen apart. */
   padding: 16px;
   display: flex;
   flex-direction: column;
