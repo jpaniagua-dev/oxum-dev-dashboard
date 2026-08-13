@@ -60,18 +60,21 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
     changes: [] as GitChange[],
     commits: [] as GitCommit[],
     stashes: [] as GitStash[],
+    headMessage: '',
     sequencer: 'none' as GitSequencer,
   };
 
   try {
-    const [branches, changes, commits, stashes, sequencer, upstream] = await Promise.all([
-      readBranches(project.path),
-      readChanges(project.path),
-      readCommits(project.path),
-      readStashes(project.path),
-      readSequencer(project.path),
-      readUpstream(project.path),
-    ]);
+    const [branches, changes, commits, stashes, headMessage, sequencer, upstream] =
+      await Promise.all([
+        readBranches(project.path),
+        readChanges(project.path),
+        readCommits(project.path),
+        readStashes(project.path),
+        readHeadMessage(project.path),
+        readSequencer(project.path),
+        readUpstream(project.path),
+      ]);
 
     const current = branches.find((branch) => branch.current);
     return {
@@ -80,6 +83,7 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
       changes,
       commits,
       stashes,
+      headMessage,
       sequencer,
       // The current branch comes from the branch list when there is one, and from HEAD otherwise:
       // a detached HEAD matches no entry in `refs/heads`, and reporting an empty name there would
@@ -153,6 +157,21 @@ export async function readStashes(repoPath: string): Promise<GitStash[]> {
     return parseStashLines(await git(repoPath, ['stash', 'list', `--format=${format}`]));
   } catch {
     return [];
+  }
+}
+
+/**
+ * The full message of the HEAD commit, for the amend form to pre-fill.
+ *
+ * `%B` is the raw body, subject and blank line and paragraphs included: an amend replaces the whole
+ * message, so offering only the subject would silently drop the body of the commit being amended.
+ * Failure degrades to an empty string, a repository with no commit yet being a normal row here.
+ */
+export async function readHeadMessage(repoPath: string): Promise<string> {
+  try {
+    return (await git(repoPath, ['log', '-1', '--format=%B'])).trim();
+  } catch {
+    return '';
   }
 }
 

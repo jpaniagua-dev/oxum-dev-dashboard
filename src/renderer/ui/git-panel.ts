@@ -82,6 +82,13 @@ export interface GitPanelState {
    * survive a rebuild that happened between two bursts of typing, never one during a keystroke.
    */
   readonly message: string;
+  /**
+   * Whether the commit form is amending the HEAD commit instead of creating a new one.
+   *
+   * Held here like the message, and reset with it when the repository changes: an amend armed on
+   * one project must not survive onto another, where it would rewrite an unrelated commit.
+   */
+  readonly amend: boolean;
   /** Draft branch name, held for the same reason. */
   readonly branchDraft: string;
   /** Draft stash label, held for the same reason. */
@@ -102,6 +109,8 @@ export interface GitPanelActions {
   onCreateBranch: (name: string) => void;
   onCommit: () => void;
   onMessage: (value: string) => void;
+  /** Arms or disarms the amend. Ticking it pre-fills the form with the message being replaced. */
+  onAmend: (amend: boolean) => void;
   onBranchDraft: (value: string) => void;
   onSync: (op: GitSyncOp) => void;
   /** Replays a commit onto the current branch. `noCommit` is `-n`: staged, not committed. */
@@ -658,6 +667,14 @@ function buildChangeRow(
  *
  * The button is disabled when nothing is staged, using the same `hasStagedChanges` the main process
  * would: an enabled button that produces "nothing added to commit" in a terminal tab teaches nothing.
+ * **Amending lifts that rule**: `git commit --amend` with an empty index is a reword, which is half
+ * of what an amend is for.
+ *
+ * The amend is a checkbox rather than a second button, and that is a judgement call in line with the
+ * cherry-pick one: an amend rewrites history, so it must not be reachable by the same single click
+ * that commits. Arming it first, watching the button change name, then clicking, is the deliberate
+ * two-step gesture. Ticking it pre-fills the form with the message being replaced (`headMessage`),
+ * because an amend that silently drops the old body would lose what it promised to edit.
  */
 function renderCommitForm(
   host: HTMLElement,
@@ -676,12 +693,39 @@ function renderCommitForm(
   area.addEventListener('blur', () => actions.onEditing(false));
 
   const staged = hasStagedChanges(repo.changes);
-  const button = createElement('button', { className: 'button button--primary', text: 'Commit' });
+  const head = repo.commits[0];
+
+  const toggle = createElement('label', { className: 'git__toggle' });
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'git__check';
+  box.checked = state.amend;
+  box.disabled = state.busy || head === undefined;
+  box.addEventListener('change', () => actions.onAmend(box.checked));
+  toggle.append(box, createElement('span', { text: 'Amend' }));
+  // The tooltip names the commit about to be rewritten, and says when that rewrite will need a
+  // force push: with nothing ahead, HEAD is exactly what the upstream has.
+  toggle.title =
+    head === undefined
+      ? 'No commit to amend yet'
+      : `git commit --amend: rewrites ${head.sha} "${head.subject}".${
+          repo.hasUpstream && repo.ahead === 0
+            ? '\nAlready pushed: the next push will have to be forced.'
+            : ''
+        }`;
+
+  const button = createElement('button', {
+    className: 'button button--primary',
+    text: state.amend ? 'Amend' : 'Commit',
+  });
   button.type = 'button';
-  button.disabled = state.busy || !staged || state.message.trim().length === 0;
-  button.title = staged
-    ? 'git commit -F, launched in a terminal tab so the hooks stay visible'
-    : 'Nothing staged: tick at least one file';
+  button.disabled =
+    state.busy || state.message.trim().length === 0 || (!staged && !state.amend);
+  button.title = state.amend
+    ? 'git commit --amend -F, launched in a terminal tab so the hooks stay visible'
+    : staged
+      ? 'git commit -F, launched in a terminal tab so the hooks stay visible'
+      : 'Nothing staged: tick at least one file';
   button.addEventListener('click', () => actions.onCommit());
 
   const footer = createElement('div', { className: 'git__commit-actions' });
@@ -690,8 +734,11 @@ function renderCommitForm(
       className: 'strip__meta',
       text: staged
         ? `${repo.changes.filter(isStaged).length} staged file(s)`
-        : 'index vide',
+        : state.amend
+          ? 'Empty index: rewords the last commit'
+          : 'Empty index',
     }),
+    toggle,
     button,
   );
 

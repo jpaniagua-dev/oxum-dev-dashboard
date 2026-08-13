@@ -106,6 +106,8 @@ class App {
   private gitTarget: GitDiffTarget | null = null;
   private gitDiff: GitDiff | null = null;
   private gitMessage = '';
+  /** Whether the next commit amends HEAD. Reset with the drafts on every repository change. */
+  private gitAmend = false;
   private gitBranchDraft = '';
   private gitStashDraft = '';
   private gitStashUntracked = false;
@@ -522,6 +524,7 @@ class App {
       target: this.gitTarget,
       diff: this.gitDiff,
       message: this.gitMessage,
+      amend: this.gitAmend,
       branchDraft: this.gitBranchDraft,
       stashDraft: this.gitStashDraft,
       stashUntracked: this.gitStashUntracked,
@@ -542,6 +545,7 @@ class App {
           this.gitTarget = null;
           this.gitDiff = null;
           this.gitMessage = '';
+          this.gitAmend = false;
           this.gitBranchDraft = '';
           this.gitStashDraft = '';
           this.renderGit();
@@ -575,6 +579,20 @@ class App {
           // Stored without a re-render: the textarea already shows it, and rebuilding the panel on
           // every keystroke would move the caret.
           this.gitMessage = value;
+        },
+        onAmend: (amend) => {
+          // Arming the amend puts the message being replaced in the form, since that is the text
+          // the gesture edits — but never over a draft already typed. Disarming takes the pre-fill
+          // back out, and only the pre-fill: an untouched old message left behind would otherwise
+          // become a brand-new commit that *looks* like the previous one.
+          const head = this.gitRepo?.headMessage ?? '';
+          if (amend && this.gitMessage.trim().length === 0) {
+            this.gitMessage = head;
+          } else if (!amend && this.gitMessage === head) {
+            this.gitMessage = '';
+          }
+          this.gitAmend = amend;
+          this.renderGit();
         },
         onBranchDraft: (value) => {
           this.gitBranchDraft = value;
@@ -770,12 +788,18 @@ class App {
     this.gitBusy = true;
     this.renderGit();
     try {
-      const { terminalId, result } = await window.api.gitCommit(projectId, this.gitMessage);
+      const { terminalId, result } = await window.api.gitCommit(
+        projectId,
+        this.gitMessage,
+        this.gitAmend,
+      );
       this.stampMessage(result.message);
       if (terminalId !== null) {
         // Cleared once handed over: the message now lives in the file git is reading, and leaving it
-        // in the form invites committing it twice.
+        // in the form invites committing it twice. The amend is disarmed with it — left armed, the
+        // next commit would silently rewrite the one that was just made.
         this.gitMessage = '';
+        this.gitAmend = false;
         await this.focusTerminal(terminalId);
       }
     } finally {

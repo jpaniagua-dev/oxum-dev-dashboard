@@ -332,6 +332,13 @@ export interface GitRepoState {
   readonly changes: readonly GitChange[];
   readonly commits: readonly GitCommit[];
   readonly stashes: readonly GitStash[];
+  /**
+   * Full message of the HEAD commit, subject and body, empty when the repository has no commit.
+   *
+   * Read for the amend gesture: ticking "Amend" pre-fills the form with the message being
+   * replaced, and `commits[0]` only carries the subject line.
+   */
+  readonly headMessage: string;
   /** `none` unless git has left a cherry-pick, a merge, a revert or a rebase half-finished. */
   readonly sequencer: GitSequencer;
   readonly ahead: number;
@@ -970,10 +977,10 @@ export const IpcChannel = {
   /** invoke: (projectId, paths: string[], staged: boolean) => GitResult, stages or unstages */
   GitStage: 'git:stage',
   /**
-   * invoke: (projectId, message) => { terminalId, result }
+   * invoke: (projectId, message, amend: boolean) => { terminalId, result }
    *
-   * Writes the message to a file and runs `git commit -F` in a terminal tab, so hooks and their
-   * output are visible rather than swallowed by a silent `execFile`.
+   * Writes the message to a file and runs `git commit -F` (`--amend` when asked) in a terminal
+   * tab, so hooks and their output are visible rather than swallowed by a silent `execFile`.
    */
   GitCommit: 'git:commit',
   /** invoke: (projectId, op: GitSyncOp) => GitResult, the three network operations */
@@ -1137,10 +1144,14 @@ export interface RendererApi {
    *
    * Returns the tab so the caller can bring it forward: the point of running it there is that the
    * pre-commit hooks are watchable, which is worth nothing if the tab stays hidden.
+   *
+   * `amend` swaps the command for `git commit --amend`: the staged changes (none is fine, that is
+   * a reword) fold into the HEAD commit and the message replaces its message.
    */
   gitCommit(
     projectId: ProjectId,
     message: string,
+    amend: boolean,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   gitSync(projectId: ProjectId, op: GitSyncOp): Promise<GitResult>;
   /**

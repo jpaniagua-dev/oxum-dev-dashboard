@@ -239,6 +239,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       _event,
       projectId: unknown,
       message: unknown,
+      amend: unknown,
     ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
@@ -252,11 +253,16 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       const terminalId = deps.terminals.runProjectCommand({
         project,
         actionId: GIT_COMMIT_ACTION_ID,
-        title: `${project.label} · commit`,
+        title: `${project.label} · ${amend === true ? 'amend' : 'commit'}`,
         // `git` straight from PATH, no shell: the app already calls it that way everywhere else.
         // `--cleanup=strip` drops comment lines and trailing blanks the way an editor session would.
+        // The amend runs in the same tab for the same reason the commit does: it fires the very same
+        // hooks, and rewriting HEAD silently is worse than rewriting it in front of the user.
         file: 'git',
-        args: ['commit', '--cleanup=strip', '-F', file],
+        args:
+          amend === true
+            ? ['commit', '--amend', '--cleanup=strip', '-F', file]
+            : ['commit', '--cleanup=strip', '-F', file],
         size: deps.terminalSize(),
       });
 

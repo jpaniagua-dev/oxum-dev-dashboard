@@ -13,6 +13,7 @@ import {
   readChanges,
   readCommits,
   readDiff,
+  readHeadMessage,
   readRepoState,
   readSequencer,
   readStashes,
@@ -71,6 +72,8 @@ describe('readRepoState', () => {
     expect(state.branch).toBe('main');
     expect(state.changes).toEqual([]);
     expect(state.commits[0]?.subject).toBe('feat: premier commit');
+    // The full HEAD message rides along, for the amend form to pre-fill.
+    expect(state.headMessage).toBe('feat: premier commit');
     // No remote in a fresh repository, which must read as a normal state and not as a failure.
     expect(state.hasUpstream).toBe(false);
   });
@@ -206,6 +209,39 @@ describe('the commit path', () => {
     const file = await writeCommitMessage(join(repo, '.messages'), '../../escaped', 'x');
 
     expect(file.includes('..')).toBe(false);
+  });
+
+  it('amends HEAD with the same file mechanism, folding the staged changes in', async () => {
+    // The exact argv the Amend button hands to the terminal tab. Everything the plain commit test
+    // proves about the file (encoding, --cleanup, dashed subjects) holds by construction; what an
+    // amend adds is the rewrite itself, so that is what is asserted: same commit count, new
+    // message, extra file folded into HEAD.
+    write('amended.ts', 'const z = 1;\n');
+    run(['add', 'amended.ts']);
+    run(['commit', '-m', 'feat: before amend']);
+    const countBefore = (await readCommits(repo)).length;
+
+    write('folded.ts', 'const f = 1;\n');
+    run(['add', 'folded.ts']);
+    const message = 'feat: after amend\n\nThe body survives the round trip.\n';
+    const file = await writeCommitMessage(join(repo, '.messages'), 'fixture', message);
+    execFileSync('git', ['-C', repo, 'commit', '--amend', '--cleanup=strip', '-F', file], {
+      windowsHide: true,
+      stdio: 'pipe',
+    });
+
+    expect((await readCommits(repo)).length).toBe(countBefore);
+    // `%B` carries subject and body: pre-filling with `commits[0].subject` alone would have lost
+    // the body of the commit being amended.
+    expect(await readHeadMessage(repo)).toBe(
+      'feat: after amend\n\nThe body survives the round trip.',
+    );
+    const shown = execFileSync('git', ['-C', repo, 'show', '--stat', '--format=', 'HEAD'], {
+      windowsHide: true,
+      encoding: 'utf8',
+    });
+    expect(shown).toContain('amended.ts');
+    expect(shown).toContain('folded.ts');
   });
 });
 

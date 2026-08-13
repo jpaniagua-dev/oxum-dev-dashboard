@@ -80,8 +80,9 @@ const api: RendererApi = {
   gitCommit: (
     projectId: ProjectId,
     message: string,
+    amend: boolean,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
-    ipcRenderer.invoke(IpcChannel.GitCommit, projectId, message),
+    ipcRenderer.invoke(IpcChannel.GitCommit, projectId, message, amend),
 
   gitSync: (projectId: ProjectId, op: GitSyncOp): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitSync, projectId, op),
