@@ -223,13 +223,15 @@ export class TerminalPane {
    * would walk through this handler. Letters rather than digits for the same family of reason, the digit
    * row needing Shift on that layout.
    *
-   * `Ctrl+Alt+W` (close the active tab) is the one exception to that rule, asked for explicitly. It is
-   * survivable for this key and only this key: `W` carries no AltGr character on the Swiss French
-   * layout, so the combination types nothing and there is nothing to shadow. It is matched on
-   * `event.code` rather than `event.key` precisely because that assumption is about the *physical* key:
-   * under a chord that some layouts do map, `key` becomes the composed character and the comparison
-   * would quietly stop matching. Any future `Ctrl+Alt` chord has to be checked against the layout the
-   * same way, or it will eat a character someone types for real.
+   * `Alt+Shift+W` closes the active tab, the everyday gesture, so it sits on the everyday chord.
+   * Closing the focused pane, the rarer gesture, lives on `Ctrl+Alt+W`: the one accepted exception
+   * to the no-`Ctrl+Alt` rule, survivable for this key and only this key because `W` carries no
+   * AltGr character on the Swiss French layout, so the combination types nothing and there is
+   * nothing to shadow. It is matched on `event.code` rather than `event.key` precisely because that
+   * assumption is about the *physical* key: under a chord that some layouts do map, `key` becomes
+   * the composed character and the comparison would quietly stop matching. Any future `Ctrl+Alt`
+   * chord has to be checked against the layout the same way, or it will eat a character someone
+   * types for real.
    */
   private bindShortcuts(): void {
     document.addEventListener(
@@ -242,9 +244,9 @@ export class TerminalPane {
         }
 
         if (event.ctrlKey) {
-          if (!event.shiftKey && event.code === 'KeyW') {
+          if (!event.shiftKey && event.code === 'KeyW' && this.layout.groups.length > 1) {
             event.preventDefault();
-            this.closeActiveTab();
+            this.closeFocusedGroup();
           }
           return;
         }
@@ -262,9 +264,9 @@ export class TerminalPane {
         } else if (key === 'b' && session !== undefined) {
           event.preventDefault();
           this.actions.onSplitShell(session.cwd, 'rows');
-        } else if (key === 'w' && this.layout.groups.length > 1) {
+        } else if (key === 'w') {
           event.preventDefault();
-          this.closeFocusedGroup();
+          this.closeActiveTab();
         }
       },
       true,
@@ -871,7 +873,7 @@ export class TerminalPane {
         label: 'Close this pane',
         // Nothing to close when it is the only one, and its terminals must not die here.
         disabled: groups.length <= 1,
-        hint: 'Alt+Shift+W: the tabs move to the neighbouring pane',
+        hint: 'Ctrl+Alt+W: the tabs move to the neighbouring pane',
         run: () => {
           this.focused = at;
           this.closeFocusedGroup();
@@ -929,7 +931,7 @@ export class TerminalPane {
       },
       {
         label: 'Close the tab',
-        hint: 'Ctrl+Alt+W on the active tab',
+        hint: 'Alt+Shift+W on the active tab',
         disabled: !session.closable,
         run: () => this.actions.onClose(session.id),
       },

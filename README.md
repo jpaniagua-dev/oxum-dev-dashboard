@@ -153,6 +153,11 @@ Changements 12  Branches 4  Historique              ↻  ↓  ↑
   one-line failure. The message travels through a file rather than a `-m` argument, so it can be
   multi-line and nothing in it can be read as an option — a subject starting with `-` is a real thing
   people type. The file is kept, so a rejected commit does not lose what you wrote.
+- **Amend is a checkbox next to the commit button.** Arming it pre-fills the form with the whole
+  message of the commit being rewritten and relabels the button; with nothing staged it is a reword,
+  so the empty-index rule bends for it. The tooltip names the sha it will rewrite and warns when that
+  commit is already pushed. Two steps on purpose: rewriting history must not be one stray click away
+  from the gesture that does not.
 - **Branch names are validated by `git check-ref-format`**, not by a pattern of ours: git's rules are
   subtler than they look, and an approximation either refuses a legal name or lets git fail later while
   talking about something else.
@@ -300,12 +305,12 @@ to another by dragging it there.
   opens a new shell **in that pane's own directory**, so splitting a repository shell gives you a second
   one in the same repository.
 - **Right-click a tab** to move it to a pane of its own, rename it, close it, or **close every tab to its
-  right**. "Vers la droite" means the rest of *that pane's* strip and nothing else, and it counts what it
+  right**. "To the right" means the rest of *that pane's* strip and nothing else, and it counts what it
   will close in its own label: a running server is skipped rather than closed, so the count and the
   outcome always match.
-- `Ctrl+Alt+W` closes the **active** tab, if it can be closed. A running server keeps its tab, exactly as
+- `Alt+Shift+W` closes the **active** tab, if it can be closed. A running server keeps its tab, exactly as
   it keeps its missing cross: `Stop` is the deliberate way to end one.
-- `Alt+Shift+W`, or "Fermer ce panneau", closes a pane. **Its tabs move to the neighbouring pane**, they
+- `Ctrl+Alt+W`, or "Close this pane", closes a pane. **Its tabs move to the neighbouring pane**, they
   do not die with it: killing a terminal is still the cross on its tab, so no menu click can take down
   a build.
 - Panes share the surface in **one direction**, columns or rows, chosen by the split. Three side by side

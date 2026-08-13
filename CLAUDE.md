@@ -193,16 +193,29 @@ exceptions:
   looking at. And non-closable tabs are **skipped, not refused**: the count in the label is the number
   that will actually go, and the tooltip says what stays. A menu item promising four closes and doing
   three is a menu you stop believing.
-- **`Ctrl+Alt+W` is the one accepted exception to the "no `Ctrl+Alt`" rule**, explicitly requested. It
-  holds for that key only: `W` carries no AltGr character on the Swiss French layout, so the
-  combination types nothing and there is nothing to mask. It is compared on `event.code` and not
-  `event.key` precisely because the assumption is about the **physical** key: under a chord some
-  layouts do map, `key` becomes the composed character and the comparison would silently stop
-  matching. Any future `Ctrl+Alt` chord must be checked against the layout the same way, or it eats a
-  character somebody actually types.
-- **A shortcut never closes a non-closable tab.** `Ctrl+Alt+W` returns silently on a running server,
+- **`Alt+Shift+W` closes the tab, `Ctrl+Alt+W` closes the pane**, swapped on request in 4.4.0: the
+  everyday gesture sits on the everyday chord. `Ctrl+Alt+W` remains the one accepted exception to the
+  "no `Ctrl+Alt`" rule, and it holds for that key only: `W` carries no AltGr character on the Swiss
+  French layout, so the combination types nothing and there is nothing to mask. It is compared on
+  `event.code` and not `event.key` precisely because the assumption is about the **physical** key:
+  under a chord some layouts do map, `key` becomes the composed character and the comparison would
+  silently stop matching. Any future `Ctrl+Alt` chord must be checked against the layout the same
+  way, or it eats a character somebody actually types.
+- **A shortcut never closes a non-closable tab.** `Alt+Shift+W` returns silently on a running server,
   just as its tab silently has no cross: `closable` is derived for that, and `Stop` remains the
   deliberate gesture. A shortcut able to kill a build out of habit is exactly what this rule prevents.
+- **The surface is never left empty.** Closing the last session used to leave the app dead: the session
+  closed, but with zero groups every strip is hidden, and the "+" that could open a new tab lives in
+  the strip. The bootstrap rule ("open a shell when there is none") therefore also runs on every
+  sessions push: whatever gesture empties the surface, the default shell comes back. One
+  `openDefaultShell` for both callers, or the two fallbacks would drift.
+- **Nothing redraws under a tab rename.** The double-click that starts a rename on an inactive tab is
+  preceded by a click that activates it, and the layout broadcast coming back rebuilt the strip mid-
+  edit: the focused input was destroyed and its blur committed the rename before a letter was typed.
+  `renderStrips` returns while the rename input is live (checked on the DOM, since entering rename mode
+  goes through that very method to build the input), and a rename whose session died is dropped. The
+  field's focus is a **microtask**, not a `requestAnimationFrame`: an animation frame is throttled in
+  an occluded window and loses the race against the broadcast.
 - **Git Bash is launched with `-i`**, otherwise aliases do not exist in the tab.
 - **Profiles are probed on disk** before being offered: a menu entry that fails on click is worse than
   no entry.
@@ -545,6 +558,15 @@ exceptions:
   with `-` exists, and so does its test.
 - **The message file is kept after the commit.** It costs nothing, and when a hook refuses the commit it
   is the only surviving copy of what was typed: deleting it would turn a failing hook into lost work.
+- **Amend is a checkbox, armed then clicked.** The same judgement cherry-pick records: a gesture that
+  rewrites history must not be one stray click away from the one that does not. Arming pre-fills the
+  form with the whole HEAD message (`headMessage`, read via `%B`: `commits[0]` only has the subject,
+  and dropping the body would lose the very text an amend edits), never over a draft already typed;
+  disarming removes the pre-fill and only the pre-fill. It disarms after use and on every repository
+  change, or the next commit would silently rewrite the wrong one. The empty-index rule bends for it
+  (`--amend` with nothing staged is a reword), the tooltip names the sha about to be rewritten and
+  warns when HEAD is already on the upstream, and the command runs in the same terminal tab with the
+  same message file (`git commit --amend --cleanup=strip -F`): it fires the very same hooks.
 - **The commit tab carries a reserved `actionId`, `git:`.** It is tied to a project but is **not** one of
   its configured actions: looked up in the action list it finds nothing, so without the exemption case in
   `isUnreachable` every settings save would kill a commit in the middle of a hook. The case is tested,
