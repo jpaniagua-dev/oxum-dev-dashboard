@@ -968,7 +968,29 @@ export class TerminalPane {
 
   /* ---------------------------------------------------------------- strips */
 
+  /**
+   * True while the rename input is on screen, which is when the strips must not be rebuilt.
+   *
+   * A render can land in the middle of a rename: double-clicking an inactive tab first *activates*
+   * it, the layout change comes back as a broadcast from the main process, and rebuilding the strip
+   * then replaces the input mid-edit — the fresh field never reliably wins the focus back from the
+   * terminal, so the name sits there refusing keystrokes. Same invariant as the project table and
+   * the Git panel: nothing redraws under an inline edit. Checked on the DOM rather than on
+   * `renaming` alone, because entering rename mode goes through `renderStrips` to build the very
+   * input this guard protects.
+   */
+  private renameInputLive(): boolean {
+    return this.strips.some((strip) => strip.querySelector('.terminal__tab-input') !== null);
+  }
+
   private renderStrips(): void {
+    if (this.renaming !== null && !this.sessions.some((entry) => entry.id === this.renaming)) {
+      // The session died mid-rename: nothing is left to name, so the edit cannot be kept open.
+      this.renaming = null;
+    }
+    if (this.renaming !== null && this.renameInputLive()) {
+      return;
+    }
     this.layout.groups.forEach((group, index) => {
       const strip = this.strips[index];
       if (strip === undefined) {
@@ -1247,8 +1269,11 @@ export class TerminalPane {
     // Stops a click inside the field from bubbling to the document handler that closes the menu.
     input.addEventListener('click', (event) => event.stopPropagation());
 
-    // Focus after the element is in the DOM, and preselect so typing replaces the old name.
-    requestAnimationFrame(() => {
+    // Focus after the element is in the DOM, and preselect so typing replaces the old name. A
+    // microtask rather than `requestAnimationFrame`: the strip render that carries this input
+    // finishes the current task, so the microtask already finds it attached — and an animation
+    // frame is throttled in an occluded window, which left the field on screen but never focused.
+    queueMicrotask(() => {
       input.focus();
       input.select();
     });
