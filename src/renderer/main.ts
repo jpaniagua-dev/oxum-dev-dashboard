@@ -200,7 +200,15 @@ class App {
     });
     // Safe to apply mid-typing: `NotesState` carries no note body, so it cannot reach the editor.
     window.api.onNotesChanged((state) => this.notes?.apply(state));
-    window.api.onTerminalsChanged((sessions) => this.terminal?.setSessions(sessions));
+    window.api.onTerminalsChanged((sessions) => {
+      this.terminal?.setSessions(sessions);
+      // Closing the very last tab must not leave a dead surface: with no session there is no
+      // strip, and the "+" that could open a new one lives in the strip. Same rule as the
+      // bootstrap below — the terminal is this app's centre, so it is never left empty.
+      if (sessions.length === 0) {
+        void this.openDefaultShell();
+      }
+    });
     window.api.onTerminalLayoutChanged((layout) => this.terminal?.setLayout(layout));
     window.api.onPtyOutput(({ terminalId, data }) => this.terminal?.write(terminalId, data));
     window.api.onThemeChanged((state) => this.applyTheme(state));
@@ -212,11 +220,22 @@ class App {
     // Open a shell straight away, but only when there is none: the pane should be usable as a
     // terminal immediately, without stacking a new tab on every renderer reload.
     if (bootstrap.terminals.length === 0) {
-      const preferred = this.settings?.defaultShellProfileId ?? '';
-      const profile = this.profiles.find((entry) => entry.id === preferred) ?? this.profiles[0];
-      if (profile !== undefined) {
-        await this.openShell(profile.id);
-      }
+      await this.openDefaultShell();
+    }
+  }
+
+  /**
+   * Opens a tab on the preferred shell profile, falling back to the first one known.
+   *
+   * The two callers are the two moments the surface would otherwise be empty: the first bootstrap,
+   * and the closing of the last tab. One resolution for both, or the fallback shell after a close
+   * would eventually differ from the one the app starts on.
+   */
+  private async openDefaultShell(): Promise<void> {
+    const preferred = this.settings?.defaultShellProfileId ?? '';
+    const profile = this.profiles.find((entry) => entry.id === preferred) ?? this.profiles[0];
+    if (profile !== undefined) {
+      await this.openShell(profile.id);
     }
   }
 
