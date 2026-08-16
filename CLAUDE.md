@@ -317,7 +317,7 @@ exceptions:
 
 ## Pull requests tab
 
-- **The top strip has four tabs, and the terminal does not depend on them.** Only the strip's content
+- **The top strip has five tabs, and the terminal does not depend on them.** Only the strip's content
   changes; a tab that stole the terminal's space would go against everything else in this app. Adding a
   view means an entry in `STRIP_TABS`, two elements in `index.html`, and a height in `AppSettings`, and
   that height must be added to `asPatch` **and** to `LOCAL_ONLY_KEYS`, or it is dropped in silence (see
@@ -723,6 +723,105 @@ exceptions:
   (an automatic stash behind a checkout) and not at the object. A stash is a named, listed, complete
   snapshot, and creating one leaves a clean tree. What had to come with the view is the outcome of a
   conflicting `pop`, hence `sequencer`.
+
+## Triage tab
+
+- **A headless Claude Code run, not a terminal tab.** This is the one deliberate exception to "every
+  row action ends up in a terminal tab", and the dividing line is the same one the Git tab draws
+  between a quick write and a commit: a tab is the right home for a command whose **output** is the
+  point, whereas here the output is a payload the tab has to parse and group. It therefore sits with
+  the services that call `gh` and Jira from the main process. What the rule protects, that no work
+  happens where the app can neither show nor stop it, still holds: the run shows as a state on the
+  sprint row and the process is killed on timeout.
+- **The prompt goes in on stdin, never as an argument.** Twenty tickets with their descriptions is
+  tens of kilobytes, past what a Windows command line accepts, and the failure mode would be a
+  truncated prompt rather than an error.
+- **The run may read, and only read** (`--allowedTools Read Grep Glob`, `cwd` on `projectsRoot`).
+  Reading the code is the difference between "this needs the backend" and a guess from the title;
+  an analysis is not a change, so nothing may write or execute.
+- **No `--bare`.** That mode requires `ANTHROPIC_API_KEY`, while a normal install is signed in
+  through OAuth: the run would fail on authentication for a reason foreign to the tab. Verified.
+- **`stream-json`, not `json`.** The plain envelope arrives once, at the end, so a run of several
+  minutes would have nothing to show while it worked. The streamed form emits every tool call as it
+  happens, which is what the progress line is made of. It needs `--verbose` in print mode, and it is
+  line-delimited: the output is split on newlines with the remainder carried over, because a pipe
+  cuts wherever its buffer ended and an event routinely arrives in two pieces. Parsing per chunk
+  would drop exactly those, silently, and the run would look frozen while it was working.
+- **The closing `result` event's `is_error` is checked, not just the exit code.** A refusal or an API
+  failure arrives with a successful exit and an error inside the JSON; trusting the code alone would
+  show an empty triage as a successful one. A clean exit with no `result` event at all is reported as
+  a failure rather than as an empty answer.
+- **Sprints come from the Agile API, never from an issue's sprint field.** That field is a
+  `customfield_xxxxx` whose number differs per site, which is exactly why story points are not shown
+  in the Jira tab either. `/rest/agile/1.0/board/{id}/sprint` answers the same question by name. A
+  Kanban board has no sprints and answers 400: that is skipped in silence, not reported.
+- **A failed run keeps the previous verdicts and only carries the new error.** The stored result is
+  the whole point of the tab, and an analysis costs a minute: wiping a usable answer because of a
+  network blip would punish the reader for the weather. The error line sits above the old list,
+  saying the list is the old one.
+- **The result lives in `triage.json`, not in `settings.json`.** It is a result and not a
+  preference, it is rewritten by a long-running job, and a settings save must never be able to drop
+  it. Keyed by sprint id, which survives a rename.
+- **A ticket the model forgot is added back as `unclear`, never dropped.** A ticket silently missing
+  from a triage reads exactly like a sprint that does not contain it, which is the one failure
+  nobody would notice. Same reasoning for an unknown verdict: it falls back to `unclear`, the honest
+  statement being "this was not classified".
+- **The summary and assignee shown are Jira's, never the model's.** It is asked to classify, not to
+  restate; letting it rewrite a summary would put text on screen that does not match the ticket.
+- **One analysis at a time**, and every `Analyse` button is disabled while it runs: they share a
+  single process and a single file.
+- **`/browse/<KEY>` comes from `boardUrl`, shared with the Jira tab.** Two builders of the same URL
+  would drift, and that form is the only one Jira Cloud resolves for every project style.
+- **Five verdicts, not three.** The three that were asked for, plus `unclear` and `blocked`: a
+  ticket whose description is too thin to act on is a different problem from one waiting on an API,
+  and merging them hides the one a single sentence would fix.
+- **`Analyse` is a play triangle, and deliberately not `.icon-button--row`.** A magnifier was tried
+  first and read as "search", which is what the button is not: it launches a job that takes minutes,
+  and play is the one glyph nobody has to be taught. The terminal icons of the pull request and Git
+  lists fade until their row is hovered, which is right for a secondary affordance beside a row
+  whose main gesture is elsewhere; this one is the tab's primary action, and a button nobody sees
+  until they hover the right row is a button nobody finds. Its two paths stay in `triage-panel.ts`
+  rather than moving to `icons.ts`, the rule that keeps the sync arrows in `git-panel.ts`.
+- **A run is watchable, not just "busy".** A pulsing 14px icon was the first attempt and it is far
+  too quiet for an operation of several minutes. The tab now streams the run: an indeterminate bar,
+  the line the model is currently on (`Reading schema.graphql`), the step count and the elapsed
+  time. That combination is what tells a slow run from a stuck one, which is the only question being
+  asked while you wait.
+- **The bar is indeterminate, and that is a decision.** Nothing here knows how long a run takes, so
+  a bar filling at an invented pace would be a promise the tab cannot keep, and the first slow sprint
+  would make every later one untrustworthy. No `aria-valuenow` either: inventing one would tell a
+  screen reader a percentage the sighted view is careful not to claim.
+- **The elapsed clock ticks in the renderer.** Progress is pushed on events, and those can be twenty
+  seconds apart while a file is read: without a timer of its own the line would freeze and look
+  exactly like a run that had died. It exists only while something runs.
+- **Pressing `Analyse` selects that sprint first.** Otherwise starting a run on a sprint you are not
+  looking at leaves the panel on another one, and the progress you asked for is on a screen you
+  cannot see.
+- **The running bar replaces the verdict counts, it does not sit beside them.** Those counts
+  describe the *previous* analysis; next to a live status they would read as the one being produced.
+- **One sub-tab per verdict, sharing `.subtab` with the Git and pull request tabs.** The list used
+  to stack all five behind headings, which meant scrolling past what you cannot act on to reach what
+  you can. The counts sit **on** the tabs for the reason they sit on `Mine` / `All`: a count you
+  have to switch view to read makes choosing a tab a guess, and it is also what makes the split
+  safe, since nothing is hidden silently. Sitting on `Backend` you can still see that four tickets
+  are ready. Empty verdicts keep their tab: "Ready 0" is an answer, and a tab that comes and goes
+  between two analyses moves the others under the cursor.
+- **Tab labels are short, the full sentence is the tooltip and the `aria-label`.** Five full labels
+  with their counts do not fit a strip's bar, and a tab row that scrolls sideways is a row whose
+  last tab nobody finds. The accessible name keeps the sentence, since a screen reader gets no
+  tooltip and "Backend" alone does not say those tickets are the ones the API cannot serve.
+- **The verdict selection is session-local, and reset when the sprint changes.** Unlike `pullScope`,
+  reopening the app on `Blocked` because that is where you left it would answer a question nobody
+  asked this morning; and a verdict worth reading on one sprint says nothing about the next. With
+  nothing chosen it opens on the first verdict that holds tickets (`firstFilledVerdict`, pure and
+  tested), so a finished analysis never lands on an empty tab.
+- **The active marker is filled, every other glyph in the app is stroked.** That is what tells a
+  state from an action at a glance. It is a `span[role="img"]` carrying its own `aria-label`:
+  `createIcon` marks the drawing `aria-hidden`, which is correct inside a named button and leaves a
+  bare icon mute, so the wrapper has to be the named thing.
+- **`.icon-button:hover` is guarded by `:not(:disabled)`**, like `.button` already was. Chromium
+  matches `:hover` on a disabled control, so without it a button that cannot be pressed still lights
+  up under the cursor and invites the click it is about to swallow.
 
 ## Mail and Teams: why they are not here
 

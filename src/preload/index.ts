@@ -13,6 +13,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type TriageState,
   type NoteContent,
   type NoteId,
   type NotesState,
@@ -142,6 +143,17 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.JiraSave, config, token),
 
   testJira: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke(IpcChannel.JiraTest),
+
+  refreshTriage: (): Promise<TriageState> => ipcRenderer.invoke(IpcChannel.TriageRefresh),
+
+  analyseSprint: (sprintId: number): Promise<TriageState> =>
+    ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId),
+
+  onTriageChanged: (listener: (state: TriageState) => void): (() => void) => {
+    const handler = (_event: unknown, state: TriageState): void => listener(state);
+    ipcRenderer.on(IpcChannel.TriageChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.TriageChanged, handler);
+  },
 
   jiraTransitions: (key: string): Promise<IssueTransition[]> =>
     ipcRenderer.invoke(IpcChannel.JiraTransitions, key),

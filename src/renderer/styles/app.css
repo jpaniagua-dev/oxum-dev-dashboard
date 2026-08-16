@@ -393,9 +393,19 @@ body {
   cursor: pointer;
 }
 
-.icon-button:hover {
+/*
+ * `:not(:disabled)` like `.button` above, and for the same reason: Chromium still matches `:hover`
+ * on a disabled control, so without the guard a button that cannot be pressed still lights up under
+ * the cursor and invites the click it is about to swallow.
+ */
+.icon-button:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text);
+}
+
+.icon-button:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 .icon-button svg {
@@ -2253,4 +2263,214 @@ body {
 
 .diff__line--meta .diff__text {
   color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ triage */
+
+/*
+ * The Triage tab reuses the `.pulls` master-detail grammar: sprints on the left, the analysis on the
+ * right. Only what is new to this tab is styled here, which is the `Analyse` button on a sprint row,
+ * the verdict chips and the ticket rows.
+ */
+
+/*
+ * The active sprint's marker: a filled dot, green because "this is the one running".
+ *
+ * Deliberately not a `.icon-button`: it is a state, so it takes no hover, no cursor and no focus.
+ */
+.triage__state {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--success);
+}
+
+.triage__state svg {
+  width: 8px;
+  height: 8px;
+}
+
+/*
+ * Pushed to the end of the row so the sprint names stay left-aligned and comparable.
+ *
+ * Deliberately NOT `.icon-button--row`, unlike the terminal icons of the pull request and Git
+ * lists. Those are secondary affordances beside a row whose main gesture is elsewhere, so fading
+ * them out until the row is hovered costs nothing. This one is the tab's primary action: an
+ * `Analyse` button nobody can see until they hover the right row is a button nobody finds.
+ */
+.triage__analyse {
+  margin-left: auto;
+}
+
+/*
+ * While a run is going, the icon breathes.
+ *
+ * The button is disabled for the whole analysis, and a greyed control on its own says "unavailable"
+ * rather than "working". This is the only cue that the minutes are being spent on purpose, so it is
+ * on the row that is being analysed and nowhere else.
+ */
+.triage__analyse--running {
+  animation: triage-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes triage-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+/* A pulse is information here, so what replaces it has to be visible: the icon stays fully opaque. */
+@media (prefers-reduced-motion: reduce) {
+  .triage__analyse--running {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+.triage__meta {
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+}
+
+/*
+ * The running bar: indeterminate on purpose.
+ *
+ * Nothing here knows how long a run takes, so a bar that filled at an invented pace would be a
+ * promise the tab cannot keep. This one only says "alive"; the line beside it carries the facts
+ * (the file being read, the step count, the elapsed time).
+ */
+.triage__progress {
+  position: relative;
+  flex: 1 1 160px;
+  max-width: 280px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.triage__progress-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  border-radius: 999px;
+  background: var(--primary);
+  animation: triage-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes triage-slide {
+  0% {
+    left: -40%;
+  }
+
+  100% {
+    left: 100%;
+  }
+}
+
+/*
+ * With motion off the bar cannot travel, so it becomes a full, static track.
+ *
+ * Hiding it instead would take away the one element that says a run is going, and the status line
+ * next to it already carries a clock that keeps moving on its own.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .triage__progress-bar {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
+/* The live line: what the run is doing right now, in the reader's words. */
+.triage__phase {
+  color: var(--text);
+  font-size: var(--font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Colour on the two sub-tabs that carry an action, and nowhere else.
+ *
+ * "Ready" and "Decision" are the two the reader can do something about today. Toning all five would
+ * make the row a rainbow in which none of them stands out, which is the opposite of what a count on
+ * a tab is for. Scoped with `.triage__subtab` so the shared `.subtab` used by the Git and pull
+ * request tabs keeps its own neutral look.
+ */
+.triage__subtab--ready .subtab__count {
+  color: var(--success);
+}
+
+.triage__subtab--needs-decision .subtab__count {
+  color: var(--warning);
+}
+
+.triage__ticket {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.triage__ticket:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.triage__ticket-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.triage__key {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.triage__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: var(--font-md);
+}
+
+.triage__assignee {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+}
+
+/* A question is something to answer, a reason something to know: only the first gets the accent. */
+.triage__question {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-sm);
+  border-left: 2px solid var(--warning);
+  padding-left: 8px;
+}
+
+.triage__reason {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
 }

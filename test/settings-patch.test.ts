@@ -100,7 +100,14 @@ describe('LOCAL_ONLY_KEYS', () => {
       'pullScope',
       'pullsHeight',
       'stripCollapsed',
+      'triageHeight',
     ]);
+  });
+
+  it('lets the dashboard persist the Triage tab height', () => {
+    // Same trap as `pullsHeight` and `jiraHeight` before it: a height missing from `asPatch` is
+    // dropped in total silence, and the tab reopens at the default on every launch.
+    expect(asPatch({ triageHeight: 512 })).toEqual({ triageHeight: 512 });
   });
 
   it('lets the dashboard persist the pull request scope', () => {

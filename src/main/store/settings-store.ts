@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Taller still, and on purpose: three columns ending in a diff is the one tab of this strip where
   // the user stops glancing and starts working. 250 pixels would show four lines of a diff.
   gitHeight: 460,
+  triageHeight: 460,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
   // 340 was not. The diff keeps the rest, and the separator is there to change the balance.
   gitListWidth: 460,
@@ -139,6 +140,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     pullsHeight: clamp(asNumber(input.pullsHeight, DEFAULT_SETTINGS.pullsHeight), 90, 1200),
     jiraHeight: clamp(asNumber(input.jiraHeight, DEFAULT_SETTINGS.jiraHeight), 90, 1200),
     gitHeight: clamp(asNumber(input.gitHeight, DEFAULT_SETTINGS.gitHeight), 90, 1200),
+    triageHeight: clamp(asNumber(input.triageHeight, DEFAULT_SETTINGS.triageHeight), 90, 1200),
     gitListWidth: clamp(asNumber(input.gitListWidth, DEFAULT_SETTINGS.gitListWidth), 240, 1400),
     defaultShellProfileId: asString(
       input.defaultShellProfileId,

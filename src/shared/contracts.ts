@@ -759,7 +759,102 @@ export const TERMINAL_FONT_SIZE = { default: 14, min: 9, max: 28 } as const;
 export const UI_FONT_SIZE = { default: 13, min: 11, max: 17 } as const;
 
 /** Which view the top strip shows. The terminal below is unaffected by this choice. */
-export type StripTab = 'projects' | 'pulls' | 'jira' | 'git';
+export type StripTab = 'projects' | 'pulls' | 'jira' | 'git' | 'triage';
+
+/**
+ * A sprint offered for triage.
+ *
+ * Read from the Agile API rather than from an issue's sprint field: that field is a
+ * `customfield_xxxxx` whose number differs per site, the same reason story points are not shown in
+ * the Jira tab. A board endpoint answers the same question without guessing an id.
+ */
+export interface Sprint {
+  readonly id: number;
+  readonly name: string;
+  /** `active` or `future`. Closed sprints are not offered: there is nothing left to plan in them. */
+  readonly state: string;
+  readonly boardName: string;
+}
+
+/**
+ * What the triage says about one ticket.
+ *
+ * The three the user asked for, plus two that kept turning up in practice: a ticket whose
+ * description is too thin to act on is not the same problem as one waiting on an API, and lumping
+ * them together hides the one a single sentence would fix.
+ */
+export type TriageVerdict = 'ready' | 'needs-decision' | 'backend' | 'unclear' | 'blocked';
+
+export const TRIAGE_VERDICTS: readonly TriageVerdict[] = [
+  'ready',
+  'needs-decision',
+  'backend',
+  'unclear',
+  'blocked',
+];
+
+export interface TriagedTicket {
+  readonly key: string;
+  readonly summary: string;
+  readonly verdict: TriageVerdict;
+  /** One sentence on why it landed there. Empty when the model gave none. */
+  readonly reason: string;
+  /** The closed question to answer, for `needs-decision`. Empty otherwise. */
+  readonly question: string;
+  readonly assignee: string;
+}
+
+/** The last analysis of one sprint, kept until that sprint is analysed again. */
+export interface TriageResult {
+  readonly sprintId: number;
+  readonly sprintName: string;
+  /** ISO instant, so the view can say how old the answer is. */
+  readonly analysedAt: string;
+  readonly tickets: readonly TriagedTicket[];
+  /** Set when the run failed; the previous result is kept on screen and this explains why. */
+  readonly error: string | null;
+}
+
+/**
+ * Where a run has got to.
+ *
+ * Named after what the reader sees rather than after the protocol: `reading` covers every tool the
+ * model uses to open the codebase, and `answering` is the stretch where nothing else will happen
+ * until the verdicts land, which is exactly when a silent screen looks broken.
+ */
+export type TriagePhase = 'starting' | 'fetching' | 'reading' | 'answering' | 'done';
+
+/**
+ * Live state of the running analysis.
+ *
+ * Deliberately not a percentage. Nothing here knows how long a run takes, and a bar that fills at a
+ * pace nobody can predict is a promise the tab cannot keep: what it reports instead is real
+ * activity, the file being opened and the time spent, which is what tells a slow run from a stuck
+ * one.
+ */
+export interface TriageProgress {
+  readonly sprintId: number;
+  readonly phase: TriagePhase;
+  /** Human-facing line, such as `Reading schema.graphql`. */
+  readonly detail: string;
+  /** Tool calls so far. A count that keeps moving is the proof the run is alive. */
+  readonly steps: number;
+  /** ISO instant the run started, so the view can show elapsed time without its own clock. */
+  readonly startedAt: string;
+  /** How many tickets the sprint holds, known as soon as Jira answers. */
+  readonly tickets: number;
+}
+
+export interface TriageState {
+  readonly sprints: readonly Sprint[];
+  /** Last analysis per sprint id, surviving restarts. */
+  readonly results: Readonly<Record<string, TriageResult>>;
+  /** Sprint currently being analysed, if any. One at a time: the run is long and costs tokens. */
+  readonly running: number | null;
+  /** Set only while a run is going, cleared when it lands. */
+  readonly progress: TriageProgress | null;
+  readonly error: string | null;
+}
 
 export interface AppSettings {
   themeMode: ThemeMode;
@@ -797,6 +892,11 @@ export interface AppSettings {
    * this tab is the one where the strip stops being a glance and becomes a place to work.
    */
   gitHeight: number;
+  /**
+   * Height of the Triage tab. Sized like the Git tab rather than like the status table: it lists a
+   * sprint's tickets grouped by verdict, which is read for a while and not glanced at.
+   */
+  triageHeight: number;
   /**
    * Width of the Git tab's working column, in pixels. The diff column takes what is left.
    *
@@ -1006,6 +1106,18 @@ export const IpcChannel = {
    * the renderer names a ticket and a project, never a command line.
    */
   JiraBranch: 'jira:branch',
+  /** on: (state: TriageState) => void, pushed when the sprint list, a result or the running flag moves */
+  TriageChanged: 'triage:changed',
+  /** invoke: () => TriageState, re-reads the sprints from Jira and returns the stored results */
+  TriageRefresh: 'triage:refresh',
+  /**
+   * invoke: (sprintId) => TriageState
+   *
+   * Fetches the sprint's issues, hands them to a headless Claude Code run for classification, and
+   * stores the verdicts. The previous result stays on screen for the whole run and is only replaced
+   * when a new one lands, which is the point of storing it at all.
+   */
+  TriageAnalyse: 'triage:analyse',
   /** on: (state: NotesState) => void, pushed whenever the note list changes */
   NotesChanged: 'notes:changed',
   /** invoke: () => NotesState, re-reads the folder from disk */
@@ -1096,6 +1208,9 @@ export interface RendererApi {
 
   refreshJira(): Promise<JiraState>;
   onJiraChanged(listener: (state: JiraState) => void): () => void;
+  refreshTriage(): Promise<TriageState>;
+  analyseSprint(sprintId: number): Promise<TriageState>;
+  onTriageChanged(listener: (state: TriageState) => void): () => void;
   /**
    * Saves the Jira connection.
    *

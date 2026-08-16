@@ -22,6 +22,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type TriageState,
   type NoteContent,
   type NoteId,
   type NotesState,
@@ -64,6 +65,7 @@ import {
 import type { NotesStore } from './notes/notes-store.js';
 import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
+import type { TriageService } from './triage/triage-service.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -76,6 +78,7 @@ export interface IpcDependencies {
   readonly monitor: () => ProjectMonitor;
   readonly pulls: () => PullMonitor;
   readonly jira: () => JiraMonitor;
+  readonly triage: () => TriageService;
   /** Writes the Jira token to the encrypted store. Never reads it back towards the renderer. */
   readonly saveJiraToken: (token: string) => Promise<{ ok: boolean; message: string }>;
   readonly jiraConfig: () => JiraConfig;
@@ -156,6 +159,22 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   );
 
   ipcMain.handle(IpcChannel.JiraRefresh, async (): Promise<JiraState> => deps.jira().refreshNow());
+
+  /* --------------------------------------------------------------- triage */
+
+  ipcMain.handle(IpcChannel.TriageRefresh, async (): Promise<TriageState> => deps.triage().refresh());
+
+  /*
+   * The sprint id arrives from the renderer and is coerced here rather than trusted: it ends up in a
+   * Jira path, and the service also matches it against the sprint list before doing anything.
+   */
+  ipcMain.handle(IpcChannel.TriageAnalyse, async (_event, sprintId: unknown): Promise<TriageState> => {
+    const id = Number(sprintId);
+    if (!Number.isInteger(id)) {
+      return deps.triage().state();
+    }
+    return deps.triage().analyse(id);
+  });
 
   /* ------------------------------------------------------------------ git */
 

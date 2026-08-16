@@ -1,4 +1,4 @@
-import type { IssueStage, IssueTransition, JiraIssue } from '@shared/contracts.js';
+import type { IssueStage, IssueTransition, JiraIssue, Sprint } from '@shared/contracts.js';
 
 const TIMEOUT_MS = 20_000;
 /** A sprint with more issues than this is not a list you read in a strip anyway. */
@@ -288,6 +288,144 @@ async function call(
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * Lists the sprints that can still be planned, for the Triage tab.
+ *
+ * Read through the Agile API and not through an issue's sprint field, for the reason story points
+ * are not shown either: that field is a `customfield_xxxxx` whose number differs from site to site,
+ * so reading it means discovering it first. A board answers the same question by name.
+ *
+ * Closed sprints are left out: triage is about what to build next.
+ */
+export async function listSprints(
+  credentials: JiraCredentials,
+  projectKeys: readonly string[],
+): Promise<{ sprints: Sprint[]; error: string | null }> {
+  const sprints: Sprint[] = [];
+  const seen = new Set<number>();
+  let lastError: string | null = null;
+
+  for (const projectKey of projectKeys) {
+    const boards = await call(credentials, `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(projectKey)}`);
+    if (boards.status === 'error') {
+      lastError = boards.message;
+      continue;
+    }
+    for (const board of asArray(asRecord(boards.body)['values'])) {
+      const boardRecord = asRecord(board);
+      const boardId = boardRecord['id'];
+      if (typeof boardId !== 'number') {
+        continue;
+      }
+      const boardName = typeof boardRecord['name'] === 'string' ? boardRecord['name'] : projectKey;
+      const answer = await call(
+        credentials,
+        `/rest/agile/1.0/board/${boardId}/sprint?state=active,future&maxResults=50`,
+      );
+      if (answer.status === 'error') {
+        // A Kanban board has no sprints and answers 400; that is not an error worth showing.
+        continue;
+      }
+      for (const value of asArray(asRecord(answer.body)['values'])) {
+        const sprint = asRecord(value);
+        const id = sprint['id'];
+        const name = sprint['name'];
+        if (typeof id !== 'number' || typeof name !== 'string' || seen.has(id)) {
+          continue;
+        }
+        seen.add(id);
+        sprints.push({
+          id,
+          name,
+          state: typeof sprint['state'] === 'string' ? sprint['state'] : 'future',
+          boardName,
+        });
+      }
+    }
+  }
+
+  // Active first: that is the one being worked, and the list is read top down.
+  sprints.sort((a, b) => rankState(a.state) - rankState(b.state) || a.name.localeCompare(b.name));
+  return { sprints, error: sprints.length === 0 ? lastError : null };
+}
+
+function rankState(state: string): number {
+  return state === 'active' ? 0 : 1;
+}
+
+/**
+ * Reads a sprint's issues with their descriptions, for the analysis.
+ *
+ * A separate call from the tab's own search because it asks for `description`, which the list never
+ * shows and which is the bulk of the payload. `renderedFields` is not requested: the analysis reads
+ * the text, and Jira's HTML rendering would only add markup for a model to strip.
+ */
+export async function readSprintIssues(
+  credentials: JiraCredentials,
+  sprintId: number,
+): Promise<{ issues: SprintIssue[]; error: string | null }> {
+  const answer = await call(
+    credentials,
+    `/rest/agile/1.0/sprint/${sprintId}/issue?maxResults=${MAX_RESULTS}` +
+      '&fields=summary,status,assignee,description',
+  );
+  if (answer.status === 'error') {
+    return { issues: [], error: answer.message };
+  }
+
+  const issues: SprintIssue[] = [];
+  for (const value of asArray(asRecord(answer.body)['issues'])) {
+    const issue = asRecord(value);
+    const key = issue['key'];
+    if (typeof key !== 'string') {
+      continue;
+    }
+    const fields = asRecord(issue['fields']);
+    const status = asRecord(fields['status']);
+    const assignee = asRecord(fields['assignee']);
+    issues.push({
+      key,
+      summary: typeof fields['summary'] === 'string' ? fields['summary'] : '',
+      status: typeof status['name'] === 'string' ? status['name'] : '',
+      assignee: typeof assignee['displayName'] === 'string' ? assignee['displayName'] : '',
+      description: flattenDocument(fields['description']),
+    });
+  }
+  return { issues, error: null };
+}
+
+export interface SprintIssue {
+  readonly key: string;
+  readonly summary: string;
+  readonly status: string;
+  readonly assignee: string;
+  readonly description: string;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * Flattens an Atlassian Document Format body to plain text.
+ *
+ * ADF is a tree of nodes whose text lives in `text` leaves; walking it is enough for an analysis,
+ * which needs the words and not the formatting. A `null` description is normal and common, so it
+ * returns an empty string rather than being treated as a failure.
+ */
+export function flattenDocument(node: unknown): string {
+  if (typeof node === 'string') {
+    return node;
+  }
+  const record = asRecord(node);
+  const text = record['text'];
+  const own = typeof text === 'string' ? text : '';
+  const children = asArray(record['content']).map(flattenDocument).join('');
+  // Block nodes are separated by a newline so headings and list items do not run together.
+  const separator = record['type'] === 'paragraph' || record['type'] === 'heading' ? '\n' : '';
+  return `${own}${children}${separator}`;
 }
 
 function asStage(key: unknown): IssueStage {

@@ -6,6 +6,7 @@ import type {
   GitSyncOp,
   JiraIssue,
   JiraState,
+  TriageState,
   JiraViewId,
   NotesState,
   Project,
@@ -33,6 +34,7 @@ import {
 import { attachGitSplitter } from './ui/git-split.js';
 import {
   DEFAULT_JIRA_SORT,
+  boardUrl,
   nextSort,
   renderJiraList,
   type JiraSort,
@@ -42,6 +44,7 @@ import { NotesPanel } from './ui/notes-panel.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
 import { renderPullList } from './ui/pull-list.js';
+import { TriagePanel } from './ui/triage-panel.js';
 import { attachSideResizer } from './ui/side-resizer.js';
 import { StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
@@ -75,6 +78,8 @@ class App {
   /** Which pull requests the tab lists. Mirrors `settings.pullScope`, so it survives a restart. */
   private pullScope: PullScope = 'mine';
   private jira: JiraState | null = null;
+  private triage: TriageState | null = null;
+  private triagePanel: TriagePanel | null = null;
   private selectedJiraView: JiraViewId = 'mine';
   /*
    * Jira filter and sort.
@@ -200,6 +205,12 @@ class App {
       this.jira = state;
       this.renderJira();
     });
+    // Pushed around a run: the button has to say "Analysing" the moment it starts, and the verdicts
+    // have to land when it ends, which can be minutes later.
+    window.api.onTriageChanged((state) => {
+      this.triage = state;
+      this.renderTriage();
+    });
     // Safe to apply mid-typing: `NotesState` carries no note body, so it cannot reach the editor.
     window.api.onNotesChanged((state) => this.notes?.apply(state));
     window.api.onTerminalsChanged((sessions) => {
@@ -297,6 +308,13 @@ class App {
       onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
       onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
     });
+  }
+
+  private renderTriage(): void {
+    if (this.triage === null || this.triagePanel === null) {
+      return;
+    }
+    this.triagePanel.render(this.triage);
   }
 
   private renderJira(): void {
@@ -676,6 +694,11 @@ class App {
    * Skipped while a field has the focus: this runs on the git poll, so a refresh landing mid-sentence
    * would replace the textarea under the cursor. Exactly the guard the project table's rename uses.
    */
+  private async loadTriage(): Promise<void> {
+    this.triage = await window.api.refreshTriage();
+    this.renderTriage();
+  }
+
   private async loadGit(): Promise<void> {
     if (this.gitEditing) {
       return;
@@ -1063,6 +1086,30 @@ class App {
       },
     });
 
+    this.triagePanel = new TriagePanel(
+      {
+        sprints: requireElement('triage-sprints'),
+        bar: requireElement('triage-bar'),
+        list: requireElement('triage-list'),
+      },
+      {
+        onAnalyse: (sprintId) => {
+          void window.api.analyseSprint(sprintId).then((state) => {
+            this.triage = state;
+            this.renderTriage();
+          });
+        },
+        onSelect: (sprintId) => {
+          this.triagePanel?.select(sprintId);
+          this.renderTriage();
+        },
+        // Same `/browse/<KEY>` builder the Jira tab uses: two of them would drift, and that form
+        // is the one Jira Cloud resolves for every project style.
+        onOpen: (key) =>
+          void window.api.openExternal(boardUrl(this.settings?.jira.siteUrl ?? '', key)),
+      },
+    );
+
     this.strip = new StripTabs({
       onChange: (tab) => {
         // Picking a tab while the strip is folded means "show me that one", not "switch an invisible
@@ -1079,6 +1126,11 @@ class App {
         if (tab === 'git') {
           this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);
           void this.loadGit();
+        }
+        // Same reasoning for Triage: sprints move once a fortnight, so they are read when the tab is
+        // shown rather than polled. The stored verdicts are already on screen by then.
+        if (tab === 'triage') {
+          void this.loadTriage();
         }
         // The terminal's geometry changed with the strip's: without this its pty keeps the old size.
         this.terminal?.refit();
@@ -1374,6 +1426,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.jiraHeight;
     case 'git':
       return settings.gitHeight;
+    case 'triage':
+      return settings.triageHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -1382,7 +1436,7 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
 /** Settings key that stores a tab's height. */
 function heightKeyOf(
   tab: StripTab,
-): 'projectsHeight' | 'pullsHeight' | 'jiraHeight' | 'gitHeight' {
+): 'projectsHeight' | 'pullsHeight' | 'jiraHeight' | 'gitHeight' | 'triageHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -1390,6 +1444,8 @@ function heightKeyOf(
       return 'jiraHeight';
     case 'git':
       return 'gitHeight';
+    case 'triage':
+      return 'triageHeight';
     case 'projects':
       return 'projectsHeight';
   }

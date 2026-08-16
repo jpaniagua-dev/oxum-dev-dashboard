@@ -12,6 +12,7 @@ import { writeCommitMessage } from './git/commit-message.js';
 import { PullMonitor } from './github/pull-monitor.js';
 import { registerIpcHandlers } from './ipc.js';
 import { JiraMonitor } from './jira/jira-monitor.js';
+import { TriageService } from './triage/triage-service.js';
 import { buildJql, searchIssues } from './jira/jira-service.js';
 import { NotesStore } from './notes/notes-store.js';
 import { SecretStore } from './store/secret-store.js';
@@ -139,6 +140,14 @@ async function bootstrap(): Promise<void> {
     (state) => dashboardWindow.send(IpcChannel.JiraChanged, state),
   );
 
+  // Triage shares the Jira credentials and nothing else: it is pulled, never polled.
+  const triageService = new TriageService(
+    () => settingsStore.get(),
+    secrets,
+    (state) => dashboardWindow.send(IpcChannel.TriageChanged, state),
+  );
+  await triageService.load();
+
   /*
    * Notes own their folder, which may be the app's own or one the user picked.
    *
@@ -214,6 +223,7 @@ async function bootstrap(): Promise<void> {
     monitor: () => projectMonitor,
     pulls: () => pullMonitor,
     jira: () => jiraMonitor,
+    triage: () => triageService,
     jiraConfig,
     saveJiraToken: async (token) => {
       const result = await secrets.write(token);

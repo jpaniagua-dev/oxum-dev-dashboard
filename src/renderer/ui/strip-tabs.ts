@@ -13,7 +13,7 @@ export interface StripTabsActions {
  * window, and a tab that stole its space would defeat the point of having it always there.
  */
 /** Every tab, in display order. One list, so adding a view is one entry and two elements. */
-export const STRIP_TABS: readonly StripTab[] = ['projects', 'pulls', 'jira', 'git'];
+export const STRIP_TABS: readonly StripTab[] = ['projects', 'pulls', 'jira', 'git', 'triage'];
 
 export class StripTabs {
   private current: StripTab = 'projects';
@@ -23,6 +23,7 @@ export class StripTabs {
     pulls: requireElement<HTMLButtonElement>('strip-tab-pulls'),
     jira: requireElement<HTMLButtonElement>('strip-tab-jira'),
     git: requireElement<HTMLButtonElement>('strip-tab-git'),
+    triage: requireElement<HTMLButtonElement>('strip-tab-triage'),
   };
 
   private readonly panels: Record<StripTab, HTMLElement> = {
@@ -30,6 +31,7 @@ export class StripTabs {
     pulls: requireElement('strip-panel-pulls'),
     jira: requireElement('strip-panel-jira'),
     git: requireElement('strip-panel-git'),
+    triage: requireElement('strip-panel-triage'),
   };
 
   constructor(private readonly actions: StripTabsActions) {

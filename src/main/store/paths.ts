@@ -24,4 +24,11 @@ export const AppPaths = {
    * that was typed is then worth keeping somewhere a cleanup job will not sweep it away.
    */
   commitMessages: (): string => join(app.getPath('userData'), 'commit-messages'),
+  /**
+   * Last triage per sprint.
+   *
+   * Its own file rather than a key in `settings.json`: this is a result, not a preference, it is
+   * rewritten by a long-running analysis, and a settings save must never be able to drop it.
+   */
+  triage: (): string => join(app.getPath('userData'), 'triage.json'),
 } as const;

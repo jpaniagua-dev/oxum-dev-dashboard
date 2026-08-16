@@ -54,6 +54,7 @@
             </button>
             <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">Jira</button>
             <button type="button" id="strip-tab-git" class="strip__tab" role="tab">Git</button>
+            <button type="button" id="strip-tab-triage" class="strip__tab" role="tab">Triage</button>
           </div>
           <div class="projects__header-actions">
             <span id="last-refresh" class="strip__meta"></span>
@@ -172,6 +173,22 @@
           <div class="pulls__main">
             <div class="pulls__bar" id="jira-filter"></div>
             <div class="pulls__list" id="jira-list"></div>
+          </div>
+        </div>
+
+        <!--
+          Triage: the sprints on the left, the last analysis of the selected one on the right.
+          Master-detail again, deliberately: the gesture is the same as the two panels above it, and
+          the only new idea in the tab is the `Analyse` button on a sprint row.
+
+          Every child is filled by `triage-panel.ts` with `textContent`: sprint names, ticket
+          summaries and model output all come from outside.
+        -->
+        <div class="pulls" id="strip-panel-triage" role="tabpanel" hidden>
+          <div class="pulls__repos" id="triage-sprints"></div>
+          <div class="pulls__main">
+            <div class="pulls__bar" id="triage-bar"></div>
+            <div class="pulls__list" id="triage-list"></div>
           </div>
         </div>
 
