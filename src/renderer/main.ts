@@ -418,12 +418,7 @@ class App {
    * branch after branch lands in the same repository for days at a time.
    */
   private openBranchProjectMenu(issue: JiraIssue, x: number, y: number): void {
-    const ordered = [...this.projects].sort((left, right) => {
-      if (left.id === this.lastBranchProject) {
-        return -1;
-      }
-      return right.id === this.lastBranchProject ? 1 : 0;
-    });
+    const ordered = this.projectsByLastBranch();
 
     if (ordered.length === 0) {
       showContextMenu(x, y, [
@@ -437,11 +432,72 @@ class App {
       y,
       ordered.map((project) => ({
         label:
-          project.id === this.lastBranchProject ? `${project.label} (dernier)` : project.label,
+          project.id === this.lastBranchProject ? `${project.label} (last)` : project.label,
         hint: `dev ${issue.key} in ${project.path}`,
         run: () => void this.startBranch(project.id, issue.key),
       })),
     );
+  }
+
+  /**
+   * The project list, with the one used for the last ticket first.
+   *
+   * Shared by the two gestures that ask "which repository", branching from the Jira tab and handing a
+   * ticket to Claude Code from the Triage tab, because they are the same question about the same
+   * ticket: a repository chosen for one is the right first guess for the other, and two separate
+   * memories would each be wrong half the time.
+   */
+  private projectsByLastBranch(): Project[] {
+    return [...this.projects].sort((left, right) => {
+      if (left.id === this.lastBranchProject) {
+        return -1;
+      }
+      return right.id === this.lastBranchProject ? 1 : 0;
+    });
+  }
+
+  /**
+   * Asks which repository the ticket lives in, then starts Claude Code there.
+   *
+   * Same second-menu-at-the-cursor gesture as the branch menu above, and for the same reasons, but
+   * the question is genuinely open here: the triage analysis reads Jira, which never says which of
+   * the four repositories an issue touches. Guessing would put a worktree in the wrong clone, so the
+   * choice stays with the reader, one click away.
+   */
+  private openWorkProjectMenu(keys: readonly string[], x: number, y: number): void {
+    const ordered = this.projectsByLastBranch();
+    if (ordered.length === 0) {
+      showContextMenu(x, y, [{ label: 'No project configured', disabled: true, run: () => {} }]);
+      return;
+    }
+
+    const what = keys.length === 1 ? (keys[0] ?? '') : `${keys.length} tickets`;
+    showContextMenu(
+      x,
+      y,
+      ordered.map((project) => ({
+        label: project.id === this.lastBranchProject ? `${project.label} (last)` : project.label,
+        hint: `claude on ${what} in ${project.path}`,
+        run: () => void this.workOnTickets(project.id, keys),
+      })),
+    );
+  }
+
+  /**
+   * Opens Claude Code on the tickets, in a terminal tab, and brings it forward.
+   *
+   * Focused straight away like the branch tab: the agent asks questions, and one waiting for an
+   * answer behind the current tab is one nobody answers.
+   */
+  private async workOnTickets(projectId: ProjectId, keys: readonly string[]): Promise<void> {
+    const { terminalId, result } = await window.api.workOnTickets(projectId, [...keys]);
+    this.stampMessage(result.message);
+    if (terminalId === null) {
+      console.warn('[triage]', result.message);
+      return;
+    }
+    this.lastBranchProject = projectId;
+    await this.focusTerminal(terminalId);
   }
 
   /**
@@ -1091,6 +1147,7 @@ class App {
         sprints: requireElement('triage-sprints'),
         bar: requireElement('triage-bar'),
         list: requireElement('triage-list'),
+        overview: requireElement('triage-overview'),
       },
       {
         onAnalyse: (sprintId) => {
@@ -1107,6 +1164,7 @@ class App {
         // is the one Jira Cloud resolves for every project style.
         onOpen: (key) =>
           void window.api.openExternal(boardUrl(this.settings?.jira.siteUrl ?? '', key)),
+        onWork: (keys, x, y) => this.openWorkProjectMenu(keys, x, y),
       },
     );
 

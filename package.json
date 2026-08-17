@@ -1,6 +1,6 @@
 {
   "name": "oxum-dev-dashboard",
-  "version": "4.4.0",
+  "version": "5.0.0",
   "description": "A terminal with a status strip above it: dev servers, git and GitHub checks for your front-end projects, every action running in a tab of that terminal.",
   "author": "Julio Paniagua",
   "license": "MIT",

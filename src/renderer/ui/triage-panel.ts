@@ -1,5 +1,6 @@
 import {
   TRIAGE_VERDICTS,
+  WORK_BATCH_LIMIT,
   type Sprint,
   type TriagedTicket,
   type TriageProgress,
@@ -37,6 +38,7 @@ export interface TriagePanelHosts {
   readonly sprints: HTMLElement;
   readonly bar: HTMLElement;
   readonly list: HTMLElement;
+  readonly overview: HTMLElement;
 }
 
 export interface TriagePanelActions {
@@ -45,6 +47,19 @@ export interface TriagePanelActions {
   onSelect: (sprintId: number) => void;
   /** Opens a ticket in the browser: there is no local equivalent of a ticket. */
   onOpen: (key: string) => void;
+  /**
+   * Hands one or more tickets to Claude Code, in a terminal tab.
+   *
+   * The pointer position travels with the call because the repository is asked for in a menu at the
+   * cursor, the same second-menu gesture the Jira tab uses for `dev <TICKET>`: which repository a
+   * ticket belongs to is knowledge this tab does not have, and a wrong guess would create a worktree
+   * in the wrong clone.
+   *
+   * Only the keys are passed. The verdict, the reason and the question stay on disk, where the
+   * session that picks the ticket up reads them itself; pushing that text through a shell argument
+   * would be both fragile and a copy that starts going stale the moment it is made.
+   */
+  onWork: (keys: readonly string[], x: number, y: number) => void;
 }
 
 /**
@@ -88,6 +103,8 @@ export class TriagePanel {
    * says nothing about the next.
    */
   private verdict: TriageVerdict | null = null;
+  /** Key of the ticket the overview describes. Session-local, like the verdict. */
+  private ticket: string | null = null;
   /** Last state, so the elapsed clock can repaint without the app pushing a new one. */
   private last: TriageState | null = null;
   private clock: number | null = null;
@@ -100,6 +117,7 @@ export class TriagePanel {
   select(sprintId: number): void {
     if (sprintId !== this.selected) {
       this.verdict = null;
+      this.ticket = null;
     }
     this.selected = sprintId;
   }
@@ -133,6 +151,7 @@ export class TriagePanel {
     this.renderSprints(state);
     this.renderBar(state);
     this.renderList(state);
+    this.renderOverview(state);
   }
 
   private renderSprints(state: TriageState): void {
@@ -261,6 +280,8 @@ export class TriagePanel {
       );
       button.addEventListener('click', () => {
         this.verdict = verdict;
+        // The ticket belonged to the list being left; keeping it would describe a row nobody can see.
+        this.ticket = null;
         if (this.last !== null) {
           this.render(this.last);
         }
@@ -274,6 +295,34 @@ export class TriagePanel {
         text: describeAge(result.analysedAt),
       }),
     );
+
+    /*
+     * One button for the whole `ready` group, next to the counts rather than inside the list.
+     *
+     * It is the answer to the question the tab raises once the analysis lands, "so what can I start
+     * now", and that question is about the sprint, not about whichever row happens to be selected.
+     * It shows on every sub-tab for the same reason the counts do: sitting on `Backend` you should
+     * still be able to start the four that are not blocked.
+     *
+     * Only `ready` gets one. A ticket the analysis parked on a question is one whose answer decides
+     * what gets built, so handing a batch of those to an agent would be asking it to pick for you.
+     */
+    const ready = readyKeys(result.tickets);
+    if (ready.length > 0) {
+      const work = createElement('button', {
+        className: 'button button--primary triage__work',
+        text: `Work ${ready.length} ready`,
+        title:
+          ready.length < countVerdicts(result.tickets).ready
+            ? `Hands the first ${ready.length} of them to Claude Code, one after another`
+            : 'Hands them to Claude Code, one after another',
+      });
+      work.type = 'button';
+      work.addEventListener('click', (event) =>
+        this.actions.onWork(ready, event.clientX, event.clientY),
+      );
+      this.hosts.bar.append(work);
+    }
   }
 
   /**
@@ -373,10 +422,139 @@ export class TriagePanel {
     }
   }
 
+  /**
+   * Everything the analysis has to say about one ticket.
+   *
+   * The column exists because the row cannot hold it: a verdict is only worth as much as the reason
+   * behind it, and checking that reason used to mean opening Jira in a browser, which is the trip
+   * this tab is meant to save. Blocks in a fixed order, so the eye learns where the question is.
+   */
+  private renderOverview(state: TriageState): void {
+    clearChildren(this.hosts.overview);
+    const ticket = this.overviewTicket(state);
+
+    if (ticket === undefined) {
+      this.hosts.overview.append(
+        createElement('p', {
+          className: 'triage__overview-empty',
+          text: 'Pick a ticket to see why it landed there.',
+        }),
+      );
+      return;
+    }
+
+    const head = createElement('div', { className: 'triage__overview-head' });
+    head.append(createElement('span', { className: 'triage__overview-key', text: ticket.key }));
+    head.append(
+      createElement('span', {
+        className: `triage__verdict triage__verdict--${ticket.verdict}`,
+        text: VERDICT_LABEL[ticket.verdict],
+      }),
+    );
+    head.append(
+      createElement('span', { className: 'triage__overview-summary', text: ticket.summary }),
+    );
+    this.hosts.overview.append(head);
+
+    const facts = [ticket.status, ticket.assignee.length > 0 ? ticket.assignee : 'unassigned']
+      .filter((fact) => fact.length > 0)
+      .join(' · ');
+    if (facts.length > 0) {
+      this.hosts.overview.append(createElement('span', { className: 'triage__meta', text: facts }));
+    }
+
+    this.appendBlock('Why', ticket.reason);
+    // The question first among the two, because it is the only block that asks something of the
+    // reader; what it triggers is what makes answering it worth doing now.
+    this.appendBlock('Question', ticket.question, 'question');
+    this.appendBlock('What it triggers', ticket.next);
+
+    if (ticket.description.length > 0) {
+      const block = createElement('div', { className: 'triage__block' });
+      block.append(createElement('span', { className: 'triage__block-label', text: 'Ticket' }));
+      block.append(createElement('div', { className: 'triage__description', text: ticket.description }));
+      this.hosts.overview.append(block);
+    }
+
+    const actions = createElement('div', { className: 'triage__overview-actions' });
+
+    /*
+     * Every verdict gets the button, not only `ready`.
+     *
+     * Refusing to start a ticket the analysis parked would be the tab overruling its reader on the
+     * strength of its own guess, and that guess is a language model reading a Jira description: it
+     * has no idea that the missing decision was taken in a corridor this morning. The verdict is
+     * shown right above the button, which is the honest version of the same warning, and the batch
+     * button beside the counts is where the automatic choice is made and stays limited to `ready`.
+     */
+    const work = createElement('button', {
+      className: 'button button--primary',
+      text: 'Work on this',
+      title: `Runs the ticket skill on ${ticket.key} in a terminal tab`,
+    });
+    work.type = 'button';
+    work.addEventListener('click', (event) =>
+      this.actions.onWork([ticket.key], event.clientX, event.clientY),
+    );
+    actions.append(work);
+
+    const open = createElement('button', { className: 'button', text: `Open ${ticket.key}` });
+    open.type = 'button';
+    open.addEventListener('click', () => this.actions.onOpen(ticket.key));
+    actions.append(open);
+
+    this.hosts.overview.append(actions);
+  }
+
+  /** Skips a block the analysis left empty rather than printing a heading over nothing. */
+  private appendBlock(label: string, text: string, modifier?: string): void {
+    if (text.length === 0) {
+      return;
+    }
+    const block = createElement('div', {
+      className: `triage__block${modifier === undefined ? '' : ` triage__block--${modifier}`}`,
+    });
+    block.append(createElement('span', { className: 'triage__block-label', text: label }));
+    block.append(createElement('p', { className: 'triage__block-text', text }));
+    this.hosts.overview.append(block);
+  }
+
+  /**
+   * The ticket the overview describes.
+   *
+   * Falls back to the first of the visible verdict, so switching sub-tab lands on something rather
+   * than on an empty column, and a selection that no longer belongs to the visible list is dropped.
+   */
+  private overviewTicket(state: TriageState): TriagedTicket | undefined {
+    const result = this.result(state);
+    if (result === undefined) {
+      return undefined;
+    }
+    const visible = result.tickets.filter(
+      (ticket) => ticket.verdict === this.activeVerdict(result.tickets),
+    );
+    return visible.find((ticket) => ticket.key === this.ticket) ?? visible[0];
+  }
+
   private buildTicketRow(ticket: TriagedTicket): HTMLElement {
-    const row = createElement('div', { className: 'triage__ticket' });
-    row.addEventListener('click', () => this.actions.onOpen(ticket.key));
-    row.title = 'Open in the browser';
+    const selected = ticket.key === this.ticket;
+    const row = createElement('div', {
+      className: `triage__ticket${selected ? ' triage__ticket--active' : ''}`,
+    });
+    /*
+     * Clicking a row SELECTS it, where a pull request row opens the browser.
+     *
+     * The opposite of that tab on purpose: faced with a list of pull requests the reflex is to go
+     * read the PR, because nothing local can show it. Here the reason for the verdict is already on
+     * this machine, so reading it is the everyday gesture and Jira is the deliberate one, behind a
+     * button in the overview.
+     */
+    row.addEventListener('click', () => {
+      this.ticket = ticket.key;
+      if (this.last !== null) {
+        this.render(this.last);
+      }
+    });
 
     const head = createElement('div', { className: 'triage__ticket-head' });
     head.append(createElement('span', { className: 'triage__key', text: ticket.key }));
@@ -427,6 +605,24 @@ export function describeRun(progress: TriageProgress, now: Date): string {
 export function firstFilledVerdict(tickets: readonly TriagedTicket[]): TriageVerdict {
   const counts = countVerdicts(tickets);
   return TRIAGE_VERDICTS.find((verdict) => counts[verdict] > 0) ?? 'ready';
+}
+
+/**
+ * The keys the batch button hands over, in list order, capped.
+ *
+ * The cap is not a display detail: the main process applies the same one, so a button offering more
+ * than it can start would silently drop the tail. Capping here instead makes the label say the true
+ * number, and the tooltip says it is a first slice. Order is the list's own, so what runs first is
+ * what the reader saw first.
+ *
+ * Pure and exported, because a batch that quietly skips a ticket is the kind of bug nobody notices
+ * until a sprint is over.
+ */
+export function readyKeys(tickets: readonly TriagedTicket[]): string[] {
+  return tickets
+    .filter((ticket) => ticket.verdict === 'ready')
+    .slice(0, WORK_BATCH_LIMIT)
+    .map((ticket) => ticket.key);
 }
 
 /** Counts per verdict, for the sub-tab badges. Exported for testing. */

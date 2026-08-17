@@ -10,7 +10,7 @@ import type { SecretStore } from '../store/secret-store.js';
 import { runClaude } from './run-claude.js';
 import { parseTriage } from './triage-parse.js';
 import { readProgress } from './triage-progress.js';
-import { buildTriagePrompt } from './triage-prompt.js';
+import { buildTriagePrompt, trimDescription } from './triage-prompt.js';
 import { TriageStore } from './triage-store.js';
 
 /**
@@ -130,9 +130,18 @@ export class TriageService {
 
     this.advance({ phase: 'starting', detail: 'Starting Claude Code', tickets: issues.length });
 
+    /*
+     * Trimmed once, then used for both the prompt and the stored ticket.
+     *
+     * The overview shows exactly the text the analysis was given, never more: a column showing a
+     * full description beside a verdict drawn from an extract would invite blaming the verdict for
+     * something the model never read.
+     */
+    const asked = issues.map((issue) => ({ ...issue, description: trimDescription(issue.description) }));
+
     const answer = await runClaude({
       cwd: this.settings().projectsRoot,
-      prompt: buildTriagePrompt(sprint.name, issues),
+      prompt: buildTriagePrompt(sprint.name, asked),
       onEvent: (event) => {
         const step = readProgress(event);
         if (step === null || step.phase === 'done') {
@@ -145,7 +154,7 @@ export class TriageService {
       return keep(answer.error ?? 'The analysis failed');
     }
 
-    const tickets = parseTriage({ answer: answer.answer, asked: issues });
+    const tickets = parseTriage({ answer: answer.answer, asked });
     return { sprintId: sprint.id, sprintName: sprint.name, analysedAt: now(), tickets, error: null };
   }
 

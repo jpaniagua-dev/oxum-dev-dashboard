@@ -1,4 +1,4 @@
-import type { TriagedTicket } from '../src/shared/contracts.js';
+import { WORK_BATCH_LIMIT, type TriagedTicket } from '../src/shared/contracts.js';
 import { describe, expect, it } from 'vitest';
 import { flattenDocument } from '../src/main/jira/jira-service.js';
 import { isEmptyAnswer, parseTriage } from '../src/main/triage/triage-parse.js';
@@ -9,11 +9,12 @@ import {
   describeAge,
   describeRun,
   firstFilledVerdict,
+  readyKeys,
 } from '../src/renderer/ui/triage-panel.js';
 
 const asked = [
-  { key: 'PROJ-1', summary: 'Add a column', assignee: 'dev@example.com' },
-  { key: 'PROJ-2', summary: 'Fix the header', assignee: '' },
+  { key: 'PROJ-1', summary: 'Add a column', assignee: 'dev@example.com', status: 'To Do', description: 'Body' },
+  { key: 'PROJ-2', summary: 'Fix the header', assignee: '', status: 'To Do', description: '' },
 ];
 
 describe('parseTriage', () => {
@@ -62,16 +63,30 @@ describe('parseTriage', () => {
     expect(tickets[0]?.verdict).toBe('ready');
   });
 
-  it('keeps the summary and assignee from Jira, never from the model', () => {
-    // The model is asked to classify, not to restate: letting it rewrite a summary would put text on
-    // screen that does not match the ticket.
+  it('keeps every fact from Jira, never from the model', () => {
+    // The model is asked to classify, not to restate: letting it rewrite a summary or a description
+    // would put text on screen that no longer matches the ticket the overview claims to show.
     const tickets = parseTriage({
-      answer: '[{"key":"PROJ-1","verdict":"ready","summary":"Something else"}]',
+      answer: '[{"key":"PROJ-1","verdict":"ready","summary":"Something else","description":"Invented"}]',
       asked: [asked[0]!],
     });
 
     expect(tickets[0]?.summary).toBe('Add a column');
     expect(tickets[0]?.assignee).toBe('dev@example.com');
+    expect(tickets[0]?.status).toBe('To Do');
+    expect(tickets[0]?.description).toBe('Body');
+  });
+
+  it('carries what answering the question triggers', () => {
+    // The half that makes a question worth answering now rather than later.
+    const tickets = parseTriage({
+      answer:
+        '[{"key":"PROJ-1","verdict":"needs-decision","question":"One or two?","next":"A front-end change either way"}]',
+      asked: [asked[0]!],
+    });
+
+    expect(tickets[0]?.question).toBe('One or two?');
+    expect(tickets[0]?.next).toBe('A front-end change either way');
   });
 
   it('survives an answer with no array at all', () => {
@@ -122,17 +137,71 @@ describe('flattenDocument', () => {
   });
 });
 
+/** A triaged ticket with only its verdict set, for the counting and ordering tests. */
+const ticketWith = (verdict: TriagedTicket['verdict']): TriagedTicket => ({
+  key: 'PROJ-1',
+  summary: '',
+  verdict,
+  reason: '',
+  question: '',
+  next: '',
+  assignee: '',
+  status: '',
+  description: '',
+});
+
 describe('countVerdicts', () => {
   it('counts every verdict, including the ones at zero', () => {
     const counts = countVerdicts([
-      { key: 'PROJ-1', summary: '', verdict: 'ready', reason: '', question: '', assignee: '' },
-      { key: 'PROJ-2', summary: '', verdict: 'ready', reason: '', question: '', assignee: '' },
-      { key: 'PROJ-3', summary: '', verdict: 'backend', reason: '', question: '', assignee: '' },
+      ticketWith('ready'),
+      ticketWith('ready'),
+      ticketWith('backend'),
     ]);
 
     expect(counts.ready).toBe(2);
     expect(counts.backend).toBe(1);
     expect(counts.blocked).toBe(0);
+  });
+});
+
+describe('readyKeys', () => {
+  const keyed = (key: string, verdict: TriagedTicket['verdict']): TriagedTicket => ({
+    ...ticketWith(verdict),
+    key,
+  });
+
+  it('takes the ready tickets and nothing else', () => {
+    // The batch button starts work unattended, so a ticket the analysis parked on a question must
+    // never end up in it: answering that question is what decides what gets built.
+    expect(
+      readyKeys([
+        keyed('PROJ-1', 'ready'),
+        keyed('PROJ-2', 'needs-decision'),
+        keyed('PROJ-3', 'ready'),
+        keyed('PROJ-4', 'backend'),
+      ]),
+    ).toEqual(['PROJ-1', 'PROJ-3']);
+  });
+
+  it('keeps the list order, so the first started is the first read', () => {
+    expect(readyKeys([keyed('PROJ-9', 'ready'), keyed('PROJ-2', 'ready')])).toEqual([
+      'PROJ-9',
+      'PROJ-2',
+    ]);
+  });
+
+  it('caps at the same limit the main process applies', () => {
+    // Both ends cap. If only the main process did, the button would promise more than it starts and
+    // drop the tail without saying so.
+    const many = Array.from({ length: WORK_BATCH_LIMIT + 3 }, (_unused, index) =>
+      keyed(`PROJ-${index}`, 'ready'),
+    );
+
+    expect(readyKeys(many)).toHaveLength(WORK_BATCH_LIMIT);
+  });
+
+  it('returns nothing when no ticket is ready, so the button never appears', () => {
+    expect(readyKeys([keyed('PROJ-1', 'blocked')])).toEqual([]);
   });
 });
 
@@ -143,7 +212,10 @@ describe('firstFilledVerdict', () => {
     verdict,
     reason: '',
     question: '',
+    next: '',
     assignee: '',
+    status: '',
+    description: '',
   });
 
   it('lands on what can be built before what is waiting on you', () => {

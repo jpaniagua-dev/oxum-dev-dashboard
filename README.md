@@ -74,8 +74,8 @@ precisely why the dashboard spawns it and reads its output.
 
 ## Pull requests
 
-The top strip has four tabs, `Projects`, `Pull requests`, `Jira` and `Git`. Only the strip changes: the terminal below
-keeps its space whichever is selected, and each tab remembers its own height.
+The top strip has five tabs, `Projects`, `Pull requests`, `Jira`, `Git` and `Triage`. Only the strip changes: the
+terminal below keeps its space whichever is selected, and each tab remembers its own height.
 
 The pull request tab lists the watched repositories on the left with a counter, and the pull requests of
 the selected one on the right, one line each:
@@ -135,11 +135,11 @@ settings: site URL, account email, project keys, and an Atlassian API token.
 ## Git
 
 The fourth tab, and the one where the strip stops being a glance and becomes a place to work: pick a
-repository on the left, then `Changements`, `Branches` or `Historique` in the middle, and read the diff
+repository on the left, then `Changes`, `Branches` or `History` in the middle, and read the diff
 on the right. The boundary between the working column and the diff is draggable and remembered.
 
 ```
-Changements 12  Branches 4  Historique              ↻  ↓  ↑
+Changes 12  Branches 4  History                     ↻  ↓  ↑
 [x] MM  src/app/feature/x.component.ts
 [ ] ·M  src/app/feature/x.component.html
 ```
@@ -189,6 +189,41 @@ terminal.
 
 `no checks` is deliberately distinct from a green rollup: two real open pull requests returned an empty
 rollup, and painting that green would be a lie.
+
+## Triage
+
+The fifth tab, and the only one that spends minutes rather than milliseconds. Pick a sprint on the left, press the play button, and a **read-only
+Claude Code process** classifies every ticket in it; the verdicts land in sub-tabs so what you can start
+today is not buried under what nobody can move.
+
+```
+Ready 4  Decision 3  Backend 2  Unclear 1  Blocked 0   Analysed 12 min ago   [Work 4 ready]
+```
+
+- **Five verdicts, not three.** `ready`, `needs-decision`, `backend`, plus `unclear` and `blocked`: a
+  ticket whose description is too thin to act on is a different problem from one waiting on an API, and
+  merging them hides the one a single sentence would fix. Every verdict keeps its tab even at zero, since
+  a tab that comes and goes between two analyses moves the others under the cursor.
+- **The counts sit on the tabs**, so choosing one is never a guess and nothing is hidden silently: from
+  `Backend` you can still see that four tickets are ready.
+- **A run is watchable, not just "busy".** The bar streams what the model is doing, the file it is
+  currently reading, the step count and the elapsed time. It is **indeterminate on purpose**: nothing here
+  knows how long a run takes, and a bar filling at an invented pace would be a promise the tab cannot
+  keep.
+- **The last result stays** until the next run on that sprint. It is stored in its own `triage.json`
+  beside the settings, not inside them, so any other tool on the machine can read the verdicts back.
+  A failed run keeps the previous ones and only adds the error above them.
+- **A third column explains the verdict**: why the ticket landed there, the question that has to be
+  answered, and what answering it triggers. Without it, checking a verdict means opening Jira in a
+  browser, which is the trip this tab exists to save.
+- **`Work on this` hands the ticket to Claude Code** in a terminal tab, after asking which repository it
+  lives in. Only the ticket key is passed: the analysis is already on disk, so the session that picks it
+  up reads the verdict itself rather than receiving a copy that starts going stale immediately.
+  `Work N ready` does the same for the whole `ready` group, and only for that group, because a ticket
+  parked on a question is one whose answer decides what gets built.
+
+Needs the `claude` CLI on your `PATH` and the Jira connection above. The analysis process gets `Read`,
+`Grep` and `Glob` and nothing else: it reads, it never writes.
 
 ## Actions
 

@@ -84,7 +84,10 @@ function readResult(value: unknown): TriageResult | null {
           verdict: entry['verdict'] as TriageResult['tickets'][number]['verdict'],
           reason: typeof entry['reason'] === 'string' ? entry['reason'] : '',
           question: typeof entry['question'] === 'string' ? entry['question'] : '',
+          next: typeof entry['next'] === 'string' ? entry['next'] : '',
           assignee: typeof entry['assignee'] === 'string' ? entry['assignee'] : '',
+          status: typeof entry['status'] === 'string' ? entry['status'] : '',
+          description: typeof entry['description'] === 'string' ? entry['description'] : '',
         },
       ];
     }),

@@ -388,6 +388,18 @@ export const GIT_COMMIT_ACTION_ID = `${RESERVED_ACTION_PREFIX}commit`;
  */
 export const TICKET_BRANCH_ACTION_ID = `${RESERVED_ACTION_PREFIX}branch`;
 
+/** Action id of the tab where the Triage tab hands tickets to an interactive Claude Code session. */
+export const TRIAGE_WORK_ACTION_ID = `${RESERVED_ACTION_PREFIX}triage-work`;
+
+/**
+ * How many tickets one batch may hand over at once.
+ *
+ * A session working twenty tickets in a row is one nobody supervises, which is the opposite of why
+ * this lands in a terminal tab at all. The cap is stated rather than silent: the view says how many
+ * it is about to send.
+ */
+export const WORK_BATCH_LIMIT = 8;
+
 /**
  * Shape a Jira key must have before it is put on a command line.
  *
@@ -801,7 +813,23 @@ export interface TriagedTicket {
   readonly reason: string;
   /** The closed question to answer, for `needs-decision`. Empty otherwise. */
   readonly question: string;
+  /**
+   * What answering the question sets in motion.
+   *
+   * The half that makes a question worth reading: "who does what next" is the difference between a
+   * decision you can take in ten seconds and one you postpone because its consequences are unclear.
+   */
+  readonly next: string;
   readonly assignee: string;
+  readonly status: string;
+  /**
+   * The ticket's own text, trimmed.
+   *
+   * Kept with the verdict so the overview can show what the analysis was actually reading. Without
+   * it, judging a verdict means opening Jira in a browser, which is the trip this tab exists to
+   * save.
+   */
+  readonly description: string;
 }
 
 /** The last analysis of one sprint, kept until that sprint is analysed again. */
@@ -1106,6 +1134,14 @@ export const IpcChannel = {
    * the renderer names a ticket and a project, never a command line.
    */
   JiraBranch: 'jira:branch',
+  /**
+   * invoke: (projectId, issueKeys[]) => { terminalId, result }
+   *
+   * Opens an interactive Claude Code session in a terminal tab, seeded with `/ticket <KEY>` for one
+   * ticket or with the list for a whole batch. The keys are validated in the main process against
+   * `ISSUE_KEY_PATTERN`, like the branch channel: the renderer names tickets, never a command line.
+   */
+  TriageWork: 'triage:work',
   /** on: (state: TriageState) => void, pushed when the sprint list, a result or the running flag moves */
   TriageChanged: 'triage:changed',
   /** invoke: () => TriageState, re-reads the sprints from Jira and returns the stored results */
@@ -1209,6 +1245,10 @@ export interface RendererApi {
   refreshJira(): Promise<JiraState>;
   onJiraChanged(listener: (state: JiraState) => void): () => void;
   refreshTriage(): Promise<TriageState>;
+  workOnTickets(
+    projectId: ProjectId,
+    issueKeys: string[],
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   analyseSprint(sprintId: number): Promise<TriageState>;
   onTriageChanged(listener: (state: TriageState) => void): () => void;
   /**

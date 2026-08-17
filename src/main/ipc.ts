@@ -5,6 +5,8 @@ import {
   IpcChannel,
   ISSUE_KEY_PATTERN,
   TICKET_BRANCH_ACTION_ID,
+  TRIAGE_WORK_ACTION_ID,
+  WORK_BATCH_LIMIT,
   type AppSettings,
   type BootstrapState,
   type GitDiff,
@@ -428,6 +430,74 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           terminalId === null
             ? { ok: false, message: 'Could not open the tab' }
             : { ok: true, message: `dev ${key} launched in ${project.label}` },
+      };
+    },
+  );
+
+  /*
+   * Hands one or more triaged tickets to an interactive Claude Code session, in a terminal tab.
+   *
+   * A tab and not a headless run, unlike the analysis: triage only reads, whereas working a ticket
+   * writes files, runs tests and opens a pull request. A long writer with no visible output is
+   * exactly what the "every action ends in a tab" rule exists to prevent, and in a tab it can be
+   * watched, answered and killed.
+   *
+   * Only the keys travel. The session reads the verdict itself from the tab's own tooling if it
+   * wants it, which keeps a long quoted string out of a shell command line.
+   *
+   * The default shell profile is enough here, where the branch channel insists on an interactive
+   * bash: `dev` is a `.bashrc` alias and needs one, `claude.exe` is a real executable that any pty
+   * resolves.
+   */
+  ipcMain.handle(
+    IpcChannel.TriageWork,
+    async (
+      _event,
+      projectId: unknown,
+      issueKeys: unknown,
+    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { terminalId: null, result: { ok: false, message: 'Project not found' } };
+      }
+
+      const keys = (Array.isArray(issueKeys) ? issueKeys : [])
+        .map((key) => (typeof key === 'string' ? key.trim().toUpperCase() : ''))
+        .filter((key) => ISSUE_KEY_PATTERN.test(key))
+        .slice(0, WORK_BATCH_LIMIT);
+      if (keys.length === 0) {
+        return { terminalId: null, result: { ok: false, message: 'No valid issue key' } };
+      }
+
+      const profile = resolveDefaultProfile(deps.profiles(), deps.settings.get().defaultShellProfileId);
+      if (profile === undefined) {
+        return { terminalId: null, result: { ok: false, message: 'No shell profile available' } };
+      }
+
+      // One ticket goes straight to the skill; a batch names them in order, and the skill still runs
+      // per ticket. Keys only, so the argument holds nothing a shell could read as syntax.
+      const prompt =
+        keys.length === 1
+          ? `/ticket ${keys[0]}`
+          : `Work these tickets one after another, using the ticket skill for each: ${keys.join(', ')}`;
+      const resolved = resolveShellCommand(profile, `claude "${prompt}"`);
+
+      const terminalId = deps.terminals.runProjectCommand({
+        project,
+        actionId: TRIAGE_WORK_ACTION_ID,
+        title: `${project.label} · ${keys.length === 1 ? keys[0] : `${keys.length} tickets`}`,
+        file: resolved.file,
+        args: resolved.args,
+        size: deps.terminalSize(),
+        profileId: profile.id,
+      });
+
+      return {
+        terminalId,
+        result:
+          terminalId === null
+            ? { ok: false, message: 'Could not open the tab' }
+            : { ok: true, message: `${keys.join(', ')} handed to Claude Code in ${project.label}` },
       };
     },
   );

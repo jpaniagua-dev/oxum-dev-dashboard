@@ -2278,6 +2278,140 @@ body {
  *
  * Deliberately not a `.icon-button`: it is a state, so it takes no hover, no cursor and no focus.
  */
+/*
+ * Three columns: the sprints, their tickets, and the overview of the selected one.
+ *
+ * Same grammar as the Git tab, and for the same reason it grew a third column there: the last one
+ * holds prose that cannot be read in the width a list leaves over. No splitter, unlike Git: a diff
+ * wants whatever width you can give it, whereas this column holds a paragraph, and a fixed readable
+ * measure is better than one the reader has to tune. It also spares the app a fourth resizer module,
+ * which its own notes warn against generalising.
+ *
+ * `[hidden]` needs saying explicitly: a `display` set by a class beats the browser's own, the same
+ * trap `.pulls` and `.terminal__view` already carry.
+ */
+.triage {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr) 340px;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 10px;
+}
+
+.triage[hidden] {
+  display: none;
+}
+
+.triage__overview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  overflow-y: auto;
+}
+
+.triage__overview-empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.triage__overview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.triage__overview-key {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.triage__overview-summary {
+  width: 100%;
+  color: var(--text);
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+/*
+ * The verdict, spelled out in full here.
+ *
+ * The sub-tab above says `Backend` in one word because five labels have to fit a bar; this column
+ * has room for the sentence, and it is the first thing the reader wants confirmed.
+ */
+.triage__verdict {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--text-dim);
+  font-size: var(--font-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* The tone is carried by the text alone: this app has no soft success or warning ground, and
+   inventing one here would be a token nobody else can reuse. */
+.triage__verdict--ready {
+  color: var(--success);
+}
+
+.triage__verdict--needs-decision {
+  color: var(--warning);
+}
+
+/* Each block of the overview is a small labelled section, so the eye can jump to the question. */
+.triage__block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.triage__block-label {
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.triage__block-text {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-sm);
+  white-space: pre-wrap;
+}
+
+/* The question is the one thing here that asks something of the reader, so it alone is called out. */
+.triage__block--question {
+  padding: 8px 10px;
+  border-left: 2px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+/*
+ * The ticket's own text, capped.
+ *
+ * A consolidated story runs longer than this column, and a description that pushes the verdict off
+ * screen defeats the point of showing them together. It scrolls inside its own box.
+ */
+.triage__description {
+  max-height: 180px;
+  overflow-y: auto;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  white-space: pre-wrap;
+}
+
 .triage__state {
   display: inline-grid;
   place-items: center;
@@ -2338,64 +2472,113 @@ body {
 }
 
 /*
+ * The batch button sits at the far end of the bar, away from the sub-tabs.
+ *
+ * `margin-left: auto` rather than an order value: the tabs are what the bar is for, and a button
+ * that starts a run of agents has no business sitting against them where a mis-aimed click on
+ * "Ready" would land on it instead.
+ */
+.triage__work {
+  margin-left: auto;
+}
+
+/*
+ * The overview's two buttons, spaced by the shared `.button + .button` rule and not by a `gap`.
+ *
+ * Both would apply, and the sum is a spacing nobody chose; the adjacency rule is the one every
+ * other button pair in this app already uses.
+ */
+.triage__overview-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+/*
  * The running bar: indeterminate on purpose.
  *
  * Nothing here knows how long a run takes, so a bar that filled at an invented pace would be a
  * promise the tab cannot keep. This one only says "alive"; the line beside it carries the facts
  * (the file being read, the step count, the elapsed time).
  */
+/*
+ * The running bar.
+ *
+ * Indeterminate on purpose: nothing here knows how long a run takes, so a bar filling at an invented
+ * pace would be a promise the tab cannot keep. The line beside it carries the facts (the file being
+ * read, the step count, the elapsed time); this only has to say "alive", legibly.
+ *
+ * Striped rather than a single travelling segment, and that is a fix rather than a taste. The first
+ * version slid one 40%-wide chunk from `left: -40%` to `left: 100%`, so the chunk was entirely
+ * OUTSIDE the track at both ends of the cycle, and `ease-in-out` made it linger there: the bar read
+ * as empty for a good part of every loop, which looks like a run that has stopped. A repeating
+ * gradient fills the track at every instant and can only ever be read as motion.
+ */
 .triage__progress {
-  position: relative;
-  flex: 1 1 160px;
-  max-width: 280px;
-  height: 4px;
+  flex: 1 1 200px;
+  max-width: 320px;
+  height: 6px;
   border-radius: 999px;
-  background: var(--surface-inset);
+  /* The unfilled ground is the primary's own faint tint, so even the gaps belong to the run. */
+  background: var(--primary-soft);
   overflow: hidden;
 }
 
+/*
+ * `background-size` is one full horizontal period of the stripes: 12px measured across a 45 degree
+ * gradient is 12 x sqrt(2) on the x axis. Animating the position by exactly that distance is what
+ * makes the loop seamless; any other value leaves a visible jump once per second.
+ */
 .triage__progress-bar {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 40%;
-  border-radius: 999px;
-  background: var(--primary);
-  animation: triage-slide 1.4s ease-in-out infinite;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--primary) 0 6px,
+    var(--primary-border) 6px 12px
+  );
+  background-size: 16.97px 100%;
+  animation: triage-stripes 0.6s linear infinite;
 }
 
-@keyframes triage-slide {
-  0% {
-    left: -40%;
-  }
-
-  100% {
-    left: 100%;
+@keyframes triage-stripes {
+  to {
+    background-position-x: 16.97px;
   }
 }
 
 /*
- * With motion off the bar cannot travel, so it becomes a full, static track.
+ * With motion off the stripes stay, they simply stop moving.
  *
- * Hiding it instead would take away the one element that says a run is going, and the status line
- * next to it already carries a clock that keeps moving on its own.
+ * They still read as a busy state where a flat fill reads as a finished one, and the elapsed clock
+ * next to them keeps counting in text, which is the part that proves the run is alive. Hiding the
+ * bar instead would remove the only element saying a run is going at all.
  */
 @media (prefers-reduced-motion: reduce) {
   .triage__progress-bar {
     animation: none;
-    left: 0;
-    width: 100%;
-    opacity: 0.5;
   }
 }
 
-/* The live line: what the run is doing right now, in the reader's words. */
+/*
+ * The live line: what the run is doing right now, in the reader's words.
+ *
+ * `min-width: 0` is not cosmetic. A flex item refuses to shrink below its content, so without it the
+ * ellipsis never triggers and a long file name pushes the elapsed clock out of the bar instead of
+ * being cut. Same trap as `.workspace` and the acquisition summary before it.
+ */
 .triage__phase {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text);
   font-size: var(--font-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The clock must never be the thing that gets cut: it is the proof the run is moving. */
+.triage__progress ~ .triage__meta {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -2427,6 +2610,12 @@ body {
 .triage__ticket:hover {
   background: var(--surface-hover);
   border-color: var(--border);
+}
+
+/* The selected row is the one the overview column is describing, so it has to stay obvious. */
+.triage__ticket--active {
+  background: var(--surface-inset);
+  border-color: var(--border-strong);
 }
 
 .triage__ticket-head {

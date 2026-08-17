@@ -791,6 +791,17 @@ exceptions:
   a bar filling at an invented pace would be a promise the tab cannot keep, and the first slow sprint
   would make every later one untrustworthy. No `aria-valuenow` either: inventing one would tell a
   screen reader a percentage the sighted view is careful not to claim.
+- **The bar is striped, not a travelling segment.** The first version slid one 40%-wide chunk from
+  `left: -40%` to `left: 100%`, so the chunk sat entirely OUTSIDE the track at both ends of its
+  cycle, and `ease-in-out` made it linger there: the track read as empty for a good part of every
+  loop, which is exactly what a stopped run looks like. A repeating gradient fills it at every
+  instant. `background-size` is one full horizontal period of the stripes (12px across a 45 degree
+  gradient is 12 x sqrt(2) on the x axis) and the animation shifts by exactly that: any other value
+  leaves a visible jump once per loop. Under `prefers-reduced-motion` the stripes stay and simply
+  stop, since a flat fill reads as a finished bar and the elapsed clock beside it keeps counting.
+- **`min-width: 0` on the status line.** A flex item refuses to shrink below its content, so without
+  it the ellipsis never fires and a long file name pushes the elapsed clock out of the bar. Same
+  trap as `.workspace` next to the notes panel.
 - **The elapsed clock ticks in the renderer.** Progress is pushed on events, and those can be twenty
   seconds apart while a file is read: without a timer of its own the line would freeze and look
   exactly like a run that had died. It exists only while something runs.
@@ -810,6 +821,23 @@ exceptions:
   with their counts do not fit a strip's bar, and a tab row that scrolls sideways is a row whose
   last tab nobody finds. The accessible name keeps the sentence, since a screen reader gets no
   tooltip and "Backend" alone does not say those tickets are the ones the API cannot serve.
+- **A third column: the overview of the selected ticket.** Same grammar as the Git tab, and it grew
+  a third column for the same reason: the last one holds prose that cannot be read in the width a
+  list leaves over. It carries the verdict spelled out in full, why it landed there, the question,
+  what answering it triggers, and the ticket's own text. Without it, checking a verdict means
+  opening Jira in a browser, which is the trip this tab exists to save. **No splitter**, unlike Git:
+  a diff wants whatever width you can give it, a paragraph wants a readable measure, and the app's
+  own notes warn against generalising its three resizers into a fourth.
+- **Clicking a ticket row SELECTS it; the browser is a button in the overview.** The opposite of the
+  pull request tab, deliberately. Faced with a list of PRs the reflex is to go read the PR, because
+  nothing local can show it; here the reason for the verdict is already on this machine, so reading
+  it is the everyday gesture and Jira is the deliberate one.
+- **The overview shows the text the model was given, not the full description.** It is trimmed once
+  and used for both the prompt and the stored ticket. A column showing a whole description beside a
+  verdict drawn from an extract would invite blaming the verdict for something the model never read.
+- **`next` is asked of the model alongside the question.** "Who does what once this is answered" is
+  the half that makes a decision worth taking now rather than postponing, and it is what turns a
+  list of questions into a list of moves.
 - **The verdict selection is session-local, and reset when the sprint changes.** Unlike `pullScope`,
   reopening the app on `Blocked` because that is where you left it would answer a question nobody
   asked this morning; and a verdict worth reading on one sprint says nothing about the next. With
@@ -822,6 +850,36 @@ exceptions:
 - **`.icon-button:hover` is guarded by `:not(:disabled)`**, like `.button` already was. Chromium
   matches `:hover` on a disabled control, so without it a button that cannot be pressed still lights
   up under the cursor and invites the click it is about to swallow.
+
+### Handing a ticket to Claude Code
+
+- **The handoff passes the key and nothing else.** `TriageWork` takes issue keys, filters them
+  through `ISSUE_KEY_PATTERN` and builds `/ticket <KEY>`. The verdict, the reason and the question
+  stay in `triage.json`, where the session that picks the ticket up reads them itself: a copy pushed
+  through a shell argument would be both fragile to quote and stale from the moment it was made, and
+  the whole point of storing the analysis on disk is that any session can go and get it.
+- **Two buttons, two different promises.** `Work on this` in the overview starts the ticket you are
+  reading, whatever its verdict; `Work N ready` beside the counts starts the `ready` group. Only the
+  batch is limited to `ready` (`readyKeys`, pure and tested): a ticket parked on a question is one
+  whose answer decides what gets built, so a batch of those would be asking an agent to choose for
+  you. Refusing the single-ticket button on a non-`ready` verdict would be the opposite mistake, the
+  tab overruling its reader on the strength of a language model reading a Jira description, which
+  has no way of knowing the decision was taken in a corridor this morning.
+- **Both ends cap at `WORK_BATCH_LIMIT`.** The main process caps because it must, the renderer caps
+  so the label says the true number: a button offering `Work 12 ready` while four are silently
+  dropped is worse than one saying `Work 8 ready`, and the tooltip says it is a first slice.
+- **The repository is asked for, never guessed.** Same second-menu-at-the-cursor gesture as the Jira
+  tab's `dev <TICKET>`, sharing `lastBranchProject` through `projectsByLastBranch()`: both gestures
+  ask the same question about the same ticket, and two separate memories would each be wrong half
+  the time. Jira never says which of the four repositories an issue touches, and a guess would put a
+  worktree in the wrong clone.
+- **It runs on the default profile, where the branch button needs interactive bash.** `dev` is a
+  shell alias, which only exists once `~/.bashrc` has been read; `claude.exe` is a real executable on
+  `PATH`, so `resolveDefaultProfile` is enough and the tab starts in whatever shell the user actually
+  works in.
+- **The batch button is pushed to the far end with `margin-left: auto`.** Not an `order` value: the
+  sub-tabs are what the bar is for, and a control that launches a run of agents has no business
+  sitting against `Ready` where a mis-aimed click would land on it.
 
 ## Mail and Teams: why they are not here
 

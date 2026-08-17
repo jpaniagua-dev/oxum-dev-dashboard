@@ -146,6 +146,12 @@ const api: RendererApi = {
 
   refreshTriage: (): Promise<TriageState> => ipcRenderer.invoke(IpcChannel.TriageRefresh),
 
+  workOnTickets: (
+    projectId: ProjectId,
+    issueKeys: string[],
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
+    ipcRenderer.invoke(IpcChannel.TriageWork, projectId, issueKeys),
+
   analyseSprint: (sprintId: number): Promise<TriageState> =>
     ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId),
 

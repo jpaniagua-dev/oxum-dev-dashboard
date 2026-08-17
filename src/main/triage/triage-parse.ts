@@ -12,8 +12,20 @@ import { TRIAGE_VERDICTS, type TriagedTicket, type TriageVerdict } from '@shared
 export interface ParseInput {
   /** Raw text the model returned. */
   readonly answer: string;
-  /** The tickets that were asked about, in display order. */
-  readonly asked: readonly { key: string; summary: string; assignee: string }[];
+  /**
+   * The tickets that were asked about, in display order.
+   *
+   * Everything factual about a ticket is taken from here and never from the answer: the model is
+   * asked to classify, not to restate, and letting it rewrite a summary or a description would put
+   * text on screen that no longer matches the ticket.
+   */
+  readonly asked: readonly {
+    key: string;
+    summary: string;
+    assignee: string;
+    status: string;
+    description: string;
+  }[];
 }
 
 export function parseTriage(input: ParseInput): TriagedTicket[] {
@@ -30,9 +42,12 @@ export function parseTriage(input: ParseInput): TriagedTicket[] {
       key: ticket.key,
       summary: ticket.summary,
       assignee: ticket.assignee,
+      status: ticket.status,
+      description: ticket.description,
       verdict: toVerdict(found?.verdict),
       reason: toText(found?.reason, found === undefined ? 'The analysis did not mention it.' : ''),
       question: toText(found?.question, ''),
+      next: toText(found?.next, ''),
     };
   });
 }
@@ -42,6 +57,7 @@ interface RawVerdict {
   verdict?: unknown;
   reason?: unknown;
   question?: unknown;
+  next?: unknown;
 }
 
 /**
