@@ -55,6 +55,14 @@
             <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">Jira</button>
             <button type="button" id="strip-tab-git" class="strip__tab" role="tab">Git</button>
             <button type="button" id="strip-tab-triage" class="strip__tab" role="tab">Triage</button>
+            <!--
+              Appended after the existing tabs rather than slotted next to Git, which is where it
+              belongs by subject: inserting it there would shift Triage under a cursor that has learnt
+              where to find it. A tab row is read by position long before it is read by label.
+            -->
+            <button type="button" id="strip-tab-worktrees" class="strip__tab" role="tab">
+              Worktrees
+            </button>
           </div>
           <div class="projects__header-actions">
             <span id="last-refresh" class="strip__meta"></span>
@@ -191,6 +199,24 @@
             <div class="pulls__list" id="triage-list"></div>
           </div>
           <div class="triage__overview" id="triage-overview"></div>
+        </div>
+
+        <!--
+          Worktrees: one flat list across every project, and no master-detail.
+
+          The one tab of this strip that deliberately does not select a repository first. Its whole
+          reason to exist is the view *across* clones, "where are my eight checkouts and which one has
+          uncommitted work", and a column of repositories to click through is exactly the question it
+          answers. The bar above the list carries the totals; the rows are a grid, like the Jira issues
+          and for the same reason: their badges are conditional, and in a flex row no two lines would
+          agree on where the branch sits.
+
+          Filled by `worktree-list.ts` with `textContent`: folder names and branch names are text from
+          outside the app.
+        -->
+        <div class="worktrees" id="strip-panel-worktrees" role="tabpanel" hidden>
+          <div class="pulls__bar" id="worktrees-bar"></div>
+          <div class="pulls__list" id="worktrees-list"></div>
         </div>
 
         <!--

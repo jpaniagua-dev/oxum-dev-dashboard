@@ -318,9 +318,7 @@ export class TriagePanel {
             : 'Hands them to Claude Code, one after another',
       });
       work.type = 'button';
-      work.addEventListener('click', (event) =>
-        this.actions.onWork(ready, event.clientX, event.clientY),
-      );
+      this.bindWork(work, ready);
       this.hosts.bar.append(work);
     }
   }
@@ -493,9 +491,7 @@ export class TriagePanel {
       title: `Runs the ticket skill on ${ticket.key} in a terminal tab`,
     });
     work.type = 'button';
-    work.addEventListener('click', (event) =>
-      this.actions.onWork([ticket.key], event.clientX, event.clientY),
-    );
+    this.bindWork(work, [ticket.key]);
     actions.append(work);
 
     const open = createElement('button', { className: 'button', text: `Open ${ticket.key}` });
@@ -504,6 +500,28 @@ export class TriagePanel {
     actions.append(open);
 
     this.hosts.overview.append(actions);
+  }
+
+  /**
+   * Wires a "work on these tickets" button, and swallows the click that opened it.
+   *
+   * `stopPropagation` is what makes both of these buttons work at all, and it is the whole reason
+   * this method exists rather than two inline handlers. `onWork` opens a repository menu through
+   * `showContextMenu`, which dismisses on any `click` reaching `document`: that is correct for every
+   * caller opening from `contextmenu`, since a right click fires no `click` at all, but a menu opened
+   * by a **left** click is shut in the same tick by the very click that opened it. The buttons then
+   * look completely dead: the menu is created and removed before a frame is painted, so there is
+   * nothing on screen and nothing in the logs either.
+   *
+   * The Git tab's `⋯` button records the same trap, which is precisely why the two triage buttons
+   * share one binder: the rule has to be remembered once per menu opener, and the third one would
+   * have forgotten it too.
+   */
+  private bindWork(button: HTMLButtonElement, keys: readonly string[]): void {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.actions.onWork(keys, event.clientX, event.clientY);
+    });
   }
 
   /** Skips a block the analysis left empty rather than printing a heading over nothing. */

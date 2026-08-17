@@ -44,6 +44,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // the user stops glancing and starts working. 250 pixels would show four lines of a diff.
   gitHeight: 460,
   triageHeight: 460,
+  // Between the status table and the Git tab: one line per worktree, and this workspace holds eight
+  // of them across two repositories, which is more than a 250px strip can show without scrolling.
+  worktreesHeight: 360,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
   // 340 was not. The diff keeps the rest, and the separator is there to change the balance.
   gitListWidth: 460,
@@ -141,6 +144,11 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     jiraHeight: clamp(asNumber(input.jiraHeight, DEFAULT_SETTINGS.jiraHeight), 90, 1200),
     gitHeight: clamp(asNumber(input.gitHeight, DEFAULT_SETTINGS.gitHeight), 90, 1200),
     triageHeight: clamp(asNumber(input.triageHeight, DEFAULT_SETTINGS.triageHeight), 90, 1200),
+    worktreesHeight: clamp(
+      asNumber(input.worktreesHeight, DEFAULT_SETTINGS.worktreesHeight),
+      90,
+      1200,
+    ),
     gitListWidth: clamp(asNumber(input.gitListWidth, DEFAULT_SETTINGS.gitListWidth), 240, 1400),
     defaultShellProfileId: asString(
       input.defaultShellProfileId,
@@ -296,8 +304,24 @@ function asJira(value: unknown): AppSettings['jira'] {
   };
 }
 
+/**
+ * The tab to reopen on, falling back to the projects table.
+ *
+ * This list is the **second** gate `activeStrip` has to pass, `asPatch` being the first, and a tab
+ * missing from either one is discarded in total silence. `triage` was missing here while `asPatch`
+ * accepted it, so `update()` sanitised the value away on its way to disk: the Triage tab was written,
+ * saved as `projects`, and the app reopened on the wrong tab with nothing to explain it. Exactly the
+ * failure mode `settings-patch.ts` documents, one function further down. Both lists are pinned by
+ * `test/settings-store.test.ts` and `test/settings-patch.test.ts` for that reason.
+ */
 function asStrip(value: unknown): StripTab {
-  return value === 'pulls' || value === 'jira' || value === 'git' ? value : 'projects';
+  return value === 'pulls' ||
+    value === 'jira' ||
+    value === 'git' ||
+    value === 'triage' ||
+    value === 'worktrees'
+    ? value
+    : 'projects';
 }
 
 /** Drops malformed profiles instead of letting one reach `pty.spawn`. */

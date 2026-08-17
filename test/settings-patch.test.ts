@@ -30,6 +30,18 @@ describe('asPatch', () => {
     });
   });
 
+  it('accepts every tab of the strip as the active one', () => {
+    /*
+     * Both gates, in one place. `asPatch` accepted `triage` while `asStrip` in the settings store did
+     * not, so `update()` sanitised the value back to `projects` on its way to disk: the Triage tab was
+     * simply never remembered, and there was nothing to see. Every tab is checked here so the next one
+     * added cannot repeat it, and `settings-store.test.ts` holds the other half.
+     */
+    for (const tab of ['projects', 'pulls', 'jira', 'git', 'triage', 'worktrees']) {
+      expect(asPatch({ activeStrip: tab })).toEqual({ activeStrip: tab });
+    }
+  });
+
   it('accepts the Git tab as an active strip', () => {
     // A fourth tab is one more branch in a union that is checked by hand in three places: here, the
     // settings store's `asStrip`, and the renderer's height lookup. Missing it here would silently
@@ -101,6 +113,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       'pullsHeight',
       'stripCollapsed',
       'triageHeight',
+      'worktreesHeight',
     ]);
   });
 
@@ -108,6 +121,10 @@ describe('LOCAL_ONLY_KEYS', () => {
     // Same trap as `pullsHeight` and `jiraHeight` before it: a height missing from `asPatch` is
     // dropped in total silence, and the tab reopens at the default on every launch.
     expect(asPatch({ triageHeight: 512 })).toEqual({ triageHeight: 512 });
+  });
+
+  it('lets the dashboard persist the Worktrees tab height', () => {
+    expect(asPatch({ worktreesHeight: 380 })).toEqual({ worktreesHeight: 380 });
   });
 
   it('lets the dashboard persist the pull request scope', () => {

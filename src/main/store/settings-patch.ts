@@ -12,6 +12,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'jiraHeight',
   'gitHeight',
   'triageHeight',
+  'worktreesHeight',
   'gitListWidth',
   'activeStrip',
   'pullScope',
@@ -44,13 +45,18 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.jiraHeight === 'number') patch.jiraHeight = input.jiraHeight;
   if (typeof input.gitHeight === 'number') patch.gitHeight = input.gitHeight;
   if (typeof input.triageHeight === 'number') patch.triageHeight = input.triageHeight;
+  if (typeof input.worktreesHeight === 'number') patch.worktreesHeight = input.worktreesHeight;
   if (typeof input.gitListWidth === 'number') patch.gitListWidth = input.gitListWidth;
+  // Kept in step with `asStrip` in `settings-store.ts`: a tab this list accepts and that one drops is
+  // saved as `projects` on its way to disk, which is how the Triage tab spent a version not being
+  // remembered. Two gates, one list of tabs.
   if (
     input.activeStrip === 'projects' ||
     input.activeStrip === 'pulls' ||
     input.activeStrip === 'jira' ||
     input.activeStrip === 'git' ||
-    input.activeStrip === 'triage'
+    input.activeStrip === 'triage' ||
+    input.activeStrip === 'worktrees'
   ) {
     patch.activeStrip = input.activeStrip;
   }

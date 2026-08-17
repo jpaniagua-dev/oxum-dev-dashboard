@@ -317,11 +317,15 @@ exceptions:
 
 ## Pull requests tab
 
-- **The top strip has five tabs, and the terminal does not depend on them.** Only the strip's content
+- **The top strip has six tabs, and the terminal does not depend on them.** Only the strip's content
   changes; a tab that stole the terminal's space would go against everything else in this app. Adding a
   view means an entry in `STRIP_TABS`, two elements in `index.html`, and a height in `AppSettings`, and
   that height must be added to `asPatch` **and** to `LOCAL_ONLY_KEYS`, or it is dropped in silence (see
-  the note on `settings-patch.ts`).
+  the note on `settings-patch.ts`). The tab's own name has to pass **two** gates as well, `asPatch` and
+  `asStrip` in the settings store: `triage` was missing from the second while the first accepted it, so
+  every save turned it back into `projects` and the tab was simply never remembered. Both lists are now
+  looped over in their tests. A new tab goes at the **end** of the row, whatever its subject: inserting
+  it in the middle moves the others under a cursor that has learnt where they are.
 - **There is no application title bar any more.** Everything it carried (last refresh, `Refresh`,
   notes, settings, theme) lives in the strip's tab row, which was already a chrome row: two chrome rows
   above a terminal is one too many when the terminal is the subject of the window. The application title
@@ -664,7 +668,7 @@ exceptions:
   `side-resizer.ts`: three different axes (height anchored at the top, width anchored on the right,
   width anchored on the left inside a container), and a resizer's direction is precisely what gets
   written backwards, which has already happened here. All three are therefore pure, tested functions.
-- **`gitHeight` defaults to 460**, the largest of the four. Three columns ending in a diff make this the
+- **`gitHeight` defaults to 460**, the largest of them all. Three columns ending in a diff make this the
   tab where you stop glancing and start working; 250 px would show four lines of diff.
 - **A repository row's terminal icon is the row's SIBLING, not its child**, and that is the entire reason
   for the `git__repo-line` container. The row is a real `<button>` (so reachable with Tab and responding
@@ -723,6 +727,68 @@ exceptions:
   (an automatic stash behind a checkout) and not at the object. A stash is a named, listed, complete
   snapshot, and creating one leaves a clean tree. What had to come with the view is the outcome of a
   conflicting `pop`, hence `sequencer`.
+
+## Worktrees tab
+
+- **`git worktree list --porcelain` is the only authority.** A scan of a conventional worktrees folder
+  cannot do two things this needs: it misses a worktree created somewhere else (there is one sitting
+  next to its own clone in this very workspace), and it cannot tell a live checkout from an entry whose
+  folder has been wiped. git answers both, and it answers `locked` and `prunable` for free. The same
+  conclusion the shell helper reached before this tab existed.
+- **The main checkout is excluded by comparing paths, normalised.** git prints `C:/repos/web-app` while
+  a configured project holds `C:\repos\web-app`, so a raw comparison never matches and **every** project
+  grows a phantom worktree row that is really itself. Separators folded, case folded (Windows only, and
+  git spells the drive letter as it was stored). Pinned twice: once on a fixed string, once on a real
+  temporary repository, because only the second proves the format git actually prints.
+- **A record ends at the next `worktree` line or at the end of the output**, never at the blank line
+  alone: an output that does not end with one would lose its last worktree. Unknown attributes are
+  ignored rather than treated as the start of a record, so a future git can add one without breaking the
+  parse.
+- **`locked` and `prunable` arrive with or without a reason.** `locked` alone is a locked worktree, so
+  reading only `locked <reason>` reports it as unlocked, which is the opposite of what it is. Hence
+  `string | null` and not a boolean plus a message.
+- **The row carries the branch from the registration, not from its `GitState`.** It is the only one that
+  survives a folder that is gone: git still knows which branch a prunable worktree was on, while a
+  `rev-parse` inside a missing directory can only fail.
+- **The working tree is read with `readGitState`, the project table's own function.** It costs two git
+  calls per worktree more than a narrower read would, and it is worth it: the alternative is a second
+  definition of "modified", "clean" and "ahead" drifting next to the first, which is the failure
+  `verdictFor` and `isStaged` already record. `presentGit` then paints these rows with no new presenter.
+  Its `stashes` is deliberately not shown: the stash list belongs to the repository, so every worktree
+  of one clone would report the same number while looking per-worktree.
+- **A prunable worktree is not read at all**, and its terminal button is disabled. Reading it would
+  produce an error saying less than the badge does, and a shell opened on a missing folder starts
+  wherever the profile's own directory is, which looks like a button that aimed at the wrong row.
+- **A flat list, no repository column.** The one tab of the strip that does not select a repository
+  first, and that is its reason to exist: the question is the one that spans clones ("where are my
+  checkouts, which one holds work I have not committed"), and a column to click through answers it one
+  repository at a time, which is the laborious version it replaces.
+- **The row is a grid with fixed tracks, and that is load-bearing.** Each row is its **own** grid, so an
+  `auto` or `fr` track is sized from that row's content: the first version sized the name and the branch
+  that way and no two lines agreed on where either began, which is the alignment a grid was chosen for.
+  Only two tracks are free, and both are safe: the branch absorbs the leftover width and is left-aligned
+  so its start still lines up, and the state column is `auto` but right-aligned against the terminal
+  button so its badges line up on the edge that is read. Same answer as `.issue`, and the same reason.
+- **The terminal button does not fade, unlike the pull request and Git lists.** `.icon-button--row` sits
+  at `opacity: 0.4` until its row is hovered, which is right for a secondary affordance beside a row
+  whose main gesture is elsewhere. Here it is the row's only gesture and the reason the tab was asked
+  for. Same judgement as the Triage tab's `Analyse`.
+- **Clicking the row does nothing, on purpose.** Every other list in this strip has a row-level gesture;
+  the only one available here would be "open a terminal", and that spawns a tab rather than reusing one.
+  On a list that is scrolled and read, a stray click would cost a tab. It goes through `openShell` with a
+  `cwd` and no `projectId`, since a worktree is not a project and there is nothing for reuse to key on.
+- **Read when the tab is shown, then on `RowsChanged`.** No monitor, like the Git tab, and for the same
+  reason: it is the widest read of the strip (one `worktree list` per project, then a status per
+  worktree), and doing it for a hidden tab is work for nobody. It needs no editing guard because the tab
+  holds no field and no selection, which is a property to remember before giving it any state.
+- **Projects with no worktree stay in the payload.** The summary says "eight across two of seven", and a
+  project silently absent from a list cannot be told from one the tab forgot to look at. An unreadable
+  project is counted apart for the same reason, and its error sits **above** the rows rather than
+  replacing them: one broken project must not hide the worktrees of the six that answered.
+- **The tab creates and removes nothing.** `git worktree add` and `remove` have rules this list would
+  have to reimplement to be trustworthy (a shared `node_modules` junction to unlink first, a refusal on
+  an unregistered folder), and getting one wrong deletes work. The life cycle stays in the terminal,
+  where the command says what it did.
 
 ## Triage tab
 
@@ -880,6 +946,14 @@ exceptions:
 - **The batch button is pushed to the far end with `margin-left: auto`.** Not an `order` value: the
   sub-tabs are what the bar is for, and a control that launches a run of agents has no business
   sitting against `Ready` where a mis-aimed click would land on it.
+- **Both buttons go through `bindWork`, which stops the click.** They open a menu on a **left** click,
+  so the rule the Git tab's `⋯` recorded applies to them too: `showContextMenu` dismisses on any
+  `click` reaching `document`, and without `stopPropagation` the opening click shuts the repository
+  menu in the same tick. Shipped that way in the first version and both buttons were completely dead,
+  with nothing on screen and nothing in the logs, the menu being created and removed before a frame
+  was painted. They share one binder rather than repeating the call because the rule has to be
+  remembered once per menu opener, and the second one had already forgotten it. Any future control
+  that opens a menu from a left click needs the same line.
 
 ## Mail and Teams: why they are not here
 

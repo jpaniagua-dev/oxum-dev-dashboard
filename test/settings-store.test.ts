@@ -79,4 +79,26 @@ describe('sanitizeSettings', () => {
   it('drops a project entry with no path, since nothing can be inferred for it', () => {
     expect(sanitizeSettings({ projects: [{ id: 'ghost', label: 'Ghost' }] }).projects).toEqual([]);
   });
+
+  it('keeps every tab of the strip as a valid active one', () => {
+    /*
+     * The other half of the two-gate trap, `asPatch` holding the first. `triage` was missing from
+     * `asStrip` while the renderer wrote it and `asPatch` let it through, so every save turned it back
+     * into `projects` and the tab was never remembered. A whole tab's persistence failing in silence
+     * is what this loop is here to stop happening to the next one.
+     */
+    for (const tab of ['projects', 'pulls', 'jira', 'git', 'triage', 'worktrees'] as const) {
+      expect(sanitizeSettings({ activeStrip: tab }).activeStrip).toBe(tab);
+    }
+  });
+
+  it('falls back to the projects tab for a strip it does not know', () => {
+    expect(sanitizeSettings({ activeStrip: 'mails' }).activeStrip).toBe('projects');
+  });
+
+  it('clamps the Worktrees tab height like every other strip height', () => {
+    expect(sanitizeSettings({ worktreesHeight: 4 }).worktreesHeight).toBe(90);
+    expect(sanitizeSettings({ worktreesHeight: 5000 }).worktreesHeight).toBe(1200);
+    expect(sanitizeSettings({}).worktreesHeight).toBe(360);
+  });
 });

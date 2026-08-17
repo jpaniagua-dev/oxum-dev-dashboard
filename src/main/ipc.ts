@@ -30,6 +30,7 @@ import {
   type NotesState,
   type ProjectValidation,
   type RepoPulls,
+  type RepoWorktrees,
   type ShellProfile,
   type TerminalGroup,
   type TerminalId,
@@ -49,6 +50,7 @@ import {
   stashPush,
   sync,
 } from './git/git-commands.js';
+import { readAllWorktrees } from './git/git-worktrees.js';
 import {
   configFromPath,
   detectCandidates,
@@ -188,6 +190,13 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
    * renderer asks when it shows the tab, when the selection changes and after every write, which is
    * exactly when the answer can have changed.
    */
+
+  // Reads the whole workspace's worktrees in one pass. `deps.projects()` rather than a stored list,
+  // like every other handler here: a project added a second ago must appear in the next read.
+  ipcMain.handle(
+    IpcChannel.WorktreesRead,
+    async (): Promise<RepoWorktrees[]> => readAllWorktrees(deps.projects()),
+  );
 
   ipcMain.handle(
     IpcChannel.GitState,

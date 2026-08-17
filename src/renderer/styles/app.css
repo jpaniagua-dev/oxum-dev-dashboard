@@ -2663,3 +2663,115 @@ body {
   color: var(--text-dim);
   font-size: var(--font-sm);
 }
+
+/* ---------------------------------------------------------------- worktrees */
+
+/*
+ * One column: the summary line, then the list.
+ *
+ * The only tab of this strip with no repository column, and that is its whole point: the question it
+ * answers spans the clones ("where are my checkouts, which one holds uncommitted work"), so a column
+ * to click through first would be the laborious version it replaces. `.pulls__bar` and `.pulls__list`
+ * are reused for the two boxes, as the Jira and Triage panels already do.
+ */
+.worktrees {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px 10px;
+}
+
+/* Same trap as `.pulls`: a class that sets `display` beats the browser's own rule for `[hidden]`. */
+.worktrees[hidden] {
+  display: none;
+}
+
+/*
+ * A grid and not a flex row, like the Jira issues and for the same reason: the badges are conditional,
+ * so in a flex row no two lines would agree on where the branch or the counts sit, and a list read by
+ * scanning down a column is exactly what this tab is for.
+ */
+.worktree {
+  display: grid;
+  /*
+   * Fixed tracks for everything the eye scans down, and that is not a style preference.
+   *
+   * Each row is its **own** grid, so an `auto` or `fr` track is resolved per row from that row's own
+   * content: the first version sized the name and the branch that way and no two lines agreed on where
+   * either began, which is precisely the alignment a grid was chosen for. Same answer as `.issue` in
+   * the Jira tab, and the same reason.
+   *
+   * Only two tracks are free, and both are safe: the branch absorbs the leftover width (it is
+   * left-aligned, so its start still lines up), and the state column is `auto` but right-aligned
+   * against the terminal button, so its badges line up on the edge that is read.
+   */
+  grid-template-columns: 104px 264px minmax(0, 1fr) auto 26px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--font-md);
+}
+
+/*
+ * Hovered like the other lists, though nothing here reacts to a click on the row.
+ *
+ * Kept because the row is wide and its button sits at the far end: the highlight is what says which
+ * line that button belongs to. It carries no `cursor: pointer`, which is the honest half of the
+ * signal, the row itself doing nothing.
+ */
+.worktree:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+/* The clone it belongs to: context rather than identity, so it is dimmed and it shrinks first. */
+.worktree__project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+/*
+ * The folder name, truncated on the RIGHT.
+ *
+ * A worktree's name opens with what tells it apart (the ticket key), so the end is the half that can
+ * be lost without losing the row. The opposite of a file path, which is why the Git tab needs two
+ * truncation classes rather than one.
+ */
+.worktree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/*
+ * The branch keeps its table styling, minus the table's width cap.
+ *
+ * `.cell-branch` stops at 280px because a table column has to be told when to yield; here the grid
+ * track already bounds it, so that cap would only cut a branch name in a column with room to spare.
+ */
+.worktree .cell-branch {
+  max-width: none;
+}
+
+/* Counts then badges, pushed against the terminal button so they line up down the list. */
+.worktree__state {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.worktree__terminal {
+  justify-self: end;
+}

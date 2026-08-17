@@ -771,7 +771,7 @@ export const TERMINAL_FONT_SIZE = { default: 14, min: 9, max: 28 } as const;
 export const UI_FONT_SIZE = { default: 13, min: 11, max: 17 } as const;
 
 /** Which view the top strip shows. The terminal below is unaffected by this choice. */
-export type StripTab = 'projects' | 'pulls' | 'jira' | 'git' | 'triage';
+export type StripTab = 'projects' | 'pulls' | 'jira' | 'git' | 'triage' | 'worktrees';
 
 /**
  * A sprint offered for triage.
@@ -884,6 +884,72 @@ export interface TriageState {
   readonly error: string | null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Worktrees
+ * ------------------------------------------------------------------ */
+
+/**
+ * One linked worktree of a repository.
+ *
+ * Everything here comes from `git worktree list --porcelain`, which is the only authority on the
+ * question: a scan of the worktrees folder cannot tell a live checkout from a leftover, and it misses
+ * every worktree created somewhere else, a real case in this workspace where one sits next to its
+ * clone under `projects/` rather than in the canonical folder.
+ */
+export interface Worktree {
+  /**
+   * Folder name, which the naming convention makes the useful label (`TEC-1482-<repo>`).
+   *
+   * Derived from the path rather than stored by git, so it is exactly what a `cd` would show.
+   */
+  readonly name: string;
+  /** Absolute path: the terminal's `cwd`, and the only identity a worktree has. */
+  readonly path: string;
+  /**
+   * Branch checked out there, or `detached@<sha>` in the same spelling the project rows use.
+   *
+   * Read from the **registration** and never from `git.branch`, because it is the one that survives a
+   * folder that has been wiped: git still knows which branch a prunable worktree was on, while a
+   * `rev-parse` inside a missing directory can only fail.
+   */
+  readonly branch: string;
+  /** Reason given to `git worktree lock`, or an empty string when it was locked without one. Null when unlocked. */
+  readonly locked: string | null;
+  /**
+   * git's own reason for considering this worktree prunable, or null.
+   *
+   * The state the folder-scanning approach could never name: registered, but its directory is gone or
+   * no longer a worktree. Shown rather than hidden, because it is the one row where the terminal
+   * button cannot work and `wt rm` is the answer.
+   */
+  readonly prunable: string | null;
+  /**
+   * Working-tree state, or null when it was not read (a prunable worktree has nothing to read).
+   *
+   * The very same `GitState` the project table shows, deliberately: `presentGit` then paints these
+   * rows with one definition of "modified", "clean" and "ahead" for the whole app. Its `stashes` is
+   * not displayed here, and that is not an oversight: the stash list belongs to the repository, so
+   * every worktree of one clone would report the same number and it would read as per-worktree.
+   */
+  readonly git: GitState | null;
+}
+
+/** The worktrees of one watched project, plus why there might be none. */
+export interface RepoWorktrees {
+  readonly projectId: ProjectId;
+  readonly label: string;
+  /** The main checkout's path, which is what the rows below are *not*. */
+  readonly path: string;
+  readonly worktrees: readonly Worktree[];
+  /**
+   * Set when `git worktree list` itself failed.
+   *
+   * Shown instead of swallowed, for the reason the pull request tab keeps its own error: a folder that
+   * is not a git repository must not be readable as "this project has no worktree".
+   */
+  readonly error: string | null;
+}
+
 export interface AppSettings {
   themeMode: ThemeMode;
   /** Seconds between git refreshes. */
@@ -925,6 +991,14 @@ export interface AppSettings {
    * sprint's tickets grouped by verdict, which is read for a while and not glanced at.
    */
   triageHeight: number;
+  /**
+   * Height of the Worktrees tab.
+   *
+   * Sized like the master-detail tabs rather than like the status table: this workspace holds eight
+   * worktrees across two repositories on an ordinary day, and a list that scrolls at four rows is a
+   * list you stop trusting to be complete.
+   */
+  worktreesHeight: number;
   /**
    * Width of the Git tab's working column, in pixels. The diff column takes what is left.
    *
@@ -1094,6 +1168,14 @@ export const IpcChannel = {
   JiraTransition: 'jira:transition',
   /** invoke: (key) => { ok, message }, assigns an issue to the token's own account */
   JiraAssignMe: 'jira:assign-me',
+  /**
+   * invoke: () => RepoWorktrees[], every project's linked worktrees with their working-tree state
+   *
+   * Pulled and never pushed, like the Git tab: there is no monitor behind it, so nothing is read for
+   * a tab nobody is looking at. Its heartbeat is the git poll's `RowsChanged`, which describes the
+   * very working trees this list is about.
+   */
+  WorktreesRead: 'worktrees:read',
   /** invoke: (projectId) => GitRepoState | null, everything the Git tab shows for one repository */
   GitState: 'git:state',
   /** invoke: (projectId, target: GitDiffTarget) => GitDiff, a file's changes or a whole commit */
@@ -1279,6 +1361,14 @@ export interface RendererApi {
   /** Opens a pull request in the real browser. Only http(s) is followed, checked in the main process. */
   openExternal(url: string): Promise<void>;
 
+  /**
+   * Reads every project's linked worktrees, for the Worktrees tab.
+   *
+   * One call for the whole list rather than one per project: the tab's reason to exist is the view
+   * *across* repositories, so a per-project channel would only let the renderer assemble what the main
+   * process can answer in one pass.
+   */
+  readWorktrees(): Promise<RepoWorktrees[]>;
   /**
    * Reads a repository's full git state for the Git tab.
    *

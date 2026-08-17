@@ -14,6 +14,7 @@ import type {
   ProjectRow,
   PullScope,
   RepoPulls,
+  RepoWorktrees,
   ShellProfile,
   StripTab,
   ThemeMode,
@@ -44,6 +45,7 @@ import { NotesPanel } from './ui/notes-panel.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
 import { renderPullList } from './ui/pull-list.js';
+import { renderWorktreeList } from './ui/worktree-list.js';
 import { TriagePanel } from './ui/triage-panel.js';
 import { attachSideResizer } from './ui/side-resizer.js';
 import { StripTabs } from './ui/strip-tabs.js';
@@ -78,6 +80,15 @@ class App {
   /** Which pull requests the tab lists. Mirrors `settings.pullScope`, so it survives a restart. */
   private pullScope: PullScope = 'mine';
   private jira: JiraState | null = null;
+  /**
+   * Worktrees of every project, or null until the tab has been read once.
+   *
+   * Null and not an empty array: "not read yet" and "there are none" are two different sentences, and
+   * an empty list shown before the first read would announce the second while meaning the first. There
+   * is nothing else to keep here, the tab having no selection and no field of its own, which is also
+   * why a refresh landing mid-scroll can never destroy anything.
+   */
+  private worktrees: readonly RepoWorktrees[] | null = null;
   private triage: TriageState | null = null;
   private triagePanel: TriagePanel | null = null;
   private selectedJiraView: JiraViewId = 'mine';
@@ -185,6 +196,12 @@ class App {
     if (bootstrap.settings.activeStrip === 'git') {
       void this.loadGit();
     }
+    // Same rule for the worktrees, which are read the same way and for the same reason: `Reading...`
+    // until the tab is the one on screen.
+    this.renderWorktrees();
+    if (bootstrap.settings.activeStrip === 'worktrees') {
+      void this.loadWorktrees();
+    }
 
     window.api.onRowsChanged((rows) => {
       this.rows = rows;
@@ -194,6 +211,12 @@ class App {
       // status for a hidden tab is work for nobody.
       if (this.strip?.active === 'git') {
         void this.loadGit();
+      }
+      // The Worktrees tab describes working trees too, so the same heartbeat carries it. Its read is
+      // the widest of the strip (one `git worktree list` per project, then a status per worktree),
+      // which is exactly why it is bound to the visible tab and to nothing else.
+      if (this.strip?.active === 'worktrees') {
+        void this.loadWorktrees();
       }
       this.stampRefresh();
     });
@@ -308,6 +331,19 @@ class App {
       onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
       onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
     });
+  }
+
+  private renderWorktrees(): void {
+    renderWorktreeList(
+      { bar: requireElement('worktrees-bar'), list: requireElement('worktrees-list') },
+      this.worktrees,
+      {
+        // A path and a name, straight from the row: there is no project to resolve, a worktree not
+        // being one. The title is the folder name rather than the repository's label, because that is
+        // what tells two tabs on the same clone apart, which is the whole situation this tab is about.
+        onOpenTerminal: (path, name) => void this.openShellInPath(path, name),
+      },
+    );
   }
 
   private renderTriage(): void {
@@ -755,6 +791,18 @@ class App {
     this.renderTriage();
   }
 
+  /**
+   * Re-reads every project's worktrees.
+   *
+   * No `editing` guard, unlike the table and the Git tab: this tab holds no field and no selection, so
+   * there is nothing a refresh could take away. That is a property of the flat list, and the reason to
+   * be careful about giving this tab state later.
+   */
+  private async loadWorktrees(): Promise<void> {
+    this.worktrees = await window.api.readWorktrees();
+    this.renderWorktrees();
+  }
+
   private async loadGit(): Promise<void> {
     if (this.gitEditing) {
       return;
@@ -996,6 +1044,25 @@ class App {
   }
 
   /**
+   * Opens a new shell in any folder, for the Worktrees tab.
+   *
+   * The same call as the project `Terminal` button, with the path coming from a row instead of from the
+   * project list. It has to be a bare `openShell`: `openProjectShell` resolves a **project**, and a
+   * worktree is not one, so the reuse it offers has nothing here to key on. The tab is therefore named
+   * after the worktree's folder, which is what tells two tabs on the same clone apart.
+   */
+  private async openShellInPath(path: string, title: string): Promise<void> {
+    const terminalId = await window.api.openShell({
+      profileId: this.settings?.defaultShellProfileId ?? '',
+      cwd: path,
+      title,
+    });
+    if (terminalId !== null) {
+      await this.focusTerminal(terminalId);
+    }
+  }
+
+  /**
    * Renames a project.
    *
    * Only the label changes; the id stays derived from the folder, which is what keeps a running
@@ -1189,6 +1256,11 @@ class App {
         // shown rather than polled. The stored verdicts are already on screen by then.
         if (tab === 'triage') {
           void this.loadTriage();
+        }
+        // And the same for the worktrees, which are read when shown and then on the git poll. A stale
+        // list here is worse than a slow one: the whole point is knowing which checkout holds work.
+        if (tab === 'worktrees') {
+          void this.loadWorktrees();
         }
         // The terminal's geometry changed with the strip's: without this its pty keeps the old size.
         this.terminal?.refit();
@@ -1486,6 +1558,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.gitHeight;
     case 'triage':
       return settings.triageHeight;
+    case 'worktrees':
+      return settings.worktreesHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -1494,7 +1568,13 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
 /** Settings key that stores a tab's height. */
 function heightKeyOf(
   tab: StripTab,
-): 'projectsHeight' | 'pullsHeight' | 'jiraHeight' | 'gitHeight' | 'triageHeight' {
+):
+  | 'projectsHeight'
+  | 'pullsHeight'
+  | 'jiraHeight'
+  | 'gitHeight'
+  | 'triageHeight'
+  | 'worktreesHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -1504,6 +1584,8 @@ function heightKeyOf(
       return 'gitHeight';
     case 'triage':
       return 'triageHeight';
+    case 'worktrees':
+      return 'worktreesHeight';
     case 'projects':
       return 'projectsHeight';
   }

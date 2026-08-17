@@ -74,8 +74,9 @@ precisely why the dashboard spawns it and reads its output.
 
 ## Pull requests
 
-The top strip has five tabs, `Projects`, `Pull requests`, `Jira`, `Git` and `Triage`. Only the strip changes: the
-terminal below keeps its space whichever is selected, and each tab remembers its own height.
+The top strip has six tabs, `Projects`, `Pull requests`, `Jira`, `Git`, `Triage` and `Worktrees`. Only
+the strip changes: the terminal below keeps its space whichever is selected, and each tab remembers its
+own height.
 
 The pull request tab lists the watched repositories on the left with a counter, and the pull requests of
 the selected one on the right, one line each:
@@ -224,6 +225,39 @@ Ready 4  Decision 3  Backend 2  Unclear 1  Blocked 0   Analysed 12 min ago   [Wo
 
 Needs the `claude` CLI on your `PATH` and the Jira connection above. The analysis process gets `Read`,
 `Grep` and `Glob` and nothing else: it reads, it never writes.
+
+## Worktrees
+
+The sixth tab, and the only one with no repository to pick first: one flat list of every **linked git
+worktree** across every watched project, and a terminal button on each line.
+
+```
+10 worktrees across 3 of 4 projects
+
+Web        PROJ-123-web-app        PROJ-123-thousands-separator                clean         >_
+Web        wip-toast-web-app       wip/toast-zone-escape          3 modified   ↓4            >_
+Admin      PROJ-1647-admin-front   PROJ-1647-list-sorting                      clean  local  >_
+```
+
+- **git is the authority, not a folder scan.** The list comes from `git worktree list --porcelain` per
+  project, so it finds the ones created outside your usual location and it can name the ones that are
+  registered while their folder is gone (`prunable`). A scan of a conventional directory would miss the
+  first and could not tell the second from a live checkout.
+- **The main checkout is left out**: it already has a row in the Projects tab, and the comparison that
+  excludes it normalises separators and case, since git prints `C:/repos/web-app` where the settings
+  hold `C:\repos\web-app`.
+- **The state is the project table's own.** Same `modified` / `staged` / `clean` counts, same `↑↓` gap
+  and same `local` badge, read with the same function: one definition of "dirty" for the whole app,
+  rather than a second one drifting next to the first.
+- **The terminal button opens a new tab in that worktree's folder**, the same gesture as the `Terminal`
+  button of a project row. It is legible on every line instead of fading in on hover, because here it is
+  the row's only gesture. Clicking the row itself does nothing on purpose: on a list you scroll, a
+  gesture that spawns a tab would cost you one per stray click.
+- **Read when shown, then on the git poll**, like the Git tab, and never for a hidden tab: it is the
+  widest read of the strip (one `git worktree list` per project, then a status per worktree).
+
+The tab creates and removes nothing. A worktree's life cycle stays in the terminal, where `git worktree
+add` and `git worktree remove` say what they did.
 
 ## Actions
 

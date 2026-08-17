@@ -26,6 +26,7 @@ import {
   type ProjectValidation,
   type RendererApi,
   type RepoPulls,
+  type RepoWorktrees,
   type ShellProfile,
   type TerminalChunk,
   type TerminalGroup,
@@ -62,6 +63,8 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.ClipboardWrite, text),
 
   readClipboard: (): Promise<string> => ipcRenderer.invoke(IpcChannel.ClipboardRead),
+
+  readWorktrees: (): Promise<RepoWorktrees[]> => ipcRenderer.invoke(IpcChannel.WorktreesRead),
 
   gitState: (projectId: ProjectId): Promise<GitRepoState | null> =>
     ipcRenderer.invoke(IpcChannel.GitState, projectId),
