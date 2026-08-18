@@ -47,6 +47,37 @@ export class TriageService {
     };
   }
 
+  /**
+   * The estimate the last analysis put on a ticket, or `null`.
+   *
+   * Read off disk rather than passed through the handoff channel, which carries keys and nothing else.
+   * That is the same reasoning the channel was designed with: a verdict copied into a shell argument
+   * would be stale from the moment it was made, and the whole point of storing the analysis is that any
+   * part of the app can go and get the current one.
+   */
+  estimateFor(key: string): number | null {
+    return this.store.findTicket(key)?.estimate ?? null;
+  }
+
+  /**
+   * The sprint list, fetched once if nothing has been read yet.
+   *
+   * The fallback fetch is the load-bearing half. Every path that reaches here today comes from the
+   * Triage tab, which lists the sprints when it is shown, so the cache is normally warm; but a handoff
+   * that silently skipped the sprint move because no list had been fetched would look exactly like a
+   * board with no active sprint, and nothing in the message could tell those two apart.
+   *
+   * Returns the list rather than the active sprint: which one counts as current is decided by
+   * `pickActiveSprint`, one pure function, and a second answer to that question living here is how the
+   * two would drift.
+   */
+  async sprintList(): Promise<readonly Sprint[]> {
+    if (this.sprints.length === 0) {
+      await this.refresh();
+    }
+    return this.sprints;
+  }
+
   /** Re-reads the sprint list. The stored results are untouched: they outlive any refresh. */
   async refresh(): Promise<TriageState> {
     const credentials = await this.credentials();

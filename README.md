@@ -217,14 +217,30 @@ Ready 4  Decision 3  Backend 2  Unclear 1  Blocked 0   Analysed 12 min ago   [Wo
 - **A third column explains the verdict**: why the ticket landed there, the question that has to be
   answered, and what answering it triggers. Without it, checking a verdict means opening Jira in a
   browser, which is the trip this tab exists to save.
+- **Every ticket is estimated too**, in story points on a Fibonacci scale, by the same pass that read the
+  description. The number shows next to the status, and an estimate the model did not give stays empty
+  rather than being filled with a default: it gets written to the ticket and planned against.
 - **`Work on this` hands the ticket to Claude Code** in a terminal tab, after asking which repository it
-  lives in. Only the ticket key is passed: the analysis is already on disk, so the session that picks it
-  up reads the verdict itself rather than receiving a copy that starts going stale immediately.
+  lives in. Only the key and that repository name are passed: the analysis is already on disk, so the
+  session reads the verdict itself rather than receiving a copy that starts going stale immediately.
   `Work N ready` does the same for the whole `ready` group, and only for that group, because a ticket
   parked on a question is one whose answer decides what gets built.
+- **The session starts in the workspace above your repositories, not inside the one it will work on.**
+  Claude Code reads its instructions and skills from the folder it starts in and that folder's
+  ancestors, so a session launched inside a single repository never sees what several of them share one
+  level up. It starts at `claudeContextRoot` and is told which repository the ticket is about. Set that
+  key to an empty string in `settings.json` to go back to starting inside the repository.
+- **It also records the handoff on the board**: the ticket is moved to the active sprint, assigned to
+  you, given its story points and moved to in progress. Every button says so before you press it, and
+  the result says what went through. None of it can stop the session: the tab opens first, the writes
+  run after, and a Jira that is unconfigured or refusing is reported in a sentence rather than treated
+  as a failure of the gesture.
+- **Permission prompts are off** for these sessions (`--dangerously-skip-permissions`): the ticket was
+  read, the repository was chosen from a menu, and the session exists to do the work.
 
 Needs the `claude` CLI on your `PATH` and the Jira connection above. The analysis process gets `Read`,
-`Grep` and `Glob` and nothing else: it reads, it never writes.
+`Grep` and `Glob` and nothing else: it reads, it never writes. A handed-over session is the opposite,
+which is exactly why it lands in a tab you can watch and kill.
 
 ## Worktrees
 
@@ -249,10 +265,11 @@ Admin      PROJ-1647-admin-front   PROJ-1647-list-sorting                      c
 - **The state is the project table's own.** Same `modified` / `staged` / `clean` counts, same `↑↓` gap
   and same `local` badge, read with the same function: one definition of "dirty" for the whole app,
   rather than a second one drifting next to the first.
-- **The terminal button opens a new tab in that worktree's folder**, the same gesture as the `Terminal`
-  button of a project row. It is legible on every line instead of fading in on hover, because here it is
-  the row's only gesture. Clicking the row itself does nothing on purpose: on a list you scroll, a
-  gesture that spawns a tab would cost you one per stray click.
+- **Clicking a line opens a new tab in that worktree's folder**, the same gesture as the `Terminal`
+  button of a project row. The whole row is the button, so it works with Tab and Enter too, and the
+  terminal glyph at the end stays legible on every line rather than fading in on hover, because it
+  labels the row's own gesture. A `prunable` row is inert: its folder is gone, so there is nothing to
+  open.
 - **Read when shown, then on the git poll**, like the Git tab, and never for a hidden tab: it is the
   widest read of the strip (one `git worktree list` per project, then a status per worktree).
 
@@ -392,6 +409,9 @@ to another by dragging it there.
 - A tab can be closed as soon as it has nothing left to do: shells always, a `task` action always, a
   `server` action once it has stopped. A running server has no close button because `Stop` is the
   deliberate way to end it. A green dot marks a live process.
+- **URLs printed in a tab are clickable**, and open in your real browser instead of being copied out by
+  hand. Only `http` and `https` are followed: a terminal prints whatever a program sends it, so the
+  scheme is checked in the main process rather than handed to the system as-is.
 
 Git Bash is launched with `-i`, which means **your aliases work**: typing `commit` in a shell tab
 behaves exactly as it does in Windows Terminal.

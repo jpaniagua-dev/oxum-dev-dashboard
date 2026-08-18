@@ -259,6 +259,16 @@ export class TerminalManager {
     size: TerminalSize;
     /** Profile the command was resolved against, recorded so a split inherits the same shell. */
     profileId?: string | null;
+    /**
+     * Folder to start in, when it is not the project's own.
+     *
+     * The exception, not the rule: a commit has to run where the repository is. It exists for the
+     * triage handoff, which starts a Claude Code session in the workspace *above* the repositories so
+     * the session inherits the instructions and skills kept there, and names the repository in its
+     * prompt instead. The tab stays tied to the project either way, which is what keeps its title
+     * honest and its `actionId` exempt from `reconcile`.
+     */
+    cwd?: string;
   }): TerminalId | null {
     const existing = this.findActionSession(options.project.id, options.actionId);
     if (existing !== undefined) {
@@ -277,7 +287,7 @@ export class TerminalManager {
       // `task`, so the tab is closable at any moment and its output is never parsed as build markers.
       role: 'task',
       profileId: options.profileId ?? null,
-      cwd: options.project.path,
+      cwd: options.cwd ?? options.project.path,
       file: options.file,
       args: [...options.args],
       size: options.size,

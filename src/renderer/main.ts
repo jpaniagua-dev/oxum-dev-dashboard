@@ -170,6 +170,10 @@ class App {
         // Both ends, or none. ConPTY keeps its own copy of the screen and reprints it at the next
         // repaint it decides, which puts back the exact text that was just cleared.
         onClear: (terminalId) => window.api.clearPty(terminalId),
+        // Same channel as a pull request row, and therefore the same `http(s)`-only guard on the
+        // other side: a terminal prints whatever a program sends it, so this is the least trusted
+        // URL source in the app.
+        onOpenLink: (url) => void window.api.openExternal(url),
       },
       bootstrap.terminalCompat,
     );
@@ -520,10 +524,16 @@ class App {
   }
 
   /**
-   * Opens Claude Code on the tickets, in a terminal tab, and brings it forward.
+   * Opens Claude Code on the tickets, in a terminal tab, brings it forward, then records it in Jira.
    *
    * Focused straight away like the branch tab: the agent asks questions, and one waiting for an
    * answer behind the current tab is one nobody answers.
+   *
+   * The Jira writes come **after** the focus and on their own channel, which is the whole reason there
+   * are two: four writes per ticket over the network is seconds for a batch of eight, and awaiting them
+   * before focusing would hold the tab back for exactly as long. They are also allowed to fail without
+   * touching the session, so a failed sprint move stamps a message and nothing else, and the tab is
+   * never left unfocused because a board refused something.
    */
   private async workOnTickets(projectId: ProjectId, keys: readonly string[]): Promise<void> {
     const { terminalId, result } = await window.api.workOnTickets(projectId, [...keys]);
@@ -534,6 +544,14 @@ class App {
     }
     this.lastBranchProject = projectId;
     await this.focusTerminal(terminalId);
+
+    const jira = await window.api.startInJira([...keys]);
+    this.stampMessage(jira.message);
+    if (!jira.ok) {
+      // In the log as well as on the strip: the message names which ticket and which step, and that is
+      // the kind of thing you go looking for an hour later rather than reading as it flashes past.
+      console.warn('[triage]', jira.message);
+    }
   }
 
   /**
@@ -1428,10 +1446,17 @@ class App {
     panel.addEventListener('notes-escape', () => this.toggleNotes(false));
 
     /*
-     * `Alt+Shift+N`, matching the terminal's own `Alt+Shift+{d,b,w}` and for the same reasons: capture
-     * phase, because a focused xterm or CodeMirror would otherwise swallow it; `Alt+Shift` rather than
-     * `Ctrl+Alt`, which is AltGr on a Swiss French layout; a letter rather than a digit; and a guard on
-     * `event.repeat`, without which holding the keys toggles the panel dozens of times.
+     * `Alt+Shift+E`, matching the terminal's own `Alt+Shift+{d,b,w}` and the strip's `a`, and for the
+     * same reasons: capture phase, because a focused xterm or CodeMirror would otherwise swallow it;
+     * `Alt+Shift` rather than `Ctrl+Alt`, which is AltGr on a Swiss French layout; a letter rather than
+     * a digit; and a guard on `event.repeat`, without which holding the keys toggles the panel dozens
+     * of times.
+     *
+     * It was `N` until 5.2.0, moved on request. `E` is free in every handler in the app (the terminal's
+     * three letters, the strip's one, and the two `W` chords are the whole set) and it carries no AltGr
+     * character on the Swiss French layout, so the chord types nothing there is to shadow. Matched on
+     * `event.code`, the physical key, for the reason `Ctrl+Alt+W` is: under a chord that some layouts
+     * do map, `event.key` becomes the composed character and the comparison quietly stops matching.
      */
     document.addEventListener(
       'keydown',
@@ -1442,7 +1467,7 @@ class App {
           !event.shiftKey ||
           event.ctrlKey ||
           event.metaKey ||
-          event.code !== 'KeyN'
+          event.code !== 'KeyE'
         ) {
           return;
         }

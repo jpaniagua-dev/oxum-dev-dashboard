@@ -134,17 +134,30 @@ describe('buildJql', () => {
 });
 
 describe('parseTransitions', () => {
-  it('labels a transition by the status it lands on', () => {
+  it('labels a transition by the status it lands on, and carries its category', () => {
     // The transition's own name is a verb ("Start progress"); the destination is what the user chooses.
+    // The category comes along so a transition can also be picked by meaning, whatever the site named it.
     const body = {
       transitions: [
-        { id: '21', name: 'Start progress', to: { name: 'In progress' } },
-        { id: '31', name: 'Done', to: { name: 'Done' } },
+        {
+          id: '21',
+          name: 'Start progress',
+          to: { name: 'In progress', statusCategory: { key: 'indeterminate' } },
+        },
+        { id: '31', name: 'Done', to: { name: 'Done', statusCategory: { key: 'done' } } },
       ],
     };
     expect(parseTransitions(body)).toEqual([
-      { id: '21', label: 'In progress' },
-      { id: '31', label: 'Done' },
+      { id: '21', label: 'In progress', stage: 'in-progress' },
+      { id: '31', label: 'Done', stage: 'done' },
+    ]);
+  });
+
+  it('reports an unknown stage rather than guessing one from the name', () => {
+    // A payload with no destination carries no category either, and inferring "in progress" from the
+    // word "progress" is exactly the name matching the category exists to avoid.
+    expect(parseTransitions({ transitions: [{ id: '7', name: 'Start progress' }] })).toEqual([
+      { id: '7', label: 'Start progress', stage: 'unknown' },
     ]);
   });
 

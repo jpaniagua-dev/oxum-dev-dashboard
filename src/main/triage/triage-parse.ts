@@ -1,4 +1,5 @@
 import { TRIAGE_VERDICTS, type TriagedTicket, type TriageVerdict } from '@shared/contracts.js';
+import { nearestStoryPoints } from '../jira/jira-start.js';
 
 /**
  * Turns a model answer into verdicts, and never throws.
@@ -48,6 +49,16 @@ export function parseTriage(input: ParseInput): TriagedTicket[] {
       reason: toText(found?.reason, found === undefined ? 'The analysis did not mention it.' : ''),
       question: toText(found?.question, ''),
       next: toText(found?.next, ''),
+      /*
+       * Snapped onto the scale, or refused.
+       *
+       * Refused rather than defaulted, because this number is written to the ticket by `Work on this`
+       * and then planned against: a fabricated estimate is worse than a blank field, which at least
+       * reads as a question nobody answered. A model asked for a value from a list still returns 4 or
+       * 7.5 sometimes, and the same rounding serves both that and a value read out of an older
+       * `triage.json`.
+       */
+      estimate: nearestStoryPoints(found?.estimate),
     };
   });
 }
@@ -58,6 +69,7 @@ interface RawVerdict {
   reason?: unknown;
   question?: unknown;
   next?: unknown;
+  estimate?: unknown;
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   type WindowBounds,
 } from '@shared/contracts.js';
 import {
+  DEFAULT_CLAUDE_CONTEXT_ROOT,
   DEFAULT_PROJECTS_ROOT,
   defaultActions,
   makeActionId,
@@ -66,6 +67,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notesOpen: false,
   shellProfiles: [],
   projectsRoot: DEFAULT_PROJECTS_ROOT,
+  // The workspace above the repositories, so a `Work on this` session starts with the conventions and
+  // skills that live there. Empty would mean "start in the repository", which is what it used to do.
+  claudeContextRoot: DEFAULT_CLAUDE_CONTEXT_ROOT,
   // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
   // default here would come back every time the user deleted a project.
   projects: [],
@@ -177,6 +181,12 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     notesOpen: typeof input.notesOpen === 'boolean' ? input.notesOpen : false,
     shellProfiles: asProfiles(input.shellProfiles),
     projectsRoot: asString(input.projectsRoot, DEFAULT_SETTINGS.projectsRoot),
+    // Not `asString`, which falls back on an empty value: an empty string is a real answer here, and it
+    // means "start the session in the repository itself". Same reason `notesFolder` reads it by hand.
+    claudeContextRoot:
+      typeof input.claudeContextRoot === 'string'
+        ? input.claudeContextRoot.trim()
+        : DEFAULT_SETTINGS.claudeContextRoot,
     projects: asProjects(input.projects),
   };
 }

@@ -1,4 +1,5 @@
 import { release } from 'node:os';
+import { basename } from 'node:path';
 import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
 import {
   GIT_COMMIT_ACTION_ID,
@@ -66,10 +67,17 @@ import {
   readTransitions,
   type JiraCredentials,
 } from './jira/jira-service.js';
+import {
+  describeStart,
+  readStartContext,
+  startIssue,
+  type StartReport,
+} from './jira/jira-start.js';
 import type { NotesStore } from './notes/notes-store.js';
 import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
 import type { TriageService } from './triage/triage-service.js';
+import { buildWorkCommand, resolveClaudeContext } from './triage/work-command.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -451,8 +459,9 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
    * exactly what the "every action ends in a tab" rule exists to prevent, and in a tab it can be
    * watched, answered and killed.
    *
-   * Only the keys travel. The session reads the verdict itself from the tab's own tooling if it
-   * wants it, which keeps a long quoted string out of a shell command line.
+   * Only the keys and the repository name travel. The verdict, the reason and the question stay in
+   * `triage.json`, where the session goes and reads them itself: a copy pushed through a shell
+   * argument would be fragile to quote and stale from the moment it was made.
    *
    * The default shell profile is enough here, where the branch channel insists on an interactive
    * bash: `dev` is a `.bashrc` alias and needs one, `claude.exe` is a real executable that any pty
@@ -478,18 +487,15 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return { terminalId: null, result: { ok: false, message: 'No valid issue key' } };
       }
 
-      const profile = resolveDefaultProfile(deps.profiles(), deps.settings.get().defaultShellProfileId);
+      const settings = deps.settings.get();
+      const profile = resolveDefaultProfile(deps.profiles(), settings.defaultShellProfileId);
       if (profile === undefined) {
         return { terminalId: null, result: { ok: false, message: 'No shell profile available' } };
       }
 
-      // One ticket goes straight to the skill; a batch names them in order, and the skill still runs
-      // per ticket. Keys only, so the argument holds nothing a shell could read as syntax.
-      const prompt =
-        keys.length === 1
-          ? `/ticket ${keys[0]}`
-          : `Work these tickets one after another, using the ticket skill for each: ${keys.join(', ')}`;
-      const resolved = resolveShellCommand(profile, `claude "${prompt}"`);
+      const cwd = resolveClaudeContext(settings.claudeContextRoot, project.path);
+      const command = buildWorkCommand(keys, basename(project.path));
+      const resolved = resolveShellCommand(profile, command);
 
       const terminalId = deps.terminals.runProjectCommand({
         project,
@@ -499,14 +505,64 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         args: resolved.args,
         size: deps.terminalSize(),
         profileId: profile.id,
+        cwd,
       });
-
       return {
         terminalId,
         result:
           terminalId === null
             ? { ok: false, message: 'Could not open the tab' }
             : { ok: true, message: `${keys.join(', ')} handed to Claude Code in ${project.label}` },
+      };
+    },
+  );
+
+  /*
+   * Records a handoff on the board: active sprint, assigned to you, estimated, in progress.
+   *
+   * Its own channel, called by the renderer **after** the tab is open and focused. Four writes per
+   * ticket over the network is seconds for a batch of eight, and folded into `TriageWork` they would
+   * delay the moment the tab comes forward, which the tab's own note forbids: it holds an agent that
+   * asks questions, and one waiting behind the current tab is one nobody answers.
+   *
+   * Jira not being configured is reported in a sentence rather than as an error. The session is the
+   * deliverable and this app works for someone who never entered a token, so `ok` is about whether the
+   * bookkeeping ran, never about whether the handoff succeeded.
+   *
+   * The estimate is looked up in `triage.json` per key rather than travelling on the channel, which is
+   * what keeps this carrying nothing but issue keys while still writing a number somebody will plan
+   * against: the value was produced by the pass that read the description, not invented at click time.
+   */
+  ipcMain.handle(
+    IpcChannel.TriageStartInJira,
+    async (_event, issueKeys: unknown): Promise<GitResult> => {
+      const keys = (Array.isArray(issueKeys) ? issueKeys : [])
+        .map((key) => (typeof key === 'string' ? key.trim().toUpperCase() : ''))
+        .filter((key) => ISSUE_KEY_PATTERN.test(key))
+        .slice(0, WORK_BATCH_LIMIT);
+      if (keys.length === 0) {
+        return { ok: false, message: 'No valid issue key' };
+      }
+
+      const credentials = await deps.jiraCredentials();
+      if (credentials === null) {
+        return { ok: false, message: 'Jira not updated: no credentials configured' };
+      }
+      const { accountId, error } = await readMyAccountId(credentials);
+      if (error !== null) {
+        return { ok: false, message: `Jira not updated: ${error}` };
+      }
+
+      const triage = deps.triage();
+      const context = await readStartContext(credentials, accountId, await triage.sprintList());
+      const reports: StartReport[] = [];
+      for (const key of keys) {
+        reports.push(await startIssue(context, key, triage.estimateFor(key)));
+      }
+      deps.afterJiraWrite();
+      return {
+        ok: reports.every((report) => report.failed.length === 0),
+        message: describeStart(reports),
       };
     },
   );

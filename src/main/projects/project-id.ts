@@ -15,6 +15,17 @@ import type { ProjectAction, ProjectId } from '@shared/contracts.js';
 /** Default place to look for repositories. */
 export const DEFAULT_PROJECTS_ROOT = join(homedir(), 'oxum', 'projects');
 
+/**
+ * Default folder a `Work on this` session starts in: the workspace holding the repositories.
+ *
+ * Spelled out rather than derived with `dirname(DEFAULT_PROJECTS_ROOT)`, and that is deliberate. The
+ * parent of a repository folder is only the workspace under this layout; point `projectsRoot` at
+ * `C:\repos` and the same arithmetic yields the drive root, which is not a context, it is a folder
+ * whose ancestors nobody chose. A default is allowed to assume the layout it ships with; a computation
+ * would silently claim to work for every other one.
+ */
+export const DEFAULT_CLAUDE_CONTEXT_ROOT = join(homedir(), 'oxum');
+
 /** Stable id derived from a folder name, kept distinct from the editable label. */
 export function makeId(folder: string): ProjectId {
   return folder

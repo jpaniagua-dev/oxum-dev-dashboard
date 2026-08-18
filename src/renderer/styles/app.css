@@ -2713,20 +2713,40 @@ body {
   padding: 5px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  /*
+   * The row is a real `<button>`, so it needs the same reset as `.pulls__repo`: a button brings its own
+   * background, its own centred text and the platform's font, none of which belong on a list row.
+   * `font: inherit` before `font-size`, or the shorthand would put the inherited size back.
+   */
+  background: transparent;
   color: var(--text);
+  font: inherit;
   font-size: var(--font-md);
+  text-align: left;
+  cursor: pointer;
 }
 
 /*
- * Hovered like the other lists, though nothing here reacts to a click on the row.
+ * Hovered and focusable, the row being the gesture.
  *
- * Kept because the row is wide and its button sits at the far end: the highlight is what says which
- * line that button belongs to. It carries no `cursor: pointer`, which is the honest half of the
- * signal, the row itself doing nothing.
+ * `:focus-visible` is not decoration here: the row is the only control in this list, so it is the only
+ * thing Tab can reach, and a keyboard user with no visible ring has no way to tell which line Enter
+ * would open.
  */
-.worktree:hover {
+.worktree:hover:not(:disabled),
+.worktree:focus-visible {
   background: var(--surface-hover);
   border-color: var(--border);
+}
+
+/*
+ * A prunable row: readable, but not a target.
+ *
+ * `cursor: default` and no hover highlight, because the folder is gone and there is nothing to open;
+ * the row keeps its full opacity all the same, its `prunable` pill being the thing to read.
+ */
+.worktree:disabled {
+  cursor: default;
 }
 
 /* The clone it belongs to: context rather than identity, so it is dimmed and it shrinks first. */
@@ -2772,6 +2792,31 @@ body {
   white-space: nowrap;
 }
 
-.worktree__terminal {
+/*
+ * The terminal glyph at the end of the row.
+ *
+ * A `span` and not a button: the row is the button, and nesting one inside another is invalid HTML that
+ * browsers silently rearrange. Sized like `.icon-button--row`'s drawing so the gesture looks the same as
+ * the one the projects table and the Git tab offer, dimmed because it is a label for the row's action
+ * and not a second control, and brought up to full colour with the row it belongs to.
+ */
+.worktree__glyph {
+  display: flex;
   justify-self: end;
+  color: var(--text-dim);
+}
+
+.worktree__glyph svg {
+  width: 14px;
+  height: 14px;
+}
+
+.worktree:hover:not(:disabled) .worktree__glyph,
+.worktree:focus-visible .worktree__glyph {
+  color: var(--primary);
+}
+
+/* Nothing to open, so the glyph must not promise otherwise. */
+.worktree:disabled .worktree__glyph {
+  opacity: 0.35;
 }

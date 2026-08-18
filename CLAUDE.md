@@ -216,6 +216,18 @@ exceptions:
   goes through that very method to build the input), and a rename whose session died is dropped. The
   field's focus is a **microtask**, not a `requestAnimationFrame`: an animation frame is throttled in
   an occluded window and loses the race against the broadcast.
+- **URLs printed in a tab are clickable, through our own handler.** `@xterm/addon-web-links` is loaded
+  in `ensure()` and not from `fitVisible` like the WebGL addon: it registers a link provider and reads
+  nothing about the geometry, so a background tab is a fine place to be born. The handler is **ours**
+  rather than the addon's default, which calls `window.open`. That would work by accident, `window.ts`
+  turning every window-open request into a `shell.openExternal`, and it would be the only place in the
+  app where a URL reaches the browser without passing the main process's `http(s)` check, and a pty
+  prints whatever a program sends it, `file://` and `vscode://` included, so the check is the point. It goes
+  through `onOpenLink`, a callback like every other side effect of this pane, and calls
+  `event.preventDefault()` so the click does not also land on xterm's own mouse handling and start a
+  selection under the link that was just followed. The addon is pinned to the `0.12.x` line, which uses
+  only `registerLinkProvider`: verified against the published code, because the `0.13.0-beta` line is
+  the one that tracks xterm 6 and a beta has no place in a dependency list here.
 - **Git Bash is launched with `-i`**, otherwise aliases do not exist in the tab.
 - **Profiles are probed on disk** before being offered: a menu entry that fails on click is worse than
   no entry.
@@ -416,8 +428,11 @@ exceptions:
   credentials and the project keys, which are what fails in practice.
 - Nothing is queried until site, email and token are all three filled in: an unconfigured install makes
   no request at all.
-- **Story points are not displayed**: their field (`customfield_xxxxx`) varies from site to site and
-  would have to be discovered through `/rest/api/3/field`. To be added if the need is confirmed.
+- **Story points are still not displayed in this tab**, and the reason is unchanged: their field
+  (`customfield_xxxxx`) varies from site to site, so a column would cost a discovery call per refresh
+  for a number the list does not read. The Triage handoff does now **write** them, through
+  `pickStoryPointField` and one lookup per handoff rather than per poll. If a column is ever wanted here,
+  that function is what to reuse, and the cadence is the question to answer first.
 - **Transitions are read when the menu opens**, never cached: a workflow decides which moves are legal
   from the current status, so a remembered list would offer moves Jira would then refuse. One request
   per right-click is the right price for never lying.
@@ -538,9 +553,13 @@ exceptions:
 - **`Escape` is not in the CodeMirror keymap** but on the panel, in the bubble phase: the keymap runs at
   `Prec.highest`, so an `Escape` there would beat the search extension's own and close the panel leaving
   the search bar open behind it.
-- **`Alt+Shift+N`** toggles the panel, like the terminal's `Alt+Shift+{D,B,W}` and for the same reasons:
+- **`Alt+Shift+E`** toggles the panel, like the terminal's `Alt+Shift+{D,B,W}` and for the same reasons:
   capture phase, no `Ctrl+Alt` (AltGr on Swiss French), a letter and not a digit, and a guard on
-  `event.repeat`.
+  `event.repeat`. It was `N` until 5.2.0, moved on request. `E` is free in every handler in the app
+  (the terminal's `d`, `b`, `w`, the strip's `a`, and the two `W` chords are the whole set) and it
+  carries no AltGr character on the Swiss French layout, so the chord types nothing there is to shadow.
+  Matched on `event.code`, the physical key, for the reason `Ctrl+Alt+W` is. Any future letter chord
+  gets checked against that same set and that same layout.
 
 ## Git tab
 
@@ -769,14 +788,22 @@ exceptions:
   Only two tracks are free, and both are safe: the branch absorbs the leftover width and is left-aligned
   so its start still lines up, and the state column is `auto` but right-aligned against the terminal
   button so its badges line up on the edge that is read. Same answer as `.issue`, and the same reason.
-- **The terminal button does not fade, unlike the pull request and Git lists.** `.icon-button--row` sits
-  at `opacity: 0.4` until its row is hovered, which is right for a secondary affordance beside a row
-  whose main gesture is elsewhere. Here it is the row's only gesture and the reason the tab was asked
-  for. Same judgement as the Triage tab's `Analyse`.
-- **Clicking the row does nothing, on purpose.** Every other list in this strip has a row-level gesture;
-  the only one available here would be "open a terminal", and that spawns a tab rather than reusing one.
-  On a list that is scrolled and read, a stray click would cost a tab. It goes through `openShell` with a
-  `cwd` and no `projectId`, since a worktree is not a project and there is nothing for reuse to key on.
+- **The row IS the button, and clicking it opens a terminal.** A real `<button>` and not a `div`
+  carrying one, which is what makes the whole line the target and keeps the row reachable with Tab and
+  answerable with Enter. It can be one precisely because the row has a **single** gesture: there is no
+  second control to nest, which is the constraint that keeps a pull request row a `div`, and the Git
+  tab's repository row is the same shape for the same reason. It goes through `openShell` with a `cwd`
+  and no `projectId`, since a worktree is not a project and there is nothing for reuse to key on: every
+  click therefore spawns a tab. That was the argument for keeping the gesture on a button until 5.2.0,
+  and it lost to use, a whole-row target being what everything else in this strip taught the hand to
+  expect. A prunable row is `disabled`, which is also the one state that keeps it out of the tab order
+  without hiding it.
+- **The terminal glyph stays, decorative.** A `span` carrying an `aria-hidden` drawing (`createIcon`
+  marks it so, and the button is named by its own `aria-label`), because the row would otherwise be a
+  wide clickable strip with nothing on it saying what the click does. It does **not** fade like
+  `.icon-button--row`, which sits at `opacity: 0.4` until its row is hovered: that is right for a
+  secondary affordance beside a row whose main gesture is elsewhere, and here it labels the row's own
+  gesture. Same judgement as the Triage tab's `Analyse`.
 - **Read when the tab is shown, then on `RowsChanged`.** No monitor, like the Git tab, and for the same
   reason: it is the widest read of the strip (one `worktree list` per project, then a status per
   worktree), and doing it for a hidden tab is work for nobody. It needs no editing guard because the tab
@@ -901,6 +928,10 @@ exceptions:
 - **The overview shows the text the model was given, not the full description.** It is trimmed once
   and used for both the prompt and the stored ticket. A column showing a whole description beside a
   verdict drawn from an extract would invite blaming the verdict for something the model never read.
+- **The estimate sits with the status and the assignee, not in a block of its own.** It is a fact about
+  the ticket in the same way those two are, and it has to be on screen **before** the button rather than
+  only in its tooltip: `Work on this` writes that number to Jira. "no estimate" is stated rather than
+  left blank, an absent line being indistinguishable from a tab that forgot to show one.
 - **`next` is asked of the model alongside the question.** "Who does what once this is answered" is
   the half that makes a decision worth taking now rather than postponing, and it is what turns a
   list of questions into a list of moves.
@@ -919,11 +950,36 @@ exceptions:
 
 ### Handing a ticket to Claude Code
 
-- **The handoff passes the key and nothing else.** `TriageWork` takes issue keys, filters them
-  through `ISSUE_KEY_PATTERN` and builds `/ticket <KEY>`. The verdict, the reason and the question
-  stay in `triage.json`, where the session that picks the ticket up reads them itself: a copy pushed
-  through a shell argument would be both fragile to quote and stale from the moment it was made, and
-  the whole point of storing the analysis on disk is that any session can go and get it.
+- **The handoff passes the key and the repository name, nothing else.** `TriageWork` takes issue keys,
+  filters them through `ISSUE_KEY_PATTERN` and builds `/ticket <KEY> in the <repo> repository`. The
+  verdict, the reason and the question stay in `triage.json`, where the session that picks the ticket
+  up reads them itself: a copy pushed through a shell argument would be both fragile to quote and
+  stale from the moment it was made, and the whole point of storing the analysis on disk is that any
+  session can go and get it. The repository name is the exception, and it is there because the session
+  no longer starts inside the repository (see below); it goes through `safeRepoName`, which strips
+  anything a shell could read as syntax, since the value lands inside a double-quoted argument where
+  bash expands `$` and backticks.
+- **The session starts in the workspace, not in the repository, and that is the whole point.** Claude
+  Code reads its instructions, skills and memory from the folder it is launched in and from that
+  folder's ancestors, so a repository under a workspace starts with strictly **less** than the
+  workspace does: it sees its own `CLAUDE.md` and nothing of the conventions, skills and knowledge
+  several repositories share one level up. Launching at the workspace root and naming the repository
+  in the prompt keeps both halves. The folder is `claudeContextRoot`, a `settings.json`-only key like
+  `projectsRoot` and the poll cadences, and an **empty** value means "start in the repository", which
+  is what every version before 5.2.0 did. `resolveClaudeContext` falls back to the repository when the
+  configured root is not on disk: a pty spawned on a missing directory fails, and the failure would be
+  a tab closing on an error about a path nobody typed today. The default is spelled out rather than
+  derived with `dirname(projectsRoot)`, deliberately: the parent of a repository folder is only the
+  workspace under this layout, and the same arithmetic on `C:\repos` yields the drive root, which is
+  not a context but a folder whose ancestors nobody chose.
+- **`runProjectCommand` takes an optional `cwd` for exactly that**, and it is the exception rather than
+  the rule: a commit has to run where the repository is. The tab stays tied to the project either way,
+  which is what keeps its title honest and its reserved `actionId` exempt from `reconcile`.
+- **Permission prompts are off** (`--dangerously-skip-permissions`). The session is opened
+  deliberately, on a ticket that was read, in a repository chosen from a menu, to do the one thing the
+  tab exists for. The flag has **no `--allow-` prefix**, and a wrong spelling is not harmless: `claude`
+  rejects an unknown option, so the tab would open, print a usage error and sit at a shell prompt,
+  which reads exactly like a session that started and did nothing. Pinned by test for that reason.
 - **Two buttons, two different promises.** `Work on this` in the overview starts the ticket you are
   reading, whatever its verdict; `Work N ready` beside the counts starts the `ready` group. Only the
   batch is limited to `ready` (`readyKeys`, pure and tested): a ticket parked on a question is one
@@ -946,6 +1002,63 @@ exceptions:
 - **The batch button is pushed to the far end with `margin-left: auto`.** Not an `order` value: the
   sub-tabs are what the bar is for, and a control that launches a run of agents has no business
   sitting against `Ready` where a mis-aimed click would land on it.
+- **The handoff also records itself on the board: sprint, assignee, estimate, in progress.** Four
+  writes, in that order, and the order is not cosmetic: a transition can sit behind a screen that
+  requires an assignee, and a ticket left "In progress" while unassigned and outside the sprint is
+  precisely the state a standup argues about, so the changes that describe the work come before the one
+  that announces it. They live in `jira/jira-start.ts`, each step independent, every failure collected
+  rather than thrown.
+- **The writes live on their own channel, `TriageStartInJira`, called after the tab is focused.** Not
+  folded into `TriageWork`, and the reason is measurable: four writes per ticket over the network is
+  seconds for a batch of eight, and awaiting them inside the handoff would hold the tab back for
+  exactly that long, which the tab's own rule forbids (it holds an agent that asks questions, and one
+  waiting behind the current tab is one nobody answers). The renderer therefore opens, focuses, *then*
+  records. Folding the two back into one channel is the change to refuse.
+- **Nothing in Jira can stop the handoff.** A failed write stamps a message and touches nothing else;
+  Jira not being configured is the same case, reported in one sentence, since this app works for
+  someone who never entered a token. `ok` on that channel is about whether the bookkeeping ran, never
+  about whether the handoff succeeded, and the session is running either way.
+- **The estimate comes from the analysis, never from click time.** `TriagedTicket.estimate` is asked of
+  the model alongside the verdict, snapped onto `STORY_POINT_SCALE` by `nearestStoryPoints`, and read
+  back off disk by the handoff through `TriageStore.findTicket`. That is what lets the channel keep
+  carrying nothing but keys while still writing a number somebody will plan against: the value was
+  produced by the pass that actually read the description. A missing or unusable value stays `null` and
+  the step is **skipped**, because there is no safe default for a number a human plans against, and a
+  blank field at least reads as a question nobody answered. The rounding also runs on read, so a
+  hand-edited or older `triage.json` cannot put a value off the scale into a ticket.
+- **The story point field has to be discovered, and cannot be hardcoded.** There is no fixed id: a
+  company-managed project calls it `Story Points`, a team-managed one `Story point estimate`, and the
+  `customfield_xxxxx` behind either is allocated per site. That is the same fact that keeps story points
+  out of the Jira tab's display. `pickStoryPointField` asks `/rest/api/3/field`, keeps only
+  **number-typed** fields (a text field of the same name left by an import would accept a PUT and store
+  something the board cannot sum) and prefers the team-managed built-in when a site carries both, since
+  only one of them is the field the board adds up. Looked up once per handoff, not once per ticket.
+- **The sprint move goes through the Agile API**, `POST /rest/agile/1.0/sprint/{id}/issue`, for the
+  reason `listSprints` exists: an issue's sprint is another per-site `customfield_xxxxx`, and the Agile
+  endpoint says the same thing by sprint id with nothing to discover. One key per call even though it
+  takes a list, so a single rejected ticket cannot fail or hide behind the seven that were fine.
+- **"Current sprint" means `state === 'active'`, read and never inferred from position.** `listSprints`
+  sorts active first for display, and relying on that would make `pickActiveSprint` silently wrong the
+  day the sort changes for a display reason, with a ticket landing in another iteration. A board between
+  sprints has none, which is real and reported as skipped rather than falling back to the next future
+  sprint: moving a ticket into a sprint nobody has started is not what was asked.
+- **The in-progress transition is chosen by category, and the name is only a tiebreak.**
+  `IssueTransition` now carries `stage`, from the destination's `statusCategory`, for the reason an
+  issue's own stage does: status names are per-project and renamed at will, so matching the string "in
+  progress" finds nothing on a board that calls it "Développement". The short word list in
+  `pickStartTransition` only ranks the candidates when a workflow offers several in-progress
+  destinations at once, and never decides alone. No in-progress move available is a **skip**: the common
+  case is a ticket already in progress, which is the state that was asked for.
+- **Transitions are read at the moment of the write**, like the tab's own context menu: a workflow
+  decides which moves are legal from the current status, and the three writes above may have just
+  changed it.
+- **The writes are announced before they happen and reported after.** `describeWork` builds both
+  buttons' tooltips and names the four writes, because a control that did not say it touches Jira is one
+  whose consequences you discover at the next standup; the estimate is quoted when there is one and its
+  absence stated when there is not, an unmentioned omission reading as a promise. `describeStart` is the
+  account afterwards: failures named and counted, since "some writes failed" is useless when the point
+  is knowing which ticket and which step, and skips collapsed to their distinct reasons, eight tickets
+  missing the same field being one fact.
 - **Both buttons go through `bindWork`, which stops the click.** They open a menu on a **left** click,
   so the rule the Git tab's `⋯` recorded applies to them too: `showContextMenu` dismisses on any
   `click` reaching `document`, and without `stopPropagation` the opening click shuts the repository

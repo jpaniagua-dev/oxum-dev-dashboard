@@ -1,3 +1,5 @@
+import { STORY_POINT_SCALE } from '@shared/contracts.js';
+
 /**
  * The prompt handed to the headless Claude Code run, and the shape of what it is asked to send back.
  *
@@ -54,15 +56,26 @@ export function buildTriagePrompt(sprintName: string, tickets: readonly PromptTi
     'a verdict of "ready" is a promise that clicking it starts work, and a wrong promise there is',
     'worse than a cautious one.',
     '',
+    'Estimate every ticket in story points as well, on this scale and no other value:',
+    `${STORY_POINT_SCALE.join(', ')}.`,
+    '',
+    'Read the scale as effort for one front-end developer, uncertainty included: 1 is a change with',
+    'one obvious place to make it, 3 is a day of work with no unknown, 8 is a feature spanning',
+    'several screens or one whose shape is still fuzzy, and 21 is a ticket to split rather than',
+    'start. Estimate the work the ticket describes even when the verdict is not "ready": what a',
+    'blocked ticket will cost once it is unblocked is exactly what makes it worth scheduling. Answer',
+    '0 only when there is genuinely nothing to size, and it will be read as "no estimate".',
+    '',
     'Answer with JSON only, no prose around it, no code fence:',
     '',
-    '[{"key":"PROJ-123","verdict":"ready","reason":"one sentence","question":"","next":""}]',
+    '[{"key":"PROJ-123","verdict":"ready","reason":"one sentence","question":"","next":"","estimate":3}]',
     '',
     '"reason" is one sentence saying what the verdict rests on.',
     '"question" is filled only for "needs-decision", empty otherwise.',
     '"next" says what answering the question, or lifting the blocker, sets in motion: who does',
     'what, and whether it is a front-end change or work for someone else. That is the half that',
     'makes a question worth reading rather than postponing. One sentence, empty for "ready".',
+    '"estimate" is one number from the scale above.',
     'Include every ticket exactly once, using the keys exactly as given.',
     '',
     'Tickets:',

@@ -409,6 +409,20 @@ export const WORK_BATCH_LIMIT = 8;
  */
 export const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]*-\d+$/;
 
+/**
+ * The only story point values this app will write.
+ *
+ * A Fibonacci-style scale, because that is what the estimate is asked for in and what a board is
+ * planned in; a model handed a free numeric field answers 4, 6 or 7.5 often enough that the value has
+ * to be snapped to something a human would have chosen. Anything outside the scale is rounded to the
+ * nearest member, and anything that is not a finite positive number is refused outright rather than
+ * defaulted: no estimate is an honest state, an invented one is not.
+ *
+ * 21 is the top on purpose. A ticket estimated above that is one to split, and writing a bigger number
+ * would record an estimate nobody intends to plan against.
+ */
+export const STORY_POINT_SCALE: readonly number[] = [1, 2, 3, 5, 8, 13, 21];
+
 /* ------------------------------------------------------------------ *
  * GitHub checks
  * ------------------------------------------------------------------ */
@@ -537,6 +551,15 @@ export interface IssueTransition {
   readonly id: string;
   /** The status it lands on, which is what the user is choosing. */
   readonly label: string;
+  /**
+   * Category of the status it lands on, so a transition can be chosen by meaning and not by name.
+   *
+   * The same reason an issue's own stage comes from `statusCategory`: names are per-project and
+   * renamed at will ("In review", "Ready for QA", "Développement"), and code looking for the string
+   * "in progress" finds nothing on a site that never used that word. `unknown` when the payload
+   * carries no destination at all, which is also when `label` falls back to the transition's verb.
+   */
+  readonly stage: IssueStage;
 }
 
 /** One of the two saved views of the Jira tab. */
@@ -820,6 +843,15 @@ export interface TriagedTicket {
    * decision you can take in ten seconds and one you postpone because its consequences are unclear.
    */
   readonly next: string;
+  /**
+   * Story points the analysis thinks the ticket is worth, on `STORY_POINT_SCALE`.
+   *
+   * `null` when the model gave none or gave something off the scale, and that is a real answer rather
+   * than a gap to fill with a default: `Work on this` writes this number to Jira, and a fabricated
+   * estimate is a number a human will plan against. Asked of the analysis rather than computed at
+   * click time, because it is the pass that actually read the description.
+   */
+  readonly estimate: number | null;
   readonly assignee: string;
   readonly status: string;
   /**
@@ -1034,6 +1066,21 @@ export interface AppSettings {
   /** Where to look for repositories when detecting candidates. */
   projectsRoot: string;
   /**
+   * Folder a `Work on this` session starts in, instead of the ticket's own repository.
+   *
+   * Claude Code reads its instructions, its skills and its memory from the folder it is launched in
+   * and from that folder's ancestors. A repository sitting under a workspace therefore starts with
+   * strictly less context than the workspace itself: the session knows the repository's own
+   * `CLAUDE.md` and nothing of the conventions, the skills and the knowledge base kept one level up,
+   * which is exactly where they live when several repositories share them. Starting at the workspace
+   * root and naming the repository in the prompt is the way round that keeps both.
+   *
+   * Empty means "start in the repository", which is what every version before 5.2.0 did. Not in the
+   * settings window, like `projectsRoot` and the poll cadences: a path that is right on the first
+   * launch and never touched again does not need a field competing with the ones that are.
+   */
+  claudeContextRoot: string;
+  /**
    * Watched projects.
    *
    * Empty on a fresh install, which triggers a one-time seeding from `projectsRoot` so the app is
@@ -1224,6 +1271,19 @@ export const IpcChannel = {
    * `ISSUE_KEY_PATTERN`, like the branch channel: the renderer names tickets, never a command line.
    */
   TriageWork: 'triage:work',
+  /**
+   * invoke: (issueKeys[]) => GitResult
+   *
+   * Records a handoff on the Jira board: active sprint, assigned to the token's account, story points
+   * from the stored analysis, then in progress. A **separate** channel from `TriageWork` on purpose,
+   * and called after it: four writes per ticket over the network is seconds for a batch, and folded
+   * into the handoff they would delay the moment the tab comes forward. That tab holds an agent that
+   * asks questions, and one waiting behind the current tab is one nobody answers.
+   *
+   * Keys only, like every other Jira channel. The estimate is looked up in `triage.json` by the main
+   * process rather than travelling, so it is always the current one.
+   */
+  TriageStartInJira: 'triage:start-in-jira',
   /** on: (state: TriageState) => void, pushed when the sprint list, a result or the running flag moves */
   TriageChanged: 'triage:changed',
   /** invoke: () => TriageState, re-reads the sprints from Jira and returns the stored results */
@@ -1331,6 +1391,7 @@ export interface RendererApi {
     projectId: ProjectId,
     issueKeys: string[],
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
+  startInJira(issueKeys: string[]): Promise<GitResult>;
   analyseSprint(sprintId: number): Promise<TriageState>;
   onTriageChanged(listener: (state: TriageState) => void): () => void;
   /**

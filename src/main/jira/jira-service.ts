@@ -200,7 +200,9 @@ export function parseTransitions(body: unknown): IssueTransition[] {
       : typeof record.name === 'string'
         ? record.name
         : id;
-    transitions.push({ id, label });
+    // The category alongside the name, so a transition can also be picked by meaning: `Work on this`
+    // has to find "start working on it" on a site whose statuses are named in any language.
+    transitions.push({ id, label, stage: asStage(asRecord(target['statusCategory'])['key']) });
   }
   return transitions;
 }
@@ -240,6 +242,119 @@ export async function assignIssue(
   return result.status === 'ok'
     ? { ok: true, message: `${key} assigned` }
     : { ok: false, message: result.message };
+}
+
+/**
+ * Moves an issue into a sprint.
+ *
+ * The Agile API and not a field write, and that is the whole reason this is possible at all: an issue's
+ * sprint is a `customfield_xxxxx` whose number differs per site, which is why the tab never reads it.
+ * `POST /rest/agile/1.0/sprint/{id}/issue` says the same thing by sprint id and needs no discovery.
+ *
+ * One key per call even though the endpoint takes a list. A batch would report one outcome for eight
+ * tickets, so a single rejected issue would either fail the seven that were fine or hide behind them.
+ */
+export async function moveToSprint(
+  credentials: JiraCredentials,
+  key: string,
+  sprintId: number,
+): Promise<{ ok: boolean; message: string }> {
+  const result = await call(credentials, `/rest/agile/1.0/sprint/${sprintId}/issue`, {
+    method: 'POST',
+    body: { issues: [key] },
+  });
+  return result.status === 'ok'
+    ? { ok: true, message: `${key} moved to the sprint` }
+    : { ok: false, message: result.message };
+}
+
+/**
+ * Writes a story point estimate.
+ *
+ * Takes the field id rather than finding it, because finding it costs a call that returns every field
+ * on the site and the answer does not change between tickets: `findStoryPointField` is run once per
+ * handoff and the id is passed down. See its own note for why the id cannot be hardcoded.
+ */
+export async function setStoryPoints(
+  credentials: JiraCredentials,
+  key: string,
+  fieldId: string,
+  points: number,
+): Promise<{ ok: boolean; message: string }> {
+  const result = await call(credentials, `/rest/api/3/issue/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: { fields: { [fieldId]: points } },
+  });
+  return result.status === 'ok'
+    ? { ok: true, message: `${key} estimated at ${points}` }
+    : { ok: false, message: result.message };
+}
+
+/**
+ * Finds the site's story point field, the one thing this app cannot know in advance.
+ *
+ * There is no fixed id. A company-managed project calls it `Story Points`, a team-managed one calls it
+ * `Story point estimate`, and the `customfield_xxxxx` behind either is allocated per site, which is
+ * exactly why the Jira tab never displays the value. Writing it means asking `/rest/api/3/field` what
+ * it is called here, and taking the answer as authoritative rather than guessing a number.
+ *
+ * Returns `null` when the site has no such field, and the caller then skips the estimate and says so:
+ * a handoff must not fail over a field that may not exist.
+ */
+export async function findStoryPointField(
+  credentials: JiraCredentials,
+): Promise<{ fieldId: string | null; error: string | null }> {
+  const result = await call(credentials, '/rest/api/3/field');
+  if (result.status === 'error') {
+    return { fieldId: null, error: result.message };
+  }
+  return { fieldId: pickStoryPointField(result.body), error: null };
+}
+
+/**
+ * Names a story point field would answer to, most specific first.
+ *
+ * Ordered because a site can carry more than one: `Story point estimate` is the built-in of a
+ * team-managed project while `Story Points` is often a custom field left over from a migration, and
+ * picking whichever came back first in an unordered payload would write to the one the board does not
+ * read. Compared case-insensitively, Jira's own casing being inconsistent across the two.
+ */
+const STORY_POINT_FIELD_NAMES: readonly string[] = [
+  'story point estimate',
+  'story points',
+  'story point',
+];
+
+/**
+ * Picks the field out of `/rest/api/3/field`. Exported for testing: the payload is a few hundred
+ * entries on a real site and the interesting behaviour is which one wins.
+ */
+export function pickStoryPointField(body: unknown): string | null {
+  const numeric = new Map<string, string>();
+  for (const entry of asArray(body)) {
+    const field = asRecord(entry);
+    const id = field['id'];
+    const name = field['name'];
+    if (typeof id !== 'string' || typeof name !== 'string') {
+      continue;
+    }
+    // Number-typed only. A site can carry a text field named "Story points" left behind by an import,
+    // and a PUT of a number into it either fails or stores something the board cannot add up.
+    if (asRecord(field['schema'])['type'] !== 'number') {
+      continue;
+    }
+    const normalised = name.trim().toLowerCase();
+    if (!numeric.has(normalised)) {
+      numeric.set(normalised, id);
+    }
+  }
+  for (const candidate of STORY_POINT_FIELD_NAMES) {
+    const found = numeric.get(candidate);
+    if (found !== undefined) {
+      return found;
+    }
+  }
+  return null;
 }
 
 /** The account id behind the token, needed to assign anything. */

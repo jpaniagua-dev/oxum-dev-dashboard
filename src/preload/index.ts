@@ -155,6 +155,9 @@ const api: RendererApi = {
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
     ipcRenderer.invoke(IpcChannel.TriageWork, projectId, issueKeys),
 
+  startInJira: (issueKeys: string[]): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.TriageStartInJira, issueKeys),
+
   analyseSprint: (sprintId: number): Promise<TriageState> =>
     ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId),
 

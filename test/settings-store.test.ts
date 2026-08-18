@@ -101,4 +101,15 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings({ worktreesHeight: 5000 }).worktreesHeight).toBe(1200);
     expect(sanitizeSettings({}).worktreesHeight).toBe(360);
   });
+
+  it('keeps an empty Claude context root, which means "start in the repository"', () => {
+    // Not through `asString`, whose fallback-on-empty behaviour would be wrong here: the empty string is
+    // the way back to what every version before 5.2.0 did, so it has to survive a save.
+    expect(sanitizeSettings({ claudeContextRoot: '' }).claudeContextRoot).toBe('');
+    expect(sanitizeSettings({ claudeContextRoot: '  C:/workspace  ' }).claudeContextRoot).toBe(
+      'C:/workspace',
+    );
+    // Absent is a different statement from empty, and falls back to the workspace default.
+    expect(sanitizeSettings({}).claudeContextRoot.length).toBeGreaterThan(0);
+  });
 });

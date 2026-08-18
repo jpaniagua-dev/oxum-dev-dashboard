@@ -1,5 +1,5 @@
 import type { ProjectId, RepoWorktrees, Worktree } from '@shared/contracts.js';
-import { clearChildren, createElement, createIconButton } from './dom.js';
+import { clearChildren, createElement, createIcon } from './dom.js';
 import { TERMINAL_ICON } from './icons.js';
 import { presentGit } from './presenters.js';
 import { buildPill } from './project-table.js';
@@ -141,18 +141,40 @@ export function renderWorktreeList(
 }
 
 /**
- * One worktree line.
+ * One worktree line, and it is the button.
  *
- * A `div` and not a `button`: it carries a button of its own, and nesting them is invalid HTML that
- * browsers silently rearrange, the same reason a pull request row is a `div`. There is deliberately
- * **no row-level gesture** either, which departs from every other list in this strip: the only thing a
- * row could do here is open a terminal, and that spawns a tab on every click rather than reusing one.
- * On a list that is scrolled and read, a stray click would cost a tab, so the gesture stays on its
- * button.
+ * A real `<button>` rather than a `div` carrying one, which is what makes the whole line the target and
+ * keeps the row reachable with Tab and answerable with Enter. It can be one precisely because the row
+ * has a **single** gesture: there is no second control to nest, which is the constraint that keeps a
+ * pull request row a `div`. The Git tab's repository row is the same shape for the same reason.
+ *
+ * The terminal glyph stays, decorative and `aria-hidden` (`createIcon` marks it so, and the button is
+ * named by its own `aria-label`): the row would otherwise be a wide clickable strip with nothing on it
+ * saying what the click does, and the icon is what makes this gesture recognisable as the same one the
+ * projects table and the Git tab offer.
  */
 function buildWorktreeRow(row: WorktreeRow, actions: WorktreeListActions): HTMLElement {
   const { worktree } = row;
-  const element = createElement('div', { className: 'worktree' });
+  const element = createElement('button', { className: 'worktree' });
+  element.type = 'button';
+  /*
+   * Disabled on a prunable row rather than left to fail: the folder is gone, so the shell would open
+   * wherever the profile's own directory happens to be, which looks like a row that aimed at the wrong
+   * worktree. A disabled button is also the one state that keeps the row out of the tab order without
+   * hiding it, and the `prunable` pill says why.
+   */
+  element.disabled = worktree.prunable !== null;
+  element.setAttribute(
+    'aria-label',
+    worktree.prunable === null
+      ? `Open a terminal in ${worktree.name}`
+      : `${worktree.name}, folder missing`,
+  );
+  element.title =
+    worktree.prunable === null
+      ? `Open a new tab in ${worktree.path}`
+      : `${worktree.path} (folder missing)`;
+  element.addEventListener('click', () => actions.onOpenTerminal(worktree.path, worktree.name));
 
   element.append(
     createElement('span', {
@@ -251,25 +273,17 @@ function buildWorktreeRow(row: WorktreeRow, actions: WorktreeListActions): HTMLE
   element.append(state);
 
   /*
-   * The terminal button, legible on every row.
+   * The terminal glyph, legible on every row and not only on the hovered one.
    *
-   * Deliberately **not** `.icon-button--row`, which sits at `opacity: 0.4` until its row is hovered.
-   * That fade is right for the pull request and Git lists, where the terminal is a secondary affordance
-   * beside a row whose main gesture is elsewhere; here it is the only gesture the row has and the reason
-   * the tab was asked for, and a control nobody sees until they hover the right line is a control nobody
-   * finds. Same judgement as the Triage tab's `Analyse`, which turned down the same fade.
+   * Deliberately **not** the `.icon-button--row` treatment, which sits at `opacity: 0.4` until its row
+   * is hovered. That fade is right for the pull request and Git lists, where the terminal is a secondary
+   * affordance beside a row whose main gesture is elsewhere; here it *is* the row's gesture and the
+   * reason the tab was asked for, and an affordance nobody sees until they hover the right line is one
+   * nobody finds. Same judgement as the Triage tab's `Analyse`, which turned down the same fade.
    */
-  const terminal = createIconButton(TERMINAL_ICON, {
-    label: `Open a terminal in ${worktree.name}`,
-    title: `Open a new tab in ${worktree.path}`,
-    className: 'worktree__terminal',
-  });
-  // Disabled on a prunable row rather than left to fail: the folder is gone, so the shell would open
-  // wherever the profile's own directory happens to be, which looks like the button aimed at the
-  // wrong worktree.
-  terminal.disabled = worktree.prunable !== null;
-  terminal.addEventListener('click', () => actions.onOpenTerminal(worktree.path, worktree.name));
-  element.append(terminal);
+  const glyph = createElement('span', { className: 'worktree__glyph' });
+  glyph.append(createIcon(TERMINAL_ICON, { paint: 'stroke' }));
+  element.append(glyph);
 
   return element;
 }

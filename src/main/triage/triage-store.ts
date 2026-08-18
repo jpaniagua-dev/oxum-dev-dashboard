@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import type { TriageResult } from '@shared/contracts.js';
+import type { TriagedTicket, TriageResult } from '@shared/contracts.js';
+import { nearestStoryPoints } from '../jira/jira-start.js';
 import { atomicWriteFile } from '../store/atomic-write.js';
 import { AppPaths } from '../store/paths.js';
 
@@ -35,6 +36,27 @@ export class TriageStore {
 
   get(sprintId: number): TriageResult | undefined {
     return this.results.get(sprintId);
+  }
+
+  /**
+   * Finds one ticket by key, across every sprint analysed.
+   *
+   * What makes the handoff able to carry an estimate while the channel still passes nothing but keys:
+   * the analysis is on disk, so the main process goes and reads it rather than being handed a copy that
+   * would be stale from the moment it was made. The most recent analysis wins, a key being able to
+   * appear in two sprints once a ticket is carried over, and the fresher verdict is the one that read
+   * the ticket as it stands today.
+   */
+  findTicket(key: string): TriagedTicket | undefined {
+    const wanted = key.toUpperCase();
+    let best: { ticket: TriagedTicket; analysedAt: string } | undefined;
+    for (const result of this.results.values()) {
+      const ticket = result.tickets.find((entry) => entry.key.toUpperCase() === wanted);
+      if (ticket !== undefined && (best === undefined || result.analysedAt > best.analysedAt)) {
+        best = { ticket, analysedAt: result.analysedAt };
+      }
+    }
+    return best?.ticket;
   }
 
   /** Plain object keyed by sprint id, the shape the renderer receives. */
@@ -85,6 +107,9 @@ function readResult(value: unknown): TriageResult | null {
           reason: typeof entry['reason'] === 'string' ? entry['reason'] : '',
           question: typeof entry['question'] === 'string' ? entry['question'] : '',
           next: typeof entry['next'] === 'string' ? entry['next'] : '',
+          // Through the same rounding as a fresh answer, so a file written before the scale existed, or
+          // hand-edited, cannot put a value off it on screen and then into a ticket.
+          estimate: nearestStoryPoints(entry['estimate']),
           assignee: typeof entry['assignee'] === 'string' ? entry['assignee'] : '',
           status: typeof entry['status'] === 'string' ? entry['status'] : '',
           description: typeof entry['description'] === 'string' ? entry['description'] : '',

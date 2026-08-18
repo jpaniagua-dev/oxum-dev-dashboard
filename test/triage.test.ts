@@ -8,6 +8,7 @@ import {
   countVerdicts,
   describeAge,
   describeRun,
+  describeWork,
   firstFilledVerdict,
   readyKeys,
 } from '../src/renderer/ui/triage-panel.js';
@@ -16,6 +17,63 @@ const asked = [
   { key: 'PROJ-1', summary: 'Add a column', assignee: 'dev@example.com', status: 'To Do', description: 'Body' },
   { key: 'PROJ-2', summary: 'Fix the header', assignee: '', status: 'To Do', description: '' },
 ];
+
+describe('parseTriage: the estimate', () => {
+  const one = (extra: string): TriagedTicket | undefined =>
+    parseTriage({
+      answer: `[{"key":"PROJ-1","verdict":"ready","reason":"ok"${extra}}]`,
+      asked: [asked[0] as (typeof asked)[number]],
+    })[0];
+
+  it('keeps a value the scale carries', () => {
+    expect(one(',"estimate":5')?.estimate).toBe(5);
+  });
+
+  it('snaps a value off the scale, since the number is written to a ticket', () => {
+    // A model handed a numeric field answers 4 or 6 often enough, and the board is planned in Fibonacci.
+    expect(one(',"estimate":6')?.estimate).toBe(5);
+  });
+
+  it('refuses a missing or unusable estimate rather than defaulting to one', () => {
+    // An invented estimate is a number a human plans against. A blank field at least reads as a question
+    // nobody answered, and the prompt tells the model to answer 0 when there is nothing to size.
+    expect(one('')?.estimate).toBeNull();
+    expect(one(',"estimate":0')?.estimate).toBeNull();
+    expect(one(',"estimate":"soon"')?.estimate).toBeNull();
+  });
+
+  it('leaves a forgotten ticket without an estimate, as it leaves it unclear', () => {
+    // Same rule as the verdict: a ticket the analysis skipped must not come back carrying values nobody
+    // produced for it.
+    const tickets = parseTriage({ answer: '[{"key":"PROJ-1","verdict":"ready","estimate":3}]', asked });
+    expect(tickets[1]?.verdict).toBe('unclear');
+    expect(tickets[1]?.estimate).toBeNull();
+  });
+});
+
+describe('describeWork', () => {
+  it('announces the four Jira writes, which happen out of sight', () => {
+    const sentence = describeWork(['PROJ-1'], 3);
+    expect(sentence).toContain('PROJ-1');
+    expect(sentence).toContain('active sprint');
+    expect(sentence).toContain('assigns it to you');
+    expect(sentence).toContain('3 story points');
+    expect(sentence).toContain('starts progress');
+  });
+
+  it('states a missing estimate rather than staying silent about it', () => {
+    // An unmentioned omission reads as a promise: the tooltip has to say the field will not be written.
+    expect(describeWork(['PROJ-1'], null)).toContain('no story points');
+  });
+
+  it('does not quote one number for a batch of tickets', () => {
+    // Several tickets carry several estimates, and naming one would be right for at most one of them.
+    const sentence = describeWork(['PROJ-1', 'PROJ-2'], null);
+    expect(sentence).toContain('2 tickets');
+    expect(sentence).toContain('the story points the analysis gave each');
+    expect(sentence).not.toContain('no story points');
+  });
+});
 
 describe('parseTriage', () => {
   it('reads a plain JSON array', () => {
@@ -145,6 +203,7 @@ const ticketWith = (verdict: TriagedTicket['verdict']): TriagedTicket => ({
   reason: '',
   question: '',
   next: '',
+  estimate: null,
   assignee: '',
   status: '',
   description: '',
@@ -213,6 +272,7 @@ describe('firstFilledVerdict', () => {
     reason: '',
     question: '',
     next: '',
+    estimate: null,
     assignee: '',
     status: '',
     description: '',

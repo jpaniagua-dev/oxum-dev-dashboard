@@ -312,10 +312,14 @@ export class TriagePanel {
       const work = createElement('button', {
         className: 'button button--primary triage__work',
         text: `Work ${ready.length} ready`,
-        title:
+        // The cap is named in the tooltip when it bites, so the label's number and the truth agree; the
+        // Jira half comes from the same builder as the single-ticket button, per-ticket estimates being
+        // the one thing a batch cannot state up front.
+        title: `${
           ready.length < countVerdicts(result.tickets).ready
-            ? `Hands the first ${ready.length} of them to Claude Code, one after another`
-            : 'Hands them to Claude Code, one after another',
+            ? `The first ${ready.length} of them, one after another. `
+            : 'One after another. '
+        }${describeWork(ready, null)}`,
       });
       work.type = 'button';
       this.bindWork(work, ready);
@@ -454,7 +458,19 @@ export class TriagePanel {
     );
     this.hosts.overview.append(head);
 
-    const facts = [ticket.status, ticket.assignee.length > 0 ? ticket.assignee : 'unassigned']
+    /*
+     * The estimate sits with the status and the assignee, not in a block of its own.
+     *
+     * It is a fact about the ticket in the same way those two are, and it belongs on screen **before**
+     * the button rather than only in its tooltip: `Work on this` writes this number to Jira, so it has
+     * to be readable without hovering anything. "no estimate" is stated rather than left blank, an
+     * absent line being indistinguishable from a tab that forgot to show one.
+     */
+    const facts = [
+      ticket.status,
+      ticket.assignee.length > 0 ? ticket.assignee : 'unassigned',
+      ticket.estimate === null ? 'no estimate' : `${ticket.estimate} points`,
+    ]
       .filter((fact) => fact.length > 0)
       .join(' · ');
     if (facts.length > 0) {
@@ -488,7 +504,10 @@ export class TriagePanel {
     const work = createElement('button', {
       className: 'button button--primary',
       text: 'Work on this',
-      title: `Runs the ticket skill on ${ticket.key} in a terminal tab`,
+      // The Jira half is spelled out because it is a write nobody sees happen, on a board the team
+      // reads. The estimate is named when there is one and its absence stated when there is not: a
+      // tooltip promising story points that were never written is worse than one that says so.
+      title: describeWork([ticket.key], ticket.estimate),
     });
     work.type = 'button';
     this.bindWork(work, [ticket.key]);
@@ -641,6 +660,36 @@ export function readyKeys(tickets: readonly TriagedTicket[]): string[] {
     .filter((ticket) => ticket.verdict === 'ready')
     .slice(0, WORK_BATCH_LIMIT)
     .map((ticket) => ticket.key);
+}
+
+/**
+ * What a `Work on this` click is about to do, in one sentence.
+ *
+ * Both work buttons say it, because both do two things at once: they open a Claude Code session **and**
+ * they write to Jira. The Jira half happens out of sight, on a board the whole team reads, so a control
+ * that did not announce it would be one whose consequences you discover at the next standup. The
+ * sentence lists the four writes in the order they are made.
+ *
+ * `estimate` is `null` for the batch button, which covers several tickets with different estimates and
+ * therefore cannot name one: the sentence then says the estimate comes from the analysis rather than
+ * quoting a number that would be right for at most one of them. `null` on the single-ticket button
+ * means the analysis gave none, and that is stated too, an unmentioned omission reading as a promise.
+ *
+ * Pure and exported: it is the only warning the user gets before four writes they cannot preview.
+ */
+export function describeWork(keys: readonly string[], estimate: number | null): string {
+  const subject = keys.length === 1 ? keys[0] : `${keys.length} tickets`;
+  const points =
+    keys.length === 1
+      ? estimate === null
+        ? 'no story points (the analysis gave none)'
+        : `${estimate} story points`
+      : 'the story points the analysis gave each';
+  return (
+    `Runs the ticket skill on ${subject} in a terminal tab, and in Jira: ` +
+    `moves ${keys.length === 1 ? 'it' : 'them'} to the active sprint, ` +
+    `assigns ${keys.length === 1 ? 'it' : 'them'} to you, sets ${points}, and starts progress`
+  );
 }
 
 /** Counts per verdict, for the sub-tab badges. Exported for testing. */

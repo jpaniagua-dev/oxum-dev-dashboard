@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import {
@@ -121,6 +122,15 @@ export interface TerminalPaneActions {
    * it at the next repaint it decides to make.
    */
   onClear: (terminalId: TerminalId) => void;
+  /**
+   * Opens a URL printed in the terminal, in the real browser.
+   *
+   * A callback and not a direct `window.api` call, like every other side effect this pane has: the
+   * pane builds DOM and knows nothing about the process boundary. The renderer cannot open a browser
+   * itself anyway, `shell.openExternal` living in the main process behind the same `http(s)`-only
+   * guard the pull request rows already go through.
+   */
+  onOpenLink: (url: string) => void;
 }
 
 /** Which side of a tab a drop lands on. */
@@ -662,6 +672,27 @@ export class TerminalPane {
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    /*
+     * URLs printed in a tab become clickable.
+     *
+     * Loaded here and not from `fitVisible` like the WebGL addon: this one registers a link provider
+     * and reads nothing about the geometry, so a background tab is a perfectly good place to be born.
+     *
+     * The handler is ours rather than the addon's default, which calls `window.open`. That would work
+     * by accident, `window.ts` turning every window-open request into a `shell.openExternal`, and it
+     * would be the only place in the app where a URL reaches the browser without passing the
+     * main process's `http(s)` check. A pty prints whatever a program sends it, `file://` and
+     * `vscode://` included, so the check is the point.
+     *
+     * `preventDefault` is what stops the click from also landing on xterm's own mouse handling, which
+     * would move the cursor or start a selection under the link that was just followed.
+     */
+    term.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        event.preventDefault();
+        this.actions.onOpenLink(uri);
+      }),
+    );
     term.onData((data) => this.actions.onInput(terminalId, data));
 
     /*
