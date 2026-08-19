@@ -123,11 +123,16 @@ body {
 }
 
 /*
- * A `display` set by a class beats the browser's `[hidden]`, so every panel that has one needs this
- * spelled out. Also true of `.pulls` and of the folded strip's panels.
+ * A `display` set by a class beats the browser's `[hidden]`, so a folded strip has to hide its panels
+ * explicitly or they stay on screen while the strip shrinks around them.
+ *
+ * Selected by `[role='tabpanel']` and **not** by listing the classes. The list was the bug: it named
+ * `.projects__scroll` and `.pulls`, so the three panels that arrived later and set their own `display`
+ * (`.git`, `.triage`, `.worktrees`) kept painting through the fold. A rule that has to be extended
+ * every time a tab is added is a rule that will be forgotten again, and the symptom is silent. Every
+ * panel already carries the role, because that is what makes the strip a tab list.
  */
-.projects--collapsed .projects__scroll,
-.projects--collapsed .pulls {
+.projects--collapsed [role='tabpanel'] {
   display: none;
 }
 

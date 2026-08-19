@@ -6,7 +6,7 @@ import {
   IpcChannel,
   ISSUE_KEY_PATTERN,
   TICKET_BRANCH_ACTION_ID,
-  TRIAGE_WORK_ACTION_ID,
+  workActionId,
   WORK_BATCH_LIMIT,
   WORKTREE_ACTION_ID,
   type AppSettings,
@@ -630,7 +630,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
       const terminalId = deps.terminals.runProjectCommand({
         project,
-        actionId: TRIAGE_WORK_ACTION_ID,
+        // One tab per set of tickets: a handoff already running must never swallow a new one.
+        actionId: workActionId(keys),
         title: `${project.label} · ${keys.length === 1 ? keys[0] : `${keys.length} tickets`}`,
         file: resolved.file,
         args: resolved.args,

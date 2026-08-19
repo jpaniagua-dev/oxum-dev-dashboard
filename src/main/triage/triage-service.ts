@@ -5,7 +5,12 @@ import type {
   TriageResult,
   TriageState,
 } from '@shared/contracts.js';
-import { listSprints, readSprintIssues } from '../jira/jira-service.js';
+import {
+  listSprints,
+  readSprintIssues,
+  searchIssues,
+  type JiraCredentials,
+} from '../jira/jira-service.js';
 import type { SecretStore } from '../store/secret-store.js';
 import { runClaude } from './run-claude.js';
 import { parseTriage } from './triage-parse.js';
@@ -20,6 +25,14 @@ import { TriageStore } from './triage-store.js';
  * its own. Sprints move once a fortnight, and an analysis only ever happens because someone asked
  * for it. Reading is pulled when the tab is shown, and pushed only around a run.
  */
+/**
+ * How many ticket keys one live-field query may carry.
+ *
+ * They end up in a JQL string inside a URL, and a request refused for length fails with a message
+ * about the request rather than about triage. Generous next to a fortnight of analyses, and bounded.
+ */
+const LIVE_REFRESH_KEY_CAP = 200;
+
 export class TriageService {
   private readonly store = new TriageStore();
   private sprints: Sprint[] = [];
@@ -78,7 +91,20 @@ export class TriageService {
     return this.sprints;
   }
 
-  /** Re-reads the sprint list. The stored results are untouched: they outlive any refresh. */
+  /**
+   * Re-reads the sprint list, and the live fields of the tickets already analysed.
+   *
+   * The **verdicts** are untouched and outlive any refresh: they are what a long, paid run concluded,
+   * and nothing but another run may replace them. The **status** and the **assignee** are the opposite
+   * kind of fact, and they used to be frozen with the rest: a ticket analysed as `Ready` still read
+   * `Ready` after `Work on this` had moved it to in progress, and still read `Ready` once it was done.
+   * The one column that has to be current was the only one that never changed.
+   *
+   * One extra search per refresh, and this is a **pulled** service with no poll behind it: the tab asks
+   * when it is shown. A failure there is deliberately not surfaced as the tab's error either, since the
+   * sprint list is what the tab is for and stale statuses are worth less than a red banner over a
+   * perfectly usable analysis.
+   */
   async refresh(): Promise<TriageState> {
     const credentials = await this.credentials();
     if (credentials === null) {
@@ -90,7 +116,43 @@ export class TriageService {
     const { sprints, error } = await listSprints(credentials, this.settings().jira.projectKeys);
     this.sprints = sprints;
     this.error = error;
+    await this.refreshLiveFields(credentials);
     return this.push();
+  }
+
+  /**
+   * Re-reads `status` and `assignee` for every ticket held on disk.
+   *
+   * Queried by key rather than by sprint, because a stored analysis outlives the sprint it was made in:
+   * tickets get carried over, and a query scoped to open sprints would silently stop refreshing exactly
+   * the tickets that moved on, which is the case this exists for.
+   *
+   * Capped, because the keys go into a JQL string and that string goes into a URL. The cap is stated in
+   * the code rather than left to the server's own limit, whose failure mode is a request refused for a
+   * reason that has nothing to do with triage. Beyond it the newest analyses win, being the ones the
+   * tab is showing.
+   */
+  private async refreshLiveFields(credentials: JiraCredentials): Promise<void> {
+    const keys = this.store.keys().slice(0, LIVE_REFRESH_KEY_CAP);
+    if (keys.length === 0) {
+      return;
+    }
+    const jql = `key in (${keys.map((key) => `"${key}"`).join(', ')})`;
+    const { issues, error: searchError } = await searchIssues(credentials, jql, credentials.email);
+    if (searchError !== null) {
+      // Swallowed on purpose: see `refresh`. The analysis on screen stays usable with a stale status,
+      // which is strictly better than replacing it with an error about a query nobody asked for.
+      return;
+    }
+    const live = new Map(
+      issues.map((issue) => [
+        issue.key.toUpperCase(),
+        { status: issue.status, assignee: issue.assignee },
+      ]),
+    );
+    if (this.store.applyLiveFields(live)) {
+      await this.store.write();
+    }
   }
 
   /**

@@ -388,8 +388,34 @@ export const GIT_COMMIT_ACTION_ID = `${RESERVED_ACTION_PREFIX}commit`;
  */
 export const TICKET_BRANCH_ACTION_ID = `${RESERVED_ACTION_PREFIX}branch`;
 
-/** Action id of the tab where the Triage tab hands tickets to an interactive Claude Code session. */
+/**
+ * Action id **prefix** of the tabs where the Triage tab hands tickets to Claude Code.
+ *
+ * A prefix and not an id, unlike the three above, and that is the whole point:
+ * `workActionId` appends the tickets so **each handoff gets its own tab**. Reuse is right for a commit
+ * or a branch, where a second click means "do that again"; it is wrong here, where the tab holds a
+ * long-lived interactive session. Shared, a second handoff found the first one still running and
+ * `runProjectCommand` handed back the tab it was already in: the new prompt never ran, and the only
+ * symptom was a session that ignored you.
+ *
+ * Still carries `RESERVED_ACTION_PREFIX`, which is what `isUnreachable` checks with `startsWith`, so a
+ * suffixed id stays exempt from the reconciliation that closes tabs whose action has disappeared.
+ */
 export const TRIAGE_WORK_ACTION_ID = `${RESERVED_ACTION_PREFIX}triage-work`;
+
+/**
+ * The tab a handoff belongs to: one per set of tickets, per project.
+ *
+ * Keyed on the tickets rather than unique per click, deliberately. Two clicks on the **same** ticket
+ * should land in the session already working it, not start a second agent on the same worktree, which
+ * is the one outcome worse than being blocked. Two clicks on **different** tickets get two tabs, which
+ * is what was missing.
+ *
+ * Pure and exported: the reuse rule is invisible until it is wrong in one direction or the other.
+ */
+export function workActionId(issueKeys: readonly string[]): string {
+  return `${TRIAGE_WORK_ACTION_ID}:${[...issueKeys].sort().join('-')}`;
+}
 
 /**
  * Action id of the tab that runs the worktree helper from the Worktrees tab.

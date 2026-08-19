@@ -338,6 +338,12 @@ exceptions:
   every save turned it back into `projects` and the tab was simply never remembered. Both lists are now
   looped over in their tests. A new tab goes at the **end** of the row, whatever its subject: inserting
   it in the middle moves the others under a cursor that has learnt where they are.
+- **The folded strip hides its panels by `[role='tabpanel']`, never by a list of classes.** A class that
+  sets `display` beats the browser's `[hidden]`, so a folded strip has to hide its panels explicitly.
+  The rule used to name `.projects__scroll` and `.pulls`, so the three panels that arrived later with
+  their own `display` (`.git`, `.triage`, `.worktrees`) kept painting through the fold while the strip
+  shrank around them. A rule extended once per new tab is a rule that gets forgotten, and the symptom
+  is silent; the role is already there, because it is what makes the strip a tab list.
 - **There is no application title bar any more.** Everything it carried (last refresh, `Refresh`,
   settings, theme) lives in the strip's tab row, which was already a chrome row: two chrome rows
   above a terminal is one too many when the terminal is the subject of the window. The application title
@@ -1046,6 +1052,20 @@ exceptions:
   account afterwards: failures named and counted, since "some writes failed" is useless when the point
   is knowing which ticket and which step, and skips collapsed to their distinct reasons, eight tickets
   missing the same field being one fact.
+- **Each handoff gets its OWN tab**, `workActionId(keys)` and not one shared id. Reuse is right for a
+  commit or a branch, where a second click means "do that again"; it is wrong for a tab holding a
+  long-lived interactive session. Shared, `runProjectCommand` found the previous handoff still running
+  and handed its tab straight back: the new prompt never ran, and the only symptom was a session
+  ignoring you. Keyed on the tickets rather than unique per click, because two clicks on the **same**
+  ticket must land in the session already working it, not start a second agent on one worktree. The
+  reserved prefix survives the suffix, which is what keeps `isUnreachable` from closing it.
+- **The tab statuses are re-read on refresh, the verdicts never are.** `status` and `assignee` used to
+  be frozen at analysis time with everything else, so a ticket analysed as `Ready` still read `Ready`
+  after `Work on this` had moved it, and long after it was done: the one column that has to be current
+  was the only one that never changed. `applyLiveFields` refreshes those two and nothing else, because
+  a verdict is what a paid run concluded and only another run may replace it. Queried by **key** and
+  not by sprint: a stored analysis outlives its sprint, and a query scoped to open sprints would stop
+  refreshing exactly the tickets that moved on.
 - **Both buttons go through `bindWork`, which stops the click.** They open a menu on a **left** click,
   and they were shipped completely dead: `showContextMenu` dismissed on any `click` reaching
   `document`, so the opening click shut the menu in the same tick, with nothing on screen and nothing

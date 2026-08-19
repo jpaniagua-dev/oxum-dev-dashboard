@@ -70,6 +70,62 @@ export class TriageStore {
 
   async save(result: TriageResult): Promise<void> {
     this.results.set(result.sprintId, result);
+    await this.write();
+  }
+
+  /** Every key held, across every sprint analysed, so the live fields can be re-read in one query. */
+  keys(): string[] {
+    const keys = new Set<string>();
+    for (const result of this.results.values()) {
+      for (const ticket of result.tickets) {
+        keys.add(ticket.key);
+      }
+    }
+    return [...keys];
+  }
+
+  /**
+   * Refreshes the fields that describe the ticket **now**, leaving the analysis alone.
+   *
+   * `status` and `assignee` were captured when the sprint was analysed, and an analysis is not re-run
+   * just because a ticket moved. Left as they were, the tab kept showing a ticket in `Ready` after
+   * `Work on this` had moved it to in progress, and long after it was done: the one column that has to
+   * be current was the only one that never changed.
+   *
+   * The verdict, the reason, the question and the estimate are **not** touched. Those are what the run
+   * concluded from the ticket as it read it; silently mixing a fresh status into an old verdict is
+   * honest, silently editing the verdict would not be.
+   *
+   * A key absent from the answer keeps what it had rather than being blanked: a ticket that left the
+   * search is not a ticket whose status is now empty.
+   *
+   * Returns whether anything moved, so a refresh that changed nothing does not rewrite the file.
+   */
+  applyLiveFields(live: ReadonlyMap<string, { status: string; assignee: string }>): boolean {
+    let changed = false;
+    for (const [sprintId, result] of this.results) {
+      let touched = false;
+      const tickets = result.tickets.map((ticket) => {
+        const fresh = live.get(ticket.key.toUpperCase());
+        if (
+          fresh === undefined ||
+          (fresh.status === ticket.status && fresh.assignee === ticket.assignee)
+        ) {
+          return ticket;
+        }
+        touched = true;
+        return { ...ticket, status: fresh.status, assignee: fresh.assignee };
+      });
+      if (touched) {
+        changed = true;
+        this.results.set(sprintId, { ...result, tickets });
+      }
+    }
+    return changed;
+  }
+
+  /** Persists whatever is held. Public so a live-field refresh can save without pretending to analyse. */
+  async write(): Promise<void> {
     await atomicWriteFile(AppPaths.triage(), `${JSON.stringify(this.snapshot(), null, 2)}\n`);
   }
 }

@@ -1,4 +1,9 @@
-import { WORK_BATCH_LIMIT, type TriagedTicket } from '../src/shared/contracts.js';
+import {
+  RESERVED_ACTION_PREFIX,
+  WORK_BATCH_LIMIT,
+  workActionId,
+  type TriagedTicket,
+} from '../src/shared/contracts.js';
 import { describe, expect, it } from 'vitest';
 import { flattenDocument } from '../src/main/jira/jira-service.js';
 import { isEmptyAnswer, parseTriage } from '../src/main/triage/triage-parse.js';
@@ -382,5 +387,32 @@ describe('describeAge', () => {
   it('says so when there is nothing to date', () => {
     expect(describeAge('', now)).toBe('Never analysed');
     expect(describeAge('not a date', now)).toBe('Never analysed');
+  });
+});
+
+/**
+ * Which tab a handoff lands in.
+ *
+ * Invisible until it is wrong, and it was wrong in the worse of the two directions: every handoff
+ * shared one id, so `runProjectCommand` found the previous session still running and handed its tab
+ * back. The second ticket's prompt never ran and the only symptom was a session ignoring you.
+ */
+describe('workActionId', () => {
+  it('gives two different tickets two different tabs', () => {
+    expect(workActionId(['PROJ-1'])).not.toBe(workActionId(['PROJ-2']));
+  });
+
+  it('sends the same ticket back to the tab already working it', () => {
+    // Not unique-per-click on purpose: two agents on one worktree is worse than being blocked.
+    expect(workActionId(['PROJ-1'])).toBe(workActionId(['PROJ-1']));
+  });
+
+  it('reads a batch as a set, so the order it was clicked in does not open a second tab', () => {
+    expect(workActionId(['PROJ-2', 'PROJ-1'])).toBe(workActionId(['PROJ-1', 'PROJ-2']));
+  });
+
+  it('keeps the reserved prefix, which is what exempts the tab from reconciliation', () => {
+    // `isUnreachable` tests it with `startsWith`: lose it and a settings save closes a running agent.
+    expect(workActionId(['PROJ-1']).startsWith(RESERVED_ACTION_PREFIX)).toBe(true);
   });
 });
