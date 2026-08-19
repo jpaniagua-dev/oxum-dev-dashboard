@@ -145,6 +145,12 @@ export interface IpcDependencies {
   readonly pickFolder: (title: string, parent: BrowserWindow | null) => Promise<string | null>;
   /** Opens or focuses the settings window. */
   readonly openSettings: () => Promise<void>;
+  /** Opens or focuses the servers window. */
+  readonly openServers: () => Promise<void>;
+  /** Closes the servers window, if it is open. Its `closed` hook hands any sessions back. */
+  readonly closeServers: () => void;
+  /** Tells every window whether the servers are detached, so the dashboard's button reads right. */
+  readonly broadcastServersDetached: (detached: boolean) => void;
   /** Records unsaved edits in the settings window, so closing it can ask first. */
   readonly setSettingsDirty: (dirty: boolean) => void;
   /** Pushes settings to every window, after a change that alters more than the caller's own state. */
@@ -284,6 +290,27 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       };
     },
   );
+
+  /*
+   * Detaches the `server` tabs into their own window, or brings them back.
+   *
+   * The order is load-bearing in both directions. **Detaching** opens the window first and moves the
+   * sessions second, so the payload that follows lands in a renderer that exists. **Re-attaching** moves
+   * the sessions back first and closes the window second, so the dashboard has adopted them before the
+   * window that was painting them goes away; and the window's own `closed` hook then re-runs the
+   * hand-back, which is a no-op because the manager returns early on an unchanged value.
+   */
+  ipcMain.handle(IpcChannel.ServersDetach, async (_event, detached: unknown): Promise<void> => {
+    const wanted = detached === true;
+    if (wanted) {
+      await deps.openServers();
+      deps.terminals.setServersDetached(true);
+    } else {
+      deps.terminals.setServersDetached(false);
+      deps.closeServers();
+    }
+    deps.broadcastServersDetached(wanted);
+  });
 
   ipcMain.handle(
     IpcChannel.GitState,

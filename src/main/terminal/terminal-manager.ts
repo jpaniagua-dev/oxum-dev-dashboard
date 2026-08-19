@@ -49,6 +49,9 @@ const RESTART_EXIT_TIMEOUT_MS = 8_000;
  */
 export type RerunDecision = 'spawn' | 'reuse' | 'restart';
 
+/** A session minus what `sessions()` derives: see `Entry.session`. */
+type StoredSession = Omit<TerminalSession, 'role'>;
+
 export function decideRerun(
   existing: { readonly running: boolean } | undefined,
   role: ActionRole,
@@ -60,7 +63,13 @@ export function decideRerun(
 }
 
 interface Entry {
-  readonly session: TerminalSession;
+  /**
+   * The session as stored, without the two fields that are **derived** on the way out.
+   *
+   * `closable` depends on live state and `role` lives on the entry beside it, so both are added in
+   * `sessions()`. Storing either here would be a second copy able to disagree with the first.
+   */
+  readonly session: StoredSession;
   readonly pty: IPty | null;
   /**
    * Role of the action this tab runs, null for a shell.
@@ -105,6 +114,14 @@ export class TerminalManager {
    */
   private groups: TerminalGroup[] = [];
   private direction: PaneDirection = 'columns';
+  /**
+   * Whether the `server` sessions are currently shown in their own window.
+   *
+   * Held here and nowhere else because this class is the only holder of a session's `role`, and because
+   * the layout is its business: a detached session must leave the dashboard's panes, and putting that
+   * anywhere else would mean a second answer to "which tabs exist".
+   */
+  private serversDetached = false;
 
   constructor(private readonly hooks: TerminalHooks) {}
 
@@ -126,8 +143,47 @@ export class TerminalManager {
    */
   setLayout(groups: readonly TerminalGroup[], direction: PaneDirection): void {
     this.direction = direction;
-    this.groups = normalizeGroups(groups, [...this.entries.keys()]);
+    this.groups = normalizeGroups(groups, this.layoutLive());
     this.hooks.onLayoutChanged(this.layout());
+  }
+
+  /**
+   * The sessions the dashboard's panes are allowed to hold.
+   *
+   * Everything except what is currently detached. Filtering here, in the one place both `setLayout` and
+   * `syncLayout` read, is what makes detaching a **layout** fact rather than a rendering trick: a
+   * detached session is simply not live as far as the panes are concerned, so `normalizeGroups` drops
+   * its tab and, crucially, does not re-add it as an orphan on the next sync. Filtering in the renderer
+   * instead would have the dashboard drop the tab, report the new layout, and the manager put it back,
+   * once per round, forever.
+   *
+   * Re-attaching needs no code at all for the same reason: the id becomes live again and
+   * `normalizeGroups` places it as an orphan, which is exactly how a freshly spawned session lands.
+   */
+  private layoutLive(): TerminalId[] {
+    return [...this.entries.keys()].filter((id) => !this.isDetached(id));
+  }
+
+  /** True when this session belongs to the servers window rather than to the dashboard. */
+  isDetached(id: TerminalId): boolean {
+    return this.serversDetached && this.entries.get(id)?.role === 'server';
+  }
+
+  /**
+   * Moves the `server` sessions to their own window, or brings them back.
+   *
+   * Both hooks fire, and both are needed: the layout because the dashboard's panes gain or lose tabs,
+   * and the session list because each window is sent only the sessions it owns. No pty is touched, which
+   * is the point of doing this at the layout level: a detached server keeps running, keeps its
+   * scrollback in `entry.buffer`, and only changes which window paints it.
+   */
+  setServersDetached(detached: boolean): void {
+    if (this.serversDetached === detached) {
+      return;
+    }
+    this.serversDetached = detached;
+    this.syncLayout();
+    this.hooks.onSessionsChanged(this.sessions());
   }
 
   /**
@@ -140,7 +196,7 @@ export class TerminalManager {
    */
   private syncLayout(): void {
     const before = JSON.stringify(this.groups);
-    this.groups = normalizeGroups(this.groups, [...this.entries.keys()]);
+    this.groups = normalizeGroups(this.groups, this.layoutLive());
     if (JSON.stringify(this.groups) !== before) {
       this.hooks.onLayoutChanged(this.layout());
     }
@@ -152,6 +208,10 @@ export class TerminalManager {
     return [...this.entries.values()].map((entry) => ({
       ...entry.session,
       closable: isClosable(entry.session, entry.role),
+      // Exposed so a renderer can tell a dev server from a shell without asking. `closable` is already
+      // derived from it here; the servers window needs the same fact to know which sessions are its own
+      // in the one payload that is not filtered per window, `bootstrap`.
+      role: entry.role,
     }));
   }
 
@@ -646,7 +706,7 @@ function baseSession(
     cwd: string;
     renamed: boolean;
   },
-): Omit<TerminalSession, 'running' | 'closable'> {
+): Omit<StoredSession, 'running' | 'closable'> {
   return {
     id,
     title: options.title,
@@ -717,7 +777,10 @@ export function isUnreachable(
  *
  * Exported for testing.
  */
-export function isClosable(session: TerminalSession, role: ActionRole | null): boolean {
+export function isClosable(
+  session: Pick<TerminalSession, 'kind' | 'running'>,
+  role: ActionRole | null,
+): boolean {
   if (session.kind === 'shell' || role === 'task') {
     return true;
   }

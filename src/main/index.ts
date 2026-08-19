@@ -19,6 +19,7 @@ import { SecretStore } from './store/secret-store.js';
 import { ProjectMonitor } from './projects/project-monitor.js';
 import { DEFAULT_PROJECTS_ROOT } from './projects/project-id.js';
 import { resolveProjects, seedProjects } from './projects/registry.js';
+import { ServersWindow, SERVERS_WINDOW_BOUNDS } from './servers-window.js';
 import { SettingsWindow, SETTINGS_WINDOW_BOUNDS } from './settings-window.js';
 import { AppPaths } from './store/paths.js';
 import { SettingsStore } from './store/settings-store.js';
@@ -93,6 +94,25 @@ async function bootstrap(): Promise<void> {
     },
   );
 
+  /*
+   * The servers window, and the ownership rule that comes with it.
+   *
+   * `onClosed` hands the sessions back unconditionally, however the window went: closed by its own
+   * button, by the title bar, or with the app shutting down. A running dev server owned by a window that
+   * no longer exists would be work with nothing able to show or stop it, which this app does not allow.
+   */
+  const serversWindow: ServersWindow = new ServersWindow(
+    new WindowStateStore(AppPaths.serversWindowState(), SERVERS_WINDOW_BOUNDS),
+    {
+      preloadPath: preloadPath(),
+      backgroundColor: () => themeController.backgroundColor(),
+      onClosed: () => {
+        terminals?.setServersDetached(false);
+        dashboardWindow.send(IpcChannel.ServersDetachedChanged, false);
+      },
+    },
+  );
+
   /** Sends to every live window. Used for state no window owns: the theme and the settings. */
   const broadcast = (channel: string, payload: unknown): void => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -107,6 +127,7 @@ async function bootstrap(): Promise<void> {
     (color) => {
       dashboardWindow.setBackgroundColor(color);
       settingsWindow.setBackgroundColor(color);
+      serversWindow.setBackgroundColor(color);
     },
   );
   themeController.setMode(settings.themeMode);
@@ -172,15 +193,41 @@ async function bootstrap(): Promise<void> {
   };
 
   const terminalManager = new TerminalManager({
-    onOutput: (terminalId, data) =>
-      dashboardWindow.send(IpcChannel.PtyOutput, { terminalId, data }),
+    /*
+     * Output goes to the one window that owns the session, never to both.
+     *
+     * Not a broadcast, and the reason is measured rather than stylistic: `TerminalPane.write` creates a
+     * view for whatever id it is handed, so a broadcast would build a second, hidden xterm per detached
+     * server in the dashboard and feed it every byte of a `ng serve`. Routing costs one map lookup.
+     */
+    onOutput: (terminalId, data) => {
+      const target = terminalManager.isDetached(terminalId) ? serversWindow : dashboardWindow;
+      target.send(IpcChannel.PtyOutput, { terminalId, data });
+    },
     // Reads `projectMonitor` through the closure rather than capturing it, so output keeps reaching
     // the current monitor after the project list is rebuilt.
     onParsed: (projectId, parsed) => projectMonitor.applyParsed(projectId, parsed),
     onProjectStartExit: (projectId, exitCode, stopped) =>
       projectMonitor.markExited(projectId, exitCode, stopped),
-    onSessionsChanged: (sessions: TerminalSession[]) =>
-      dashboardWindow.send(IpcChannel.TerminalsChanged, sessions),
+    /*
+     * Each window is told about its own sessions and no others.
+     *
+     * This is what makes detaching work with no change to `TerminalPane`: its `setSessions` already
+     * disposes the views of sessions that have left the list and re-normalises its panes, so a dashboard
+     * that stops being told about a server drops its tab and frees its terminal on its own. The servers
+     * window does the same in reverse. One rule, applied twice, instead of a "hide this tab" flag
+     * threaded through the renderer.
+     */
+    onSessionsChanged: (sessions: TerminalSession[]) => {
+      dashboardWindow.send(
+        IpcChannel.TerminalsChanged,
+        sessions.filter((session) => !terminalManager.isDetached(session.id)),
+      );
+      serversWindow.send(
+        IpcChannel.TerminalsChanged,
+        sessions.filter((session) => terminalManager.isDetached(session.id)),
+      );
+    },
     onLayoutChanged: (layout: TerminalLayout) =>
       dashboardWindow.send(IpcChannel.TerminalLayoutChanged, layout),
   });
@@ -311,6 +358,12 @@ async function bootstrap(): Promise<void> {
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
     openSettings: () => settingsWindow.open(),
+    openServers: () => serversWindow.open(),
+    closeServers: () => serversWindow.close(),
+    // Broadcast rather than sent to the dashboard alone: the servers window's own `Back` button reads
+    // the same state, and a window told nothing would keep showing a control for a state it has left.
+    broadcastServersDetached: (detached) =>
+      broadcast(IpcChannel.ServersDetachedChanged, detached),
     setSettingsDirty: (dirty) => settingsWindow.setDirty(dirty),
     broadcastSettings: (next: AppSettings) => broadcast(IpcChannel.SettingsChanged, next),
   });

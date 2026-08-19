@@ -152,6 +152,14 @@ class App {
   private resizer: { setHeight: (height: number) => void } | null = null;
   /** The Git tab's list/diff separator. Held so a settings change can reapply the stored width. */
   private gitSplitter: { setWidth: (width: number) => void } | null = null;
+  /**
+   * Whether the dev servers are currently in their own window.
+   *
+   * Mirrored from the main process rather than decided here: the window can be closed by its own cross,
+   * which this renderer never hears about directly, so a locally toggled flag would drift the moment it
+   * was. The button reads this; the main process writes it.
+   */
+  private serversDetached = false;
   private notes: NotesPanel | null = null;
   private notesResizer: { setWidth: (width: number) => void } | null = null;
 
@@ -258,6 +266,20 @@ class App {
     // Safe to apply mid-typing: `NotesState` carries no note body, so it cannot reach the editor.
     window.api.onNotesChanged((state) => this.notes?.apply(state));
     window.api.onTerminalsChanged((sessions) => {
+      /*
+       * Forget the replay marker of every session that has left this window.
+       *
+       * `replayBuffer` runs once per id, which was safe while an id only ever disappeared for good. A
+       * detached server keeps its id and comes back, and without this it would come back to a view
+       * whose scrollback was never written: an empty tab for a process that is running fine. Ids are
+       * unique, so dropping the marker of an id that is genuinely gone costs nothing.
+       */
+      const live = new Set(sessions.map((session) => session.id));
+      for (const id of this.replayed) {
+        if (!live.has(id)) {
+          this.replayed.delete(id);
+        }
+      }
       this.terminal?.setSessions(sessions);
       // Closing the very last tab must not leave a dead surface: with no session there is no
       // strip, and the "+" that could open a new one lives in the strip. Same rule as the
@@ -1281,6 +1303,20 @@ class App {
 
     requireElement<HTMLButtonElement>('add-project').addEventListener('click', () => {
       void this.addProject();
+    });
+
+    const serversButton = requireElement<HTMLButtonElement>('servers-button');
+    serversButton.addEventListener('click', () => {
+      // The state is not toggled here: the main process owns it and pushes it back, which is what keeps
+      // this button honest when the window is closed by its own cross rather than by this click.
+      void window.api.detachServers(!this.serversDetached);
+    });
+    window.api.onServersDetachedChanged((detached) => {
+      this.serversDetached = detached;
+      serversButton.setAttribute('aria-pressed', String(detached));
+      serversButton.title = detached
+        ? 'Bring the dev servers back into this window'
+        : 'Show the dev servers in their own window';
     });
 
     requireElement<HTMLButtonElement>('settings-button').addEventListener('click', () => {

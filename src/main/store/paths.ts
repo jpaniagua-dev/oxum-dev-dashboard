@@ -13,6 +13,9 @@ export const AppPaths = {
   windowState: (): string => join(app.getPath('userData'), 'window-state.json'),
   settingsWindowState: (): string =>
     join(app.getPath('userData'), 'settings-window-state.json'),
+  /** Its own file, so the position it was left in on a second monitor is where it comes back. */
+  serversWindowState: (): string =>
+    join(app.getPath('userData'), 'servers-window-state.json'),
   /** Encrypted Jira token, kept out of `settings.json` on purpose. */
   jiraToken: (): string => join(app.getPath('userData'), 'jira-token.bin'),
   /** Default notes folder, used when `notesFolder` is empty. */

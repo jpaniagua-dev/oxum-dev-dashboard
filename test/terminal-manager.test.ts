@@ -21,6 +21,7 @@ function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
     kind: 'project',
     projectId: 'web-app',
     actionId: 'run',
+    role: 'server',
     profileId: 'cmd',
     cwd: 'C:/repos/web-app',
     running: true,

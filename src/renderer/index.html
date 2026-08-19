@@ -85,6 +85,23 @@
             </button>
             <button
               type="button"
+              id="servers-button"
+              class="icon-button"
+              title="Show the dev servers in their own window"
+              aria-label="Detach the dev servers"
+              aria-pressed="false"
+            >
+              <!--
+                Two stacked bays with a status dot each: a rack, which is what this window shows.
+                Stroked like the notes and terminal icons, and `aria-pressed` because it toggles a
+                state rather than performing an action.
+              -->
+              <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                <path d="M2.6 3.2h10.8v4H2.6zM2.6 8.8h10.8v4H2.6zM4.6 5.2h.01M4.6 10.8h.01" />
+              </svg>
+            </button>
+            <button
+              type="button"
               id="settings-button"
               class="icon-button"
               title="Settings"

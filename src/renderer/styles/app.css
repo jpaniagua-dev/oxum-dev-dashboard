@@ -2916,3 +2916,113 @@ body {
   white-space: nowrap;
 }
 
+
+/* ----------------------------------------------------------- servers window */
+
+/*
+ * The servers window: a bar, then a grid that takes everything left.
+ *
+ * `100vh` and `overflow: hidden` on purpose. A terminal sizes itself from the box it is given, so a page
+ * that could scroll would let a tile grow past the viewport and be fitted to a height nobody can see.
+ * The grid is the scroll boundary, and there is nothing to scroll.
+ */
+.servers-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+  height: 100vh;
+  padding: 8px 10px 10px;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.servers__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.servers__back {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.servers__back:hover,
+.servers__back:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/*
+ * The tiles, in a grid whose column count the renderer computes.
+ *
+ * `--servers-columns` comes from `ceil(sqrt(n))`, which is what keeps four servers at two by two: a
+ * single row of four on a wide screen is four tall thin strips, and a build log in a thin strip wraps
+ * every line. `minmax(0, 1fr)` on both axes rather than `auto`, so a tile can be told to shrink; with
+ * `auto` a terminal's own content would set the floor and the grid would overflow the window.
+ */
+.servers__grid {
+  display: grid;
+  grid-template-columns: repeat(var(--servers-columns, 1), minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/*
+ * One server.
+ *
+ * A grid rather than a flex column, for the reason the rest of this file uses grids: the head is `auto`
+ * and the terminal takes the rest, and a flex child holding a canvas needs `min-height: 0` restated at
+ * every level to agree to shrink.
+ */
+.servers__tile {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.servers__tile-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+/* Truncated on the right: a tab title opens with the project, which is the half that identifies it. */
+.servers__tile-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+/*
+ * The terminal inside a tile.
+ *
+ * Nothing is overridden and nothing needs to be: `.terminal__view` is a plain block that shrinks
+ * (`min-width` and `min-height` at zero, `overflow: hidden`), which is exactly what a grid cell wants
+ * too. Only the padding differs, the dashboard's coming from the rule it shares with `.terminal__strip`
+ * and being sized for a pane rather than a tile. That the shared container needed no adjustment is the
+ * clearest sign the seam was cut in the right place.
+ */
+.servers__tile .terminal__view {
+  padding: 4px 6px;
+}

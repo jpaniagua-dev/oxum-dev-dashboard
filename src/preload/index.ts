@@ -61,6 +61,15 @@ const api: RendererApi = {
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IpcChannel.OpenExternal, url),
 
+  detachServers: (detached: boolean): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.ServersDetach, detached),
+
+  onServersDetachedChanged: (listener: (detached: boolean) => void): (() => void) => {
+    const handler = (_event: unknown, detached: boolean): void => listener(detached);
+    ipcRenderer.on(IpcChannel.ServersDetachedChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.ServersDetachedChanged, handler);
+  },
+
   writeClipboard: (text: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.ClipboardWrite, text),
 
