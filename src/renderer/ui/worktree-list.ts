@@ -270,6 +270,9 @@ function buildCreateButton(
   button.disabled = repos.length === 0;
 
   button.addEventListener('click', (event) => {
+    // Kept, though `showContextMenu` now forgives its own opening click and this is no longer what
+    // makes the menu appear. It still stops the click reaching anything upstream of the bar.
+    event.stopPropagation();
     const box = button.getBoundingClientRect();
     showContextMenu(
       event.clientX === 0 ? box.left : event.clientX,
@@ -517,6 +520,9 @@ function buildMenuButton(
   });
 
   button.addEventListener('click', (event) => {
+    // Same as the bar's button above: no longer load-bearing for the menu, kept so the click does not
+    // travel past the row.
+    event.stopPropagation();
     const box = button.getBoundingClientRect();
     showContextMenu(
       event.clientX === 0 ? box.left : event.clientX,

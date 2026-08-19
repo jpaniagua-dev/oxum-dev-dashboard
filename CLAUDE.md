@@ -830,8 +830,8 @@ exceptions:
   project silently absent from a list cannot be told from one the tab forgot to look at. An unreadable
   project is counted apart for the same reason, and its error sits **above** the rows rather than
   replacing them: one broken project must not hide the worktrees of the six that answered.
-- **The tab spawns the life cycle, it does not implement it.** The rule used to be that the tab creates
-  and removes nothing, and the reason was never "a list must not delete": it was that
+- **The tab spawns the life cycle, it does not implement it.** Until 5.3.0 the rule was that the tab
+  creates and removes nothing, and the reason was never "a list must not delete": it was that
   `git worktree add` and `remove` have rules a list would have to **reimplement** to be trustworthy (a
   shared `node_modules` junction to unlink *before* the removal, or it survives as an orphan; a refusal
   on a folder git no longer knows about; a stale registration to prune rather than delete), and getting
@@ -1113,13 +1113,11 @@ exceptions:
   is knowing which ticket and which step, and skips collapsed to their distinct reasons, eight tickets
   missing the same field being one fact.
 - **Both buttons go through `bindWork`, which stops the click.** They open a menu on a **left** click,
-  so the rule the Git tab's `⋯` recorded applies to them too: `showContextMenu` dismisses on any
-  `click` reaching `document`, and without `stopPropagation` the opening click shuts the repository
-  menu in the same tick. Shipped that way in the first version and both buttons were completely dead,
-  with nothing on screen and nothing in the logs, the menu being created and removed before a frame
-  was painted. They share one binder rather than repeating the call because the rule has to be
-  remembered once per menu opener, and the second one had already forgotten it. Any future control
-  that opens a menu from a left click needs the same line.
+  and they were shipped completely dead: `showContextMenu` dismissed on any `click` reaching
+  `document`, so the opening click shut the menu in the same tick, with nothing on screen and nothing
+  in the logs, the menu being created and removed before a frame was painted. **This no longer depends
+  on the call site** (see the context menu section below): the `stopPropagation` here is kept because
+  it also stops the click travelling past the row, not because the menu needs it.
 
 ## Claude Code runs: three of them, three models
 
@@ -1189,6 +1187,31 @@ exceptions:
   also catch a legitimate subject ending in a colon, and one stray line at the top of a textarea is
   deleted in a second, whereas a subject eaten by a cleanup rule is not. An empty or essay-length
   answer is reported rather than pasted, the textarea possibly holding something worth keeping.
+
+## Context menu: it forgives its own opening click
+
+- **The dismissal ignores exactly one click, the one that opened the menu.** Without it, a menu opened
+  from a **left**-click handler is closed by that same click as it reaches the `document` listener, in
+  the same tick, before a frame is painted: nothing on screen, nothing in the console, a button that
+  looks dead. Right-click openers were never affected, `contextmenu` firing no `click` at all.
+- **It is a mechanism now because the note was not one.** The rule used to be "call `stopPropagation`
+  at every left-click opener", written into this file after the Triage tab shipped both its buttons
+  dead. It then happened again, to the Worktrees tab's two openers, with the note sitting right there.
+  Twice is a design problem, not an attention problem.
+- **A flag set by `showContextMenu` itself, not the identity of the opening event.** Recognising the
+  event was the first attempt and is subtly wrong: it needs a capture-phase listener on `document`, and
+  `bindDismissal` is lazy, so on the very first menu of a session that listener is registered while the
+  opening click is already past document's capture phase. The first menu after launch would close on
+  its own and every later one would work, which is an intermittent version of the bug being fixed. A
+  flag set inside `showContextMenu` has no ordering dependency at all.
+- **It is cleared twice over, and both matter.** The dismissal consumes it, so the next click dismisses
+  normally; a `setTimeout` also clears it, for a menu opened from something that is not a click, whose
+  flag would otherwise sit armed and swallow the first genuine dismissal. A real click always lands in
+  a later task than the open, so the timeout can never disarm a flag still in use.
+- **Not covered by a test, and that is the whole shape of this bug.** The tests run under
+  `environment: 'node'` with no jsdom, on purpose: renderer modules here stay importable without a DOM,
+  and this file avoids import-time listeners for exactly that reason. So the menu's *contents* are pure
+  and tested while its *opening* is not, and both times this shipped broken it was the opening.
 
 ## Mail and Teams: why they are not here
 
