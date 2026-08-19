@@ -29,13 +29,13 @@ body {
 }
 
 /*
- * The window is a row: the workspace, then the notes panel.
+ * The window is a row holding the workspace.
  *
- * It used to sit under a top bar kept deliberately outside it, so that opening the notes changed the
- * workspace's width and nothing else. That bar is gone, its controls having moved into the strip's
- * tab row, and the property it protected survives its removal: `pane-resizer.ts` measures
- * `#projects-pane`'s distance to the top of the viewport with `getBoundingClientRect` at the moment
- * it needs it, never from a constant, so the pane simply starts higher now.
+ * It held a side panel until that feature was dropped, and before that it sat under a top bar kept
+ * outside it so a panel could change the workspace's width and nothing else. Both are gone and the
+ * property they protected survives them: `pane-resizer.ts` measures `#projects-pane`'s distance to
+ * the top of the viewport with `getBoundingClientRect` at the moment it needs it, never from a
+ * constant, so the pane simply starts where it starts.
  */
 .app__body {
   display: flex;
@@ -45,8 +45,8 @@ body {
 
 /*
  * `min-width: 0` is not cosmetic. The xterm surface has a large min-content width, and a flex item
- * refuses to shrink below it by default: without this the workspace stays wide and pushes the notes
- * panel off the right edge of the window.
+ * refuses to shrink below it by default: without this the workspace refuses to give a pixel back and
+ * anything beside it is pushed off the right edge of the window.
  */
 .workspace {
   display: flex;
@@ -124,7 +124,7 @@ body {
 
 /*
  * A `display` set by a class beats the browser's `[hidden]`, so every panel that has one needs this
- * spelled out. Third time in this file: `.pulls`, `.notes`, and now the folded strip's panels.
+ * spelled out. Also true of `.pulls` and of the folded strip's panels.
  */
 .projects--collapsed .projects__scroll,
 .projects--collapsed .pulls {
@@ -1161,157 +1161,6 @@ body {
   display: none;
 }
 
-/* ------------------------------------------------------------------ notes */
-
-.notes-resizer {
-  width: 5px;
-  flex: none;
-  background: var(--border);
-  cursor: ew-resize;
-}
-
-.notes-resizer:hover,
-.notes-resizer:focus-visible {
-  background: var(--primary);
-  outline: none;
-}
-
-.notes-resizer[hidden] {
-  display: none;
-}
-
-.notes {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  width: 340px;
-  min-width: 0;
-  border-left: 1px solid var(--border);
-  background: var(--surface);
-}
-
-/*
- * A `display` set by a class beats the browser's own rule for `[hidden]`, so the panel would stay on
- * screen when hidden. Same trap as `.pulls` and `.terminal__view`, both of which already carry it.
- */
-.notes[hidden] {
-  display: none;
-}
-
-.notes__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.notes__title {
-  font-size: var(--font-xs);
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.notes__list {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  gap: 2px;
-  max-height: 38%;
-  overflow-y: auto;
-  padding: 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-.notes__surface {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.notes__status {
-  flex: none;
-  margin: 0;
-  padding: 3px 8px;
-  border-top: 1px solid var(--border);
-  color: var(--text-faint);
-  font-size: var(--font-xs);
-}
-
-.note-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-}
-
-.note-row:hover {
-  background: var(--surface-hover);
-}
-
-.note-row--active {
-  background: var(--surface-inset);
-  border-color: var(--border-strong);
-  font-weight: 600;
-}
-
-.note-row__title {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.note-row__age {
-  color: var(--text-faint);
-  font-size: var(--font-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.note-row__delete {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-faint);
-  font: inherit;
-  line-height: 1;
-  cursor: pointer;
-  /* Revealed on hover: one delete cross per row, always visible, turns the list into a minefield. */
-  opacity: 0;
-}
-
-.note-row:hover .note-row__delete,
-.note-row__delete:focus-visible {
-  opacity: 1;
-}
-
-.note-row__delete:hover {
-  background: var(--surface-raised);
-  color: var(--error);
-}
-
-.notes__empty,
-.notes__error {
-  margin: 6px;
-  color: var(--text-faint);
-  font-size: var(--font-md);
-}
-
-.notes__error {
-  color: var(--error);
-}
-
 /* --------------------------------------------------------------- terminal */
 
 /* The terminal takes every pixel the projects strip does not need. */
@@ -1677,168 +1526,6 @@ body {
 
 /* ------------------------------------------------------------- format bar */
 
-/*
- * Copied verbatim from `oxum-prompt-editor`, along with the CodeMirror block below it. Every `var()`
- * they use already resolves here: the two projects' `tokens.css` are byte-identical, including the
- * `--md-*` and `--code-*` families this editor reads. Keeping the copies literal is what makes a
- * future re-sync a diff.
- */
-
-.format-bar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-wrap: wrap;
-  padding: 3px 8px;
-  background: var(--surface-raised);
-  border-bottom: 1px solid var(--border);
-}
-
-.format-bar__group {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-}
-
-/* Separators let the bar read as four families rather than a wall of thirteen icons. */
-.format-bar__separator {
-  width: 1px;
-  height: 16px;
-  margin: 0 5px;
-  background: var(--border);
-}
-
-.format-button {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-dim);
-  font-family: var(--font-ui);
-  font-size: var(--font-md);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.format-button:hover {
-  background: var(--surface-hover);
-  color: var(--primary);
-}
-
-.format-button:active {
-  background: var(--primary-soft);
-}
-
-.format-button svg {
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-/* Glyph buttons (B, I, H1) carry their label as text, so they opt out of stroke styling. */
-.format-button--glyph {
-  font-size: var(--font-sm);
-  letter-spacing: 0.02em;
-}
-
-.format-button--italic {
-  font-style: italic;
-}
-
-.format-button--strike {
-  text-decoration: line-through;
-}
-
-.format-button--mono {
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-/* ------------------------------------------------------------- codemirror */
-
-.cm-editor {
-  height: 100%;
-  font-family: var(--font-mono);
-  background: var(--surface);
-}
-
-.cm-editor.cm-focused {
-  outline: none;
-}
-
-.cm-scroller {
-  padding: 10px 14px 14px;
-  line-height: 1.6;
-}
-
-.cm-content {
-  caret-color: var(--primary);
-}
-
-.cm-cursor,
-.cm-dropCursor {
-  border-left-color: var(--primary);
-  border-left-width: 2px;
-}
-
-.cm-selectionBackground,
-.cm-editor .cm-selectionBackground,
-.cm-editor.cm-focused .cm-selectionBackground {
-  background: var(--selection) !important;
-}
-
-/* `.cm-activeLine` is set in the editor theme, not here: CodeMirror's base-theme selector is
-   more specific than a stylesheet rule and would win. See markdown-theme.ts. */
-
-.cm-gutters {
-  display: none;
-}
-
-.cm-placeholder {
-  color: var(--text-faint);
-  font-style: italic;
-}
-
-.cm-panels {
-  background: var(--surface-raised);
-  color: var(--text);
-  border-color: var(--border);
-}
-
-.cm-panels input,
-.cm-panels button {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-}
-
-.cm-searchMatch {
-  background: var(--primary-soft);
-  outline: 1px solid var(--primary-border);
-}
-
-.cm-searchMatch-selected {
-  background: var(--selection);
-}
-
-/*
- * The dashboard sets `user-select: none` on the body (only the terminal surface opts back in),
- * so without this the note text cannot be selected with the mouse at all.
- */
-.cm-editor {
-  user-select: text;
-}
-
 /* ------------------------------------------------------------------- git */
 
 /*
@@ -1863,7 +1550,7 @@ body {
   padding: 8px 12px 10px;
 }
 
-/* Same grammar as the two other separators of this app, on the horizontal axis like the notes one. */
+/* Same grammar as the other separator of this app, on the horizontal axis. */
 .git__resizer {
   background: var(--border);
   cursor: ew-resize;
@@ -3003,6 +2690,63 @@ body {
   padding: 3px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-inset);
+}
+
+/* The phase pill, pushed against the send-back button so every tile's state sits on the same edge. */
+.servers__tile-phase {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+/*
+ * Sends one tile back to the dashboard, without closing the window.
+ *
+ * Quiet until the tile is hovered, unlike the phase beside it: the phase is the reason to look at this
+ * window and this is a correction you make once. Same judgement, and the same opposite conclusion, as
+ * the Worktrees tab's dots.
+ */
+.servers__tile-back {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.servers__tile:hover .servers__tile-back,
+.servers__tile-back:focus-visible {
+  opacity: 1;
+  color: var(--primary);
+}
+
+/*
+ * The tone on the tile's own edge.
+ *
+ * The point of this window is an answer read from across a room, and four characters of text in a pill
+ * are not that. The border carries the same tone the pill does, from the same `presentServer` verdict,
+ * so the two can never disagree. `neutral` is left alone: a stopped server is not a state to be drawn
+ * towards.
+ */
+.servers__tile[data-tone='ok'] {
+  border-color: var(--primary-border);
+}
+
+.servers__tile[data-tone='busy'] {
+  border-color: var(--warning);
+}
+
+.servers__tile[data-tone='error'] {
+  border-color: var(--danger);
+  /* Doubled on the error case only, which is the one the window exists to catch. */
+  box-shadow: inset 0 0 0 1px var(--danger);
 }
 
 /* Truncated on the right: a tab title opens with the project, which is the half that identifies it. */

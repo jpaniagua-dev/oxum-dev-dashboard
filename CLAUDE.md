@@ -179,7 +179,7 @@ exceptions:
   frame in place does) brought the cursor back to column 0: the redraw restarted in the wrong place and
   never covered the tail of the previous frame.
 - **The pty is only told when the geometry really changed.** `fitVisible` runs on every render: tab
-  change, pane focus, opening the notes panel, and once per `pointermove` while dragging a splitter. A
+  change, pane focus, and once per `pointermove` while dragging a splitter. A
   resize to the same size is not free on Windows (ConPTY reprints the screen it holds) and a
   full-screen TUI answers each one by redrawing its whole frame. `View.sent` remembers the last
   announced size; the comparison costs nothing and removes every redundant resize.
@@ -339,7 +339,7 @@ exceptions:
   looped over in their tests. A new tab goes at the **end** of the row, whatever its subject: inserting
   it in the middle moves the others under a cursor that has learnt where they are.
 - **There is no application title bar any more.** Everything it carried (last refresh, `Refresh`,
-  notes, settings, theme) lives in the strip's tab row, which was already a chrome row: two chrome rows
+  settings, theme) lives in the strip's tab row, which was already a chrome row: two chrome rows
   above a terminal is one too many when the terminal is the subject of the window. The application title
   went with it, the native title bar already saying it. Benefit of the move: that row is the one that
   never collapses, so settings and refresh stay one click away when the strip is folded.
@@ -494,72 +494,6 @@ exceptions:
   first open: at module load, two DOM-less test files broke.
 - **No example placeholder in the settings.** A greyed example reads like a value that is already saved;
   where a placeholder does remain, it is an inferred value, and it is in very pale italics.
-
-## Notes panel
-
-- **The window is a row under the top bar** (`.app__body` as a flex row, `.workspace` as a column, the
-  `<aside>` on the right). The top bar stays **outside** that row, and that is the whole trick:
-  `#projects-pane` keeps its distance to the top of the viewport, so `resolvePaneHeight`,
-  `clampPaneHeight` and `test/pane-resizer.test.ts` are unchanged. Opening the panel changes **only the
-  width** of the workspace.
-- **`min-width: 0` on `.workspace` is not cosmetic**: xterm's min-content width is large and a flex item
-  refuses to shrink below it, so without this the panel goes off screen. And an explicit
-  `.notes[hidden] { display: none }`, same trap as `.pulls`.
-- **The window `resize` event does not fire when the panel opens**, the window not having changed size.
-  So `terminal.refit()` has to be called explicitly in three places: the toggle, the splitter drag, and
-  applying the remembered width at startup.
-- **`WORKSPACE_RESERVE = 480`** in `side-resizer.ts`: the panel can never shrink the terminal below
-  480 px. The invariant becomes a clamp, not a hope. `side-resizer.ts` is a separate module and **not** a
-  generalisation of `attachPaneResizer`: the latter hardcodes the vertical axis, and its direction is
-  exactly what its test locks down.
-- **No modal, no overlay.** A text selection started in the editor and released outside would fire a
-  `click` on the common ancestor: that is exactly the bug that got the settings modal removed, and a
-  text editor is its most exposed case.
-- **The file name is a timestamp, not the title.** The title *is* the first line of the body, so a name
-  derived from the title would be renamed on every keystroke on line 1, with Windows' `EPERM` race every
-  time. The id also guards against path traversal, validated at every entry point. And it **must keep its
-  `T`**: `NOTE_ID_PATTERN` requires it, and removing it made `isNoteId` fail, `update()` return in
-  silence, and every keystroke get lost.
-- **No frontmatter.** Everything it would carry is already free (`mtime`, size, first line), and the
-  round-trip would be a transformation on the one thing that must never be lost.
-- **The 300 ms debounce lives in the main process, not in the renderer.** The renderer dies several
-  times a minute under `--watch`; with the timer on the main side, a crash mid-sentence loses nothing,
-  and quitting has a single buffer to flush. `openNote` **flushes the queue then reads**, in a single
-  handler, so the ordering does not depend on the renderer's discipline.
-- **Deleting discards the pending buffer first**, otherwise a deferred write resurrects the file 200 ms
-  later. That is the store's most likely bug, and it has its test.
-- **`before-quit` is synchronous**: `preventDefault()`, then `flush().finally(() => app.quit())`, with
-  an early `return` without which the monitors would stop on a cancelled close.
-- **`notesStore.refresh()` is awaited BEFORE the window is created.** Done after the page loads, the
-  renderer's `bootstrap` gets ahead of it, comes back with an empty list, and a panel reopened at
-  startup shows its notes with none selected.
-- **`NotesState` never carries a note's body.** That is what makes a list refresh incapable, *by
-  construction*, of overwriting the text being typed. The list is pushed, the body is pulled.
-- **No `fs.watch`**: it would fire on our own writes and fight the editor, and on a synchronised folder
-  it would loop.
-- **The editor is taken from `oxum-prompt-editor`**, not rewritten. The `tokens.css` of both repositories
-  are byte-identical, including the `--md-*` variables `markdown-theme.ts` reads, so the CSS blocks copy
-  over untouched. Three accepted divergences, marked in the code: `@codemirror/language-data` dropped
-  (about 1.4 MB over 120 chunks, for prose), no font-size compartment, and a `loadDocument` that does a
-  **`setState`** and not a `replaceAll`, since otherwise the undo history survives the note change and
-  `Ctrl+Z` in note B types note A's content into it.
-- **The CSP did not have to change**: `style-src 'self' 'unsafe-inline'` was already there, and that is
-  what CodeMirror uses to inject its `<style>` elements. `script-src 'self'` stays intact, it needs no
-  `unsafe-eval`. A static import and not a dynamic one: a chunk emitted on demand would raise an
-  unverified question about `script-src` under `file://`.
-- **`.cm-editor { user-select: text }`** is mandatory: this app's `body` is `user-select: none` and only
-  `.terminal__surface` departed from it, so without this rule a note's text cannot be selected with the
-  mouse.
-- **`Escape` is not in the CodeMirror keymap** but on the panel, in the bubble phase: the keymap runs at
-  `Prec.highest`, so an `Escape` there would beat the search extension's own and close the panel leaving
-  the search bar open behind it.
-- **`Alt+Shift+E`** toggles the panel, like the terminal's `Alt+Shift+{D,B,W}` and for the same reasons:
-  capture phase, no `Ctrl+Alt` (AltGr on Swiss French), a letter and not a digit, and a guard on
-  `event.repeat`. It was `N` until 5.2.0, moved on request. `E` is free in every handler in the app
-  (the terminal's `d`, `b`, `w`, the strip's `a`, and the two `W` chords are the whole set) and it
-  carries no AltGr character on the Swiss French layout, so the chord types nothing there is to shadow.
-  Matched on `event.code`, the physical key, for the reason `Ctrl+Alt+W` is. Any future letter chord
-  gets checked against that same set and that same layout.
 
 ## Git tab
 
@@ -947,7 +881,7 @@ exceptions:
   stop, since a flat fill reads as a finished bar and the elapsed clock beside it keeps counting.
 - **`min-width: 0` on the status line.** A flex item refuses to shrink below its content, so without
   it the ellipsis never fires and a long file name pushes the elapsed clock out of the bar. Same
-  trap as `.workspace` next to the notes panel.
+  trap as `.workspace`, which has to be allowed to shrink for the same reason.
 - **The elapsed clock ticks in the renderer.** Progress is pushed on events, and those can be twenty
   seconds apart while a file is read: without a timer of its own the line would freeze and look
   exactly like a run that had died. It exists only while something runs.
@@ -973,7 +907,7 @@ exceptions:
   what answering it triggers, and the ticket's own text. Without it, checking a verdict means
   opening Jira in a browser, which is the trip this tab exists to save. **No splitter**, unlike Git:
   a diff wants whatever width you can give it, a paragraph wants a readable measure, and the app's
-  own notes warn against generalising its three resizers into a fourth.
+  own notes warn against generalising its resizers into one more.
 - **Clicking a ticket row SELECTS it; the browser is a button in the overview.** The opposite of the
   pull request tab, deliberately. Faced with a list of PRs the reflex is to go read the PR, because
   nothing local can show it; here the reason for the verdict is already on this machine, so reading
@@ -1118,6 +1052,49 @@ exceptions:
   in the logs, the menu being created and removed before a frame was painted. **This no longer depends
   on the call site** (see the context menu section below): the `stopPropagation` here is kept because
   it also stops the click travelling past the row, not because the menu needs it.
+
+## Servers window: terminals in a second window
+
+- **Ownership is a fact of the LAYOUT, decided in `TerminalManager`.** `setLayout` and `syncLayout`
+  filter their live-session list through `layoutLive()`, so a detached session is simply not live as far
+  as the dashboard's panes are concerned. `normalizeGroups` therefore drops its tab **and does not
+  re-add it as an orphan** on the next sync. Filtering in the renderer instead would have the dashboard
+  drop the tab, report the new layout, the manager put it back, once per round, forever. Re-attaching
+  needs no code at all for the same reason: the id becomes live again and lands as an orphan, exactly
+  like a freshly spawned session.
+- **Each window is sent only the sessions it owns**, and that is what made this cheap.
+  `TerminalPane.setSessions` already disposes the views of sessions that left the list and re-normalises
+  its panes, so a dashboard that stops being told about a server frees its terminal on its own. No
+  "hide this tab" flag threaded through the renderer.
+- **Output is routed, never broadcast.** `TerminalPane.write` creates a view for whatever id it is
+  handed, so a broadcast would build a second hidden xterm per detached server in the dashboard and feed
+  it every byte of a `ng serve`. Routing costs one map lookup. `RowsChanged` *is* broadcast, and the
+  difference is the point: one small payload on a poll cadence, not a byte stream.
+- **`detachedIds` is a set, not a rule re-evaluated on read.** `role === 'server'` seeds it and a newly
+  spawned server joins it, but once a session is in or out it stays where it was put. A derived rule
+  cannot express "this shell is really a server" or "pull this one back and leave it back", and both are
+  needed because the role knows what a `Run` action is and cannot know what somebody typed into a shell.
+  Spawn time is the only place the role still decides, because it is the only moment with no prior
+  placement to respect.
+- **Closing hands the sessions back, from `closed` and not `close`.** `close` can still be cancelled,
+  and re-attaching to a window that then stays open would paint the servers in two places. This is the
+  app's own invariant applied to a second window: no work runs where nothing can show or stop it.
+- **`App.replayed` is cleared for sessions that leave.** It ran once per id, which was safe while an id
+  only ever disappeared for good. A detached server keeps its id and comes back, and without this it
+  came back to a view whose scrollback was never written: an empty tab for a process running fine.
+- **The tiles reuse `presentServer`.** What `serving`, `lint failed` and `crashed` look like is decided
+  once for the whole app, so a tile and a projects-table row can never disagree about the same process.
+  The tone is put on the tile's border as well as in the pill, because the window exists to be read from
+  across a room and four characters of text are not that.
+- **One forced `refreshNow` when the window opens.** The phases arrive on the monitor's cadence, so a
+  window opened between two pushes would show no phase for up to ten seconds, which is exactly the
+  window in which somebody is looking at it to find out whether anything needs them.
+- **A grid, not a second `TerminalPane`.** No tab bar, no splitter, no active pane, nothing persisted:
+  the arrangement is `ceil(sqrt(n))` columns derived from the session list. That is why `servers.ts` is
+  a fraction of the pane's size, and why the layout-per-window problem never had to be solved.
+- **`.terminal__view` needed no override in the grid**, only a different padding. That the shared
+  container dropped into a grid cell unchanged is the clearest sign `createTerminalView` was cut at the
+  right seam.
 
 ## Claude Code runs: three of them, three models
 
@@ -1301,7 +1278,7 @@ pattern are left ready.
   case that resizes this form, would be discarded.
 - **Changing the interface size refits the terminal.** Larger text makes the tab row and the strip's
   chrome taller, so the box left to the terminal changes size without the window having moved: `resize`
-  does not fire. Same trap as opening the notes panel.
+  does not fire.
 - **The bounds (`UI_FONT_SIZE`, 11 to 17) are tighter than the terminal's**, and that is deliberate:
   this size draws text inside boxes whose padding is fixed, and beyond that a tab row or a badge presses
   against its own borders. The clamp is duplicated on the renderer side (`clampUiFontSize`) because a

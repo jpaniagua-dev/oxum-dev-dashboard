@@ -1,5 +1,14 @@
-import type { ResolvedTheme, TerminalCompat, TerminalId, TerminalSession, ThemeState } from '@shared/contracts.js';
+import type {
+  ProjectRow,
+  ResolvedTheme,
+  TerminalCompat,
+  TerminalId,
+  TerminalSession,
+  ThemeState,
+} from '@shared/contracts.js';
 import { clearChildren, createElement, requireElement } from './ui/dom.js';
+import { presentServer } from './ui/presenters.js';
+import { buildPill } from './ui/project-table.js';
 import {
   createTerminalView,
   ensureTerminalRenderer,
@@ -36,6 +45,15 @@ class ServersView {
   private theme: ResolvedTheme = 'light';
   private fontSize = 14;
   private compat: TerminalCompat | null = null;
+  /**
+   * The project rows, for the phase of each tile.
+   *
+   * This is the part that makes the window worth building rather than opening a second terminal beside
+   * the app: `serving`, `lint failed`, `build failed` and `crashed` are read from the process output by
+   * the main process, so a tile can say which one it is without anybody reading a log. A bare terminal
+   * cannot do that at any price.
+   */
+  private rows: readonly ProjectRow[] = [];
   /** Sessions whose buffered scrollback has been replayed, so it is not written twice. */
   private readonly replayed = new Set<TerminalId>();
 
@@ -51,6 +69,23 @@ class ServersView {
     // does not tailor per window, so this is where `role` earns its place in the contract.
     this.setSessions(bootstrap.terminals.filter((session) => session.role === 'server'));
 
+    /*
+     * One forced read at startup, rather than waiting for the poll.
+     *
+     * The phases arrive on the project monitor's own cadence, so a window opened between two pushes
+     * would show its tiles with no phase for up to ten seconds. That is precisely the window in which
+     * somebody is looking at it to find out whether anything needs them, so the answer cannot be blank.
+     * The cost is one refresh, once, when the window opens.
+     */
+    this.rows = await window.api.refreshNow();
+    this.paintPhases();
+
+    window.api.onRowsChanged((rows) => {
+      this.rows = rows;
+      // Only the heads are repainted: rebuilding the grid on every poll would re-append live terminals
+      // ten times a minute for a pill that changed colour.
+      this.paintPhases();
+    });
     window.api.onTerminalsChanged((sessions) => this.setSessions(sessions));
     window.api.onPtyOutput(({ terminalId, data }) => {
       this.tile(terminalId)?.view.term.write(data);
@@ -148,10 +183,47 @@ class ServersView {
     // size to measure. The renderer is engaged from here too, for the same reason.
     this.fitAll();
     this.replayMissing();
+    // A tile created in this pass has an empty phase slot until something repaints it, and the next
+    // poll can be ten seconds away.
+    this.paintPhases();
   }
 
   private tile(terminalId: TerminalId): Tile | undefined {
     return this.views.get(terminalId);
+  }
+
+  /**
+   * Repaints the phase of every tile, and nothing else.
+   *
+   * Its own pass rather than part of `render`, because the two have completely different cadences: the
+   * grid changes when a server starts or stops, the phase changes on every poll. Rebuilding the grid
+   * for a pill would re-append live terminals ten times a minute.
+   *
+   * `presentServer` is the projects table's own function, reused rather than reimplemented: what
+   * `serving`, `lint failed` and `crashed` look like is decided once for the whole app, so a tile and a
+   * row can never disagree about the same process.
+   */
+  private paintPhases(): void {
+    const byProject = new Map(this.rows.map((row) => [row.project.id, row]));
+    for (const session of this.sessions) {
+      const tile = this.views.get(session.id);
+      if (tile === undefined) {
+        continue;
+      }
+      const row = session.projectId === null ? undefined : byProject.get(session.projectId);
+      clearChildren(tile.phase);
+      if (row === undefined) {
+        // A tile with no row behind it: a shell moved here by hand, which has no project and therefore
+        // no phase. Left blank rather than labelled "unknown", which would read as a fault.
+        tile.element.dataset.tone = '';
+        continue;
+      }
+      const pill = presentServer(row.server);
+      tile.phase.append(buildPill(pill));
+      // The tone on the tile itself, not just in the pill: the whole point is an answer read from
+      // across a room, and a coloured edge is visible where four characters of text are not.
+      tile.element.dataset.tone = pill.tone;
+    }
   }
 
   /** The tile of a session, created on first sight. */
@@ -164,8 +236,26 @@ class ServersView {
 
     const element = createElement('section', { className: 'servers__tile' });
     const title = createElement('span', { className: 'servers__tile-title', text: session.title });
+    const phase = createElement('span', { className: 'servers__tile-phase' });
     const head = createElement('header', { className: 'servers__tile-head' });
-    head.append(title);
+    head.append(title, phase);
+
+    /*
+     * Sending one tile back on its own, without closing the window.
+     *
+     * The counterpart of the dashboard's "Move to the servers window", and the reason both exist: the
+     * role knows what a `Run` action is and cannot know what somebody typed into a shell. Either
+     * direction has to be sayable, or the automatic rule becomes a cage.
+     */
+    const back = createElement('button', {
+      className: 'servers__tile-back',
+      text: '→',
+      title: 'Send this terminal back to the dashboard',
+    });
+    back.type = 'button';
+    back.setAttribute('aria-label', `Send ${session.title} back to the dashboard`);
+    back.addEventListener('click', () => void window.api.moveTerminalToServers(session.id, false));
+    head.append(back);
     element.append(head);
 
     const view = createTerminalView({
@@ -182,7 +272,7 @@ class ServersView {
     view.element.hidden = false;
     element.append(view.element);
 
-    const tile: Tile = { element, title, view, sent: null };
+    const tile: Tile = { element, title, phase, view, sent: null };
     this.views.set(session.id, tile);
     return tile;
   }
@@ -266,6 +356,8 @@ class ServersView {
 interface Tile {
   readonly element: HTMLElement;
   readonly title: HTMLElement;
+  /** Where the phase pill goes, repainted on its own cadence. See `paintPhases`. */
+  readonly phase: HTMLElement;
   readonly view: TerminalView;
   /** Last geometry announced to the pty. See `fitAll` for why a redundant resize is not free. */
   sent: { cols: number; rows: number } | null;

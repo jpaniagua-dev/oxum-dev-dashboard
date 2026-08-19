@@ -96,7 +96,6 @@ export interface SettingsFormHosts {
   readonly interface: HTMLElement;
   readonly projects: HTMLElement;
   readonly terminal: HTMLElement;
-  readonly notes: HTMLElement;
   readonly claude: HTMLElement;
   readonly jira: HTMLElement;
   readonly footer: HTMLElement;
@@ -128,9 +127,6 @@ export class SettingsForm {
   /** Interface font size draft, separate from the terminal's: see `renderInterface`. */
   private uiFontSize: number = UI_FONT_SIZE.default;
   /** Empty means "the default folder", so it is never coerced to the resolved path. */
-  private notesFolder = '';
-  /** The path an empty `notesFolder` resolves to, shown as the placeholder. */
-  private defaultNotesFolder = '';
   /** The three model drafts. Empty is a real value: it means "let Claude Code decide". */
   private claudeModels: ClaudeModelDrafts = { analysis: '', work: '', commit: '' };
   private jira: JiraConfig = { siteUrl: '', email: '', projectKeys: [], hasToken: false };
@@ -163,10 +159,7 @@ export class SettingsForm {
     settings: AppSettings,
     profiles: readonly ShellProfile[],
     jira: JiraConfig,
-    defaultNotesFolder: string,
   ): Promise<void> {
-    this.notesFolder = settings.notesFolder;
-    this.defaultNotesFolder = defaultNotesFolder;
     this.claudeModels = {
       analysis: settings.claudeAnalysisModel,
       work: settings.claudeWorkModel,
@@ -213,7 +206,6 @@ export class SettingsForm {
     this.renderInterface();
     this.renderProjects();
     this.renderTerminal();
-    this.renderNotes();
     this.renderClaude();
     this.renderJira();
     this.renderFooter();
@@ -248,45 +240,6 @@ export class SettingsForm {
       ),
     );
     this.hosts.interface.append(row);
-  }
-
-  /**
-   * The notes folder.
-   *
-   * Empty is a real value meaning "the app's own folder", so the placeholder shows the path that will
-   * be used. That is the one case the house rule allows a placeholder: it states a **deduced** value
-   * rather than pretending an example is a saved setting.
-   */
-  private renderNotes(): void {
-    clearChildren(this.hosts.notes);
-
-    const row = createElement('div', { className: 'settings-card__path' });
-    row.append(
-      this.field(
-        'Notes folder',
-        this.notesFolder,
-        (value) => {
-          this.notesFolder = value;
-          this.touch();
-        },
-        this.defaultNotesFolder,
-      ),
-    );
-
-    const browse = createElement('button', { className: 'button', text: '…' });
-    browse.type = 'button';
-    browse.title = 'Choose a folder';
-    browse.addEventListener('click', () => {
-      void window.api.pickFolder('Notes folder').then((picked) => {
-        if (picked !== null) {
-          this.notesFolder = picked;
-          this.touch();
-          this.render();
-        }
-      });
-    });
-    row.append(browse);
-    this.hosts.notes.append(row);
   }
 
   /**
@@ -936,14 +889,12 @@ export class SettingsForm {
     const saved = await window.api.updateSettings({
       terminalFontSize: this.fontSize,
       uiFontSize: this.uiFontSize,
-      notesFolder: this.notesFolder,
       claudeAnalysisModel: this.claudeModels.analysis,
       claudeWorkModel: this.claudeModels.work,
       claudeCommitModel: this.claudeModels.commit,
     });
     this.fontSize = saved.terminalFontSize;
     this.uiFontSize = saved.uiFontSize;
-    this.notesFolder = saved.notesFolder;
     // Read back like the clamped sizes above, and for the same reason: the store normalises a value it
     // will not use to empty, so realigning the draft on what was actually stored is what makes the
     // field agree with the setting. Without it, a rejected value stays on screen looking saved.

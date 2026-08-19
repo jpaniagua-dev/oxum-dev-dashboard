@@ -15,8 +15,6 @@ describe('asPatch', () => {
       jiraHeight: 400,
       gitHeight: 460,
       activeStrip: 'jira',
-      notesWidth: 340,
-      notesOpen: true,
     });
 
     expect(patch).toEqual({
@@ -25,8 +23,6 @@ describe('asPatch', () => {
       jiraHeight: 400,
       gitHeight: 460,
       activeStrip: 'jira',
-      notesWidth: 340,
-      notesOpen: true,
     });
   });
 
@@ -61,7 +57,6 @@ describe('asPatch', () => {
         defaultShellProfileId: 'git-bash',
         gitPollSeconds: 10,
         checksPollSeconds: 60,
-        notesFolder: 'C:\\notes',
       }),
     ).toEqual({
       terminalFontSize: 16,
@@ -69,7 +64,6 @@ describe('asPatch', () => {
       defaultShellProfileId: 'git-bash',
       gitPollSeconds: 10,
       checksPollSeconds: 60,
-      notesFolder: 'C:\\notes',
     });
   });
 
@@ -82,7 +76,7 @@ describe('asPatch', () => {
   });
 
   it('drops values of the wrong type rather than trusting them', () => {
-    expect(asPatch({ projectsHeight: '250', notesOpen: 'oui', activeStrip: 'mails' })).toEqual({});
+    expect(asPatch({ projectsHeight: '250', stripCollapsed: 'oui', activeStrip: 'mails' })).toEqual({});
   });
 
   it('survives a non-object payload', () => {
@@ -91,9 +85,10 @@ describe('asPatch', () => {
     expect(asPatch(undefined)).toEqual({});
   });
 
-  it('keeps an empty notesFolder, which means "use the default folder"', () => {
-    // `asString`-style fallback-on-empty would be wrong here: empty is a meaningful value.
-    expect(asPatch({ notesFolder: '' })).toEqual({ notesFolder: '' });
+  it('keeps an empty model name, which means "use the Claude Code default"', () => {
+    // `asString`-style fallback-on-empty would be wrong here: empty is a meaningful value, and it is
+    // the only way to unset a model that was pinned.
+    expect(asPatch({ claudeWorkModel: '' })).toEqual({ claudeWorkModel: '' });
   });
 });
 
@@ -106,15 +101,24 @@ describe('LOCAL_ONLY_KEYS', () => {
       'gitHeight',
       'gitListWidth',
       'jiraHeight',
-      'notesOpen',
-      'notesWidth',
       'projectsHeight',
       'pullScope',
       'pullsHeight',
+      // Not a geometry, but local for the same reason: it is written by the dashboard the moment the
+      // servers window opens, and an echo would reload settings in the middle of that gesture.
+      'serversDetached',
       'stripCollapsed',
       'triageHeight',
       'worktreesHeight',
     ]);
+  });
+
+  it('lets the dashboard remember that the servers were detached', () => {
+    // The whole point of persisting it: a window parked on a second monitor that has to be reopened at
+    // every launch is a window you stop using. Same silent-drop trap as the heights above.
+    expect(asPatch({ serversDetached: true })).toEqual({ serversDetached: true });
+    expect(asPatch({ serversDetached: false })).toEqual({ serversDetached: false });
+    expect(asPatch({ serversDetached: 'yes' })).toEqual({});
   });
 
   it('lets the dashboard persist the Triage tab height', () => {
@@ -177,7 +181,6 @@ describe('LOCAL_ONLY_KEYS', () => {
     for (const key of [
       'terminalFontSize',
       'uiFontSize',
-      'notesFolder',
       'defaultShellProfileId',
       'projects',
       'claudeAnalysisModel',

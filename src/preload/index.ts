@@ -15,9 +15,6 @@ import {
   type JiraConfig,
   type JiraState,
   type TriageState,
-  type NoteContent,
-  type NoteId,
-  type NotesState,
   type OpenShellRequest,
   type PaneDirection,
   type ProjectCandidate,
@@ -63,6 +60,9 @@ const api: RendererApi = {
 
   detachServers: (detached: boolean): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.ServersDetach, detached),
+
+  moveTerminalToServers: (terminalId: TerminalId, toServers: boolean): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.ServersMove, terminalId, toServers),
 
   onServersDetachedChanged: (listener: (detached: boolean) => void): (() => void) => {
     const handler = (_event: unknown, detached: boolean): void => listener(detached);
@@ -128,28 +128,6 @@ const api: RendererApi = {
   // position cannot make a drop hit the wrong entry.
   gitStash: (projectId: ProjectId, sha: string, op: GitStashOp): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitStashApply, projectId, sha, op),
-
-  refreshNotes: (): Promise<NotesState> => ipcRenderer.invoke(IpcChannel.NotesRefresh),
-
-  onNotesChanged: (listener: (state: NotesState) => void): (() => void) => {
-    const handler = (_event: unknown, state: NotesState): void => listener(state);
-    ipcRenderer.on(IpcChannel.NotesChanged, handler);
-    return () => ipcRenderer.off(IpcChannel.NotesChanged, handler);
-  },
-
-  openNote: (id: NoteId): Promise<NoteContent | null> =>
-    ipcRenderer.invoke(IpcChannel.NoteOpen, id),
-
-  createNote: (): Promise<NoteId | null> => ipcRenderer.invoke(IpcChannel.NoteCreate),
-
-  // `send`, like `sendPtyInput`: a keystroke must not wait on a round trip.
-  updateNote: (id: NoteId, text: string): void => {
-    ipcRenderer.send(IpcChannel.NoteUpdate, id, text);
-  },
-
-  flushNotes: (): Promise<void> => ipcRenderer.invoke(IpcChannel.NoteFlush),
-
-  deleteNote: (id: NoteId): Promise<boolean> => ipcRenderer.invoke(IpcChannel.NoteDelete, id),
 
   refreshJira: (): Promise<JiraState> => ipcRenderer.invoke(IpcChannel.JiraRefresh),
 

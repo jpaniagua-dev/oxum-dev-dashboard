@@ -20,7 +20,6 @@ async function start(): Promise<void> {
       interface: requireElement('settings-interface'),
       projects: requireElement('settings-projects'),
       terminal: requireElement('settings-terminal'),
-      notes: requireElement('settings-notes'),
       claude: requireElement('settings-claude'),
       jira: requireElement('settings-jira'),
       footer: requireElement('settings-footer'),
@@ -37,7 +36,6 @@ async function start(): Promise<void> {
     bootstrap.settings,
     bootstrap.shellProfiles,
     bootstrap.jiraConfig,
-    bootstrap.defaultNotesFolder,
   );
 
   window.api.onThemeChanged((state) => applyTheme(state));
@@ -58,7 +56,7 @@ async function start(): Promise<void> {
     void window.api
       .bootstrap()
       .then((next) =>
-        form.load(settings, next.shellProfiles, next.jiraConfig, next.defaultNotesFolder),
+        form.load(settings, next.shellProfiles, next.jiraConfig),
       );
   });
 

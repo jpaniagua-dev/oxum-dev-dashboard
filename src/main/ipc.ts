@@ -28,9 +28,6 @@ import {
   type JiraConfig,
   type JiraState,
   type TriageState,
-  type NoteContent,
-  type NoteId,
-  type NotesState,
   type ProjectValidation,
   type RepoPulls,
   type RepoWorktrees,
@@ -82,7 +79,6 @@ import {
   startIssue,
   type StartReport,
 } from './jira/jira-start.js';
-import type { NotesStore } from './notes/notes-store.js';
 import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
 import type { TriageService } from './triage/triage-service.js';
@@ -111,22 +107,11 @@ export interface IpcDependencies {
   /**
    * Persists a commit message and hands back the file `git commit -F` will read.
    *
-   * Injected rather than called directly, for the same reason `defaultNotesFolder` is: resolving the
-   * folder means asking Electron where `userData` lives, and this module is already the one place
-   * that must stay testable without an Electron runtime around it.
+   * Injected rather than called directly: resolving the folder means asking Electron where
+   * `userData` lives, and this module is already the one place that must stay testable without an
+   * Electron runtime around it.
    */
   readonly writeCommitMessage: (projectId: ProjectId, message: string) => Promise<string>;
-  readonly notes: () => NotesStore;
-  /** Where notes land when `notesFolder` is empty. Shown as the placeholder in the settings window. */
-  readonly defaultNotesFolder: () => string;
-  /**
-   * Asks the user to confirm a deletion.
-   *
-   * Native and owned by the main process, like the unsaved-settings prompt: an in-page overlay in the
-   * notes panel would sit next to a text editor, and a mousedown-inside/mouseup-outside selection
-   * fires a `click` on the common ancestor. That is the exact bug that got the settings modal removed.
-   */
-  readonly confirmNoteDelete: (title: string) => boolean;
   readonly terminals: TerminalManager;
   readonly settings: SettingsStore;
   readonly theme: ThemeController;
@@ -174,8 +159,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     pulls: deps.pulls().rows(),
     jira: deps.jira().state(),
     jiraConfig: deps.jiraConfig(),
-    notes: deps.notes().state(),
-    defaultNotesFolder: deps.defaultNotesFolder(),
     terminalCompat: terminalCompat(process.platform, release()),
   }));
 
@@ -310,7 +293,26 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       deps.closeServers();
     }
     deps.broadcastServersDetached(wanted);
+    // Remembered, so a window parked on a second monitor is still populated at the next launch.
+    await deps.settings.update({ serversDetached: wanted });
   });
+
+  /*
+   * Moves one tab between the two windows.
+   *
+   * Nothing is validated here beyond the types: the manager refuses an unknown id, a move that changes
+   * nothing, and any move at all while the servers window is closed, which is the one case that could
+   * otherwise take a tab off the dashboard and hand it to nobody.
+   */
+  ipcMain.handle(
+    IpcChannel.ServersMove,
+    async (_event, terminalId: unknown, toServers: unknown): Promise<void> => {
+      if (typeof terminalId !== 'string') {
+        return;
+      }
+      deps.terminals.moveTerminal(terminalId, toServers === true);
+    },
+  );
 
   ipcMain.handle(
     IpcChannel.GitState,
@@ -696,39 +698,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     },
   );
 
-  /* ---------------------------------------------------------------- notes */
-
-  ipcMain.handle(IpcChannel.NotesRefresh, async (): Promise<NotesState> => deps.notes().refresh());
-
-  ipcMain.handle(IpcChannel.NoteOpen, async (_event, id: unknown): Promise<NoteContent | null> =>
-    typeof id === 'string' ? deps.notes().open(id) : null,
-  );
-
-  ipcMain.handle(IpcChannel.NoteCreate, async (): Promise<NoteId | null> => deps.notes().create());
-
-  // `send`, not `invoke`: a keystroke must never wait on a round trip. The store debounces.
-  ipcMain.on(IpcChannel.NoteUpdate, (_event, id: unknown, text: unknown) => {
-    if (typeof id === 'string' && typeof text === 'string') {
-      deps.notes().update(id, text);
-    }
-  });
-
-  ipcMain.handle(IpcChannel.NoteFlush, async (): Promise<void> => deps.notes().flush());
-
-  ipcMain.handle(IpcChannel.NoteDelete, async (_event, id: unknown): Promise<boolean> => {
-    if (typeof id !== 'string') {
-      return false;
-    }
-    const note = deps.notes().state().notes.find((entry) => entry.id === id);
-    if (note === undefined) {
-      return false;
-    }
-    if (!deps.confirmNoteDelete(note.title)) {
-      return false;
-    }
-    return deps.notes().delete(id);
-  });
-
   ipcMain.handle(IpcChannel.JiraTest, async (): Promise<{ ok: boolean; message: string }> =>
     deps.testJira(),
   );
@@ -980,11 +949,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, patch: unknown): Promise<AppSettings> => {
       const parsed = asPatch(patch);
       const saved = await deps.settings.update(parsed);
-      if (parsed.notesFolder !== undefined) {
-        // Flushes into the *old* folder before switching, which `reopen` guarantees: pending writes
-        // carry the path they were typed against, so the last keystrokes must not follow the move.
-        await deps.notes().reopen();
-      }
       /*
        * Broadcast everything except the keys the dashboard writes about its own geometry. Those are
        * written on every drag release and every tab change, so echoing them back would rebuild the

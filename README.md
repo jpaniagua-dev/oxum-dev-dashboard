@@ -296,6 +296,36 @@ implementation of those rules in here. Same choice as `dev <TICKET>` in the Jira
 called bare, so it comes from your own shell profile; without one, the tab says `wt: command not found`
 where the command was going to run.
 
+## Servers window
+
+The dev servers can live in a window of their own, so a second monitor answers "does one of them need
+me" without you cycling through tabs. The rack icon next to the settings gear moves them across; the
+dashboard keeps the shells and the Claude Code sessions.
+
+```
+3 servers                                          [ Back to the dashboard ]
+
+┌─ web-app · start ──────[serving :4200]┐ ┌─ admin-front · start ─[build failed]┐
+│ ✔ Compiled successfully               │ │ ERROR in src/app/list.ts:42         │
+└───────────────────────────────────────┘ └─────────────────────────────────────┘
+┌─ design-system · start ────[watch]────┐
+│ Build at 14:02:11                     │
+└───────────────────────────────────────┘
+```
+
+- **What moves is decided by the action's role.** A `server` action goes; a `task`, a shell and a Claude
+  Code session stay. One started while the window is open goes straight there.
+- **What the role cannot know, you can say.** Right-click a tab for `Move to the servers window`, for a
+  `npm run start` typed by hand into a shell. The arrow on a tile sends that one back.
+- **The tiles carry the phase**, the same `serving` / `lint failed` / `crashed` verdict the projects
+  table shows, read from the process output. The tile's border takes the colour, so the answer is
+  legible from across a room. That is the one thing a terminal opened beside the app cannot do.
+- **Nothing about the processes changes.** A detached server keeps running and keeps its scrollback, and
+  `Run` / `Stop` in the strip still drive it. Closing the window hands the terminals back to the
+  dashboard rather than leaving them somewhere nothing can stop them.
+- **The window remembers.** Left detached, the app reopens it on the next launch, at the position and
+  size it had on that screen.
+
 ## Actions
 
 Actions are **configuration, per project**. Each one is a command line, a shell profile to run it in,
@@ -349,7 +379,7 @@ with it. Servers you started from a terminal are never touched.
 
 ## Settings
 
-The gear in the strip's tab row opens a window with six sections.
+The gear in the strip's tab row opens a window with five sections.
 
 **Interface** holds one number: the font size of the application itself, 11 to 17 px, 13 by default.
 Every other size in the app is a **ratio** of it — column headers, badges, lists and diffs all keep

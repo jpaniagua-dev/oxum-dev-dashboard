@@ -17,8 +17,9 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'activeStrip',
   'pullScope',
   'stripCollapsed',
-  'notesWidth',
-  'notesOpen',
+  // Written by the dashboard when the servers window opens or closes. Broadcasting it back would make
+  // the dashboard reload settings in the middle of the gesture that produced it.
+  'serversDetached',
 ]);
 
 /**
@@ -71,9 +72,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   }
   if (typeof input.gitPollSeconds === 'number') patch.gitPollSeconds = input.gitPollSeconds;
   if (typeof input.checksPollSeconds === 'number') patch.checksPollSeconds = input.checksPollSeconds;
-  if (typeof input.notesFolder === 'string') patch.notesFolder = input.notesFolder;
-  if (typeof input.notesWidth === 'number') patch.notesWidth = input.notesWidth;
-  if (typeof input.notesOpen === 'boolean') patch.notesOpen = input.notesOpen;
+  if (typeof input.serversDetached === 'boolean') patch.serversDetached = input.serversDetached;
   // The three model names. Accepted as typed and normalised by the store, which is the single place
   // that decides what a model name is: rejecting here as well would mean two answers to that question,
   // and the one that silently dropped the value would be this one.

@@ -55,6 +55,8 @@ export interface TerminalPaneActions {
    * the caller decides which profile that means.
    */
   onSplitShell: (cwd: string, direction: PaneDirection) => void;
+  /** Hands one tab over to the servers window. Only offered while that window is open. */
+  onMoveToServers: (terminalId: TerminalId) => void;
   /** Puts a selection on the system clipboard. */
   onCopy: (text: string) => void;
   /**
@@ -128,6 +130,14 @@ export class TerminalPane {
   private menuOpen: number | null = null;
   /** Id of the tab currently being renamed in place, if any. */
   private renaming: TerminalId | null = null;
+  /**
+   * Whether the servers window is open, which decides whether a tab can be sent there.
+   *
+   * Mirrored from the main process through `setServersDetached`, never inferred: that window can be
+   * closed by its own cross, and a pane offering to move a tab into a window that is gone would take
+   * the tab off this surface and hand it to nobody.
+   */
+  private serversDetached = false;
   /** Tab being dragged, if any. Held so a drop knows what to move. */
   private dragging: TerminalId | null = null;
   /** The panes, mirroring what the main process holds. */
@@ -307,6 +317,11 @@ export class TerminalPane {
    * Views for sessions that disappeared are disposed here: a closed tab must free its xterm, or the
    * surface leaks a renderer per closed terminal.
    */
+  /** Tells the pane whether the servers window exists, for the one menu entry that depends on it. */
+  setServersDetached(detached: boolean): void {
+    this.serversDetached = detached;
+  }
+
   setSessions(sessions: readonly TerminalSession[]): void {
     this.sessions = sessions;
     const live = new Set(sessions.map((session) => session.id));
@@ -799,6 +814,16 @@ export class TerminalPane {
         label: 'Move to a pane below',
         disabled: alone,
         run: () => this.moveToOwnPane(session.id, 'rows'),
+      },
+      {
+        label: 'Move to the servers window',
+        // Only while that window exists: moving a tab to a window that is not open would take it off
+        // the dashboard and hand it to nobody. The hint says so rather than leaving a dead entry.
+        disabled: !this.serversDetached,
+        hint: this.serversDetached
+          ? 'For a server this app cannot recognise on its own, a `npm run start` typed into a shell'
+          : 'Open the servers window first, from the icon next to the settings gear',
+        run: () => this.actions.onMoveToServers(session.id),
       },
       {
         label: 'Rename',

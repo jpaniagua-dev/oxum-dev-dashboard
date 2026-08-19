@@ -8,7 +8,6 @@ import type {
   JiraState,
   TriageState,
   JiraViewId,
-  NotesState,
   Project,
   ProjectId,
   ProjectRow,
@@ -42,13 +41,11 @@ import {
   type JiraSort,
   type JiraSortKey,
 } from './ui/jira-list.js';
-import { NotesPanel } from './ui/notes-panel.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
 import { renderPullList } from './ui/pull-list.js';
 import { renderWorktreeList } from './ui/worktree-list.js';
 import { TriagePanel } from './ui/triage-panel.js';
-import { attachSideResizer } from './ui/side-resizer.js';
 import { StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
 import { applyUiFontSize } from './ui/ui-font.js';
@@ -160,8 +157,6 @@ class App {
    * was. The button reads this; the main process writes it.
    */
   private serversDetached = false;
-  private notes: NotesPanel | null = null;
-  private notesResizer: { setWidth: (width: number) => void } | null = null;
 
   async start(): Promise<void> {
     const bootstrap = await window.api.bootstrap();
@@ -180,6 +175,7 @@ class App {
         onResize: (terminalId, cols, rows) => window.api.resizePty(terminalId, { cols, rows }),
         onClose: (terminalId) => void window.api.closeTerminal(terminalId),
         onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
+        onMoveToServers: (terminalId) => void window.api.moveTerminalToServers(terminalId, true),
         onNewShell: (profileId) => void this.openShell(profileId),
         // Reported rather than dropped: an `invoke` on a channel the main process does not know
         // rejects, and a bare `void` would turn that into an unhandled rejection nobody sees. That is
@@ -215,7 +211,6 @@ class App {
     this.jira = bootstrap.jira;
     this.bindChrome();
     this.bindStrip(bootstrap.settings);
-    this.bindNotes(bootstrap.settings, bootstrap.notes);
     this.renderTable();
     this.renderPulls();
     this.renderJira();
@@ -263,8 +258,6 @@ class App {
       this.triage = state;
       this.renderTriage();
     });
-    // Safe to apply mid-typing: `NotesState` carries no note body, so it cannot reach the editor.
-    window.api.onNotesChanged((state) => this.notes?.apply(state));
     window.api.onTerminalsChanged((sessions) => {
       /*
        * Forget the replay marker of every session that has left this window.
@@ -1313,6 +1306,8 @@ class App {
     });
     window.api.onServersDetachedChanged((detached) => {
       this.serversDetached = detached;
+      // The pane needs it too: it decides whether the tab menu may offer to move a tab over.
+      this.terminal?.setServersDetached(detached);
       serversButton.setAttribute('aria-pressed', String(detached));
       serversButton.title = detached
         ? 'Bring the dev servers back into this window'
@@ -1526,127 +1521,12 @@ class App {
     this.terminal?.refit();
   }
 
-  /* ------------------------------------------------------------------ notes */
-
-  /**
-   * The notes panel, its resizer and its toggle.
-   *
-   * The panel changes the workspace's **width** and nothing else, so every entry point that moves it
-   * also refits the terminal: the window `resize` listener inside `TerminalPane` does not fire here,
-   * since the window did not resize. Three places need it, and all three are in this method.
-   */
-  private bindNotes(settings: AppSettings, initial: NotesState): void {
-    const panel = requireElement('notes-panel');
-    const handle = requireElement('notes-resizer');
-    const button = requireElement('notes-button');
-
-    this.notes = new NotesPanel(
-      {
-        list: requireElement('notes-list'),
-        formatBar: requireElement('notes-format-bar'),
-        surface: requireElement('notes-surface'),
-        status: requireElement('notes-status'),
-        newButton: requireElement('notes-new'),
-        panel,
-      },
-      {
-        onText: (id, text) => window.api.updateNote(id, text),
-        onCreate: () => window.api.createNote(),
-        onOpen: async (id) => (await window.api.openNote(id))?.text ?? null,
-        onDelete: (id) => window.api.deleteNote(id),
-      },
-      initial,
-      this.theme.resolved,
-    );
-
-    this.notesResizer = attachSideResizer({
-      handle,
-      panel,
-      initialWidth: settings.notesWidth,
-      onResize: () => this.terminal?.refit(),
-      onCommit: (width) => {
-        const rounded = Math.round(width);
-        if (this.settings !== null) {
-          this.settings = { ...this.settings, notesWidth: rounded };
-        }
-        void window.api.updateSettings({ notesWidth: rounded });
-      },
-    });
-
-    button.addEventListener('click', () => this.toggleNotes(!this.notesOpen()));
-    panel.addEventListener('notes-escape', () => this.toggleNotes(false));
-
-    /*
-     * `Alt+Shift+E`, matching the terminal's own `Alt+Shift+{d,b,w}` and the strip's `a`, and for the
-     * same reasons: capture phase, because a focused xterm or CodeMirror would otherwise swallow it;
-     * `Alt+Shift` rather than `Ctrl+Alt`, which is AltGr on a Swiss French layout; a letter rather than
-     * a digit; and a guard on `event.repeat`, without which holding the keys toggles the panel dozens
-     * of times.
-     *
-     * It was `N` until 5.2.0, moved on request. `E` is free in every handler in the app (the terminal's
-     * three letters, the strip's one, and the two `W` chords are the whole set) and it carries no AltGr
-     * character on the Swiss French layout, so the chord types nothing there is to shadow. Matched on
-     * `event.code`, the physical key, for the reason `Ctrl+Alt+W` is: under a chord that some layouts
-     * do map, `event.key` becomes the composed character and the comparison quietly stops matching.
-     */
-    document.addEventListener(
-      'keydown',
-      (event) => {
-        if (
-          event.repeat ||
-          !event.altKey ||
-          !event.shiftKey ||
-          event.ctrlKey ||
-          event.metaKey ||
-          event.code !== 'KeyE'
-        ) {
-          return;
-        }
-        event.preventDefault();
-        this.toggleNotes(!this.notesOpen());
-      },
-      true,
-    );
-    // Reopens where it was left, and applies the stored width through the resizer's own clamp.
-    this.toggleNotes(settings.notesOpen, { persist: false });
-  }
-
-  private notesOpen(): boolean {
-    return !requireElement('notes-panel').hidden;
-  }
-
-  private toggleNotes(open: boolean, options: { persist?: boolean } = {}): void {
-    const panel = requireElement('notes-panel');
-    const handle = requireElement('notes-resizer');
-    const button = requireElement('notes-button');
-
-    panel.hidden = !open;
-    handle.hidden = !open;
-    button.setAttribute('aria-pressed', String(open));
-    button.setAttribute('aria-label', open ? 'Hide the notes' : 'Show the notes');
-
-    if (open) {
-      this.notesResizer?.setWidth(this.settings?.notesWidth ?? 340);
-      void this.notes?.openFirst();
-    }
-    // The workspace just changed width; the ptys have not been told.
-    this.terminal?.refit();
-
-    if (options.persist !== false) {
-      if (this.settings !== null) {
-        this.settings = { ...this.settings, notesOpen: open };
-      }
-      void window.api.updateSettings({ notesOpen: open });
-    }
-  }
-
   /* ------------------------------------------------------------------ theme */
 
   private applyTheme(state: ThemeState): void {
     this.theme = state;
     document.documentElement.dataset.theme = state.resolved;
     this.terminal?.setTheme(state.resolved);
-    this.notes?.setTheme(state.resolved);
     this.renderThemeIcon();
   }
 

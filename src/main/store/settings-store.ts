@@ -63,9 +63,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   uiFontSize: UI_FONT_SIZE.default,
   // Empty means the default folder. Resolved in the main process, never here: this module must not
   // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in CLAUDE.md.
-  notesFolder: '',
-  notesWidth: 340,
-  notesOpen: false,
   shellProfiles: [],
   projectsRoot: DEFAULT_PROJECTS_ROOT,
   // The workspace above the repositories, so a `Work on this` session starts with the conventions and
@@ -73,6 +70,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeContextRoot: DEFAULT_CLAUDE_CONTEXT_ROOT,
   // Empty means "whatever Claude Code itself is set to", for all three. A default named here would be
   // this app deciding which model a user's own CLI runs on, which is not its call to make.
+  // Closed on a fresh install: a window nobody asked for, opening on first launch, is the wrong
+  // first impression of a feature that is opt-in by nature.
+  serversDetached: false,
   claudeAnalysisModel: '',
   claudeWorkModel: '',
   claudeCommitModel: '',
@@ -180,15 +180,12 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     ),
     // Trimmed but an empty string is preserved: it is the meaningful "use the default folder" value,
     // so `asString`'s fallback-on-empty behaviour would be wrong here.
-    notesFolder: typeof input.notesFolder === 'string' ? input.notesFolder.trim() : '',
     // Clamped for the same reason as the strip heights: a hand-edited width must not be able to hide
     // the terminal behind the panel.
-    notesWidth: clamp(asNumber(input.notesWidth, DEFAULT_SETTINGS.notesWidth), 240, 900),
-    notesOpen: typeof input.notesOpen === 'boolean' ? input.notesOpen : false,
     shellProfiles: asProfiles(input.shellProfiles),
     projectsRoot: asString(input.projectsRoot, DEFAULT_SETTINGS.projectsRoot),
     // Not `asString`, which falls back on an empty value: an empty string is a real answer here, and it
-    // means "start the session in the repository itself". Same reason `notesFolder` reads it by hand.
+    // means "start the session in the repository itself".
     claudeContextRoot:
       typeof input.claudeContextRoot === 'string'
         ? input.claudeContextRoot.trim()
@@ -197,6 +194,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     // value that is not a model name is stored as empty (the default) rather than passed on. The
     // settings form is where a typo is shown; this is the guard that holds when the file is edited by
     // hand.
+    serversDetached: typeof input.serversDetached === 'boolean' ? input.serversDetached : false,
     claudeAnalysisModel: asModel(input.claudeAnalysisModel),
     claudeWorkModel: asModel(input.claudeWorkModel),
     claudeCommitModel: asModel(input.claudeCommitModel),

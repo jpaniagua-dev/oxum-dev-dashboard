@@ -25,16 +25,15 @@
         There is no top bar. Every control it held moved into the strip's tab row, which was already
         a row of chrome: two rows of chrome above a terminal is one too many when the terminal is the
         point of the window. The application title went with it, the native title bar already saying
-        it. Bonus of the move: the tab row is the part that never folds, so the settings, the notes
-        and the refresh stay one click away with the strip folded.
+        it. Bonus of the move: the tab row is the part that never folds, so the settings, the servers
+        window and the refresh stay one click away with the strip folded.
       -->
 
       <!--
-        Below the top bar the window is a row: the workspace on the left, the notes panel on the right.
-
-        The header stays OUTSIDE this row on purpose. That is what keeps `#projects-pane`'s distance
-        from the top of the viewport unchanged, so the pane resizer's arithmetic (and its test) are
-        untouched by the panel: opening the notes changes the workspace's width and nothing else.
+        Below the top bar the window is a row holding the workspace. It held a notes panel beside it
+        until that feature was dropped; the row is kept because the header staying OUTSIDE it is what
+        keeps `#projects-pane`'s distance from the top of the viewport unchanged, and the pane
+        resizer's arithmetic and its test are written against that distance.
       -->
       <div class="app__body">
         <div class="workspace">
@@ -72,19 +71,6 @@
             </button>
             <button
               type="button"
-              id="notes-button"
-              class="icon-button"
-              title="Notes (Alt+Shift+E)"
-              aria-label="Show the notes"
-              aria-pressed="false"
-            >
-              <!-- A sheet with three lines of writing, drawn in strokes like the other panel icons. -->
-              <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
-                <path d="M4 2.2h8v11.6H4zM6.2 5.4h3.6M6.2 8h3.6M6.2 10.6h2.2" />
-              </svg>
-            </button>
-            <button
-              type="button"
               id="servers-button"
               class="icon-button"
               title="Show the dev servers in their own window"
@@ -93,7 +79,7 @@
             >
               <!--
                 Two stacked bays with a status dot each: a rack, which is what this window shows.
-                Stroked like the notes and terminal icons, and `aria-pressed` because it toggles a
+                Stroked like the terminal icon, and `aria-pressed` because it toggles a
                 state rather than performing an action.
               -->
               <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
@@ -286,28 +272,6 @@
       </section>
         </div>
 
-        <div
-          class="notes-resizer"
-          id="notes-resizer"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the notes"
-          tabindex="0"
-          hidden
-        ></div>
-
-        <aside class="notes" id="notes-panel" aria-label="Notes" hidden>
-          <div class="notes__header">
-            <span class="notes__title">Notes</span>
-            <button type="button" id="notes-new" class="button" title="New note (Ctrl+N)">
-              + Note
-            </button>
-          </div>
-          <div class="notes__list" id="notes-list"></div>
-          <div class="format-bar" id="notes-format-bar"></div>
-          <div class="notes__surface" id="notes-surface"></div>
-          <p class="notes__status" id="notes-status"></p>
-        </aside>
       </div>
     </div>
 
