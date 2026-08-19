@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decideTerminalKey } from '../src/renderer/ui/terminal-pane.js';
+import { decideTerminalKey } from '../src/renderer/ui/terminal-view.js';
 
 type Key = Parameters<typeof decideTerminalKey>[0];
 

@@ -1,7 +1,4 @@
-import { FitAddon } from '@xterm/addon-fit';
-import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl';
-import { Terminal } from '@xterm/xterm';
+import type { Terminal } from '@xterm/xterm';
 import {
   TERMINAL_FONT_SIZE,
   type PaneDirection,
@@ -25,6 +22,12 @@ import {
 } from '@shared/terminal-groups.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
+import {
+  createTerminalView,
+  ensureTerminalRenderer,
+  TERMINAL_THEMES,
+  type TerminalView,
+} from './terminal-view.js';
 
 /**
  * The chevron of the shell picker.
@@ -35,59 +38,6 @@ import { clearChildren, createElement, createIcon } from './dom.js';
 function chevronDown(): SVGSVGElement {
   return createIcon('M3.5 6l4.5 4.5L12.5 6', { paint: 'stroke' });
 }
-
-/* ------------------------------------------------------------------ *
- * Clipboard keys
- * ------------------------------------------------------------------ */
-
-/** What a key combination should do inside a terminal. */
-export type TerminalKeyAction = 'copy' | 'paste' | 'pass';
-
-/**
- * Decides what `Ctrl`-based keys mean in a terminal.
- *
- * The whole difficulty is `Ctrl+C`. In a terminal it is **SIGINT**, and it has to stay SIGINT: it is how a
- * dev server gets stopped. But it is also the copy shortcut everywhere else, which is why Windows Terminal
- * resolves it the same way this does: **copy when there is a selection, interrupt when there is not**. With
- * `Shift` held it always copies, since `Ctrl+Shift+C` means nothing to a shell.
- *
- * `Ctrl+V` never has a terminal meaning worth keeping, so it always pastes.
- *
- * Pure and exported: this is a two-line rule whose failure modes are "cannot copy" and, far worse,
- * "cannot interrupt a build".
- */
-export function decideTerminalKey(
-  event: Pick<KeyboardEvent, 'type' | 'key' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey'>,
-  hasSelection: boolean,
-): TerminalKeyAction {
-  if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) {
-    return 'pass';
-  }
-  const key = event.key.toLowerCase();
-  if (key === 'v') {
-    return 'paste';
-  }
-  if (key === 'c') {
-    return event.shiftKey || hasSelection ? 'copy' : 'pass';
-  }
-  return 'pass';
-}
-
-/** Palettes matching the app tokens, since xterm needs literal colours rather than CSS variables. */
-const THEMES: Record<ResolvedTheme, Record<string, string>> = {
-  light: {
-    background: '#ffffff',
-    foreground: '#1f1f1f',
-    cursor: '#e61e3c',
-    selectionBackground: '#fbdad5',
-  },
-  dark: {
-    background: '#0e0e0e',
-    foreground: '#ededed',
-    cursor: '#ea515b',
-    selectionBackground: '#3a1f26',
-  },
-};
 
 export interface TerminalPaneActions {
   onInput: (terminalId: TerminalId, data: string) => void;
@@ -136,12 +86,14 @@ export interface TerminalPaneActions {
 /** Which side of a tab a drop lands on. */
 type DropSide = 'before' | 'after';
 
-interface View {
-  readonly term: Terminal;
-  readonly fit: FitAddon;
-  readonly element: HTMLElement;
-  /** WebGL renderer state: not loaded yet, active, or permanently fallen back to the DOM renderer. */
-  webgl: WebglAddon | 'failed' | null;
+/**
+ * A terminal, plus the one thing only a pane needs to remember about it.
+ *
+ * Everything about xterm itself lives in `TerminalView`, shared with any other owner of a terminal.
+ * `sent` is the pane's alone: it exists because *this* surface refits on every render, which is not
+ * true of an arrangement that never splits or reorders.
+ */
+interface View extends TerminalView {
   /**
    * Geometry last announced to the pty, so an unchanged one is never announced again.
    *
@@ -308,7 +260,7 @@ export class TerminalPane {
   setTheme(theme: ResolvedTheme): void {
     this.theme = theme;
     for (const view of this.views.values()) {
-      view.term.options.theme = THEMES[theme];
+      view.term.options.theme = TERMINAL_THEMES[theme];
     }
   }
 
@@ -625,103 +577,35 @@ export class TerminalPane {
     splitter.addEventListener('pointercancel', end);
   }
 
+  /**
+   * The view of a terminal, created on first need.
+   *
+   * Split in two on purpose. `createTerminalView` builds the xterm instance, which is the part every
+   * owner of a terminal needs and which no second window may re-derive; everything below it is about
+   * **this** surface: where the container goes, what a click on it focuses, and which menu a right-click
+   * opens. That is the seam, and it is the whole reason a servers window could tile the same terminals
+   * without a tab bar or a splitter.
+   */
   private ensure(terminalId: TerminalId): View {
     const existing = this.views.get(terminalId);
     if (existing !== undefined) {
       return existing;
     }
 
-    // A dedicated, permanent container: `open()` is called on it once and never again.
-    const element = createElement('div', { className: 'terminal__view' });
-    element.hidden = true;
-    this.surface.append(element);
-
-    const term = new Terminal({
-      fontFamily: "'Cascadia Code', Consolas, monospace",
-      fontSize: this.fontSize,
-      scrollback: 5000,
-      cursorBlink: true,
-      /*
-       * Told what pty it is driving, xterm stops reflowing its own buffer on resize and grows into
-       * the scrollback instead. ConPTY reflows and reprints on its side; two owners rewriting the
-       * same rows from different origins is what leaves characters stranded on screen.
-       *
-       * Spread rather than set to `undefined` off Windows: under `exactOptionalPropertyTypes` an
-       * explicit `undefined` is not the same thing as an absent key, and xterm's option is optional
-       * without being nullable. Absent is what "no workaround" means here.
-       */
-      ...(this.compat === null ? {} : { windowsPty: this.compat }),
-      /*
-       * Shrinks glyphs that are one cell wide in the font's opinion but paint wider than one cell.
-       * Ambiguous-width characters do exactly that, and a full-screen TUI is made of them: the box
-       * drawing, `⎿`, `●` and the spinner of a Claude Code session all bleed into the neighbouring
-       * cell. Under the WebGL renderer only the cells marked dirty are repainted, so the bled pixels
-       * of a cell nobody touched this frame simply stay there. WebGL-only option, which is precisely
-       * our case.
-       */
-      rescaleOverlappingGlyphs: true,
-      /*
-       * No `convertEol`. It makes a bare `\n` also return the carriage, which is a fix for programs
-       * whose output is piped straight in — and this output comes from a pty, where the line endings
-       * are already whatever the program meant them to be. Left on, a lone line feed emitted to move
-       * down *while keeping the column* (what a TUI does when it redraws a frame in place) dropped
-       * the cursor to column 0, so the redraw started at the wrong place and never covered the tail
-       * of the previous frame.
-       */
-      theme: THEMES[this.theme],
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    /*
-     * URLs printed in a tab become clickable.
-     *
-     * Loaded here and not from `fitVisible` like the WebGL addon: this one registers a link provider
-     * and reads nothing about the geometry, so a background tab is a perfectly good place to be born.
-     *
-     * The handler is ours rather than the addon's default, which calls `window.open`. That would work
-     * by accident, `window.ts` turning every window-open request into a `shell.openExternal`, and it
-     * would be the only place in the app where a URL reaches the browser without passing the
-     * main process's `http(s)` check. A pty prints whatever a program sends it, `file://` and
-     * `vscode://` included, so the check is the point.
-     *
-     * `preventDefault` is what stops the click from also landing on xterm's own mouse handling, which
-     * would move the cursor or start a selection under the link that was just followed.
-     */
-    term.loadAddon(
-      new WebLinksAddon((event, uri) => {
-        event.preventDefault();
-        this.actions.onOpenLink(uri);
+    const view: View = {
+      ...createTerminalView({
+        fontSize: this.fontSize,
+        theme: this.theme,
+        compat: this.compat,
+        onInput: (data) => this.actions.onInput(terminalId, data),
+        onCopy: (text) => this.actions.onCopy(text),
+        onPasteRequest: () => this.actions.onPasteRequest(),
+        onOpenLink: (url) => this.actions.onOpenLink(url),
       }),
-    );
-    term.onData((data) => this.actions.onInput(terminalId, data));
-
-    /*
-     * Copy and paste, which a terminal does not get for free.
-     *
-     * `attachCustomKeyEventHandler` is the only hook that runs *before* xterm turns a keystroke into bytes
-     * for the pty. Returning false is what stops `Ctrl+V` from reaching the shell as a control character,
-     * and `Ctrl+C` from becoming SIGINT when the user meant to copy a selection.
-     *
-     * `preventDefault` is not optional: returning false only skips xterm's handling, it does not consume
-     * the keydown. Left alone, the browser then fires its native `paste` event on xterm's hidden textarea,
-     * which xterm also listens to — so the text landed twice, once from us and once from that listener.
-     */
-    term.attachCustomKeyEventHandler((event) => {
-      switch (decideTerminalKey(event, term.hasSelection())) {
-        case 'copy':
-          event.preventDefault();
-          this.copySelection(term);
-          return false;
-        case 'paste':
-          event.preventDefault();
-          this.pasteInto(term);
-          return false;
-        case 'pass':
-          return true;
-      }
-    });
-
-    term.open(element);
+      sent: null,
+    };
+    const { element } = view;
+    this.surface.append(element);
 
     // Clicking a pane focuses it. Capture phase, because xterm swallows the event on its own surface.
     element.addEventListener(
@@ -740,45 +624,8 @@ export class TerminalPane {
       this.openPaneMenu(terminalId, event.clientX, event.clientY);
     });
 
-    const view: View = { term, fit, element, webgl: null, sent: null };
     this.views.set(terminalId, view);
     return view;
-  }
-
-  /**
-   * Switches a pane to the WebGL renderer on its first real display.
-   *
-   * xterm's default renderer draws the screen as DOM nodes, and under Chromium's GPU compositing that
-   * leaves stale text layers on screen while scrolling: frozen glyphs outside the grid, seen in the
-   * wild here. The WebGL renderer repaints its whole canvas, so nothing can be left behind.
-   *
-   * Never called from `ensure()`: a view can be created for a *background* tab (`write` collects
-   * history for hidden sessions), and a WebGL canvas initialised on a `display: none` element is born
-   * with a garbage geometry that later shows up as exactly those frozen glyphs. Loading only from
-   * `fitVisible`, after the pane is on screen and fitted, means the canvas gets its real dimensions.
-   *
-   * On context loss (Chromium caps live WebGL contexts per page and evicts the oldest), the addon is
-   * disposed and xterm falls back to the DOM renderer on its own; marked `failed` so it is not
-   * reloaded just to be evicted again.
-   */
-  private ensureRenderer(view: View): void {
-    if (view.webgl !== null) {
-      return;
-    }
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        console.warn('[terminal] WebGL context lost, falling back to the DOM renderer');
-        webgl.dispose();
-        view.webgl = 'failed';
-      });
-      view.term.loadAddon(webgl);
-      view.webgl = webgl;
-    } catch (error) {
-      // Logged rather than swallowed: a silent fallback here already cost a diagnosis once.
-      view.webgl = 'failed';
-      console.warn(`[terminal] renderer: dom (WebGL failed: ${String(error)})`);
-    }
   }
 
   /**
@@ -810,7 +657,7 @@ export class TerminalPane {
           view.sent = { cols, rows };
           this.actions.onResize(group.active, cols, rows);
         }
-        this.ensureRenderer(view);
+        ensureTerminalRenderer(view);
         // A resize repaints the new grid, not what the old one left outside it: repaint everything.
         view.term.refresh(0, rows - 1);
       } catch {
