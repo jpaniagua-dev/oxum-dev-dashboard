@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { normalizeModel } from '@shared/claude-model.js';
 import {
   TERMINAL_FONT_SIZE,
   UI_FONT_SIZE,
@@ -70,6 +71,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // The workspace above the repositories, so a `Work on this` session starts with the conventions and
   // skills that live there. Empty would mean "start in the repository", which is what it used to do.
   claudeContextRoot: DEFAULT_CLAUDE_CONTEXT_ROOT,
+  // Empty means "whatever Claude Code itself is set to", for all three. A default named here would be
+  // this app deciding which model a user's own CLI runs on, which is not its call to make.
+  claudeAnalysisModel: '',
+  claudeWorkModel: '',
+  claudeCommitModel: '',
   // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
   // default here would come back every time the user deleted a project.
   projects: [],
@@ -187,6 +193,13 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       typeof input.claudeContextRoot === 'string'
         ? input.claudeContextRoot.trim()
         : DEFAULT_SETTINGS.claudeContextRoot,
+    // Normalised and not merely trimmed: one of these three ends up on a shell command line, and a
+    // value that is not a model name is stored as empty (the default) rather than passed on. The
+    // settings form is where a typo is shown; this is the guard that holds when the file is edited by
+    // hand.
+    claudeAnalysisModel: asModel(input.claudeAnalysisModel),
+    claudeWorkModel: asModel(input.claudeWorkModel),
+    claudeCommitModel: asModel(input.claudeCommitModel),
     projects: asProjects(input.projects),
   };
 }
@@ -346,6 +359,17 @@ function asProfiles(value: unknown): ShellProfile[] {
 
 function asString(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.length > 0 ? value : fallback;
+}
+
+/**
+ * Reads a model name, or the default.
+ *
+ * No `fallback` parameter, unlike `asString`: the fallback is always empty, empty being what "let
+ * Claude Code decide" is spelled as, and a stored value that is not a model name is exactly as
+ * unusable as no value at all.
+ */
+function asModel(value: unknown): string {
+  return typeof value === 'string' ? normalizeModel(value) : '';
 }
 
 function asThemeMode(value: unknown): ThemeMode {

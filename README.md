@@ -154,6 +154,14 @@ Changes 12  Branches 4  History                     ↻  ↓  ↑
   one-line failure. The message travels through a file rather than a `-m` argument, so it can be
   multi-line and nothing in it can be read as an option — a subject starting with `-` is a real thing
   people type. The file is kept, so a rejected commit does not lose what you wrote.
+- **`Generate` writes the message from the staged diff**, with a headless Claude Code run. It starts
+  **in the repository**, which is the point: Claude Code reads `CLAUDE.md` from the folder it is
+  launched in, so it follows that repository's own commit convention without this app knowing what the
+  convention is. Recent subjects go in as a fallback for a repository that documents nothing. The diff
+  is passed in the prompt rather than fetched, the run being allowed to read files and nothing else.
+  It fills the field and never commits: the answer is a draft you correct, and the commit stays the
+  separate click it already was. With the amend armed it describes the last commit plus whatever is
+  staged on top, which is what an amend actually is. Pick its model in Settings.
 - **Amend is a checkbox next to the commit button.** Arming it pre-fills the form with the whole
   message of the commit being rewritten and relabels the button; with nothing staged it is a reword,
   so the empty-index rule bends for it. The tooltip names the sha it will rewrite and warns when that
@@ -245,14 +253,14 @@ which is exactly why it lands in a tab you can watch and kill.
 ## Worktrees
 
 The sixth tab, and the only one with no repository to pick first: one flat list of every **linked git
-worktree** across every watched project, and a terminal button on each line.
+worktree** across every watched project, a terminal button on each line, and the life cycle beside it.
 
 ```
-10 worktrees across 3 of 4 projects
+10 worktrees across 3 of 4 projects                              [ New worktree ]
 
-Web        PROJ-123-web-app        PROJ-123-thousands-separator                clean         >_
-Web        wip-toast-web-app       wip/toast-zone-escape          3 modified   ↓4            >_
-Admin      PROJ-1647-admin-front   PROJ-1647-list-sorting                      clean  local  >_
+Web        PROJ-123-web-app        PROJ-123-thousands-separator                clean         ⋯
+Web        wip-toast-web-app       wip/toast-zone-escape          3 modified   ↓4            ⋯
+Admin      PROJ-1647-admin-front   PROJ-1647-list-sorting                      clean  local  ⋯
 ```
 
 - **git is the authority, not a folder scan.** The list comes from `git worktree list --porcelain` per
@@ -266,15 +274,27 @@ Admin      PROJ-1647-admin-front   PROJ-1647-list-sorting                      c
   and same `local` badge, read with the same function: one definition of "dirty" for the whole app,
   rather than a second one drifting next to the first.
 - **Clicking a line opens a new tab in that worktree's folder**, the same gesture as the `Terminal`
-  button of a project row. The whole row is the button, so it works with Tab and Enter too, and the
-  terminal glyph at the end stays legible on every line rather than fading in on hover, because it
-  labels the row's own gesture. A `prunable` row is inert: its folder is gone, so there is nothing to
-  open.
+  button of a project row. The whole row is the button, so it works with Tab and Enter too, and there is
+  no terminal glyph on it: the row *is* that gesture, and a second glyph beside the menu would read as a
+  second button. A `prunable` row is inert: its folder is gone, so there is nothing to open.
+- **The dots open the life cycle**: `Remove`, `Remove and delete the branch`, `Rename…`, and
+  `New worktree` in the summary bar. They are visible at rest rather than on hover, because forgetting
+  that the gesture exists at all is the thing this answers.
+- **What the menu offers depends on what the row says.** `--force` appears only on a worktree with
+  uncommitted work, labelled with how many changes it will discard; a plain `Remove` never carries a
+  flag, so git refusing it on unmerged work is a normal outcome. A `prunable` row gets one entry, and it
+  drops the stale registration rather than deleting anything.
 - **Read when shown, then on the git poll**, like the Git tab, and never for a hidden tab: it is the
-  widest read of the strip (one `git worktree list` per project, then a status per worktree).
+  widest read of the strip (one `git worktree list` per project, then a status per worktree). A read is
+  skipped while a name is being typed.
 
-The tab creates and removes nothing. A worktree's life cycle stays in the terminal, where `git worktree
-add` and `git worktree remove` say what they did.
+The tab does not implement the life cycle, it **spawns** it. `git worktree add` and `remove` have rules
+worth getting right (unlink a shared `node_modules` junction *before* the removal or it survives as an
+orphan, refuse a folder git no longer knows about, prune a stale registration instead of deleting it),
+so each entry runs a shell helper (`wt new`, `wt mv`, `wt rm`) in a terminal tab rather than a second
+implementation of those rules in here. Same choice as `dev <TICKET>` in the Jira tab. The helper is
+called bare, so it comes from your own shell profile; without one, the tab says `wt: command not found`
+where the command was going to run.
 
 ## Actions
 
@@ -329,7 +349,7 @@ with it. Servers you started from a terminal are never touched.
 
 ## Settings
 
-The gear in the strip's tab row opens a window with five sections.
+The gear in the strip's tab row opens a window with six sections.
 
 **Interface** holds one number: the font size of the application itself, 11 to 17 px, 13 by default.
 Every other size in the app is a **ratio** of it — column headers, badges, lists and diffs all keep
@@ -357,6 +377,18 @@ from orphaning a running terminal.
 **Terminal** holds the default profile, the terminal font size (9 to 28 px, 14 by default, applied live
 to every tab) and, per profile, the binary path, arguments and starting directory. Editing a path marks the
 profile as custom and it then wins over detection.
+
+**Claude Code** pins the model of each run that starts Claude Code, and there are three of them
+because they are three different jobs: the **Triage analysis** reads a whole sprint, where speed and
+cost show most; **Work on this** implements a ticket, where you want the strongest model there is; the
+**commit message** reads a staged diff, short and frequent. One setting would be right for one of them
+and wrong for the other two.
+
+Leave a field empty to use whatever Claude Code itself is set to. An alias (`opus`, `sonnet`, `haiku`,
+`fable`) always points at the latest version of that model; a full name (`claude-fable-5`) pins one.
+A value that is not a model name is outlined in red as you type and would be ignored if saved: one of
+these three ends up on a shell command line, so anything else is dropped rather than quoted and hoped
+for.
 
 Everything still lives in `settings.json`, so hand-editing remains possible; the dialog and the file
 go through the same validation.

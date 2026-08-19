@@ -20,3 +20,16 @@
  */
 export const TERMINAL_ICON =
   'M2.4 3.4L13.6 3.4L13.6 12.6L2.4 12.6ZM5 6.2L7.2 8.4L5 10.6M8.8 10.6L11.4 10.6';
+
+/**
+ * Three dots, the "there is more here" glyph.
+ *
+ * Drawn as three **near**-zero segments rather than three zero-length ones: a subpath of length zero
+ * with a round cap is a dot by the SVG specification and a blank by several renderers, which is a glyph
+ * that disappears on someone else's machine. A tenth of a unit is invisible and renders everywhere.
+ *
+ * Used by the Worktrees tab, whose rows carry a life-cycle menu beside their own gesture. It is the
+ * flat, unlabelled affordance on purpose: what it opens is three entries that all end in a terminal
+ * tab, and none of them deserves its own permanent button on every row.
+ */
+export const MORE_ICON = 'M3.6 8L3.7 8M7.95 8L8.05 8M12.3 8L12.4 8';

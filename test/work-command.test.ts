@@ -6,6 +6,26 @@ import {
   safeRepoName,
 } from '../src/main/triage/work-command.js';
 
+describe('buildWorkCommand, model', () => {
+  it('omits the flag when no model is pinned, which is the default', () => {
+    expect(buildWorkCommand(['PROJ-123'], 'web-app')).toBe(
+      'claude --dangerously-skip-permissions "/ticket PROJ-123 in the web-app repository"',
+    );
+  });
+
+  it('quotes the model, this being the one Claude Code run that reaches a shell', () => {
+    // `claude-opus-5[1m]` unquoted is a bracket expression to bash, and the tab would either run on
+    // the wrong model or fail on a name nobody typed.
+    expect(buildWorkCommand(['PROJ-123'], 'web-app', 'claude-opus-5[1m]')).toContain(
+      'claude --model "claude-opus-5[1m]" --dangerously-skip-permissions',
+    );
+  });
+
+  it('drops a model that is not a model rather than putting it on the command line', () => {
+    expect(buildWorkCommand(['PROJ-123'], 'web-app', 'opus"; id #')).not.toContain('--model');
+  });
+});
+
 describe('buildWorkCommand', () => {
   it('skips the permission prompts, with the flag spelled the way the CLI accepts it', () => {
     // The one spelling that exists. An unknown option makes `claude` print usage and exit, which looks

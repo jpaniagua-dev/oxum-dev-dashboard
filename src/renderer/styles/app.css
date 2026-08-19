@@ -1080,6 +1080,17 @@ body {
   font-size: var(--font-sm);
 }
 
+/*
+ * A value the store will not keep.
+ *
+ * The border and nothing else: there is no message to place, and the field's own `title` says what is
+ * wrong. It exists because the alternative is the failure `asPatch` already records, a setting that is
+ * typed, saved, silently dropped and never mentioned again.
+ */
+.settings-field__input--invalid {
+  border-color: var(--error);
+}
+
 .settings-field__input:focus {
   outline: none;
   border-color: var(--primary);
@@ -2689,6 +2700,114 @@ body {
 }
 
 /*
+ * `New worktree`, at the far end of the summary line.
+ *
+ * A worded button and not a glyph, unlike everything else in this strip: it is the one gesture here
+ * with no row to belong to, so there is nothing beside it to say what it acts on. `margin-left: auto`
+ * rather than a spacer element, `.pulls__bar` being a flex row.
+ */
+.worktrees__new {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.worktrees__new:hover:not(:disabled),
+.worktrees__new:focus-visible {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* No project, nothing to create a worktree in. Dimmed rather than hidden, so the gesture stays findable. */
+.worktrees__new:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The creation field takes the whole bar while it is open, its label included. */
+.worktrees__form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+/*
+ * The one input this tab has, shared by the creation field and the rename field.
+ *
+ * One class for both because they take the same kind of value, a label, and two spellings of the same
+ * box is how two fields stop looking like the same gesture. `flex: 1` matters only in the bar; in a row
+ * the grid track already bounds it.
+ */
+.worktrees__input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+/*
+ * The wrapper that lets a row carry a second control without nesting one button inside another.
+ *
+ * The row itself has to stay a real `<button>`: that is what makes the whole line the mouse target and
+ * keeps it reachable with Tab and answerable with Enter, and a `<button>` inside a `<button>` is invalid
+ * HTML that browsers silently rearrange. So the life-cycle menu is a **sibling**, and this wrapper holds
+ * the fixed track that keeps every row's dots on one vertical line, exactly as the row's own tracks keep
+ * the names and branches on theirs.
+ */
+.worktree-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 2px;
+}
+
+/*
+ * The dots, at row scale and at full opacity.
+ *
+ * **The width is load-bearing.** `.icon-button` is 26px, the wrapper's track is 22px, and an icon button
+ * left at its default size overflows that track by four pixels. `.pulls__list` scrolls on one axis, and
+ * CSS resolves the other from `visible` to `auto` when it does, so those four pixels come back as a
+ * horizontal scrollbar under the whole tab. 22px is `.icon-button--row`'s size, which is what a button
+ * sitting inside a list row is in this app.
+ *
+ * Not the `.icon-button--row` class itself, though, because its other half is a fade to `opacity: 0.4`
+ * until the row is hovered. That fade is right for a secondary affordance beside a row whose main
+ * gesture is elsewhere; here the menu is the reason these gestures left the terminal at all, and an
+ * affordance that appears only on hover is one you have to already know is there.
+ */
+.worktree__menu {
+  width: 22px;
+  height: 22px;
+  opacity: 0.55;
+}
+
+.worktree__menu:hover,
+.worktree__menu:focus-visible,
+.worktree-row:hover .worktree__menu {
+  opacity: 1;
+  color: var(--primary);
+}
+
+/* In a row the input replaces the name cell, so it inherits that cell's weight rather than the bar's. */
+.worktree__rename {
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+/*
  * A grid and not a flex row, like the Jira issues and for the same reason: the badges are conditional,
  * so in a flex row no two lines would agree on where the branch or the counts sit, and a list read by
  * scanning down a column is exactly what this tab is for.
@@ -2705,9 +2824,14 @@ body {
    *
    * Only two tracks are free, and both are safe: the branch absorbs the leftover width (it is
    * left-aligned, so its start still lines up), and the state column is `auto` but right-aligned
-   * against the terminal button, so its badges line up on the edge that is read.
+   * against the end of the row, so its badges line up on the edge that is read.
+   *
+   * There were five tracks while the row ended in a terminal glyph. It went when the life-cycle menu
+   * arrived: two glyphs at the end of one line read as two buttons, and only one of them was. The
+   * 34 pixels that frees are the reason the row is narrower now than before the menu existed, which
+   * matters on a grid whose minimum width is the sum of its fixed tracks.
    */
-  grid-template-columns: 104px 264px minmax(0, 1fr) auto 26px;
+  grid-template-columns: 104px 264px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
@@ -2792,31 +2916,3 @@ body {
   white-space: nowrap;
 }
 
-/*
- * The terminal glyph at the end of the row.
- *
- * A `span` and not a button: the row is the button, and nesting one inside another is invalid HTML that
- * browsers silently rearrange. Sized like `.icon-button--row`'s drawing so the gesture looks the same as
- * the one the projects table and the Git tab offer, dimmed because it is a label for the row's action
- * and not a second control, and brought up to full colour with the row it belongs to.
- */
-.worktree__glyph {
-  display: flex;
-  justify-self: end;
-  color: var(--text-dim);
-}
-
-.worktree__glyph svg {
-  width: 14px;
-  height: 14px;
-}
-
-.worktree:hover:not(:disabled) .worktree__glyph,
-.worktree:focus-visible .worktree__glyph {
-  color: var(--primary);
-}
-
-/* Nothing to open, so the glyph must not promise otherwise. */
-.worktree:disabled .worktree__glyph {
-  opacity: 0.35;
-}

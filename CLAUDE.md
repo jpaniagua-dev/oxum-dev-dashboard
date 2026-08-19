@@ -790,32 +790,85 @@ exceptions:
   button so its badges line up on the edge that is read. Same answer as `.issue`, and the same reason.
 - **The row IS the button, and clicking it opens a terminal.** A real `<button>` and not a `div`
   carrying one, which is what makes the whole line the target and keeps the row reachable with Tab and
-  answerable with Enter. It can be one precisely because the row has a **single** gesture: there is no
-  second control to nest, which is the constraint that keeps a pull request row a `div`, and the Git
-  tab's repository row is the same shape for the same reason. It goes through `openShell` with a `cwd`
-  and no `projectId`, since a worktree is not a project and there is nothing for reuse to key on: every
-  click therefore spawns a tab. That was the argument for keeping the gesture on a button until 5.2.0,
-  and it lost to use, a whole-row target being what everything else in this strip taught the hand to
-  expect. A prunable row is `disabled`, which is also the one state that keeps it out of the tab order
-  without hiding it.
-- **The terminal glyph stays, decorative.** A `span` carrying an `aria-hidden` drawing (`createIcon`
-  marks it so, and the button is named by its own `aria-label`), because the row would otherwise be a
-  wide clickable strip with nothing on it saying what the click does. It does **not** fade like
-  `.icon-button--row`, which sits at `opacity: 0.4` until its row is hovered: that is right for a
-  secondary affordance beside a row whose main gesture is elsewhere, and here it labels the row's own
-  gesture. Same judgement as the Triage tab's `Analyse`.
+  answerable with Enter. It goes through `openShell` with a `cwd` and no `projectId`, since a worktree is
+  not a project and there is nothing for reuse to key on: every click therefore spawns a tab. That was
+  the argument for keeping the gesture on a button until 5.2.0, and it lost to use, a whole-row target
+  being what everything else in this strip taught the hand to expect. A prunable row is `disabled`, which
+  is also the one state that keeps it out of the tab order without hiding it.
+- **The life-cycle menu sits BESIDE the row, in a `.worktree-row` wrapper.** The row was a button
+  precisely because it had a single gesture and therefore no second control to nest, and a `<button>`
+  inside a `<button>` is invalid HTML that browsers silently rearrange. When the second gesture arrived,
+  the answer was a **sibling** rather than the `div` a pull request row uses: the row keeps its
+  keyboard reachability, and the wrapper's fixed 22px track keeps every row's dots on one vertical line,
+  the same job the row's own tracks do for the names. The dots are visible at rest and not on hover,
+  unlike `.icon-button--row`, and that is the point of the whole feature: these gestures moved out of
+  the terminal because the command for them is easy to forget, and an affordance nobody sees until they
+  hover the right line does not fix that.
+- **No terminal glyph on the row, and it is not an oversight.** The row carried one until the life-cycle
+  menu arrived, on the grounds that it would otherwise be a wide clickable strip with nothing on it
+  saying what a click does. Two glyphs at the end of one line is the worse problem: they read as two
+  buttons and only one of them is, and the one that is not was labelling a gesture the whole row already
+  performs. The row's `title` and `aria-label` still name where the click leads, the hover highlight
+  still says the line is one target, and a `prunable` row is told apart by its pill rather than by a
+  dimmed drawing. `pull-list` keeps its glyph because there the terminal genuinely is a *second*
+  gesture, on a row whose own click opens a browser.
+- **`.worktree__menu` sets its own 22px, and that width is load-bearing.** `.icon-button` defaults to
+  26px while the wrapper's track is 22px, so an icon button left at its default size overflows by four
+  pixels; `.pulls__list` scrolls on one axis, CSS resolves the other from `visible` to `auto` when it
+  does, and those four pixels come back as a horizontal scrollbar under the whole tab. It does not take
+  the `.icon-button--row` class that would size it, because that class's other half is the hover fade
+  this button deliberately refuses. Anything given a fixed grid track here has to be measured, not
+  assumed.
 - **Read when the tab is shown, then on `RowsChanged`.** No monitor, like the Git tab, and for the same
   reason: it is the widest read of the strip (one `worktree list` per project, then a status per
-  worktree), and doing it for a hidden tab is work for nobody. It needs no editing guard because the tab
-  holds no field and no selection, which is a property to remember before giving it any state.
+  worktree), and doing it for a hidden tab is work for nobody. It needed no editing guard for as long as
+  it held no field, and its own note said that was a property to remember before giving it state. It has
+  state now: `worktreesEditing`, raised while the creation field or a rename field is open, because a
+  poll landing mid-typing rebuilds the bar or the row the cursor is in. Skipping a read costs nothing
+  here, the next poll being ten seconds away.
 - **Projects with no worktree stay in the payload.** The summary says "eight across two of seven", and a
   project silently absent from a list cannot be told from one the tab forgot to look at. An unreadable
   project is counted apart for the same reason, and its error sits **above** the rows rather than
   replacing them: one broken project must not hide the worktrees of the six that answered.
-- **The tab creates and removes nothing.** `git worktree add` and `remove` have rules this list would
-  have to reimplement to be trustworthy (a shared `node_modules` junction to unlink first, a refusal on
-  an unregistered folder), and getting one wrong deletes work. The life cycle stays in the terminal,
-  where the command says what it did.
+- **The tab spawns the life cycle, it does not implement it.** The rule used to be that the tab creates
+  and removes nothing, and the reason was never "a list must not delete": it was that
+  `git worktree add` and `remove` have rules a list would have to **reimplement** to be trustworthy (a
+  shared `node_modules` junction to unlink *before* the removal, or it survives as an orphan; a refusal
+  on a folder git no longer knows about; a stale registration to prune rather than delete), and getting
+  one wrong deletes work. That reason still stands, and it is exactly why the gestures now run a shell
+  helper (`wt new` / `mv` / `rm`) in a terminal tab instead: the rules live in one implementation, used
+  from the terminal every day, and this app spawns it rather than racing it. Same choice as the Jira
+  tab's `dev <TICKET>`, which does not create a branch either. Writing a second copy of those rules in
+  TypeScript is the drift `verdictFor` and `isStaged` already record.
+- **The helper is called bare, never by path**, and `resolveBashProfile` picks the shell. It is a shell
+  **function** (a script's `cd` would die with its subshell), so it exists only in a sourced profile,
+  and `bash -ic` is what expands it, exactly as it is what expands `dev`. A machine without it prints
+  `wt: command not found` in the tab, which names what is missing where the command was going to run.
+- **The renderer sends an intent, never a command line.** `WorktreeCommand` says "remove this label, and
+  the branch with it"; `buildWorktreeCommand` in the main process turns that into arguments, and the
+  repository comes from the **configured path's basename**, not from the payload and not from the
+  project's label, which the user can rename. Labels go through a whitelist rather than an escape, like
+  `ISSUE_KEY_PATTERN`: the one quoting bug that matters here removes the wrong folder. `-f` and `-d` are
+  read with `=== true`, the string `"false"` being truthy and the flag it would arm being the one that
+  throws work away.
+- **The pattern is anchored**, `^label$`. The helper matches unanchored across labels, repositories and
+  branches, so a bare `PROJ-12` also matches `PROJ-123` and the helper refuses on the ambiguity: safe,
+  but it turns a click into a trip to the terminal. If the helper ever stopped treating the argument as
+  a regular expression, an anchored pattern would match nothing and it would act on nothing, which is
+  the direction worth being wrong in.
+- **`--force` is on the menu of a dirty row and nowhere else.** That is the whole argument for these
+  gestures being here rather than in the terminal: the list has just read whether the folder holds
+  uncommitted work, so it can offer the destructive entry only where there is something to destroy, and
+  label it with the count. A plain `Remove` never carries a flag, so git refusing it is a normal, useful
+  outcome. `-d` stays a separate entry, and the helper still keeps an unmerged branch and says so.
+- **A prunable row keeps its menu while its own button is disabled**, and the menu holds one entry.
+  There is nothing to rename and nothing to discard; what is left is a registration git is waiting to be
+  told to drop, which is precisely what such a row is for.
+- **The tab is focused before the list is re-read, and that read is the only one.** The helper is still
+  running at that point, so what it catches is the state before the command finished; the next git poll
+  is what settles the row. Inventing a completion signal would mean this app deciding when a command it
+  did not run is done. It is also why the tab is brought forward at all: the helper is the only thing
+  that will say git refused, and silence after clicking `Remove` reads as success.
 
 ## Triage tab
 
@@ -1067,6 +1120,75 @@ exceptions:
   was painted. They share one binder rather than repeating the call because the rule has to be
   remembered once per menu opener, and the second one had already forgotten it. Any future control
   that opens a menu from a left click needs the same line.
+
+## Claude Code runs: three of them, three models
+
+- **Three settings and not one, and the reason is not configurability for its own sake.** These are
+  three different jobs: classifying a sprint is bulk reading where speed and cost dominate,
+  implementing a ticket wants the strongest model there is, and writing a commit message from a diff is
+  short and frequent. A single field would be right for one of them and wrong for the other two, and
+  the run that suffers most is the sprint analysis, which nobody can intervene in once it starts.
+- **Empty means "whatever Claude Code is set to", and it is spelled by the ABSENCE of the flag.** The
+  CLI rejects a blank model, so `--model ""` is a run that fails before it starts, not a default. That
+  is why `modelArgs` returns `[]` and `modelFlag` returns `''` rather than either producing an empty
+  option.
+- **One whitelist, in `shared/claude-model.ts`, applied to all three.** Only the `Work on this` handoff
+  actually reaches a shell (`bash -ic`), where brackets are glob characters and `$` expands; the two
+  headless runs go through `spawn` with an argument array and would have been safe either way. The rule
+  is uniform because two rules eventually get applied to the wrong call site. `claude-opus-5[1m]` is a
+  legitimate pinned name, hence the brackets in the pattern and the double quotes in `modelFlag`.
+- **A well-formed model name is not an existing one, and the CLI does not help.** Verified rather than
+  assumed: `claude --model does-not-exist-xyz` starts, and reports that name back in its own `init`
+  event; it fails at the API call, or not visibly at all. So the form can mark `sonnet 4` and cannot
+  mark `sonnett`, and saying otherwise would be a promise this app cannot keep. The same `init` event
+  is where the resolved model could be read back, if it ever becomes worth showing which one ran.
+- **The settings form marks an invalid value as you type.** The store normalises anything that is not a
+  model name to empty, so without the mark, typing `sonnet 4` would look accepted, save, and come back
+  as the default with nothing said. That is the failure `asPatch` already records in its own comment: a
+  setting failing in complete silence. `asPatch` itself passes the value on **as typed** and leaves the
+  judgement to the store, one question having one answer.
+- **`runClaude` is no longer triage's.** Its `model`, `timeoutMs` and `label` options exist because a
+  second caller arrived: fifteen minutes is right for a sprint and absurd for a commit message, and
+  "the analysis timed out" in front of a commit form describes something nobody asked for. It still
+  lives under `triage/` only because moving it would be churn in every importer for a folder name.
+
+## Generate: a commit message from the staged diff
+
+- **The diff goes IN the prompt; the run does not fetch it.** `runClaude` allows `Read`, `Grep` and
+  `Glob` and nothing else, because an analysis is not a change. Letting it call `git diff` itself would
+  mean granting `Bash`, and a run that can call git can call git for things nobody asked for. Handing
+  the diff over also makes the prompt a string a test can hold.
+- **The run starts in the repository, and that is the load-bearing part.** Claude Code reads
+  `CLAUDE.md` from the folder it starts in and from its ancestors, so it follows **that repository's
+  own** commit convention without this app ever having read one. That is the whole reason this beats a
+  format string here. It is deliberately the opposite of `Work on this`, which starts one level up:
+  that one needs what several repositories share, this one needs one repository's convention and would
+  be actively misled by a sibling's. `claudeContextRoot` is therefore not used here.
+- **It fills the form and never commits.** The answer is a draft like anything typed in that textarea,
+  and the commit stays the separate, deliberate click it already was. A button that generated *and*
+  committed would write history from a diff nobody re-read.
+- **An amend reads `git diff --cached HEAD~1`, not the index.** An amend describes the last commit
+  *plus* whatever is staged on top of it; reading only the index would produce a message about the
+  fixup while throwing away the commit it is being folded into. `HEAD~1` does not exist on a root
+  commit, so that falls back to the whole of HEAD rather than making the feature unavailable on the one
+  commit where there is no convention to read yet. Recent subjects are read with `--skip=1` when
+  amending: offering HEAD's own subject as an example of the form invites rewriting it back.
+- **An empty diff is caught before the model starts.** A run on nothing takes the same minute as a run
+  on something and comes back with an invented message, and "nothing is staged" is a sentence this app
+  can write itself.
+- **`gitGenerating` is not `gitBusy`.** `busy` means a write is touching the repository and greys the
+  whole form; a generation touches nothing and only has to stop a second run from starting. Folded into
+  `busy` it would grey out the very textarea the answer is headed for, which is also still worth typing
+  in while the run takes its minute.
+- **`renderGit` at the end, never `loadGit`.** Nothing about the repository changed, and re-reading it
+  would let the poll's refresh carry the fresh message away. `gitEditing` guards that field only while
+  it has focus, which it does not during a click on a button.
+- **The answer is unwrapped, not cleaned up.** A code fence surrounding the *whole* answer is stripped,
+  because it is the one wrapper a model adds even when told not to and it would otherwise become the
+  subject line. A preamble is deliberately left in: the rules that catch "Here is the commit message:"
+  also catch a legitimate subject ending in a colon, and one stray line at the top of a textarea is
+  deleted in a second, whereas a subject eaten by a cleanup rule is not. An empty or essay-length
+  answer is reported rather than pasted, the textarea possibly holding something worth keeping.
 
 ## Mail and Teams: why they are not here
 

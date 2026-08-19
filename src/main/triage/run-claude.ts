@@ -1,15 +1,20 @@
 import { spawn } from 'node:child_process';
+import { modelArgs } from '@shared/claude-model.js';
 import { splitLines } from './triage-progress.js';
 
 /**
- * A headless Claude Code run, used by the Triage tab and nothing else.
+ * A headless Claude Code run: the Triage tab's sprint analysis, and the Git tab's commit message.
  *
  * Not a terminal tab, and that is a deliberate departure from "every row action ends in a tab": a
  * tab is the right home for a command whose **output** is the point (a dev server, a commit and its
- * hooks). Here the output is a payload the tab has to parse and group, so it belongs with the
- * services that call `gh` and Jira from the main process. What the rule really protects, that no
- * work happens in a window the app cannot show or stop, still holds: the run is visible as a state
- * on the sprint row and the process is killed on timeout.
+ * hooks). In both of these the output is a payload the caller has to parse and put somewhere, so
+ * they belong with the services that call `gh` and Jira from the main process. What the rule really
+ * protects, that no work happens in a window the app cannot show or stop, still holds: each run shows
+ * as a state on the control that started it, and the process is killed on timeout.
+ *
+ * It lives under `triage/` because that is where it was written. Moving it now would be churn in
+ * every importer for a folder name; what matters is that it is not triage-specific, and its options
+ * say so.
  */
 
 /**
@@ -35,6 +40,30 @@ export interface ClaudeRunOptions {
   /** Where the run happens, so the model can read the code it is being asked about. */
   readonly cwd: string;
   readonly prompt: string;
+  /**
+   * Model to pin the run to, or empty for whatever Claude Code itself is set to.
+   *
+   * Per call and not a module constant, because the two headless runs in this app are different jobs:
+   * classifying a sprint is bulk reading, writing a commit message from a diff is short and frequent.
+   * Empty omits the flag entirely; `--model ""` is an error, not a default.
+   */
+  readonly model?: string;
+  /**
+   * Budget for this run, defaulting to `CLAUDE_TIMEOUT_MS`.
+   *
+   * The sprint analysis needs fifteen minutes; a commit message that has not arrived in three is not
+   * coming, and waiting out the sprint budget for it would leave a button held for a quarter of an
+   * hour. One constant for both would have to be the larger, which is the wrong answer for the run
+   * somebody is watching.
+   */
+  readonly timeoutMs?: number;
+  /**
+   * How this run is named when it times out or is cancelled, e.g. `The analysis`.
+   *
+   * The two messages are the only ones this module writes that a user reads, and "the analysis timed
+   * out" in front of a commit form describes something nobody asked for.
+   */
+  readonly label?: string;
   readonly signal?: AbortSignal;
   /**
    * Called for every event as it arrives, which is what makes the wait watchable.
@@ -63,8 +92,11 @@ export interface ClaudeRunOptions {
  *   nor run anything. An analysis is not a change.
  * - **No `--bare`.** That mode requires `ANTHROPIC_API_KEY`; a normal install is signed in through
  *   OAuth, and the run would fail with an authentication error that has nothing to do with the tab.
+ * - **`--model` last, and only when there is one.** The CLI rejects a blank model, so "use the
+ *   default" has to be the absence of the flag and not an empty one.
  */
 export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunResult> {
+  const label = options.label ?? 'The run';
   return new Promise((resolve) => {
     const child = spawn(
       'claude',
@@ -78,6 +110,7 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
         'Grep',
         'Glob',
         '--no-session-persistence',
+        ...modelArgs(options.model ?? ''),
       ],
       { cwd: options.cwd, shell: false, windowsHide: true },
     );
@@ -103,12 +136,12 @@ export async function runClaude(options: ClaudeRunOptions): Promise<ClaudeRunRes
 
     const timer = setTimeout(() => {
       child.kill();
-      finish({ ok: false, answer: '', error: 'The analysis timed out' });
-    }, CLAUDE_TIMEOUT_MS);
+      finish({ ok: false, answer: '', error: `${label} timed out` });
+    }, options.timeoutMs ?? CLAUDE_TIMEOUT_MS);
 
     const onAbort = (): void => {
       child.kill();
-      finish({ ok: false, answer: '', error: 'The analysis was cancelled' });
+      finish({ ok: false, answer: '', error: `${label} was cancelled` });
     };
     options.signal?.addEventListener('abort', onAbort, { once: true });
 

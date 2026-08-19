@@ -74,6 +74,14 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.notesFolder === 'string') patch.notesFolder = input.notesFolder;
   if (typeof input.notesWidth === 'number') patch.notesWidth = input.notesWidth;
   if (typeof input.notesOpen === 'boolean') patch.notesOpen = input.notesOpen;
+  // The three model names. Accepted as typed and normalised by the store, which is the single place
+  // that decides what a model name is: rejecting here as well would mean two answers to that question,
+  // and the one that silently dropped the value would be this one.
+  if (typeof input.claudeAnalysisModel === 'string') {
+    patch.claudeAnalysisModel = input.claudeAnalysisModel;
+  }
+  if (typeof input.claudeWorkModel === 'string') patch.claudeWorkModel = input.claudeWorkModel;
+  if (typeof input.claudeCommitModel === 'string') patch.claudeCommitModel = input.claudeCommitModel;
 
   return patch;
 }

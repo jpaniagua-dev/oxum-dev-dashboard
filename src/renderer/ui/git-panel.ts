@@ -97,6 +97,16 @@ export interface GitPanelState {
   readonly stashUntracked: boolean;
   /** True while a write is in flight, so a double click cannot launch two checkouts. */
   readonly busy: boolean;
+  /**
+   * True while `Generate` is waiting on Claude Code.
+   *
+   * Its own flag rather than `busy`, and the difference is not cosmetic: `busy` disables the whole
+   * form because a write is touching the repository, whereas a generation touches nothing and only
+   * has to stop a second run from starting. Folding it into `busy` would grey out the textarea, which
+   * is precisely where the answer is about to land and the one place still worth typing in while the
+   * run takes its minute.
+   */
+  readonly generating: boolean;
 }
 
 export interface GitPanelActions {
@@ -109,6 +119,13 @@ export interface GitPanelActions {
   onCreateBranch: (name: string) => void;
   onCommit: () => void;
   onMessage: (value: string) => void;
+  /**
+   * Asks Claude Code for a commit message and puts it in the field.
+   *
+   * Fills the form; it never commits. The answer is a draft like anything else typed there, and the
+   * commit stays the separate, deliberate click it already was.
+   */
+  onGenerateMessage: () => void;
   /** Arms or disarms the amend. Ticking it pre-fills the form with the message being replaced. */
   onAmend: (amend: boolean) => void;
   onBranchDraft: (value: string) => void;
@@ -714,6 +731,31 @@ function renderCommitForm(
             : ''
         }`;
 
+  /*
+   * `Generate`, which asks Claude Code for the message rather than writing one from a template.
+   *
+   * Secondary and to the left of `Commit`, in the order the gesture happens. It obeys the same
+   * staged-or-amending rule as the commit button, and for the same reason: with an empty index there
+   * is no diff, so a run would take its minute and come back with an invented message. `busy` blocks
+   * it because a write is in flight; `generating` blocks it because one is already running.
+   *
+   * It does **not** care whether the textarea already has something in it. Regenerating over a draft
+   * is a normal thing to want, and a button that refused would be one you have to clear a field to
+   * use. The answer replacing a draft is why this is a button and not something that fires on its own.
+   */
+  const generate = createElement('button', {
+    className: 'button',
+    text: state.generating ? 'Generating…' : 'Generate',
+  });
+  generate.type = 'button';
+  generate.disabled = state.busy || state.generating || (!staged && !state.amend);
+  generate.title = state.generating
+    ? 'Claude Code is reading the diff'
+    : staged || state.amend
+      ? "Write the message from the staged diff, following this repository's conventions"
+      : 'Nothing staged: tick at least one file';
+  generate.addEventListener('click', () => actions.onGenerateMessage());
+
   const button = createElement('button', {
     className: 'button button--primary',
     text: state.amend ? 'Amend' : 'Commit',
@@ -728,6 +770,7 @@ function renderCommitForm(
       : 'Nothing staged: tick at least one file';
   button.addEventListener('click', () => actions.onCommit());
 
+
   const footer = createElement('div', { className: 'git__commit-actions' });
   footer.append(
     createElement('span', {
@@ -739,6 +782,7 @@ function renderCommitForm(
           : 'Empty index',
     }),
     toggle,
+    generate,
     button,
   );
 

@@ -141,6 +141,36 @@ describe('LOCAL_ONLY_KEYS', () => {
     expect(asPatch({ stripCollapsed: 'yes' })).toEqual({});
   });
 
+  it('carries the three model names, which the settings window is the only writer of', () => {
+    // The failure this whole file exists for: a key missing here is accepted by the form, saved, and
+    // silently discarded on the way to disk. Three fields is three chances to forget one.
+    expect(
+      asPatch({
+        claudeAnalysisModel: 'haiku',
+        claudeWorkModel: 'opus',
+        claudeCommitModel: 'sonnet',
+      }),
+    ).toEqual({
+      claudeAnalysisModel: 'haiku',
+      claudeWorkModel: 'opus',
+      claudeCommitModel: 'sonnet',
+    });
+  });
+
+  it('lets an empty model through, empty being how the default is spelled', () => {
+    // Not dropped as falsy: clearing a pinned model has to reach the store, or the field would be the
+    // one setting in this app that can be set and never unset.
+    expect(asPatch({ claudeWorkModel: '' })).toEqual({ claudeWorkModel: '' });
+  });
+
+  it('leaves the validation of a model name to the store, and passes the value on as typed', () => {
+    // Two gates answering "is this a model name" would drift, and the one that silently dropped the
+    // value would be this one, where nothing can report it. The store normalises; this only filters
+    // by type.
+    expect(asPatch({ claudeCommitModel: 'sonnet 4' })).toEqual({ claudeCommitModel: 'sonnet 4' });
+    expect(asPatch({ claudeCommitModel: 4 })).toEqual({});
+  });
+
   it('does not cover anything the settings window owns', () => {
     // `uiFontSize` in particular: it is born in the settings window and its whole purpose is to reach
     // the dashboard, so listing it as local-only would leave the app's text size stuck.
@@ -150,6 +180,9 @@ describe('LOCAL_ONLY_KEYS', () => {
       'notesFolder',
       'defaultShellProfileId',
       'projects',
+      'claudeAnalysisModel',
+      'claudeWorkModel',
+      'claudeCommitModel',
     ]) {
       expect(LOCAL_ONLY_KEYS.has(key)).toBe(false);
     }

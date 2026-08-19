@@ -3,6 +3,7 @@ import {
   IpcChannel,
   type AppSettings,
   type BootstrapState,
+  type GeneratedCommit,
   type GitDiff,
   type GitDiffTarget,
   type GitRepoState,
@@ -36,6 +37,7 @@ import {
   type TerminalSize,
   type ThemeMode,
   type ThemeState,
+  type WorktreeCommand,
 } from '@shared/contracts.js';
 
 /**
@@ -66,11 +68,20 @@ const api: RendererApi = {
 
   readWorktrees: (): Promise<RepoWorktrees[]> => ipcRenderer.invoke(IpcChannel.WorktreesRead),
 
+  runWorktreeCommand: (
+    projectId: ProjectId,
+    command: WorktreeCommand,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
+    ipcRenderer.invoke(IpcChannel.WorktreeRun, projectId, command),
+
   gitState: (projectId: ProjectId): Promise<GitRepoState | null> =>
     ipcRenderer.invoke(IpcChannel.GitState, projectId),
 
   gitDiff: (projectId: ProjectId, target: GitDiffTarget): Promise<GitDiff> =>
     ipcRenderer.invoke(IpcChannel.GitDiff, projectId, target),
+
+  gitGenerateMessage: (projectId: ProjectId, amend: boolean): Promise<GeneratedCommit> =>
+    ipcRenderer.invoke(IpcChannel.GitGenerateMessage, projectId, amend),
 
   gitCreateBranch: (projectId: ProjectId, name: string, checkout: boolean): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitBranchCreate, projectId, name, checkout),

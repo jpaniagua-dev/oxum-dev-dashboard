@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { modelFlag } from '@shared/claude-model.js';
 
 /**
  * Builds the `Work on this` command and decides where it runs.
@@ -49,17 +50,27 @@ export function safeRepoName(folder: string): string | null {
  * that name anyway, a worktree being created per repository.
  *
  * One ticket goes straight to the skill; a batch names them in order and lets the skill run once per
- * ticket. Keys have already passed `ISSUE_KEY_PATTERN` and the folder name `safeRepoName`, so nothing
- * in here can be read as shell syntax.
+ * ticket. Keys have already passed `ISSUE_KEY_PATTERN`, the folder name `safeRepoName` and the model
+ * `CLAUDE_MODEL_PATTERN`, so nothing in here can be read as shell syntax.
+ *
+ * The model is the one of the three Claude Code runs that reaches a **shell**, which is why it is
+ * double-quoted and whitelisted rather than trusted: `claude-opus-5[1m]` is a legitimate pinned name
+ * and its brackets are glob characters. Empty omits the flag entirely, the CLI rejecting a blank
+ * model. It sits before `--dangerously-skip-permissions` for readability only; the CLI takes them in
+ * any order.
  */
-export function buildWorkCommand(keys: readonly string[], folder: string): string {
+export function buildWorkCommand(
+  keys: readonly string[],
+  folder: string,
+  model = '',
+): string {
   const repo = safeRepoName(folder);
   const where = repo === null ? '' : ` in the ${repo} repository`;
   const prompt =
     keys.length === 1
       ? `/ticket ${keys[0]}${where}`
       : `Work these tickets one after another${where}, using the ticket skill for each: ${keys.join(', ')}`;
-  return `claude ${SKIP_PERMISSIONS_FLAG} "${prompt}"`;
+  return `claude${modelFlag(model)} ${SKIP_PERMISSIONS_FLAG} "${prompt}"`;
 }
 
 /**

@@ -19,6 +19,7 @@ import type {
   StripTab,
   ThemeMode,
   ThemeState,
+  WorktreeCommand,
 } from '@shared/contracts.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
@@ -85,10 +86,18 @@ class App {
    *
    * Null and not an empty array: "not read yet" and "there are none" are two different sentences, and
    * an empty list shown before the first read would announce the second while meaning the first. There
-   * is nothing else to keep here, the tab having no selection and no field of its own, which is also
-   * why a refresh landing mid-scroll can never destroy anything.
+   * is no selection to keep beside it, the tab listing every project at once.
    */
   private worktrees: readonly RepoWorktrees[] | null = null;
+  /**
+   * Raised while the Worktrees tab has a field open, and the reason that tab now needs a guard at all.
+   *
+   * It held none until the life-cycle gestures landed, and its own comment said so. Naming a new
+   * worktree and renaming one are both a typed value, and this tab re-reads on the same ten-second git
+   * poll the project table does, so without the guard a refresh mid-typing would rebuild the bar or the
+   * row under the cursor. Same mechanism as `editingRow` and `gitEditing`.
+   */
+  private worktreesEditing = false;
   private triage: TriageState | null = null;
   private triagePanel: TriagePanel | null = null;
   private selectedJiraView: JiraViewId = 'mine';
@@ -128,6 +137,14 @@ class App {
   private gitStashDraft = '';
   private gitStashUntracked = false;
   private gitBusy = false;
+  /**
+   * True while `Generate` is waiting on Claude Code.
+   *
+   * Separate from `gitBusy`, which means "a write is touching the repository". A generation touches
+   * nothing: it only has to stop a second run from starting, and folding it into `gitBusy` would grey
+   * out the textarea the answer is about to land in.
+   */
+  private gitGenerating = false;
   private gitEditing = false;
   private strip: StripTabs | null = null;
   /** Whether the top strip is folded down to its tab row. Mirrors `settings.stripCollapsed`. */
@@ -346,6 +363,10 @@ class App {
         // being one. The title is the folder name rather than the repository's label, because that is
         // what tells two tabs on the same clone apart, which is the whole situation this tab is about.
         onOpenTerminal: (path, name) => void this.openShellInPath(path, name),
+        onRun: (projectId, command) => void this.runWorktreeCommand(projectId, command),
+        onEditingChange: (editing) => {
+          this.worktreesEditing = editing;
+        },
       },
     );
   }
@@ -657,6 +678,7 @@ class App {
       stashDraft: this.gitStashDraft,
       stashUntracked: this.gitStashUntracked,
       busy: this.gitBusy,
+      generating: this.gitGenerating,
     };
   }
 
@@ -708,6 +730,7 @@ class App {
           // every keystroke would move the caret.
           this.gitMessage = value;
         },
+        onGenerateMessage: () => void this.generateCommitMessage(),
         onAmend: (amend) => {
           // Arming the amend puts the message being replaced in the form, since that is the text
           // the gesture edits — but never over a draft already typed. Disarming takes the pre-fill
@@ -812,13 +835,45 @@ class App {
   /**
    * Re-reads every project's worktrees.
    *
-   * No `editing` guard, unlike the table and the Git tab: this tab holds no field and no selection, so
-   * there is nothing a refresh could take away. That is a property of the flat list, and the reason to
-   * be careful about giving this tab state later.
+   * Guarded like the table and the Git tab, which it was not until this tab grew fields. The read
+   * itself is cheap to skip: it runs on the git poll and when the tab is shown, so the worst a skipped
+   * one costs is a list ten seconds stale while a name is being typed.
    */
   private async loadWorktrees(): Promise<void> {
+    if (this.worktreesEditing) {
+      return;
+    }
     this.worktrees = await window.api.readWorktrees();
     this.renderWorktrees();
+  }
+
+  /**
+   * Runs one worktree life-cycle gesture, then brings its tab forward.
+   *
+   * Focused straight away like the branch and commit tabs, and here the reason is sharper: the helper
+   * is the only thing that will say whether git refused, which junction it unlinked, or that it kept an
+   * unmerged branch. A tab left behind the current one would turn a refusal into silence, and silence
+   * after clicking `Remove` reads as success.
+   *
+   * The list is re-read after the tab is focused rather than before, and it is deliberately the only
+   * refresh: the helper is still running at that point, so what this read catches is the state before
+   * it finished. The git poll a few seconds later is what settles the row, and inventing a completion
+   * signal here would mean this app deciding when a command it did not run is done.
+   */
+  private async runWorktreeCommand(
+    projectId: ProjectId,
+    command: WorktreeCommand,
+  ): Promise<void> {
+    const { terminalId, result } = await window.api.runWorktreeCommand(projectId, command);
+    this.stampMessage(result.message);
+    if (terminalId === null) {
+      // In the log as well as on the strip: a refused command is the kind of thing you go looking for
+      // afterwards, and the strip's message is gone by then.
+      console.warn('[worktree]', result.message);
+      return;
+    }
+    await this.focusTerminal(terminalId);
+    await this.loadWorktrees();
   }
 
   private async loadGit(): Promise<void> {
@@ -950,6 +1005,46 @@ class App {
     } finally {
       this.gitBusy = false;
       await this.loadGit();
+    }
+  }
+
+  /**
+   * Asks Claude Code for a commit message and puts it in the field.
+   *
+   * It fills the form and nothing else. The commit stays the separate, deliberate click it already
+   * was, because a button that generated *and* committed would write history from a diff nobody
+   * re-read, and the whole value of a generated message is that it is a draft you correct.
+   *
+   * A minute is a long time in front of a form, so the panel re-renders immediately to show the button
+   * in its `Generating…` state. The state is `gitGenerating` and not `gitBusy`: the run touches
+   * nothing in the repository, and `gitBusy` would grey out the very textarea the answer is headed
+   * for, which is also still worth typing in while the run works.
+   *
+   * `renderGit` and not `loadGit` at the end: nothing about the repository changed, so re-reading its
+   * status would be work for nothing, and the poll's own refresh would take the fresh message away
+   * with it. `gitEditing` protects the field from that poll only while it has focus, which it does not
+   * during a click on a button.
+   */
+  private async generateCommitMessage(): Promise<void> {
+    const projectId = this.gitProject;
+    if (projectId === null || this.gitGenerating || this.gitBusy) {
+      return;
+    }
+    this.gitGenerating = true;
+    this.renderGit();
+    try {
+      const generated = await window.api.gitGenerateMessage(projectId, this.gitAmend);
+      if (generated.ok) {
+        this.gitMessage = generated.message;
+        this.stampMessage('Commit message generated');
+      } else {
+        // Reported and the draft left alone. The failures here are ordinary (nothing staged, Claude
+        // Code not on the PATH, a run that timed out), and each of them names what to do next.
+        this.stampMessage(generated.error ?? 'The commit message could not be generated');
+      }
+    } finally {
+      this.gitGenerating = false;
+      this.renderGit();
     }
   }
 

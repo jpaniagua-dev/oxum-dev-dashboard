@@ -9,6 +9,7 @@ import {
   type ProjectValidation,
   type ShellProfile,
 } from '@shared/contracts.js';
+import { isValidModel } from '@shared/claude-model.js';
 import { clearChildren, createElement } from './dom.js';
 
 /**
@@ -79,11 +80,24 @@ function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: strin
   });
 }
 
+/**
+ * The three model fields, as one object rather than three properties.
+ *
+ * Named so the render loop can be keyed (`keyof ClaudeModelDrafts`) instead of repeating the same
+ * field three times with a different property each.
+ */
+interface ClaudeModelDrafts {
+  analysis: string;
+  work: string;
+  commit: string;
+}
+
 export interface SettingsFormHosts {
   readonly interface: HTMLElement;
   readonly projects: HTMLElement;
   readonly terminal: HTMLElement;
   readonly notes: HTMLElement;
+  readonly claude: HTMLElement;
   readonly jira: HTMLElement;
   readonly footer: HTMLElement;
 }
@@ -117,6 +131,8 @@ export class SettingsForm {
   private notesFolder = '';
   /** The path an empty `notesFolder` resolves to, shown as the placeholder. */
   private defaultNotesFolder = '';
+  /** The three model drafts. Empty is a real value: it means "let Claude Code decide". */
+  private claudeModels: ClaudeModelDrafts = { analysis: '', work: '', commit: '' };
   private jira: JiraConfig = { siteUrl: '', email: '', projectKeys: [], hasToken: false };
   /** Typed token, held only until the save. Never read back from the main process. */
   private jiraToken = '';
@@ -151,6 +167,11 @@ export class SettingsForm {
   ): Promise<void> {
     this.notesFolder = settings.notesFolder;
     this.defaultNotesFolder = defaultNotesFolder;
+    this.claudeModels = {
+      analysis: settings.claudeAnalysisModel,
+      work: settings.claudeWorkModel,
+      commit: settings.claudeCommitModel,
+    };
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
     this.jiraStatus = '';
@@ -193,6 +214,7 @@ export class SettingsForm {
     this.renderProjects();
     this.renderTerminal();
     this.renderNotes();
+    this.renderClaude();
     this.renderJira();
     this.renderFooter();
   }
@@ -265,6 +287,73 @@ export class SettingsForm {
     });
     row.append(browse);
     this.hosts.notes.append(row);
+  }
+
+  /**
+   * The model each Claude Code run is pinned to.
+   *
+   * Three fields and not one, because the three runs are three jobs: classifying a sprint is bulk
+   * reading where speed and cost dominate, implementing a ticket wants the strongest model there is,
+   * and writing a commit message from a diff is short and frequent. One setting would be wrong for two
+   * of them.
+   *
+   * **Validated as you type, and that is not decoration.** One of these three ends up on a shell
+   * command line, so the store normalises anything that is not a model name to empty. Without a mark
+   * here, typing `sonnet 4` would look accepted, save, and come back as the default with nothing said:
+   * a setting failing in complete silence, which is the failure `asPatch` already records. The mark is
+   * on the field rather than a message beside it, since there is nothing to explain beyond "not this".
+   */
+  private renderClaude(): void {
+    clearChildren(this.hosts.claude);
+
+    const fields: readonly { key: keyof ClaudeModelDrafts; label: string; hint: string }[] = [
+      {
+        key: 'analysis',
+        label: 'Triage analysis',
+        hint: 'Reads a whole sprint: the run where speed and cost show most',
+      },
+      {
+        key: 'work',
+        label: 'Work on this',
+        hint: 'Implements a ticket in a terminal tab: the run that writes code',
+      },
+      {
+        key: 'commit',
+        label: 'Commit message',
+        hint: 'Reads a staged diff and writes the message: short and frequent',
+      },
+    ];
+
+    for (const entry of fields) {
+      const field = this.field(
+        entry.label,
+        this.claudeModels[entry.key],
+        (value) => {
+          this.claudeModels[entry.key] = value;
+          this.markModelField(field, value);
+          this.touch();
+        },
+        'default',
+      );
+      // The hint on hover rather than in the placeholder: a placeholder long enough to explain the run
+      // is one that hides the value as soon as there is one.
+      field.title = entry.hint;
+      this.markModelField(field, this.claudeModels[entry.key]);
+      this.hosts.claude.append(field);
+    }
+  }
+
+  /** Flags a model field whose value the store would drop, so the silence is broken before the save. */
+  private markModelField(field: HTMLElement, value: string): void {
+    const input = field.querySelector('input');
+    if (input === null) {
+      return;
+    }
+    const invalid = !isValidModel(value);
+    input.classList.toggle('settings-field__input--invalid', invalid);
+    input.title = invalid
+      ? 'Not a model name: letters, digits, dot, dash, underscore and brackets. This would be ignored.'
+      : '';
   }
 
   /**
@@ -848,10 +937,21 @@ export class SettingsForm {
       terminalFontSize: this.fontSize,
       uiFontSize: this.uiFontSize,
       notesFolder: this.notesFolder,
+      claudeAnalysisModel: this.claudeModels.analysis,
+      claudeWorkModel: this.claudeModels.work,
+      claudeCommitModel: this.claudeModels.commit,
     });
     this.fontSize = saved.terminalFontSize;
     this.uiFontSize = saved.uiFontSize;
     this.notesFolder = saved.notesFolder;
+    // Read back like the clamped sizes above, and for the same reason: the store normalises a value it
+    // will not use to empty, so realigning the draft on what was actually stored is what makes the
+    // field agree with the setting. Without it, a rejected value stays on screen looking saved.
+    this.claudeModels = {
+      analysis: saved.claudeAnalysisModel,
+      work: saved.claudeWorkModel,
+      commit: saved.claudeCommitModel,
+    };
 
     // The token travels only when one was actually typed: an empty field means "keep the stored one".
     const jira = await window.api.saveJira(

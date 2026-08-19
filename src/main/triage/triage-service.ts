@@ -173,6 +173,8 @@ export class TriageService {
     const answer = await runClaude({
       cwd: this.settings().projectsRoot,
       prompt: buildTriagePrompt(sprint.name, asked),
+      model: this.settings().claudeAnalysisModel,
+      label: 'The analysis',
       onEvent: (event) => {
         const step = readProgress(event);
         if (step === null || step.phase === 'done') {

@@ -14,6 +14,7 @@ import { basename, parseWorktreeList, readRepoWorktrees } from '../src/main/git/
 import {
   flattenWorktrees,
   summarizeWorktrees,
+  worktreeMenuEntries,
 } from '../src/renderer/ui/worktree-list.js';
 
 /** The shape git prints, main checkout first, records separated by a blank line. */
@@ -234,6 +235,100 @@ describe('summarizeWorktrees', () => {
     expect(summarizeWorktrees([repo('web-app', 'Web', ['PROJ-1-web-app']), broken])).toBe(
       '1 worktree across 1 of 2 projects, 1 unreadable',
     );
+  });
+});
+
+/**
+ * Which life-cycle entries a row is allowed to offer.
+ *
+ * The reason these gestures moved out of the terminal and into the list is that the list already knows
+ * the state: it has just read whether the folder is there and whether it holds uncommitted work. So the
+ * destructive entry is on the menu of a row that has something to destroy, and nowhere else. That
+ * derivation is four fields wide, invisible until it is wrong, and its failure is a menu offering to
+ * delete work.
+ */
+describe('worktreeMenuEntries', () => {
+  const labels = (entries: ReturnType<typeof worktreeMenuEntries>): string[] =>
+    entries.map((entry) => entry.label);
+
+  it('offers a plain removal, a removal with the branch, and a rename on a clean row', () => {
+    expect(labels(worktreeMenuEntries(worktree('PROJ-1-web-app')))).toEqual([
+      'Remove',
+      'Remove and delete the branch',
+      'Rename…',
+    ]);
+  });
+
+  it('keeps -f off a clean row entirely', () => {
+    // Not disabled, absent. An entry that discards uncommitted work on a row with none is a permanently
+    // armed control offering nothing the plain removal does not already do.
+    const entries = worktreeMenuEntries(worktree('PROJ-1-web-app'));
+    expect(entries.some((entry) => entry.command?.kind === 'remove' && entry.command.discardChanges)).toBe(
+      false,
+    );
+  });
+
+  it('offers -f on a dirty row, and counts what it will throw away', () => {
+    const dirty: Worktree = {
+      ...worktree('PROJ-1-web-app'),
+      git: { ...CLEAN, modified: 2, untracked: 1 },
+    };
+    const entries = worktreeMenuEntries(dirty);
+    expect(labels(entries)).toContain('Remove, discarding 3 changes');
+    const forced = entries.find((entry) => entry.label.startsWith('Remove, discarding'));
+    expect(forced?.command).toEqual({
+      kind: 'remove',
+      label: 'PROJ-1-web-app',
+      discardChanges: true,
+      deleteBranch: false,
+    });
+  });
+
+  it('says "1 change" rather than "1 changes"', () => {
+    const dirty: Worktree = { ...worktree('PROJ-1-web-app'), git: { ...CLEAN, staged: 1 } };
+    expect(labels(worktreeMenuEntries(dirty))).toContain('Remove, discarding 1 change');
+  });
+
+  it('gives a prunable row one entry, and it is not a deletion', () => {
+    // Its folder is gone: there is nothing to rename, nothing to discard, and what is left is a
+    // registration git is waiting to be told to drop. Offering the full menu would promise gestures
+    // that have nothing to act on.
+    const stale: Worktree = {
+      ...worktree('PROJ-1-web-app'),
+      prunable: 'gitdir file points to non-existent location',
+      git: null,
+    };
+    const entries = worktreeMenuEntries(stale);
+    expect(labels(entries)).toEqual(['Prune the stale registration']);
+    expect(entries[0]?.command).toEqual({
+      kind: 'remove',
+      label: 'PROJ-1-web-app',
+      discardChanges: false,
+      deleteBranch: false,
+    });
+  });
+
+  it('warns in the hint that git refuses a locked worktree', () => {
+    const locked: Worktree = { ...worktree('PROJ-1-web-app'), locked: 'release build' };
+    expect(worktreeMenuEntries(locked)[0]?.hint).toContain('locked');
+  });
+
+  it('reads a row whose git state failed as not dirty rather than as clean-and-forceable', () => {
+    // `git status` failing says nothing about what is in the folder. Offering `--force` on the strength
+    // of an error would be inventing the one fact that makes the gesture safe.
+    const broken: Worktree = {
+      ...worktree('PROJ-1-web-app'),
+      git: { ...CLEAN, modified: 4, error: 'not a git repository' },
+    };
+    expect(labels(worktreeMenuEntries(broken))).not.toContain('Remove, discarding 4 changes');
+  });
+
+  it('addresses every worktree by its folder name, which is the only identity the helper takes', () => {
+    for (const entry of worktreeMenuEntries(worktree('PROJ-1-web-app'))) {
+      if (entry.command !== null) {
+        expect(entry.command.label).toBe('PROJ-1-web-app');
+      }
+    }
   });
 });
 

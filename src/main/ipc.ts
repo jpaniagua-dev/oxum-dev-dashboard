@@ -8,11 +8,13 @@ import {
   TICKET_BRANCH_ACTION_ID,
   TRIAGE_WORK_ACTION_ID,
   WORK_BATCH_LIMIT,
+  WORKTREE_ACTION_ID,
   type AppSettings,
   type BootstrapState,
   type GitDiff,
   type GitDiffTarget,
   type GitRepoState,
+  type GeneratedCommit,
   type GitResult,
   type GitSequencerOp,
   type GitStashOp,
@@ -51,7 +53,14 @@ import {
   stashPush,
   sync,
 } from './git/git-commands.js';
+import { generateCommitMessage } from './git/generate-commit.js';
+import { readGitState } from './git/git-service.js';
 import { readAllWorktrees } from './git/git-worktrees.js';
+import {
+  buildWorktreeCommand,
+  parseWorktreeCommand,
+  WORKTREE_HELPER,
+} from './git/worktree-command.js';
 import {
   configFromPath,
   detectCandidates,
@@ -206,6 +215,76 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (): Promise<RepoWorktrees[]> => readAllWorktrees(deps.projects()),
   );
 
+  /*
+   * Creates, renames or removes a worktree, by running the shell helper in a terminal tab.
+   *
+   * The one gesture in the strip that deletes something, and the reason it goes through a tab rather
+   * than an `execFile` is the same reason the commit does: the helper reports which junction it
+   * unlinked, whether git refused on uncommitted work and which branch it kept because it is not
+   * merged. Swallowing that would replace it with a one-line verdict this app writes about a command it
+   * did not run.
+   *
+   * The repository folder comes from the **configured path**, never from the payload: the renderer says
+   * which project, and the only thing it can name freely is a label the builder puts through a
+   * whitelist. `resolveBashProfile` for the shell, because the helper is a bash **function** and the
+   * quoting the builder emits is POSIX.
+   */
+  ipcMain.handle(
+    IpcChannel.WorktreeRun,
+    async (
+      _event,
+      projectId: unknown,
+      payload: unknown,
+    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { terminalId: null, result: { ok: false, message: 'Project not found' } };
+      }
+      const command = parseWorktreeCommand(payload);
+      if (command === null) {
+        return { terminalId: null, result: { ok: false, message: 'Invalid worktree command' } };
+      }
+
+      const profile = resolveBashProfile(
+        deps.profiles(),
+        deps.settings.get().defaultShellProfileId,
+      );
+      if (profile === undefined) {
+        return {
+          terminalId: null,
+          result: {
+            ok: false,
+            message: `No bash profile: "${WORKTREE_HELPER}" cannot be launched`,
+          },
+        };
+      }
+
+      const built = buildWorktreeCommand(command, basename(project.path));
+      if (built.command === undefined) {
+        return { terminalId: null, result: { ok: false, message: built.error } };
+      }
+
+      const resolved = resolveShellCommand(profile, built.command);
+      const terminalId = deps.terminals.runProjectCommand({
+        project,
+        actionId: WORKTREE_ACTION_ID,
+        title: `${project.label} · ${WORKTREE_HELPER}`,
+        file: resolved.file,
+        args: resolved.args,
+        size: deps.terminalSize(),
+        profileId: profile.id,
+      });
+
+      return {
+        terminalId,
+        result:
+          terminalId === null
+            ? { ok: false, message: 'Could not open the tab' }
+            : { ok: true, message: `${built.command} launched in ${project.label}` },
+      };
+    },
+  );
+
   ipcMain.handle(
     IpcChannel.GitState,
     async (_event, projectId: unknown): Promise<GitRepoState | null> => {
@@ -223,6 +302,29 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return { title: '', lines: [], note: 'Project or file not found.' };
       }
       return readDiff(project.path, parsed);
+    },
+  );
+
+  /*
+   * Writes a commit message from the staged diff, with a headless Claude Code run.
+   *
+   * The branch is read here rather than taken from the renderer: it goes into the prompt as the place
+   * a ticket key lives, and a value the renderer could get wrong would put the wrong key in a subject
+   * line. `amend` does come from the renderer, because it is a draft nothing has saved yet.
+   */
+  ipcMain.handle(
+    IpcChannel.GitGenerateMessage,
+    async (_event, projectId: unknown, amend: unknown): Promise<GeneratedCommit> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { ok: false, message: '', error: 'Project not found' };
+      }
+      const state = await readGitState(project.path);
+      return generateCommitMessage(project, {
+        amend: amend === true,
+        branch: state.branch,
+        model: deps.settings.get().claudeCommitModel,
+      });
     },
   );
 
@@ -494,7 +596,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       }
 
       const cwd = resolveClaudeContext(settings.claudeContextRoot, project.path);
-      const command = buildWorkCommand(keys, basename(project.path));
+      const command = buildWorkCommand(keys, basename(project.path), settings.claudeWorkModel);
       const resolved = resolveShellCommand(profile, command);
 
       const terminalId = deps.terminals.runProjectCommand({

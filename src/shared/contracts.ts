@@ -392,6 +392,16 @@ export const TICKET_BRANCH_ACTION_ID = `${RESERVED_ACTION_PREFIX}branch`;
 export const TRIAGE_WORK_ACTION_ID = `${RESERVED_ACTION_PREFIX}triage-work`;
 
 /**
+ * Action id of the tab that runs the worktree helper from the Worktrees tab.
+ *
+ * Reserved like the three above, so a settings save cannot close a removal mid-run. One id for the
+ * three gestures and therefore one tab per project, reused once its process has ended: `new`, `mv` and
+ * `rm` are the same conversation with the same helper about the same clone, and three ids would leave
+ * three tabs of finished output where the useful history is the last one.
+ */
+export const WORKTREE_ACTION_ID = `${RESERVED_ACTION_PREFIX}worktree`;
+
+/**
  * How many tickets one batch may hand over at once.
  *
  * A session working twenty tickets in a row is one nobody supervises, which is the opposite of why
@@ -966,6 +976,21 @@ export interface Worktree {
   readonly git: GitState | null;
 }
 
+/**
+ * What `Generate` answered: a commit message, or why there is none.
+ *
+ * A message and not a commit. The answer goes into the form's textarea and the commit stays a separate
+ * click, because a button that generated *and* committed would write history from a diff nobody
+ * re-read. Same shape as `GitResult` on purpose, minus the assumption that something happened.
+ */
+export interface GeneratedCommit {
+  readonly ok: boolean;
+  /** The message, ready to be put in the form. Empty when the run failed. */
+  readonly message: string;
+  /** Why there is no message. Null on success. */
+  readonly error: string | null;
+}
+
 /** The worktrees of one watched project, plus why there might be none. */
 export interface RepoWorktrees {
   readonly projectId: ProjectId;
@@ -981,6 +1006,36 @@ export interface RepoWorktrees {
    */
   readonly error: string | null;
 }
+
+/**
+ * A life-cycle gesture the Worktrees tab hands to the shell helper.
+ *
+ * A description of the **intent**, not a command line: the renderer says "remove this one, and the
+ * branch with it", and the main process is the only place that turns that into an argument list. The
+ * renderer therefore cannot compose a command, which is what keeps a folder name coming from a git
+ * listing the only thing that can ever reach a shell.
+ *
+ * The repository is missing on purpose, including on `create`: the caller passes a `ProjectId`, and the
+ * main process derives the folder from the configured path. A repository named by the renderer would be
+ * a repository the renderer could get wrong.
+ */
+export type WorktreeCommand =
+  | {
+      readonly kind: 'remove';
+      /** Folder name of the worktree, as the list read it back from `git worktree list`. */
+      readonly label: string;
+      /** `-f`: discards uncommitted work. Only ever offered on a row shown as dirty. */
+      readonly discardChanges: boolean;
+      /** `-d`: deletes the branch too, and the helper still refuses an unmerged one. */
+      readonly deleteBranch: boolean;
+    }
+  | { readonly kind: 'rename'; readonly label: string; readonly newLabel: string }
+  | {
+      readonly kind: 'create';
+      /** Ticket key or slug. A ticket key makes the description mandatory. */
+      readonly label: string;
+      readonly description: string;
+    };
 
 export interface AppSettings {
   themeMode: ThemeMode;
@@ -1080,6 +1135,23 @@ export interface AppSettings {
    * launch and never touched again does not need a field competing with the ones that are.
    */
   claudeContextRoot: string;
+  /**
+   * Model each Claude Code run is pinned to, or empty for whatever Claude Code itself is set to.
+   *
+   * Three fields and not one, because these are three different jobs. Classifying twenty tickets is
+   * bulk reading where speed and cost dominate; implementing a ticket wants the strongest model there
+   * is; writing a commit message from a diff is short, frequent and cheap. A single setting would be
+   * wrong for two of the three, and the run that suffers most is the one nobody can intervene in.
+   *
+   * `--model` is *not* passed at all when the value is empty: the CLI rejects a blank model, so the
+   * default has to be the absence of the flag rather than an empty one. Values are validated against
+   * `CLAUDE_MODEL_PATTERN`, since one of the three reaches a shell.
+   */
+  claudeAnalysisModel: string;
+  /** Model for the `Work on this` handoff, the one run that is interactive. */
+  claudeWorkModel: string;
+  /** Model for `Generate` in the Git tab's commit form. */
+  claudeCommitModel: string;
   /**
    * Watched projects.
    *
@@ -1223,10 +1295,27 @@ export const IpcChannel = {
    * very working trees this list is about.
    */
   WorktreesRead: 'worktrees:read',
+  /**
+   * invoke: (projectId, command: WorktreeCommand) => { terminalId, result }
+   *
+   * Runs the shell helper's `new`, `mv` or `rm` in a terminal tab. A tab and not a silent `execFile`,
+   * for the reason a commit gets one: the helper reports what it unlinked, what git refused and which
+   * branch it kept, and a gesture that deletes a folder is the last one whose output should be
+   * swallowed.
+   */
+  WorktreeRun: 'worktrees:run',
   /** invoke: (projectId) => GitRepoState | null, everything the Git tab shows for one repository */
   GitState: 'git:state',
   /** invoke: (projectId, target: GitDiffTarget) => GitDiff, a file's changes or a whole commit */
   GitDiff: 'git:diff',
+  /**
+   * invoke: (projectId, amend: boolean) => GeneratedCommit
+   *
+   * Writes a commit message from the staged diff with a headless Claude Code run, and returns it. It
+   * fills the form; it never commits. Not a terminal tab, for the reason the sprint analysis is not
+   * one: the output is a payload that has to land in a textarea, not something to read scroll past.
+   */
+  GitGenerateMessage: 'git:generate-message',
   /** invoke: (projectId, name, checkout: boolean) => GitResult */
   GitBranchCreate: 'git:branch-create',
   /** invoke: (projectId, name) => GitResult */
@@ -1431,6 +1520,21 @@ export interface RendererApi {
    */
   readWorktrees(): Promise<RepoWorktrees[]>;
   /**
+   * Creates, renames or removes a worktree, by running the shell helper in a terminal tab.
+   *
+   * The tab is the point and not a side effect. This is the one gesture in the strip that **deletes**
+   * something, and the helper's own output is what says whether the junction was unlinked, whether git
+   * refused on uncommitted work, and whether the branch was kept because it is not merged. A silent
+   * call would replace all of that with a one-line verdict written by this app, about a command it did
+   * not run.
+   *
+   * Returns the tab like `gitCommit` and `startTicketBranch` do, so the caller can bring it forward.
+   */
+  runWorktreeCommand(
+    projectId: ProjectId,
+    command: WorktreeCommand,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
+  /**
    * Reads a repository's full git state for the Git tab.
    *
    * Pulled on demand rather than pushed by a monitor: only the selected repository is ever displayed,
@@ -1440,6 +1544,14 @@ export interface RendererApi {
   gitState(projectId: ProjectId): Promise<GitRepoState | null>;
   /** The diff of one working-tree file, or of a whole commit. */
   gitDiff(projectId: ProjectId, target: GitDiffTarget): Promise<GitDiff>;
+  /**
+   * Writes a commit message from the staged diff, and returns it for the form.
+   *
+   * `amend` decides what the message has to describe: the index alone, or the last commit plus
+   * whatever is staged on top of it. It is passed rather than read from the panel's state in the main
+   * process, the amend being a draft the renderer owns and has not saved anywhere.
+   */
+  gitGenerateMessage(projectId: ProjectId, amend: boolean): Promise<GeneratedCommit>;
   /** Creates a branch, optionally switching to it. The name is validated by git itself. */
   gitCreateBranch(projectId: ProjectId, name: string, checkout: boolean): Promise<GitResult>;
   gitCheckout(projectId: ProjectId, name: string): Promise<GitResult>;

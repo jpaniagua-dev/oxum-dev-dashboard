@@ -21,6 +21,7 @@ async function start(): Promise<void> {
       projects: requireElement('settings-projects'),
       terminal: requireElement('settings-terminal'),
       notes: requireElement('settings-notes'),
+      claude: requireElement('settings-claude'),
       jira: requireElement('settings-jira'),
       footer: requireElement('settings-footer'),
     },

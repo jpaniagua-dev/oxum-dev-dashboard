@@ -64,6 +64,22 @@
           <div id="settings-notes"></div>
         </section>
 
+        <!--
+          Claude Code, after Notes and before Jira: it is a preference about how the app works, like
+          the sizes and the folders above it, whereas Jira is a connection to something outside.
+        -->
+        <section class="settings__section">
+          <h2 class="settings__section-title">Claude Code</h2>
+          <p class="settings__note">
+            Which model each run is pinned to. Leave a field empty to use whatever Claude Code itself
+            is set to. An alias (<code>opus</code>, <code>sonnet</code>, <code>haiku</code>) always
+            points at the latest version of that model; a full name (<code>claude-fable-5</code>)
+            pins one. Three fields because these are three different jobs, and one answer would be
+            wrong for two of them.
+          </p>
+          <div id="settings-claude"></div>
+        </section>
+
         <section class="settings__section">
           <h2 class="settings__section-title">Jira</h2>
           <p class="settings__note">
