@@ -2115,6 +2115,30 @@ body {
   white-space: pre-wrap;
 }
 
+/*
+ * The scope switch, at the top of the sprint column.
+ *
+ * `position: sticky` because it lives INSIDE the scroller, the same arrangement as the Jira tab's
+ * sortable header and for a related reason: pulled out into a box of its own it would sit above a
+ * column that scrolls under it, and the border would have to be drawn twice. It needs an opaque
+ * background of its own to sit over the rows it stays above, and `flex: none` so a long sprint list
+ * cannot squeeze it.
+ *
+ * The bottom border is what separates "what will be read" from "which sprint": two questions, one
+ * column, and no line between them would read as one list with two odd entries at the top.
+ */
+.triage__scope {
+  display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
+  gap: 2px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
 .triage__state {
   display: inline-grid;
   place-items: center;

@@ -504,7 +504,15 @@ export async function readSprintIssues(
       key,
       summary: typeof fields['summary'] === 'string' ? fields['summary'] : '',
       status: typeof status['name'] === 'string' ? status['name'] : '',
+      // Same rule as `parseIssues`: the **category** is what says where a ticket stands, because a
+      // status name is per-project and renamed at will. Free here, the `status` field already carries
+      // it, and it is what lets a run skip what somebody is already working on.
+      stage: asStage(asRecord(status['statusCategory'])['key']),
       assignee: typeof assignee['displayName'] === 'string' ? assignee['displayName'] : '',
+      // The account id and not the email: Jira Cloud hides `emailAddress` under the site's privacy
+      // settings, and a scope that quietly matched nobody would look exactly like a sprint with no
+      // ticket of yours in it. Same reasoning that makes every write take an `accountId`.
+      accountId: typeof assignee['accountId'] === 'string' ? assignee['accountId'] : '',
       description: flattenDocument(fields['description']),
     });
   }
@@ -515,7 +523,11 @@ export interface SprintIssue {
   readonly key: string;
   readonly summary: string;
   readonly status: string;
+  /** From `statusCategory`, never from the status name: what tells a run which tickets to skip. */
+  readonly stage: IssueStage;
   readonly assignee: string;
+  /** Assignee's account id, or empty when unassigned. The only identity a scope can match on. */
+  readonly accountId: string;
   readonly description: string;
 }
 

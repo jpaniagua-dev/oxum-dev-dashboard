@@ -73,6 +73,34 @@ export class TriageStore {
     await this.write();
   }
 
+  /**
+   * Drops one ticket from one sprint's analysis.
+   *
+   * The row and nothing else: the ticket stays in Jira, the sprint stays analysed, and the next run
+   * brings the row back. That is what makes this the one deletion in the app that needs no
+   * confirmation, unlike a stash `drop` or a discarded change: nothing is lost that a minute of
+   * compute cannot produce again.
+   *
+   * The empty result is **kept** rather than deleted with its last ticket. `analysedAt` is what the
+   * tab reads to say a sprint was looked at, and removing the entry would make a sprint you cleared
+   * look like one nobody ever ran.
+   *
+   * Returns whether anything moved, so dismissing a key twice does not rewrite the file.
+   */
+  remove(sprintId: number, key: string): boolean {
+    const result = this.results.get(sprintId);
+    if (result === undefined) {
+      return false;
+    }
+    const wanted = key.toUpperCase();
+    const tickets = result.tickets.filter((ticket) => ticket.key.toUpperCase() !== wanted);
+    if (tickets.length === result.tickets.length) {
+      return false;
+    }
+    this.results.set(sprintId, { ...result, tickets });
+    return true;
+  }
+
   /** Every key held, across every sprint analysed, so the live fields can be re-read in one query. */
   keys(): string[] {
     const keys = new Set<string>();
@@ -145,11 +173,19 @@ function readResult(value: unknown): TriageResult | null {
   if (typeof record['sprintId'] !== 'number' || !Array.isArray(record['tickets'])) {
     return null;
   }
+  const skipped = readRecord(record['skipped']);
   return {
     sprintId: record['sprintId'],
     sprintName: typeof record['sprintName'] === 'string' ? record['sprintName'] : '',
     analysedAt: typeof record['analysedAt'] === 'string' ? record['analysedAt'] : '',
     error: typeof record['error'] === 'string' ? record['error'] : null,
+    // A file written before the scope existed carries none, and `all` is what those runs did. Reading
+    // it as `mine` would relabel every old analysis as a partial one.
+    scope: record['scope'] === 'mine' ? 'mine' : 'all',
+    skipped: {
+      inProgress: readCount(skipped['inProgress']),
+      notMine: readCount(skipped['notMine']),
+    },
     tickets: record['tickets'].flatMap((ticket) => {
       const entry = ticket as Record<string, unknown>;
       if (typeof entry['key'] !== 'string' || typeof entry['verdict'] !== 'string') {
@@ -173,4 +209,19 @@ function readResult(value: unknown): TriageResult | null {
       ];
     }),
   };
+}
+
+/** A nested object, or an empty one. Same defensive reading as `readResult`, one level down. */
+function readRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+/**
+ * A count read off disk.
+ *
+ * Clamped rather than trusted: these numbers are printed in a sentence about what a run left out, and
+ * a negative or fractional one would put "-1 already in progress" on screen from a hand-edited file.
+ */
+function readCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }

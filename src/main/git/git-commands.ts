@@ -369,6 +369,85 @@ export async function stagePaths(
 }
 
 /**
+ * Throws away what was done to those paths.
+ *
+ * The only write in this tab that destroys work with nothing able to bring it back. A stash `drop`
+ * comes close, but a dropped stash is a commit the reflog holds for a while; a discarded working-tree
+ * change was never an object at all, and a deleted untracked file was never even in the database.
+ * Everything below follows from that.
+ *
+ * **The list is re-read here**, exactly like `applyStash` re-reads the stash list. The renderer's
+ * snapshot is up to a poll old, and in that window a file can have been staged, committed or created:
+ * acting on a stale classification would delete a file git now tracks, or restore a path the reader
+ * believed was still modified. A path that no longer has changes is dropped from the operation rather
+ * than passed to git anyway, and a call left with nothing to do says so instead of reporting success.
+ *
+ * **Two commands, because git has two answers.** A tracked path goes back to HEAD with
+ * `restore --staged --worktree`, which covers the `MM` case a single column would flatten: what is
+ * staged is part of what was done to that file, and leaving the index behind would put the change
+ * straight back into the next commit. An untracked path has no HEAD version to go back to, so the
+ * only way to discard it is `clean -f`, which deletes it. The two are counted apart in the message
+ * for the same reason they are two commands: one is reversible in principle, the other is not.
+ *
+ * `--` before the paths, like `stagePaths`: without it a file named `-f`, or one whose name matches a
+ * branch, is read as an option or a revision.
+ */
+export async function discardPaths(repoPath: string, paths: readonly string[]): Promise<GitResult> {
+  if (paths.length === 0) {
+    return { ok: false, message: 'No file selected' };
+  }
+
+  const wanted = new Set(paths);
+  const changes = (await readChanges(repoPath)).filter((change) => wanted.has(change.path));
+  if (changes.length === 0) {
+    return { ok: false, message: 'Those files have no change left: refresh the list' };
+  }
+
+  /*
+   * A rename is two paths, and forgetting the second one is the trap this line exists for.
+   *
+   * `git status` reports it as a single record carrying the new path, with the old one in `from`.
+   * Restoring only the new path leaves the old file deleted, which is a half-undone rename: the
+   * reader asked for the change to go away and would be left with the worse half of it.
+   */
+  const tracked = changes
+    .filter((change) => !change.untracked)
+    .flatMap((change) => (change.from === null ? [change.path] : [change.path, change.from]));
+  const untracked = changes.filter((change) => change.untracked).map((change) => change.path);
+
+  if (tracked.length > 0) {
+    const result = await tryGit(repoPath, ['restore', '--staged', '--worktree', '--', ...tracked]);
+    if (!result.ok) {
+      return result;
+    }
+  }
+  if (untracked.length > 0) {
+    const result = await tryGit(repoPath, ['clean', '-f', '--', ...untracked]);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
+  // Counted on the changes, not on the paths: a rename contributes two paths and is one file.
+  return {
+    ok: true,
+    message: describeDiscard(changes.length - untracked.length, untracked.length),
+  };
+}
+
+/** What was actually thrown away, counted per kind: one was restored, the other was deleted. */
+function describeDiscard(tracked: number, untracked: number): string {
+  const parts: string[] = [];
+  if (tracked > 0) {
+    parts.push(`${tracked} file${tracked > 1 ? 's' : ''} back to HEAD`);
+  }
+  if (untracked > 0) {
+    parts.push(`${untracked} new file${untracked > 1 ? 's' : ''} deleted`);
+  }
+  return parts.join(', ');
+}
+
+/**
  * Replays a commit onto the current branch.
  *
  * The one write of this tab that can leave the repository in a state git calls "in progress": on a

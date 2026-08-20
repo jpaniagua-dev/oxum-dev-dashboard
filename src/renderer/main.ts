@@ -23,6 +23,7 @@ import type {
 import { showContextMenu } from './ui/context-menu.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
+  buildChangeMenuItems,
   buildCommitMenuItems,
   buildRepoMenuItems,
   buildStashMenuItems,
@@ -728,6 +729,16 @@ class App {
         },
         onStage: (paths, staged) =>
           void this.runGitWrite(() => window.api.gitStage(this.requireGitProject(), paths, staged)),
+        /*
+         * The confirmation is **not** here.
+         *
+         * It is raised by the main process, on the window, before a single file is touched: a page
+         * under this CSP has no dialog worth the name, and a modal of our own is the pattern that got
+         * the settings modal removed. A cancel comes back as an ordinary failed write, which is what
+         * it is from here.
+         */
+        onDiscard: (paths) =>
+          void this.runGitWrite(() => window.api.gitDiscard(this.requireGitProject(), paths)),
         onCheckout: (name) =>
           void this.runGitWrite(() => window.api.gitCheckout(this.requireGitProject(), name)),
         onCreateBranch: (name) => {
@@ -816,6 +827,13 @@ class App {
             buildStashMenuItems(stash, this.gitPanelState(), this.gitPanelActions()),
           );
         },
+        onChangeMenu: (change, x, y) => {
+          showContextMenu(
+            x,
+            y,
+            buildChangeMenuItems(change, this.gitPanelState(), this.gitPanelActions()),
+          );
+        },
         onEditing: (editing) => {
           this.gitEditing = editing;
         },
@@ -842,6 +860,18 @@ class App {
    * Skipped while a field has the focus: this runs on the git poll, so a refresh landing mid-sentence
    * would replace the textarea under the cursor. Exactly the guard the project table's rename uses.
    */
+  /**
+   * Drops one row from a stored analysis.
+   *
+   * The state comes back from the main process rather than being edited here: `triage.json` is the
+   * authority on what was analysed, and a list edited locally would disagree with it the moment
+   * anything else pushed a `TriageChanged`.
+   */
+  private async dismissTriageTicket(sprintId: number, key: string): Promise<void> {
+    this.triage = await window.api.dismissTriageTicket(sprintId, key);
+    this.renderTriage();
+  }
+
   private async loadTriage(): Promise<void> {
     this.triage = await window.api.refreshTriage();
     this.renderTriage();
@@ -1361,11 +1391,30 @@ class App {
         overview: requireElement('triage-overview'),
       },
       {
-        onAnalyse: (sprintId) => {
-          void window.api.analyseSprint(sprintId).then((state) => {
+        onAnalyse: (sprintId, scope) => {
+          void window.api.analyseSprint(sprintId, scope).then((state) => {
             this.triage = state;
             this.renderTriage();
           });
+        },
+        onDismiss: (sprintId, key) => void this.dismissTriageTicket(sprintId, key),
+        /*
+         * A menu of one entry, built here like the Git tab's are.
+         *
+         * Kept a menu rather than promoted to a row button for the reason the Git tab keeps its
+         * destructive actions behind one: this list is clicked to read verdicts, and the deliberate
+         * gesture is what stops a browsing cursor from editing the list. The overview carries the
+         * discoverable half of the same action.
+         */
+        onTicketMenu: (sprintId, ticket, x, y) => {
+          showContextMenu(x, y, [
+            {
+              label: `Remove ${ticket.key} from the list`,
+              hint: 'Drops the row from this analysis. The ticket is untouched in Jira, and the next run brings it back.',
+              disabled: false,
+              run: () => void this.dismissTriageTicket(sprintId, ticket.key),
+            },
+          ]);
         },
         onSelect: (sprintId) => {
           this.triagePanel?.select(sprintId);

@@ -678,6 +678,28 @@ exceptions:
   diff. And `drop`'s label says it is permanent: the reflog keeps the commit for a while, but **this tab**
   cannot find it again, and promising a recovery it does not offer would be worse than announcing the
   loss.
+- **Discarding a change is a right-click on the file, and the only write here that is confirmed.**
+  Three guards, and none of them is redundant. The **gesture** keeps it out of reach of a stray click
+  in a list that is clicked all day to read diffs, exactly as cherry-pick and the stash operations
+  are. The **dialog** is raised by the main process, on the window, before a single file is touched:
+  it names the files (up to eight, then a count) because "3 files" is not enough to catch a selection
+  that was one row off, and `defaultId` is Cancel so a stray Enter does nothing. A cancel comes back
+  as `ok: false` with a message, which is what it is from the renderer's side; nothing there ever
+  learns whether the dialog was answered or the command refused, and neither deserves a different
+  line. The confirmation is in the main process for the reason every other question in this app is:
+  a page under this CSP has no dialog worth the name, and a modal of our own is the pattern that got
+  the settings modal removed.
+- **`discardPaths` re-reads the status, like `applyStash` re-reads the stash list.** The renderer's
+  snapshot is up to a poll old, and in that window a file can have been staged, committed or created:
+  acting on a stale classification would `clean` a path git now tracks. A path with no change left is
+  **refused** with "refresh the list", never approximated. Two commands because git has two answers:
+  `restore --staged --worktree` for a tracked path (the index half is not optional, `MM` being exactly
+  the case where leaving it behind would put the discarded change straight into the next commit), and
+  `clean -f` for an untracked one, which has no HEAD version to go back to and is therefore *deleted*.
+  The menu label and the message say which of the two is happening, since they are not the same
+  promise. A **rename** contributes both of its paths (`change.from` alongside `change.path`): git
+  reports it as one record carrying the new name, and restoring only that leaves the old file deleted,
+  which is the worse half of the change the reader asked to be rid of.
 - **What this tab still does not do, and why**: no conflict resolution, no interactive rebase, no
   hunk-level staging. The reason has not changed: they leave the repository in an intermediate state this
   strip could neither show nor finish, and conflicts stay displayed as `error` in the list rather than
@@ -852,6 +874,44 @@ exceptions:
   from a triage reads exactly like a sprint that does not contain it, which is the one failure
   nobody would notice. Same reasoning for an unknown verdict: it falls back to `unclear`, the honest
   statement being "this was not classified".
+- **A ticket already in progress is never analysed.** The tab answers "what can I start", and a
+  ticket somebody is on has had that question answered by the fact of being started: paying a model
+  to classify it buys a verdict nobody will act on, and it pushes what matters down a list capped by
+  what a strip can show. Read from `statusCategory` and never from the status name, the same rule
+  that makes `presentStage` what it is: "In review" and "Développement" are one stage under two
+  words, and a filter matching the string "in progress" finds neither. `done` is deliberately **not**
+  filtered here: the sprint search already excludes it, and a second authority on the same exclusion
+  is how the two would drift.
+- **The `mine` scope decides what a run reads, which is why it is not a display filter.** Two
+  sub-tabs at the top of the sprint column, `All` and `Mine`, because that column is where the sprint
+  is chosen and the run is started; in the bar on the right they would sit among counts describing an
+  analysis that already happened, and read as a filter over those. Matched on the **account id**, not
+  on a display name or an email: Jira Cloud hides `emailAddress` behind a privacy setting, and a
+  scope quietly matching nobody would look exactly like a sprint with no ticket of yours in it. An
+  unassigned ticket counts as somebody else's, nobody holding it. Failing to read the account id
+  **stops** the run rather than falling back to the whole sprint: forty tickets analysed after four
+  were asked for is money spent on a question nobody asked, and nothing in the list would say which
+  of the two happened. Session-local and never persisted, the stronger version of the reason the Jira
+  tab's assignee filter is not either, and always on screen, which is what makes a narrowing scope
+  safe.
+- **What was skipped is counted, stored and shown.** `TriageResult` carries its `scope` and a
+  `skipped` pair, and the bar states them next to the age. This is the same rule that adds a
+  forgotten ticket back as `unclear`: a filtered list and a short sprint are the same picture, so
+  "No ticket in this sprint" over nine in-progress tickets is the tab lying about its own filter.
+  The two reasons stay apart because they are answered differently, and the scope is named even when
+  it skipped nothing, a `mine` run of a sprint that happens to be all yours having still answered a
+  narrower question. `describeCoverage` and `describeEmptyResult` are pure and tested, being the only
+  places the difference is ever stated.
+- **A row can be removed from a result, and that is the one deletion needing no confirmation.**
+  Right-click on the ticket, plus a `Remove from the list` button in the overview: the expert gesture
+  does not have to be the discoverable one, but one of them has to be, the same pairing as the Git
+  tab's `...` button. It edits `triage.json` and touches nothing in Jira, and the next run on that
+  sprint brings the row back, which is exactly why no dialog stands in front of it, unlike a stash
+  `drop` or a discarded change. It is what a verdict cannot express, "this one is dealt with", and
+  the reason that is a gesture rather than a sixth verdict: a verdict is what a run concluded, and
+  only another run may replace one. The **empty result is kept** rather than deleted with its last
+  ticket: `analysedAt` is what says a sprint was looked at, and dropping the entry would make a
+  sprint you cleared look like one nobody ever ran.
 - **The summary and assignee shown are Jira's, never the model's.** It is asked to classify, not to
   restate; letting it rewrite a summary would put text on screen that does not match the ticket.
 - **One analysis at a time**, and every `Analyse` button is disabled while it runs: they share a

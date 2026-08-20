@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -9,6 +9,7 @@ import {
   checkoutBranch,
   cherryPick,
   createBranch,
+  discardPaths,
   readBranches,
   readChanges,
   readCommits,
@@ -507,5 +508,105 @@ describe('cherry-pick', () => {
     expect(await resolveSequencer(sandbox, 'cherry-pick', 'continue')).toMatchObject({ ok: true });
     expect(await readSequencer(sandbox)).toBe('none');
     expect(await readChanges(sandbox)).toEqual([]);
+  });
+});
+
+describe('discardPaths', () => {
+  let sandbox = '';
+  const local = (args: string[]): void => {
+    execFileSync('git', ['-C', sandbox, ...args], { windowsHide: true, stdio: 'pipe' });
+  };
+  const put = (name: string, content: string): void => {
+    writeFileSync(join(sandbox, name), content, 'utf8');
+  };
+  /*
+   * Read back with the line endings normalised.
+   *
+   * `core.autocrlf` is on by default on Windows, so a file git has just checked out comes back with
+   * CRLF whatever was committed. The assertions below are about the file being the HEAD version again,
+   * never about how its lines end, and pinning the endings would make this suite fail on one platform
+   * for a reason that has nothing to do with what it is testing.
+   */
+  const readBack = (name: string): string =>
+    readFileSync(join(sandbox, name), 'utf8').replace(/\r\n/g, '\n');
+
+  beforeAll(() => {
+    sandbox = freshRepo();
+  });
+  afterAll(() => {
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+
+  it('takes a modified file back to HEAD', async () => {
+    put('base.ts', 'const base = 99;\n');
+
+    expect(await discardPaths(sandbox, ['base.ts'])).toMatchObject({ ok: true });
+    expect(await readChanges(sandbox)).toEqual([]);
+    expect(readBack('base.ts')).toBe('const base = 1;\n');
+  });
+
+  it('takes the INDEX back too, which a worktree-only restore would leave behind', async () => {
+    /*
+     * The `MM` case, the one the two status columns exist for. Restoring only the working tree would
+     * leave the staged half in the index, so the change the reader has just thrown away would walk
+     * straight into the next commit. That failure is invisible until the commit is made, which is
+     * exactly why it is pinned here.
+     */
+    put('base.ts', 'const base = 2;\n');
+    local(['add', 'base.ts']);
+    put('base.ts', 'const base = 3;\n');
+
+    expect(await discardPaths(sandbox, ['base.ts'])).toMatchObject({ ok: true });
+    expect(await readChanges(sandbox)).toEqual([]);
+    expect(readBack('base.ts')).toBe('const base = 1;\n');
+  });
+
+  it('deletes an untracked file, since it has no HEAD version to go back to', async () => {
+    put('neuf.ts', 'const neuf = 1;\n');
+
+    const result = await discardPaths(sandbox, ['neuf.ts']);
+
+    expect(result.ok).toBe(true);
+    // The message says "deleted" and not "restored": the two outcomes are not the same promise.
+    expect(result.message).toContain('deleted');
+    expect(existsSync(join(sandbox, 'neuf.ts'))).toBe(false);
+  });
+
+  it('undoes a rename whole, both of its paths', async () => {
+    // A rename is ONE status record carrying the new path, with the old one in `from`. Restoring only
+    // the new path would leave the old file deleted, which is the worse half of the change the reader
+    // asked to be rid of.
+    local(['mv', 'base.ts', 'renamed.ts']);
+    const [change] = await readChanges(sandbox);
+    expect(change).toMatchObject({ path: 'renamed.ts', from: 'base.ts' });
+
+    expect(await discardPaths(sandbox, ['renamed.ts'])).toMatchObject({ ok: true });
+    expect(await readChanges(sandbox)).toEqual([]);
+    expect(existsSync(join(sandbox, 'base.ts'))).toBe(true);
+    expect(existsSync(join(sandbox, 'renamed.ts'))).toBe(false);
+  });
+
+  it('re-reads the list rather than trusting the caller, and refuses a path with nothing to discard', async () => {
+    // The renderer's snapshot is up to a poll old. In that window a file can have been committed, and
+    // acting on the stale classification is how a path git now tracks would get deleted.
+    const result = await discardPaths(sandbox, ['base.ts']);
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('refresh');
+  });
+
+  it('refuses an empty selection rather than discarding the whole tree', async () => {
+    // `git restore --` with no path does nothing, but `clean -f` with none does not: the guard is ours.
+    expect(await discardPaths(sandbox, [])).toMatchObject({ ok: false });
+  });
+
+  it('leaves the files it was not asked about alone', async () => {
+    put('base.ts', 'const base = 4;\n');
+    put('autre.ts', 'const autre = 1;\n');
+
+    expect(await discardPaths(sandbox, ['base.ts'])).toMatchObject({ ok: true });
+
+    expect((await readChanges(sandbox)).map((change) => change.path)).toEqual(['autre.ts']);
+    expect(existsSync(join(sandbox, 'autre.ts'))).toBe(true);
   });
 });

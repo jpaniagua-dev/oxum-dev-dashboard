@@ -3,10 +3,12 @@ import type {
   Sprint,
   TriageProgress,
   TriageResult,
+  TriageScope,
   TriageState,
 } from '@shared/contracts.js';
 import {
   listSprints,
+  readMyAccountId,
   readSprintIssues,
   searchIssues,
   type JiraCredentials,
@@ -16,6 +18,7 @@ import { runClaude } from './run-claude.js';
 import { parseTriage } from './triage-parse.js';
 import { readProgress } from './triage-progress.js';
 import { buildTriagePrompt, trimDescription } from './triage-prompt.js';
+import { selectIssues } from './triage-select.js';
 import { TriageStore } from './triage-store.js';
 
 /**
@@ -70,6 +73,24 @@ export class TriageService {
    */
   estimateFor(key: string): number | null {
     return this.store.findTicket(key)?.estimate ?? null;
+  }
+
+  /**
+   * Drops one ticket from a stored analysis.
+   *
+   * A local edit of the tab's own list: the ticket is not touched in Jira, and the next run on that
+   * sprint puts the row back. It is the answer to the one thing a verdict cannot say, "this one is
+   * dealt with", which no amount of re-reading a description will ever produce.
+   *
+   * Allowed **while a run is going**, unlike `analyse`: the run holds its own copy of the result and
+   * writes it whole at the end, so the worst case is a dismissed row coming back with the new
+   * analysis, which is exactly what a new analysis is for.
+   */
+  async dismiss(sprintId: number, key: string): Promise<TriageState> {
+    if (this.store.remove(sprintId, key)) {
+      await this.store.write();
+    }
+    return this.push();
   }
 
   /**
@@ -162,8 +183,12 @@ export class TriageService {
    * new one is complete: that is what makes the tab readable while it works, and what stops a
    * failure from erasing an answer that was still useful. A failed run therefore keeps the old
    * tickets and only carries the new error.
+   *
+   * The scope comes from the click rather than from the settings, and it is stored with the result:
+   * it decides what the run is given, so a stored analysis that could not say whether it covered the
+   * whole sprint or only your own tickets would make every "Ready 0" ambiguous.
    */
-  async analyse(sprintId: number): Promise<TriageState> {
+  async analyse(sprintId: number, scope: TriageScope): Promise<TriageState> {
     if (this.running !== null) {
       // One at a time: the run is long and costs tokens, and two would race on the same file.
       return this.state();
@@ -187,7 +212,7 @@ export class TriageService {
     this.push();
 
     try {
-      const result = await this.run(sprint);
+      const result = await this.run(sprint, scope);
       await this.store.save(result);
     } catch (failure) {
       this.error = failure instanceof Error ? failure.message : String(failure);
@@ -198,7 +223,7 @@ export class TriageService {
     return this.push();
   }
 
-  private async run(sprint: Sprint): Promise<TriageResult> {
+  private async run(sprint: Sprint, scope: TriageScope): Promise<TriageResult> {
     const previous = this.store.get(sprint.id);
     const keep = (error: string): TriageResult => ({
       sprintId: sprint.id,
@@ -206,6 +231,10 @@ export class TriageService {
       analysedAt: previous?.analysedAt ?? '',
       tickets: previous?.tickets ?? [],
       error,
+      // The scope and the counts of the answer being **kept**, not of the run that just failed: they
+      // describe the tickets on screen, and those are the previous ones.
+      scope: previous?.scope ?? scope,
+      skipped: previous?.skipped ?? { inProgress: 0, notMine: 0 },
     });
 
     const credentials = await this.credentials();
@@ -217,11 +246,40 @@ export class TriageService {
     if (error !== null) {
       return keep(error);
     }
-    if (issues.length === 0) {
-      return { sprintId: sprint.id, sprintName: sprint.name, analysedAt: now(), tickets: [], error: null };
+
+    /*
+     * Who "me" is, asked of Jira and only when the scope needs it.
+     *
+     * A failure here **stops** the run rather than falling back to the whole sprint: analysing forty
+     * tickets after being asked for four is money spent on a question nobody asked, and the reader
+     * would have no way of telling from the list which of the two happened.
+     */
+    let myAccountId = '';
+    if (scope === 'mine') {
+      const me = await readMyAccountId(credentials);
+      if (me.error !== null) {
+        return keep(`Jira could not say who you are: ${me.error}`);
+      }
+      myAccountId = me.accountId;
     }
 
-    this.advance({ phase: 'starting', detail: 'Starting Claude Code', tickets: issues.length });
+    const { analysed, skipped } = selectIssues(issues, scope, myAccountId);
+    const empty = (error: string | null): TriageResult => ({
+      sprintId: sprint.id,
+      sprintName: sprint.name,
+      analysedAt: now(),
+      tickets: [],
+      error,
+      scope,
+      skipped,
+    });
+    if (analysed.length === 0) {
+      // A real answer, not a failure: the sprint was read and everything in it was skipped. The counts
+      // are what stop that from reading as an empty sprint, and they travel with the empty result.
+      return empty(null);
+    }
+
+    this.advance({ phase: 'starting', detail: 'Starting Claude Code', tickets: analysed.length });
 
     /*
      * Trimmed once, then used for both the prompt and the stored ticket.
@@ -230,7 +288,7 @@ export class TriageService {
      * full description beside a verdict drawn from an extract would invite blaming the verdict for
      * something the model never read.
      */
-    const asked = issues.map((issue) => ({ ...issue, description: trimDescription(issue.description) }));
+    const asked = analysed.map((issue) => ({ ...issue, description: trimDescription(issue.description) }));
 
     const answer = await runClaude({
       cwd: this.settings().projectsRoot,
@@ -250,7 +308,15 @@ export class TriageService {
     }
 
     const tickets = parseTriage({ answer: answer.answer, asked });
-    return { sprintId: sprint.id, sprintName: sprint.name, analysedAt: now(), tickets, error: null };
+    return {
+      sprintId: sprint.id,
+      sprintName: sprint.name,
+      analysedAt: now(),
+      tickets,
+      error: null,
+      scope,
+      skipped,
+    };
   }
 
   /**

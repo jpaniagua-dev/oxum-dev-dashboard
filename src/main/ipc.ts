@@ -1,6 +1,6 @@
 import { release } from 'node:os';
 import { basename } from 'node:path';
-import { BrowserWindow, clipboard, ipcMain, shell } from 'electron';
+import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import {
   GIT_COMMIT_ACTION_ID,
   IpcChannel,
@@ -27,6 +27,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type TriageScope,
   type TriageState,
   type ProjectValidation,
   type RepoPulls,
@@ -42,6 +43,7 @@ import {
   checkoutBranch,
   cherryPick,
   createBranch,
+  discardPaths,
   readDiff,
   readRepoState,
   readSequencer,
@@ -178,13 +180,38 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
    * The sprint id arrives from the renderer and is coerced here rather than trusted: it ends up in a
    * Jira path, and the service also matches it against the sprint list before doing anything.
    */
-  ipcMain.handle(IpcChannel.TriageAnalyse, async (_event, sprintId: unknown): Promise<TriageState> => {
-    const id = Number(sprintId);
-    if (!Number.isInteger(id)) {
-      return deps.triage().state();
-    }
-    return deps.triage().analyse(id);
-  });
+  ipcMain.handle(
+    IpcChannel.TriageAnalyse,
+    async (_event, sprintId: unknown, scope: unknown): Promise<TriageState> => {
+      const id = Number(sprintId);
+      if (!Number.isInteger(id)) {
+        return deps.triage().state();
+      }
+      // `all` is the default of an unreadable value on purpose: it is the scope that hides nothing,
+      // and a run that quietly narrowed itself is the failure this whole feature has to avoid.
+      const wanted: TriageScope = scope === 'mine' ? 'mine' : 'all';
+      return deps.triage().analyse(id, wanted);
+    },
+  );
+
+  /*
+   * Drops one row from a stored analysis.
+   *
+   * The key is validated like every other one that reaches this process, even though it never leaves
+   * it: this one is only ever compared against what is on disk, and the pattern costs nothing next to
+   * being the single place a key is not checked.
+   */
+  ipcMain.handle(
+    IpcChannel.TriageDismiss,
+    async (_event, sprintId: unknown, issueKey: unknown): Promise<TriageState> => {
+      const id = Number(sprintId);
+      const key = typeof issueKey === 'string' ? issueKey.trim().toUpperCase() : '';
+      if (!Number.isInteger(id) || !ISSUE_KEY_PATTERN.test(key)) {
+        return deps.triage().state();
+      }
+      return deps.triage().dismiss(id, key);
+    },
+  );
 
   /* ------------------------------------------------------------------ git */
 
@@ -390,6 +417,44 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         ? paths.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
         : [];
       return stagePaths(project.path, list, staged === true);
+    },
+  );
+
+  /*
+   * Throws away what was done to a set of files, behind a confirmation.
+   *
+   * The confirmation lives **here** and not in the renderer, for the reason every other question the
+   * app asks does: a page under this CSP has no dialog worth the name, and the two it could use
+   * (`window.confirm`, a modal of our own) are respectively unstyleable and the exact pattern the
+   * settings modal was removed for. A `showMessageBox` on the parent window is also the only form
+   * that cannot be dismissed by clicking somewhere else, which is what a question about losing work
+   * has to be.
+   *
+   * Asked **before** anything is touched, and `ok: false` is what a cancel looks like from the
+   * renderer: it never learns whether the dialog was answered or the command refused, both being
+   * "nothing happened", and neither is worth a different line in the status bar.
+   *
+   * The count comes from the paths asked for rather than from git, because the question has to be on
+   * screen before the repository is read; `discardPaths` re-reads the list itself and is the authority
+   * on what is actually destroyed.
+   */
+  ipcMain.handle(
+    IpcChannel.GitDiscard,
+    async (event, projectId: unknown, paths: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined) {
+        return { ok: false, message: 'Project not found' };
+      }
+      const list = Array.isArray(paths)
+        ? paths.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+        : [];
+      if (list.length === 0) {
+        return { ok: false, message: 'No file selected' };
+      }
+      if (!(await confirmDiscard(event, project.label, list))) {
+        return { ok: false, message: 'Nothing discarded' };
+      }
+      return discardPaths(project.path, list);
     },
   );
 
@@ -1040,6 +1105,51 @@ function asRawProjects(value: unknown): ProjectConfig[] {
 
 function resolveProject(projects: readonly Project[], id: unknown): Project | undefined {
   return typeof id === 'string' ? findProject(projects, id as ProjectId) : undefined;
+}
+
+/**
+ * Asks before throwing work away.
+ *
+ * The one question in the Git tab that is worth a modal. Everything else it does is either reversible
+ * (a checkout that fails, a stage, a stash) or leaves an object behind that git can find again (a
+ * dropped stash is still in the reflog for a while); a discarded change is gone, and a deleted
+ * untracked file was never in the database at all.
+ *
+ * The files are **named**, up to a handful: "3 files" is not enough to catch a selection that was one
+ * row off, which is the mistake this dialog exists to catch. `defaultId` is Cancel, so a stray Enter
+ * on a focused dialog does nothing.
+ *
+ * Anchored on the window the call came from rather than on the main window: this is invoked from the
+ * dashboard, but a modal parented to another window would appear behind the one being used.
+ */
+async function confirmDiscard(
+  event: Electron.IpcMainInvokeEvent,
+  label: string,
+  paths: readonly string[],
+): Promise<boolean> {
+  const named = paths.slice(0, 8).join('\n');
+  const rest = paths.length > 8 ? `\n...and ${paths.length - 8} more` : '';
+  const options: Electron.MessageBoxOptions = {
+    type: 'warning',
+    buttons: ['Discard', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Discard changes',
+    message:
+      paths.length === 1
+        ? `Discard the changes to 1 file in ${label}?`
+        : `Discard the changes to ${paths.length} files in ${label}?`,
+    detail:
+      `${named}${rest}\n\n` +
+      'Tracked files go back to HEAD, including what is staged. New files are deleted. ' +
+      'Nothing here can bring either of them back.',
+  };
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const { response } =
+    window === null
+      ? await dialog.showMessageBox(options)
+      : await dialog.showMessageBox(window, options);
+  return response === 0;
 }
 
 /**

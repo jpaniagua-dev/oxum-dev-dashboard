@@ -115,6 +115,14 @@ export interface GitPanelActions {
   /** Shows something in the diff column: a file of the working tree, or a whole commit. */
   onSelectTarget: (target: GitDiffTarget) => void;
   onStage: (paths: string[], staged: boolean) => void;
+  /**
+   * Throws the changes to those paths away: back to HEAD, or deleted when untracked.
+   *
+   * The one action of this tab that destroys work, so it is behind a right-click **and** behind a
+   * confirmation raised by the main process. Neither guard is redundant: the gesture keeps it out of
+   * reach of a stray click in a list, the dialog names the files before anything is touched.
+   */
+  onDiscard: (paths: string[]) => void;
   onCheckout: (name: string) => void;
   onCreateBranch: (name: string) => void;
   onCommit: () => void;
@@ -150,6 +158,8 @@ export interface GitPanelActions {
   onCommitMenu: (commit: GitCommit, x: number, y: number) => void;
   /** Opens a stash's action menu, from a right-click on its row. */
   onStashMenu: (stash: GitStash, x: number, y: number) => void;
+  /** Opens a changed file's action menu, from a right-click on its row in the Changes view. */
+  onChangeMenu: (change: GitChange, x: number, y: number) => void;
   /**
    * Reports that a text field has the focus.
    *
@@ -654,7 +664,20 @@ function buildChangeRow(
       ? ' git__row--selected'
       : '';
   const row = createElement('div', { className: `git__row git__change${selected}` });
-  row.title = `${change.path}\n${label.title}\n(click: see the diff)`;
+  row.title = `${change.path}\n${label.title}\n(click: see the diff, right click: act)`;
+
+  /*
+   * Discarding is behind a right-click, like cherry-pick and every stash operation.
+   *
+   * The same judgement those two record, at its strongest: this row is clicked all day to read a
+   * diff, and the action being added to it is the only one in the app that destroys work outright. A
+   * button here would put it one stray click away from the gesture people make constantly, which is
+   * precisely the arrangement `Checkout` was made a button to avoid in the other direction.
+   */
+  row.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    actions.onChangeMenu(change, event.clientX, event.clientY);
+  });
 
   const box = document.createElement('input');
   box.type = 'checkbox';
@@ -1140,6 +1163,55 @@ function buildStashRow(
  * commit reachable through its reflog for a while, but nothing in this tab can find it again, and
  * promising a recovery it does not offer would be worse than saying it is final.
  */
+/**
+ * What a changed file offers on a right-click.
+ *
+ * Three entries and no more: the diff, the staging toggle the checkbox already carries, and the one
+ * gesture that has nowhere else to live. The first two are repeated deliberately, since a menu
+ * holding a single destructive item is a menu whose only purpose is that item, and it invites the
+ * click it should be making people think about.
+ *
+ * The discard label says what will happen to **this** file rather than a generic "discard": an
+ * untracked file is deleted, and someone who has read the word "discard" as "unstage" has to be told
+ * before the dialog, not by it. The staging half of the same idea is why the label reads `Unstage`
+ * only for something actually in the index.
+ *
+ * Rebuilt on every open, like the repository and stash menus: every label here depends on the row's
+ * current state, and a menu built once would eventually describe the file as it was.
+ */
+export function buildChangeMenuItems(
+  change: GitChange,
+  state: GitPanelState,
+  actions: GitPanelActions,
+): { label: string; hint: string; disabled: boolean; run: () => void }[] {
+  // Same guard as the stash menu, spelled out for the same reason: a repository half-way through a
+  // cherry-pick refuses every one of these for a cause that has nothing to do with the click.
+  const blocked = state.busy || (state.repo !== null && state.repo.sequencer !== 'none');
+  const staged = isStaged(change);
+  return [
+    {
+      label: 'See the diff',
+      hint: 'The same thing a click on the row does.',
+      disabled: false,
+      run: () => actions.onSelectTarget(defaultTargetFor(change)),
+    },
+    {
+      label: staged ? 'Unstage' : 'Stage',
+      hint: staged ? 'git restore --staged on this file.' : 'git add on this file.',
+      disabled: blocked,
+      run: () => actions.onStage([change.path], !staged),
+    },
+    {
+      label: change.untracked ? 'Discard (deletes the file)' : 'Discard the changes',
+      hint: change.untracked
+        ? 'git clean: this file is not tracked, so discarding it means deleting it. Nothing can get it back.'
+        : 'git restore --staged --worktree: this file goes back to HEAD, including what is staged. Nothing can get it back.',
+      disabled: blocked,
+      run: () => actions.onDiscard([change.path]),
+    },
+  ];
+}
+
 export function buildStashMenuItems(
   stash: GitStash,
   state: GitPanelState,

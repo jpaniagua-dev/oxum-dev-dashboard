@@ -14,6 +14,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type TriageScope,
   type TriageState,
   type OpenShellRequest,
   type PaneDirection,
@@ -101,6 +102,9 @@ const api: RendererApi = {
   gitStage: (projectId: ProjectId, paths: string[], staged: boolean): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitStage, projectId, paths, staged),
 
+  gitDiscard: (projectId: ProjectId, paths: string[]): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitDiscard, projectId, paths),
+
   gitCommit: (
     projectId: ProjectId,
     message: string,
@@ -156,8 +160,11 @@ const api: RendererApi = {
   startInJira: (issueKeys: string[]): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.TriageStartInJira, issueKeys),
 
-  analyseSprint: (sprintId: number): Promise<TriageState> =>
-    ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId),
+  analyseSprint: (sprintId: number, scope: TriageScope): Promise<TriageState> =>
+    ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId, scope),
+
+  dismissTriageTicket: (sprintId: number, issueKey: string): Promise<TriageState> =>
+    ipcRenderer.invoke(IpcChannel.TriageDismiss, sprintId, issueKey),
 
   onTriageChanged: (listener: (state: TriageState) => void): (() => void) => {
     const handler = (_event: unknown, state: TriageState): void => listener(state);
