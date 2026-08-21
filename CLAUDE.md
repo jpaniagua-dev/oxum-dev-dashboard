@@ -54,6 +54,17 @@ exceptions:
   adjust `projectsHeight` accordingly.
 - The "Claude Code sessions" section was removed on purpose: launching the commands from the projects
   already gives the state. Do not reintroduce it without an explicit request.
+- **The version is on screen AND in the window title**, from `app.getVersion()` through the bootstrap.
+  Not decoration: three builds of this app can sit side by side (installer, portable, unpacked zip),
+  they are identical on screen, and "am I running the new one" was a question nothing here answered.
+  The title is the load-bearing half, since it is the only one that reaches the taskbar and the
+  alt-tab list, where the question is usually asked about a window that is not in front. Written from
+  the **renderer** (`applyVersion`) and never with `setTitle` in the main process: Electron gives the
+  window whatever the document title becomes on load, so a title set there is one the page overwrites
+  a moment later. `app.getVersion()` and never an import of `package.json`: the renderer is a bundle
+  and that file lives inside the asar, so an import would ship the number that was true at build time
+  in a place nothing updates. It is also its own element and not the refresh stamp beside it, which
+  `stampMessage` overwrites with transient text.
 - **Settings are a window, not a modal.** In an overlay, a `click` fires on the common ancestor of its
   `mousedown` and its `mouseup`: selecting text in a field and releasing outside the panel closed the
   box. And a modal hides the very table it configures. The window is **independent** (no `parent`),

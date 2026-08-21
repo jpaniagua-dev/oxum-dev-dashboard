@@ -1,6 +1,6 @@
 import { release } from 'node:os';
 import { basename } from 'node:path';
-import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import {
   GIT_COMMIT_ACTION_ID,
   IpcChannel,
@@ -155,6 +155,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     projects: [...deps.projects()],
     settings: deps.settings.get(),
     theme: deps.theme.state(),
+    // `app.getVersion()` rather than an import of `package.json`: in a packaged build that file is
+    // inside the asar and the renderer is a bundle, so an import would ship the number that was true
+    // at build time in a place nothing updates.
+    appVersion: app.getVersion(),
     shellProfiles: deps.profiles(),
     terminals: deps.terminals.sessions(),
     layout: deps.terminals.layout(),

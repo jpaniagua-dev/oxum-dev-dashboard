@@ -1235,6 +1235,15 @@ export interface BootstrapState {
   readonly projects: Project[];
   readonly settings: AppSettings;
   readonly theme: ThemeState;
+  /**
+   * The running build's version, from `app.getVersion()`.
+   *
+   * Asked of Electron and never imported from `package.json`: the renderer is bundled, so an import
+   * would freeze the number the bundle was built with, and the one question this answers is "which
+   * build am I actually looking at". Three builds of this app can sit side by side (installed,
+   * portable, unpacked zip), and they are indistinguishable on screen otherwise.
+   */
+  readonly appVersion: string;
   /** Detected profiles merged with the user's, ready for the new-tab menu. */
   readonly shellProfiles: ShellProfile[];
   /**

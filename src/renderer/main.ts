@@ -165,6 +165,7 @@ class App {
     this.settings = bootstrap.settings;
     this.profiles = bootstrap.shellProfiles;
     this.applyTheme(bootstrap.theme);
+    applyVersion(bootstrap.appVersion);
     // Before anything is measured: the strip resizer and the terminal's fit both read pixel sizes that
     // the text size decides, so applying it afterwards would fit them to a layout already gone.
     applyUiFontSize(bootstrap.settings.uiFontSize);
@@ -1633,6 +1634,28 @@ const THEME_ICONS: Record<ThemeMode, { path: string; paint: 'fill' | 'stroke' }>
 const DEFAULT_GIT_LIST_WIDTH = 460;
 
 /** Remembered height of one strip tab. */
+/**
+ * Puts the running build's version in the two places that answer "which one am I looking at".
+ *
+ * **The window title as well as the label**, and the title is the load-bearing half: three builds of
+ * this app can be installed side by side (the installer, the portable, an unpacked zip), they are
+ * identical on screen, and the question is usually asked about a window that is not even in front.
+ * A title carries into the taskbar and the alt-tab list, where a label inside the page cannot go.
+ *
+ * Written from the renderer rather than through `setTitle` in the main process, because Electron
+ * hands the window whatever the document's title becomes on load: setting it there would be a value
+ * the page then overwrites, which is the sort of fight that only shows up as an intermittent bug.
+ *
+ * The label says `v5.5.0` and the tooltip spells out the product name with it: the strip is read at a
+ * glance, and a bare number in a corner is only ambiguous until you hover it.
+ */
+function applyVersion(version: string): void {
+  const label = requireElement('app-version');
+  label.textContent = `v${version}`;
+  label.title = `Oxum Dev Dashboard ${version}`;
+  document.title = `Oxum Dev Dashboard ${version}`;
+}
+
 function heightOf(settings: AppSettings, tab: StripTab): number {
   switch (tab) {
     case 'pulls':

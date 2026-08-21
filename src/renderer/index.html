@@ -64,6 +64,14 @@
             </button>
           </div>
           <div class="projects__header-actions">
+            <!--
+              The running build's version, filled from the bootstrap.
+
+              First in the cluster, and it is the one label here that never changes: the refresh stamp
+              beside it belongs to the `Refresh` button it sits against, and is also overwritten by
+              transient messages, which is exactly why the version cannot share that element.
+            -->
+            <span id="app-version" class="strip__meta"></span>
             <span id="last-refresh" class="strip__meta"></span>
             <button type="button" id="refresh-button" class="button">Refresh</button>
             <button type="button" id="add-project" class="button" title="Add a project folder">
