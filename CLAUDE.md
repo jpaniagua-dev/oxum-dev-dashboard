@@ -79,6 +79,23 @@ exceptions:
 - **The "unsaved changes" prompt lives in the main process.** Only the window's `close` handler can
   still cancel the close, so the renderer reports its state through `SettingsDirty`; the question is
   asked with `showMessageBoxSync`, since an answer awaited with `await` would arrive too late.
+- **The settings rail reports, it does not only navigate.** Every entry carries a line saying what its
+  section is set to right now — `3 projects · 1 error`, `Git Bash · 14 px`, `not configured` — computed
+  from the draft and refreshed on every keystroke, like the footer. That readout is the reason it is
+  worth 196px, and a rail reduced to five words should be taken out rather than kept. Which entry is
+  current comes from an `IntersectionObserver` on the body, never from the last click: a rail that
+  disagrees with what is on screen is worse than no rail.
+- **Monospace means one thing in the settings window: a value something else has to read back
+  exactly.** Paths, commands, ports, model ids, project keys, the rail readouts. A project name and a
+  button label are words a person chose and are set in the interface face. It is a rule, not a
+  per-field decision, so `field()` takes a `mono` flag rather than the stylesheet guessing.
+- **Colour in the settings window is spent on "not yet true" and nowhere else**: unsaved, invalid, a
+  broken path, a missing token, and the current rail entry. Everything else is greyscale. A connected
+  Jira is stated in plain text, not painted green — naming the host already says it is connected.
+- **The action rows are a table.** The four column headings are written once, on the first row; the
+  rows below keep their `<label>` text for the accessible name and hide it with `.visually-hidden`.
+  `select` and `input` are given the same explicit height for the same reason: a native select is two
+  pixels taller, which is invisible alone and obvious in a column of four labels.
 
 ## Terminal
 

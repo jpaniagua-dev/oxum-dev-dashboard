@@ -130,6 +130,15 @@
   --font-lg: calc(var(--ui-font-size) * 1.042);
   --font-xl: calc(var(--ui-font-size) * 1.083);
 
+  /*
+   * Two heading steps above the seven, added for the settings window and ratios like the rest, so a
+   * change to the base still moves them together with everything else. The ladder stopped at 1.083
+   * because the dashboard is a dense table with nothing in it larger than a row label; a window with
+   * named sections needs a step that is unmistakably a heading, and 1.083 is not one.
+   */
+  --font-2xl: calc(var(--ui-font-size) * 1.25);
+  --font-3xl: calc(var(--ui-font-size) * 1.55);
+
   --radius: 6px;
   --radius-sm: 4px;
 }

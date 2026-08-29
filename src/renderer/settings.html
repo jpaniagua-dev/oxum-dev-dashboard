@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <!-- Same locked-down policy as the dashboard: repository paths and script names come from disk. -->
@@ -12,20 +12,22 @@
   </head>
   <body>
     <!--
-      A window of its own, not an overlay. The header is the page header, the footer is pinned, and
-      only the body scrolls, so the save button stays reachable however long the project list gets.
+      A window of its own, not an overlay. The rail on the left names the sections and reports what
+      each one is currently set to; the footer is pinned; only the body scrolls, so Save stays
+      reachable however long the project list gets.
     -->
     <div class="settings-page">
-      <header class="settings__header">
-        <h1 class="settings__title">Settings</h1>
-      </header>
+      <nav class="settings-rail" aria-label="Settings sections">
+        <h1 class="settings-rail__title">Settings</h1>
+        <ul class="settings-rail__list" id="settings-rail"></ul>
+      </nav>
 
-      <div class="settings__body">
+      <main class="settings__body" id="settings-body">
         <!--
           Interface before everything else, and a section of its own rather than a field tucked into
           "Terminal": someone whose app is too small to read looks for the app, not for the terminal.
         -->
-        <section class="settings__section">
+        <section class="settings__section" id="section-interface">
           <h2 class="settings__section-title">Interface</h2>
           <p class="settings__note">
             This size is the base of the whole app's typography: everything else (badges, headers,
@@ -35,7 +37,7 @@
           <div id="settings-interface"></div>
         </section>
 
-        <section class="settings__section">
+        <section class="settings__section" id="section-projects">
           <h2 class="settings__section-title">Projects</h2>
           <p class="settings__note">
             A folder is enough. The kind and the port are inferred from the repository's
@@ -45,7 +47,7 @@
           <div id="settings-projects"></div>
         </section>
 
-        <section class="settings__section">
+        <section class="settings__section" id="section-terminal">
           <h2 class="settings__section-title">Terminal</h2>
           <p class="settings__note">
             Profiles are detected on this machine. Editing a path marks it as custom, and the custom
@@ -58,28 +60,28 @@
           Claude Code, after Terminal and before Jira: it is a preference about how the app works, like
           the sizes above it, whereas Jira is a connection to something outside.
         -->
-        <section class="settings__section">
+        <section class="settings__section" id="section-claude">
           <h2 class="settings__section-title">Claude Code</h2>
           <p class="settings__note">
-            Which model each run is pinned to. Leave a field empty to use whatever Claude Code itself
-            is set to. An alias (<code>opus</code>, <code>sonnet</code>, <code>haiku</code>) always
-            points at the latest version of that model; a full name (<code>claude-fable-5</code>)
-            pins one. Three fields because these are three different jobs, and one answer would be
-            wrong for two of them.
+            Which model each run is pinned to. Leave a field empty to use whatever Claude Code
+            itself is set to. An alias (<code>opus</code>, <code>sonnet</code>, <code>haiku</code>)
+            always points at the latest version of that model; a full name
+            (<code>claude-fable-5</code>) pins one. Three fields because these are three different
+            jobs, and one answer would be wrong for two of them.
           </p>
           <div id="settings-claude"></div>
         </section>
 
-        <section class="settings__section">
+        <section class="settings__section" id="section-jira">
           <h2 class="settings__section-title">Jira</h2>
           <p class="settings__note">
             The API token is encrypted by Windows for your account and stored separately, never in
-            <code>settings.json</code>. It is never read back into this window: to change it, type a new
-            one. A token grants access to all of your Jira, and not read-only access either.
+            <code>settings.json</code>. It is never read back into this window: to change it, type a
+            new one. A token grants access to all of your Jira, and not read-only access either.
           </p>
           <div id="settings-jira"></div>
         </section>
-      </div>
+      </main>
 
       <footer class="settings__footer" id="settings-footer"></footer>
     </div>
