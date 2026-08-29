@@ -492,6 +492,34 @@ export interface ChecksState {
 }
 
 /* ------------------------------------------------------------------ *
+ * GitHub Actions runs
+ * ------------------------------------------------------------------ */
+
+/**
+ * Whether a repository has a workflow run in flight.
+ *
+ * Repository-wide, unlike `ChecksVerdict` right next to it, and that is the point: a run started by a
+ * merge to the trunk makes the project busy just as much as one started by the branch the row shows.
+ * The column answers "is CI working on this project", not "is my branch green".
+ *
+ * `no-runs` is kept apart from `idle` for the reason `no-checks` is kept apart from `passing`: a
+ * repository that never ran a workflow is not a repository whose workflows have all finished, and
+ * flattening the two would claim a CI setup that does not exist.
+ */
+export type WorkflowsVerdict = 'running' | 'idle' | 'no-runs' | 'no-repo' | 'unknown';
+
+export interface WorkflowsState {
+  readonly verdict: WorkflowsVerdict;
+  /** Runs executing right now. */
+  readonly running: number;
+  /** Runs accepted but not started: no free runner, a pending approval, a concurrency group. */
+  readonly queued: number;
+  /** ISO timestamp of the last successful lookup. */
+  readonly checkedAt: string | null;
+  readonly error: string | null;
+}
+
+/* ------------------------------------------------------------------ *
  * Pull requests
  * ------------------------------------------------------------------ */
 
@@ -638,6 +666,7 @@ export interface ProjectRow {
   readonly server: ServerState;
   readonly git: GitState | null;
   readonly checks: ChecksState | null;
+  readonly workflows: WorkflowsState | null;
 }
 
 /* ------------------------------------------------------------------ *

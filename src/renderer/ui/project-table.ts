@@ -1,6 +1,13 @@
 import type { ProjectId, ProjectRow } from '@shared/contracts.js';
 import { clearChildren, createElement, hitsInteractive } from './dom.js';
-import { canStop, presentChecks, presentGit, presentServer, type Pill } from './presenters.js';
+import {
+  canStop,
+  presentChecks,
+  presentGit,
+  presentServer,
+  presentWorkflows,
+  type Pill,
+} from './presenters.js';
 
 export interface TableActions {
   /** Runs one of the project's configured actions. */
@@ -47,7 +54,7 @@ export function renderProjectTable(
     const cell = createElement('td', {
       text: 'No project found. Check the paths in the registry.',
     });
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     row.append(cell);
     tbody.append(row);
     return;
@@ -140,6 +147,12 @@ function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
   const checksCell = createElement('td');
   checksCell.append(buildPill(presentChecks(row.checks, row.git)));
   tr.append(checksCell);
+
+  // Workflows. Repository-wide, unlike the Checks column beside it: a run started by a merge to the
+  // trunk keeps this project busy just as much as one started by the branch shown in the row.
+  const workflowsCell = createElement('td');
+  workflowsCell.append(buildPill(presentWorkflows(row.workflows)));
+  tr.append(workflowsCell);
 
   // Actions
   const actionsCell = createElement('td', { className: 'table__actions' });

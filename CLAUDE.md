@@ -1,7 +1,7 @@
 # oxum-dev-dashboard: project instructions
 
 An embedded terminal with, above it, a status strip over your front-end projects (dev server, git,
-GitHub checks). Every action a row offers runs in a tab of that terminal.
+GitHub checks, GitHub Actions). Every action a row offers runs in a tab of that terminal.
 
 ## Public repository: keep it anonymous
 
@@ -1320,6 +1320,38 @@ plus `offline_access` (plus `Chat.Read`), `@azure/msal-node` in device code flow
 `.projects__header-actions` (formerly `.topbar__actions`, gone with the title bar) and the strip's
 pattern are left ready.
 
+## Workflows column: is CI busy on this project
+
+- **It answers "is something running", never "what is running".** No workflow name, no branch, no run
+  number: the column is read from across the table while the eye is in the terminal below, and a name
+  would need room the strip does not have. Whoever wants the name has the repository one click away.
+  Resist widening it — the day it lists workflows it stops being glanceable, which is the only thing it
+  is for.
+- **Repository-wide, and deliberately not branch-scoped.** The Checks column beside it already answers
+  "is *my branch* green"; a run started by someone else's merge to the trunk keeps this project busy
+  just as much, and hiding it would make the column lie on exactly the mornings it matters.
+- **Running and queued are one figure on screen, two in the tooltip.** They are one answer — CI is busy
+  — but "3 queued, none started" is a different morning from "3 running" for anyone waiting on a result.
+- **`no-runs` is not `idle`.** A repository that never ran a workflow has no pipeline to be idle, and
+  painting the two alike would claim a CI setup that does not exist. Same rule, same reason, as
+  `no-checks` not being `passing`.
+- **Only the quiet states share a tone.** `idle`, `no-runs`, `no-repo` and `?` are all neutral, so the
+  one amber pill in the table is the whole message; their four labels stay distinct all the same, since
+  a column saying the same thing in four different situations has to be checked somewhere else.
+- **`gh run list --repo <slug>`, not the working directory.** The answer is a property of the repository
+  on GitHub, so nothing here depends on which folder it was cloned into — the pull requests are read the
+  same way, from the same slug. `ProjectMonitor` caches the slug per project like `PullMonitor` does,
+  and the two caches are **not** shared on purpose: both monitors are rebuilt when the project list
+  changes, and a cache outliving them would be the only thing left holding a dead project.
+- **A project with no GitHub remote is a state, not a failed lookup.** `readWorkflowsState(null)`
+  returns `no-repo` without calling `gh`, which would otherwise fail at every poll, forever.
+- **It rides `checksPollSeconds`, without a setting of its own.** Same cost class — one `gh` call per
+  project over the network — and same subject; a second cadence would only offer a way to make the two
+  GitHub columns disagree about how stale they are.
+- **An unknown `status` is ignored, never counted as running.** GitHub has added values to that field
+  before and the failure modes are not symmetrical: a wrong "running" lights the column up for good,
+  and a column that is always on says nothing.
+
 ## Configurable projects
 
 - **Projects are configuration, not code.** `ProjectId` is a free string and the list lives in
@@ -1348,6 +1380,9 @@ pattern are left ready.
 - **`stripAnsi` must be anchored on `\x1b`.** Without the anchor, the pattern eats `[ERROR]` itself.
 - **`gh pr checks --watch` blocks.** Use `gh pr view --json statusCheckRollup`.
 - **An empty rollup is not a success.** The `no-checks` verdict is distinct from `passing`.
+- **`gh run list` answers `[]` with exit code 0** on a repository that has no workflow at all, exactly
+  like one whose runs have all finished. Verified on a real repository with no `.github/workflows`. The
+  two are told apart in `parseRunsPayload`, hence the `no-runs` verdict.
 - **The pty is a prebuilt Node-API binary** (`@lydell/node-pty`), so it loads into Electron without
   recompilation. The machine has no Visual Studio C++ workload: do not introduce a native dependency
   that would require `node-gyp`.

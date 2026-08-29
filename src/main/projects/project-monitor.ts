@@ -6,9 +6,11 @@ import type {
   ProjectId,
   ProjectRow,
   ServerState,
+  WorkflowsState,
 } from '@shared/contracts.js';
+import { readGitState, readRemoteSlug } from '../git/git-service.js';
 import { readChecksState } from '../github/checks-service.js';
-import { readGitState } from '../git/git-service.js';
+import { readWorkflowsState } from '../github/runs-service.js';
 import type { ParsedOutput } from './output-parser.js';
 
 /**
@@ -43,6 +45,9 @@ export class ProjectMonitor {
   private readonly servers = new Map<ProjectId, ServerState>();
   private readonly git = new Map<ProjectId, GitState>();
   private readonly checks = new Map<ProjectId, ChecksState>();
+  private readonly workflows = new Map<ProjectId, WorkflowsState>();
+  /** Resolved once per project: a remote does not move while the app runs. */
+  private readonly slugs = new Map<ProjectId, string | null>();
   private gitTimer: NodeJS.Timeout | null = null;
   private checksTimer: NodeJS.Timeout | null = null;
 
@@ -62,6 +67,7 @@ export class ProjectMonitor {
       server: this.servers.get(project.id) ?? idleServer(),
       git: this.git.get(project.id) ?? null,
       checks: this.checks.get(project.id) ?? null,
+      workflows: this.workflows.get(project.id) ?? null,
     }));
   }
 
@@ -69,13 +75,18 @@ export class ProjectMonitor {
   start(): void {
     void this.refreshGit();
     void this.refreshChecks();
+    void this.refreshWorkflows();
 
     this.gitTimer = setInterval(() => {
       void this.refreshGit();
     }, this.settings().gitPollSeconds * 1000);
 
+    // Workflow runs ride the checks cadence rather than getting a timer of their own: same cost class
+    // (one `gh` call per project, over the network) and same thing being watched, so a second setting
+    // would only offer a way to make the two GitHub columns disagree about how stale they are.
     this.checksTimer = setInterval(() => {
       void this.refreshChecks();
+      void this.refreshWorkflows();
     }, this.settings().checksPollSeconds * 1000);
   }
 
@@ -92,7 +103,7 @@ export class ProjectMonitor {
 
   /** Forces a full refresh, for the manual refresh button. */
   async refreshAll(): Promise<ProjectRow[]> {
-    await Promise.all([this.refreshGit(), this.refreshChecks()]);
+    await Promise.all([this.refreshGit(), this.refreshChecks(), this.refreshWorkflows()]);
     return this.rows();
   }
 
@@ -190,6 +201,38 @@ export class ProjectMonitor {
       this.checks.set(id, state);
     }
     this.emit();
+  }
+
+  /* --------------------------------------------------------- workflows side */
+
+  private async refreshWorkflows(): Promise<void> {
+    const results = await Promise.all(
+      this.projects.map(async (project) => ({
+        id: project.id,
+        state: await readWorkflowsState(await this.slugOf(project)),
+      })),
+    );
+    for (const { id, state } of results) {
+      this.workflows.set(id, state);
+    }
+    this.emit();
+  }
+
+  /**
+   * The repository's `owner/name`, resolved once.
+   *
+   * `PullMonitor` caches the same thing for its own projects, and the two caches are deliberately not
+   * shared: both monitors are rebuilt from scratch when the project list changes, so a cache outliving
+   * either of them would be the only thing in the app still holding a stale project.
+   */
+  private async slugOf(project: Project): Promise<string | null> {
+    const known = this.slugs.get(project.id);
+    if (known !== undefined) {
+      return known;
+    }
+    const slug = await readRemoteSlug(project.path);
+    this.slugs.set(project.id, slug);
+    return slug;
   }
 
   private emit(): void {
