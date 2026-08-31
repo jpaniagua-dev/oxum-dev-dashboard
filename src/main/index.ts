@@ -15,6 +15,7 @@ import { JiraMonitor } from './jira/jira-monitor.js';
 import { TriageService } from './triage/triage-service.js';
 import { buildJql, searchIssues } from './jira/jira-service.js';
 import { SecretStore } from './store/secret-store.js';
+import { sameProjectSet } from '@shared/project-order.js';
 import { ProjectMonitor } from './projects/project-monitor.js';
 import { DEFAULT_PROJECTS_ROOT } from './projects/project-id.js';
 import { resolveProjects, seedProjects } from './projects/registry.js';
@@ -228,10 +229,25 @@ async function bootstrap(): Promise<void> {
    * would leave rows for deleted projects and none for new ones. `reconcile` then drops the terminals
    * the new configuration has left unreachable, so no process keeps running without a button able to
    * stop it.
+   *
+   * **Unless the set of projects has not changed**, which is what reordering the table does, and what
+   * renaming one does too. Then the monitors adopt the new order and keep everything they hold: the
+   * server states, the git and checks reads, the pull requests and the resolved remotes. Rebuilding
+   * there was not merely wasteful, it was wrong. `servers` is only ever filled by pty output, so a
+   * running dev server with nothing new to say would have read `stopped` until restarted, and the Pull
+   * requests tab would have gone empty for up to `pullsPollSeconds`.
    */
   const reloadProjects = async (): Promise<void> => {
     const next = resolveProjects(settingsStore.get().projects);
     terminalManager.reconcile(next);
+
+    if (sameProjectSet(projects, next)) {
+      projects = next;
+      projectMonitor.reorder(next);
+      pullMonitor.reorder(next);
+      broadcast(IpcChannel.SettingsChanged, settingsStore.get());
+      return;
+    }
 
     projectMonitor.stop();
     pullMonitor.stop();

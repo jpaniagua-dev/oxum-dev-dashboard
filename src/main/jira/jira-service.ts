@@ -574,14 +574,25 @@ function asStage(key: unknown): IssueStage {
  * Exported for testing, because a JQL mistake is silent: it returns the wrong issues rather than an
  * error. `openSprints()` is what makes "current sprint" a question Jira answers itself, instead of the
  * app having to find a board and its active sprint.
+ *
+ * **Both searches carry that clause**, and `mine` has done so since 2026-08-24. It used to be every
+ * open issue assigned to you, which is a different question from the one this tab answers: the strip is
+ * about what is being worked on now, and a backlog item assigned six months ago pushed the current
+ * sprint's rows off the visible list. An assigned issue outside every open sprint is therefore not
+ * shown here on purpose; the board is the place to see the whole assignment.
+ *
+ * The two views stay two searches rather than one filtered twice, because `mine` orders by `updated`
+ * and the sprint view by `status, key`: the same rows in a different order is exactly what makes the
+ * second view worth having.
  */
 export function buildJql(projectKeys: readonly string[]): { sprint: string; mine: string } {
   const scope =
     projectKeys.length > 0
       ? `project in (${projectKeys.map((key) => `"${key.replace(/"/g, '')}"`).join(', ')}) AND `
       : '';
+  const open = 'sprint in openSprints() AND statusCategory != Done';
   return {
-    sprint: `${scope}sprint in openSprints() AND statusCategory != Done ORDER BY status ASC, key ASC`,
-    mine: `${scope}assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`,
+    sprint: `${scope}${open} ORDER BY status ASC, key ASC`,
+    mine: `${scope}${open} AND assignee = currentUser() ORDER BY updated DESC`,
   };
 }

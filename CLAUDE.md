@@ -31,6 +31,17 @@ exceptions:
   process. Do not invent a port for it.
 - **A row is identified by its repository path**, never by a port. A worktree of the same project runs
   on another port and has to stay a distinct row.
+- **The stored `projects` array is the display order.** There is no sort key and there must not be one:
+  `resolveProjects` maps the configuration as it stands, so a permutation saved once shows up in the
+  table, the settings window, the new-tab menu and the servers window without any of them being told.
+  Reordering is therefore a settings save (`moveProject` in `shared/project-order.ts`), not a view
+  state.
+- **A change that does not touch the set of projects must not rebuild the monitors.** `reloadProjects`
+  checks with `sameProjectSet` and calls `reorder` on both monitors instead. Rebuilding there was not
+  merely wasteful: `ProjectMonitor.servers` is seeded to `idleServer()` and only ever refilled by pty
+  output, so a running dev server with nothing new to say would have read `stopped` until restarted,
+  and the Pull requests tab would have gone blank for up to `pullsPollSeconds` (180 s). This bit
+  renaming a project too, long before reordering existed.
 - **Use `taskkill /T /F` to stop**, not `pty.kill()`: the latter only touches the wrapping `cmd.exe`
   and leaves `ng serve` holding the port.
 - **The dashboard only describes processes it owns.** The `external` state and the port probe that fed
@@ -44,6 +55,21 @@ exceptions:
 - **Confirm before quitting** while owned processes are running: they die with the app.
 - **The renderer stays sandboxed**: no `fs`, no `child_process`, locked CSP, DOM built with
   `textContent` (branch names, errors and PR titles all come from outside).
+- **A new feature is designed to be distributable, not to run on one machine.** Decided on
+  2026-08-24: this app is meant to be handed to teammates, so "it works here" is not the bar. What
+  that means concretely, and it is already how the existing code behaves:
+  - **No path, alias or shell function that only exists in the author's dotfiles.** An external
+    command is fine when it is a documented prerequisite (`git`, `gh`, `claude`) or shipped with the
+    repository. It is not fine when it lives in one `.bashrc`: the seeded `commit` action is exactly
+    that mistake, kept as the example not to repeat.
+  - **Defaults derive from `homedir()`** and every one of them is editable in the settings, the way
+    `projectsRoot` and `claudeContextRoot` are.
+  - **A missing dependency degrades visibly and locally**, never silently and never fatally: a
+    skipped row (`seedProjects`), a disabled control, or an honest `command not found` in the tab that
+    was going to run it. Never a button that looks fine and does nothing.
+  - **Everything written goes through `AppPaths`**, so state stays per user account. No file the app
+    owns lives next to the repositories or in a shared folder.
+  - **A secret belongs to `SecretStore`**, encrypted per Windows account, never in `settings.json`.
 
 ## Architecture: the terminal is the centre
 
@@ -437,6 +463,13 @@ exceptions:
   uses.
 - **`sprint in openSprints()`** lets Jira answer "which sprint is current" itself, instead of looking up
   a board and then its active sprint.
+- **Both views carry that clause, `My issues` included** (since 2026-08-24). `My issues` used to mean
+  "every open issue assigned to me", which is a different question from the one this tab answers: the
+  strip is about what is being worked on now, and a backlog item assigned months ago pushed the current
+  sprint's rows off the visible list. Consequence to keep in mind rather than treat as a bug: **an issue
+  assigned to you outside every open sprint is not shown here**, and the board is where to see the whole
+  assignment. The two views stay two searches because their `ORDER BY` differs (`updated` against
+  `status, key`); the same rows in a different order is what makes the second view worth having.
 - **Two possible search endpoints.** Jira Cloud replaced `POST /rest/api/3/search` with
   `GET /rest/api/3/search/jql`, and instances migrate at their own pace. The service tries the new one,
   falls back once to the old one on 404/410, then remembers the answer. Do not "simplify" this down to
@@ -1322,6 +1355,15 @@ pattern are left ready.
   already with two diverging label rules.
 - **Changing the list rebuilds the monitor** and closes the terminals that have become unreachable
   (`reconcile`). The monitor keys its state by project, so mutating it in place would leave phantom rows.
+  **Adding or removing** a project, that is: since 2026-08-24 a save that leaves the set untouched (a
+  reorder, a rename) makes the monitors adopt the new list instead, keeping every state they hold. See
+  the invariant on `sameProjectSet`.
+- **The order of the table is a drag away**, and the gesture is the tabs' gesture: the row carries
+  `draggable`, the drop marker is an inset shadow so nothing shifts under the cursor, the insertion
+  point is named by the **neighbour** it lands in front of rather than by an index, and **nothing
+  re-renders while a drag is in flight** (`draggingRow` in the renderer, the twin of `editingRow`),
+  Chromium cancelling a drag whose element is replaced. A row stops being draggable while its rename
+  input is up, or selecting text in the field would start a drag instead.
 - **`expectedPort` no longer drives anything** since the probe was removed: it only serves the settings
   display. The port shown by the `serving :4201` badge comes from the process output, not from that setting.
   Still to decide: remove it or make it read-only.

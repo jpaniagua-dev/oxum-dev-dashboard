@@ -18,10 +18,23 @@ export class PullMonitor {
   private timer: NodeJS.Timeout | null = null;
 
   constructor(
-    private readonly projects: readonly Project[],
+    private projects: readonly Project[],
     private readonly settings: () => AppSettings,
     private readonly onChange: (repos: RepoPulls[]) => void,
   ) {}
+
+  /**
+   * Adopts the same projects in another order, keeping the pulls and the resolved remotes.
+   *
+   * The counterpart of `ProjectMonitor.reorder`, and it earns its place for the same reason plus one:
+   * this monitor polls every 180 s by default, so a rebuild would blank the Pull requests tab for up to
+   * three minutes and spend a `gh` call per repository to learn what it already knew. Reordering a
+   * table is not a reason to go back to the network.
+   */
+  reorder(next: readonly Project[]): void {
+    this.projects = next;
+    this.onChange(this.rows());
+  }
 
   /** Watched repositories, in project order, so the list does not dance between refreshes. */
   rows(): RepoPulls[] {

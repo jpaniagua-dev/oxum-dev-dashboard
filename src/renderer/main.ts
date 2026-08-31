@@ -20,6 +20,7 @@ import type {
   ThemeState,
   WorktreeCommand,
 } from '@shared/contracts.js';
+import { moveProject } from '@shared/project-order.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
@@ -73,6 +74,14 @@ class App {
    * landing mid-typing would replace the input and throw the half-typed name away.
    */
   private editingRow = false;
+  /**
+   * True while a row is being dragged to another position.
+   *
+   * Same guard as `editingRow`, one degree more necessary: a rebuild during a rename loses what was
+   * typed, a rebuild during a drag **cancels the drag**, Chromium ending the gesture with the element
+   * that was carrying it.
+   */
+  private draggingRow = false;
   private pulls: readonly RepoPulls[] = [];
   /** Repository selected in the pull request tab, so a refresh does not jump back to the first. */
   private selectedRepo: ProjectId | null = null;
@@ -353,9 +362,10 @@ class App {
   /* ---------------------------------------------------------------- render */
 
   private renderTable(): void {
-    if (this.editingRow) {
-      // A rename is open: the refresh is dropped rather than queued, since the next poll is seconds
-      // away and will show the same data.
+    if (this.editingRow || this.draggingRow) {
+      // A rename is open, or a row is being dragged: the refresh is dropped rather than queued, since
+      // the next poll is seconds away and will show the same data. For the drag it is not a nicety,
+      // rebuilding the dragged element cancels the gesture in Chromium.
       return;
     }
     renderProjectTable(requireElement('project-tbody'), this.rows, {
@@ -368,6 +378,10 @@ class App {
       onOpenFolder: (projectId) => void window.api.openFolder(projectId),
       onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
       onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
+      onReorder: (moved, before) => void this.reorderProjects(moved, before),
+      onDraggingChange: (dragging) => {
+        this.draggingRow = dragging;
+      },
     });
   }
 
@@ -1238,6 +1252,24 @@ class App {
         project.id === projectId ? { ...project, label } : project,
       ),
     );
+  }
+
+  /**
+   * Commits a new order for the table.
+   *
+   * Saved through the same channel as a rename, because it is the same kind of change: the stored
+   * `projects` array **is** the display order, so there is no sort key to keep anywhere and the new
+   * order reaches the settings window, the new-tab menu and the servers window on its own.
+   *
+   * Nothing optimistic is painted. The main process answers with the saved settings and broadcasts the
+   * rows, so the order on screen is always the order on disk; a drop the store refused would otherwise
+   * leave the table showing something nobody holds.
+   */
+  private async reorderProjects(moved: ProjectId, before: ProjectId | null): Promise<void> {
+    if (this.settings === null) {
+      return;
+    }
+    await window.api.saveProjects(moveProject(this.settings.projects, moved, before));
   }
 
   /**

@@ -26,7 +26,27 @@ export interface TableActions {
    * `projectId`, so they are invisible to the row's reuse lookup and nothing ever closes them for you.
    */
   onNewTerminal: (projectId: ProjectId) => void;
+  /**
+   * Commits a new order: `moved` lands in front of `before`, or last when `before` is `null`.
+   *
+   * Only the two ids, never a list: the stored configuration is the order, and the main process is the
+   * one holding it. A table that sent back a whole list would be sending a copy of state it does not
+   * own, and a poll landing mid-gesture would decide what that copy said.
+   */
+  onReorder: (moved: ProjectId, before: ProjectId | null) => void;
+  /** Called when a drag starts and ends, so the caller can pause re-rendering, as it does for a rename. */
+  onDraggingChange: (dragging: boolean) => void;
 }
+
+/**
+ * The row being dragged, if any.
+ *
+ * Module state because this table is a render function and not a class, and the value has to outlive a
+ * single call: a drag spans several events on several rows. There is one project table in one renderer,
+ * so there is nothing for a second instance to disagree with. It is cleared on `dragend`, which
+ * Chromium fires even for a drag cancelled with Escape or released outside the window.
+ */
+let dragging: ProjectId | null = null;
 
 /**
  * Renders the project table.
@@ -53,15 +73,22 @@ export function renderProjectTable(
     return;
   }
 
-  for (const row of rows) {
-    tbody.append(buildRow(row, actions));
+  for (const [index, row] of rows.entries()) {
+    // The row after this one names the drop position for "below this row", which is why the whole list
+    // is handed down rather than the row alone.
+    tbody.append(buildRow(row, rows[index + 1]?.project.id ?? null, actions));
   }
 }
 
-function buildRow(row: ProjectRow, actions: TableActions): HTMLTableRowElement {
+function buildRow(
+  row: ProjectRow,
+  next: ProjectId | null,
+  actions: TableActions,
+): HTMLTableRowElement {
   const tr = createElement('tr');
   tr.className = 'table__row';
-  tr.title = 'Click: open this repository\'s terminal';
+  tr.title = 'Click: open this repository\'s terminal\nDrag: reorder the table';
+  attachDragHandlers(tr, row.project.id, next, actions);
   // The guard covers two conflicts: a click on an action button would otherwise both run the action and
   // open a shell, and the double-click that renames a project fires two clicks, so the row would steal
   // the focus from the input that just appeared.
@@ -223,6 +250,94 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
 }
 
 /**
+ * Drag and drop for one row.
+ *
+ * Same shape as the terminal tabs, and the same rule holds: **nothing re-renders during a drag**.
+ * Replacing the dragged element mid-gesture cancels the drag in Chromium, so the caller is told through
+ * `onDraggingChange` and holds its refresh exactly as it does for a rename. The table refreshes on
+ * every git poll, so without that guard a drag lasting longer than the cadence would die under the
+ * cursor.
+ *
+ * The insertion point is named by a **neighbour** rather than an index: dropping on the top half of a
+ * row means "in front of it", on the bottom half "in front of whatever follows it", and `null` for the
+ * last row means the end. An index would have to state whether it is counted before or after the moved
+ * row was taken out, which is the classic off-by-one of every reorder.
+ */
+function attachDragHandlers(
+  tr: HTMLTableRowElement,
+  id: ProjectId,
+  next: ProjectId | null,
+  actions: TableActions,
+): void {
+  tr.draggable = true;
+
+  const clear = (): void => {
+    tr.classList.remove('table__row--drop-before', 'table__row--drop-after');
+  };
+
+  tr.addEventListener('dragstart', (event) => {
+    dragging = id;
+    tr.classList.add('table__row--dragging');
+    actions.onDraggingChange(true);
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.effectAllowed = 'move';
+      // Chromium refuses to start a drag with an empty payload.
+      event.dataTransfer.setData('text/plain', id);
+    }
+  });
+
+  tr.addEventListener('dragover', (event) => {
+    if (dragging === null || dragging === id) {
+      return;
+    }
+    // Without this the drop is refused and the cursor reads "not allowed".
+    event.preventDefault();
+    if (event.dataTransfer !== null) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+    clear();
+    tr.classList.add(above(tr, event.clientY) ? 'table__row--drop-before' : 'table__row--drop-after');
+  });
+
+  tr.addEventListener('dragleave', clear);
+
+  tr.addEventListener('drop', (event) => {
+    const moved = dragging;
+    clear();
+    if (moved === null || moved === id) {
+      return;
+    }
+    event.preventDefault();
+    actions.onReorder(moved, above(tr, event.clientY) ? id : next);
+  });
+
+  // Covers a drop outside the table and a drag cancelled with Escape: the marker and the pause on
+  // re-rendering must not survive the gesture.
+  tr.addEventListener('dragend', () => {
+    dragging = null;
+    tr.classList.remove('table__row--dragging');
+    clear();
+    actions.onDraggingChange(false);
+  });
+}
+
+/**
+ * Turns the dragging of a whole row on or off, from inside one of its cells.
+ *
+ * Walks up to the row rather than taking it as a parameter: the name cell is built before it is
+ * appended anywhere, so a reference passed down would have to be the row that does not exist yet.
+ */
+function setDraggable(inside: HTMLElement, draggable: boolean): void {
+  inside.closest('tr')?.setAttribute('draggable', String(draggable));
+}
+
+/** Whether the cursor sits in the upper half of a row, which means "insert in front of it". */
+function above(tr: HTMLTableRowElement, clientY: number): boolean {
+  const box = tr.getBoundingClientRect();
+  return clientY < box.top + box.height / 2;
+}
+
+/**
  * The project name, renameable in place on a double-click.
  *
  * Enter commits, Escape cancels, blur commits: clicking away after typing a name is far more common
@@ -236,13 +351,17 @@ function buildProjectName(row: ProjectRow, actions: TableActions): HTMLElement {
     className: 'cell-project__name',
     text: row.project.label,
     title: `${row.project.path}
-(double-clic pour renommer)`,
+(double-click to rename)`,
   });
   label.type = 'button';
 
   label.addEventListener('dblclick', (event) => {
     event.preventDefault();
     actions.onEditingChange(true);
+    // The row stays draggable the rest of the time, but not while an input is up: selecting text in a
+    // field inside a draggable ancestor starts a drag instead of a selection. The tabs met the same
+    // trap and answered it the same way.
+    setDraggable(host, false);
 
     const input = createElement('input', { className: 'cell-project__input' });
     input.type = 'text';
@@ -256,6 +375,7 @@ function buildProjectName(row: ProjectRow, actions: TableActions): HTMLElement {
       }
       settled = true;
       actions.onEditingChange(false);
+      setDraggable(host, true);
       if (accept && input.value.trim().length > 0 && input.value.trim() !== row.project.label) {
         actions.onRename(row.project.id, input.value.trim());
       } else {

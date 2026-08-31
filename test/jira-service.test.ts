@@ -114,6 +114,12 @@ describe('buildJql', () => {
     expect(buildJql(['PROJ']).sprint).toContain('sprint in openSprints()');
   });
 
+  it('keeps `My issues` inside the open sprints too', () => {
+    // Without the clause it answered "everything assigned to me", backlog included, and the current
+    // sprint's rows fell off the end of the list.
+    expect(buildJql(['PROJ']).mine).toContain('sprint in openSprints()');
+  });
+
   it('leaves out what is already done', () => {
     expect(buildJql(['PROJ']).sprint).toContain('statusCategory != Done');
     expect(buildJql(['PROJ']).mine).toContain('statusCategory != Done');

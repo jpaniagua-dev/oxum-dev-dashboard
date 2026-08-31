@@ -47,13 +47,31 @@ export class ProjectMonitor {
   private checksTimer: NodeJS.Timeout | null = null;
 
   constructor(
-    private readonly projects: readonly Project[],
+    private projects: readonly Project[],
     private readonly settings: () => AppSettings,
     private readonly onChange: (rows: ProjectRow[]) => void,
   ) {
     for (const project of projects) {
       this.servers.set(project.id, idleServer());
     }
+  }
+
+  /**
+   * Adopts a project list holding the same projects in another order, keeping every state.
+   *
+   * The alternative, and what the code did until 2026-08-24, is to throw the monitor away and build a
+   * new one. That is right when the **set** changes: the state maps are keyed by project id, so a
+   * rebuild is how rows for a deleted project go away. It is wrong for a permutation, and expensively
+   * so: `servers` is seeded to `idleServer()` in the constructor and only ever refilled by pty output,
+   * so a running dev server that had nothing new to say would have read `stopped` until it was
+   * restarted. Reordering the table would have appeared to stop every server in it.
+   *
+   * Only the order is trusted here. The caller checks the set with `sameProjectSet` and rebuilds
+   * otherwise, so this method never has to invent a state for a project it has never seen.
+   */
+  reorder(next: readonly Project[]): void {
+    this.projects = next;
+    this.onChange(this.rows());
   }
 
   rows(): ProjectRow[] {

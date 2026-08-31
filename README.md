@@ -43,8 +43,11 @@ in Electron unchanged.
 On first launch the dashboard looks under your repositories root for a few common folder names
 (`web-app`, `admin-front`, `design-system`) and seeds a row for each one it finds. That is only a
 starting point, and an unrecognised layout simply starts empty: `+ Project` adds a folder,
-**double-clicking a project name renames it**, and everything else is editable in the settings
-dialog.
+**double-clicking a project name renames it**, **dragging a row reorders the table**, and everything
+else is editable in the settings dialog.
+
+The order is part of the configuration, not a view setting: drop a row where you want it and the
+settings window, the new-tab menu and the Servers window follow, on this machine and after a restart.
 
 The port is not shown in the list: the server pill already says `serving :4201` when it matters.
 
@@ -126,6 +129,9 @@ settings: site URL, account email, project keys, and an Atlassian API token.
   at once.
 - Issues are laid out in columns, assignee then status. `My issues` drops the assignee column, since
   every row would carry your name.
+- **Both views are limited to the open sprints.** `My issues` is what the sprint holds *and* is assigned
+  to you, not everything assigned to you: an issue outside every open sprint does not show up here, the
+  board being the place to see a whole assignment.
 - **What is in progress comes first**, in both views. Grouped by Jira's status *category*, never by the
   status name, so "In review" and "Ready for QA" rank with everything else the team is working on. Inside
   each group the order the search returned is preserved: `status, key` for the sprint, most recently

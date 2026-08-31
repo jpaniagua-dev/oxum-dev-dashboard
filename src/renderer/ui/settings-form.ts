@@ -444,7 +444,7 @@ export class SettingsForm {
 
     const header = createElement('div', { className: 'settings-card__header' });
     header.append(
-      this.field('Nom', project.label, (value) => {
+      this.field('Name', project.label, (value) => {
         project.label = value;
         this.touch();
       }),
@@ -760,7 +760,7 @@ export class SettingsForm {
       // The name is editable like any other field: "Git Bash" is only what detection guessed, and a
       // profile the user points elsewhere deserves a name that says so.
       header.append(
-        this.field('Nom', profile.label, (value) => {
+        this.field('Name', profile.label, (value) => {
           profile.label = value;
           profile.detected = false;
           this.touch();
