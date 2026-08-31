@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -394,6 +394,25 @@ describe('readRepoWorktrees, against a real repository', () => {
     expect(state.worktrees[0]?.git?.untracked).toBe(1);
     expect(state.worktrees[0]?.git?.hasUpstream).toBe(false);
     expect(state.worktrees[0]?.git?.error).toBeNull();
+  });
+
+  it('excludes the main checkout when the project is registered through a junction', async () => {
+    // git resolves the path it is handed before printing it, so a project registered through a
+    // junction, or living under a TEMP whose owner has an 8.3 alias, is compared against a spelling
+    // it can never equal: the main checkout survives the filter and the project grows a worktree row
+    // that is itself. Both vectors verified on Windows, and the second is what a CI runner hands you.
+    const link = join(repo, '..', `${basename(repo)}-junction`);
+    symlinkSync(repo, link, 'junction');
+    try {
+      const state = await readRepoWorktrees({ ...project(), path: link });
+
+      expect(state.error).toBeNull();
+      expect(state.worktrees).toHaveLength(1);
+      expect(state.worktrees[0]?.branch).toBe('PROJ-7-fixture');
+    } finally {
+      // Removes the junction only: verified that the target and its files survive.
+      rmSync(link, { recursive: true, force: true });
+    }
   });
 
   it('reports a folder that is not a repository instead of calling it empty', async () => {

@@ -1433,10 +1433,17 @@ pattern are left ready.
   name. They deliberately share the `appId`, and therefore the same `userData` and the same
   single-instance lock.
 - **The test suite is not all pure units.** Around 60 tests fork a real `git` against a temporary
-  repository and a few drive a real pty; the slowest measures 2.4 s on this machine. Hence
-  `testTimeout: 30_000` in `vitest.config.ts`: a Windows CI runner spawns processes markedly slower,
-  and Vitest's 5 s default leaves a margin whose loss shows up as a failed release rather than a
-  failed test. The two pty tests keep their own explicit 15 s, lower and deliberate.
+  repository and a few drive a real pty, so their duration follows process spawning and disk rather
+  than the code under test: `test/git-commands.test.ts` measured 12.5 s here and 8.9 s on a CI
+  runner, a spread of about 2 in either direction. Hence `testTimeout: 30_000` in `vitest.config.ts`,
+  Vitest's 5 s default having no room for the bad side of that. The two pty tests keep their own
+  explicit 15 s, lower and deliberate.
+- **git answers with the physical path.** Handed a junction, or an 8.3 short name such as the
+  `C:\Users\RUNNER~1\...` a CI runner's TEMP carries, `git worktree list --porcelain` prints the
+  resolved target instead. Both verified on Windows. So the main checkout can only be excluded once
+  `canonicalPath` (`realpathSync.native`) has resolved the configured path: folding separators and
+  case cannot see through an alias, and no string rule can. This is what a first CI run found, on a
+  test that had passed on this machine for weeks.
 - **The icon is `resources/icon.ico`**, multi-size (16 to 256), generated rather than drawn by hand:
   each size is traced at its own resolution, with a proportionally thicker stroke below 32 px where
   downscaling turns the glyph to mush. `windowIcon()` only passes it to windows **in dev**: a packaged

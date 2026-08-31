@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs';
 import type { Project, RepoWorktrees, Worktree } from '@shared/contracts.js';
 import { readGitState } from './git-service.js';
 import { describeGitError, git } from './run-git.js';
@@ -25,7 +26,9 @@ export interface WorktreeEntry {
  *    git prints `C:/Users/x/projects/repo` with forward slashes while a configured project carries
  *    `C:\Users\x\projects\repo`: compared raw, no path ever matches its own repository and every
  *    project grows a phantom worktree row that is really itself. Case is folded too, this being a
- *    Windows-only app whose drive letter git spells as it was stored.
+ *    Windows-only app whose drive letter git spells as it was stored. Separators and case are all
+ *    this function folds: resolving an alias needs the disk, so `mainPath` arrives already
+ *    canonical from {@link canonicalPath}.
  * 2. **A record is one attribute per line, terminated by a blank line.** Only `worktree` opens a new
  *    record, so an unknown attribute is ignored rather than mistaken for the start of the next one.
  * 3. **`locked` and `prunable` come with or without a reason.** `locked` alone is a locked worktree,
@@ -117,6 +120,28 @@ export function basename(path: string): string {
  * Lower-cased and slash-normalised: git prints its own separators and its own idea of the drive
  * letter's case, and neither has to match what the user typed into the settings.
  */
+/**
+ * The physical spelling of a path, the one git answers with.
+ *
+ * git resolves the path it is handed before printing it. So a project registered through a junction
+ * is compared against its target, and one living under a TEMP whose owner has an 8.3 alias
+ * (`C:\Users\RUNNER~1\...`) against the long form. Neither can equal what was stored, the main
+ * checkout therefore survives the filter in {@link parseWorktreeList}, and the project grows a
+ * worktree row that is itself. Both vectors verified on Windows, the second being what a CI runner
+ * hands you and how this was found. Folding separators and case cannot cover it, and no string rule
+ * can: only the filesystem knows what an alias points at.
+ *
+ * A path that cannot be resolved is returned as it came. A folder that is gone is not this helper's
+ * to report, and the git call that follows reports it anyway.
+ */
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
+}
+
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
@@ -138,7 +163,10 @@ export async function readRepoWorktrees(project: Project): Promise<RepoWorktrees
   const base = { projectId: project.id, label: project.label, path: project.path };
   let entries: WorktreeEntry[];
   try {
-    entries = parseWorktreeList(await git(project.path, ['worktree', 'list', '--porcelain']), project.path);
+    entries = parseWorktreeList(
+      await git(project.path, ['worktree', 'list', '--porcelain']),
+      canonicalPath(project.path),
+    );
   } catch (error) {
     // A folder that is not a repository is a normal row here, exactly as it is in the project table:
     // reported, so it cannot be read as "this project has no worktree".
