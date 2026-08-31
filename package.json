@@ -18,7 +18,8 @@
     "format": "prettier --write \"src/**/*.{ts,css,html}\" \"test/**/*.ts\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --win",
+    "dist:zip": "npm run build && electron-builder --win zip --x64 -c.win.artifactName=oxum-dev-dashboard-win-x64.zip"
   },
   "dependencies": {
     "@lydell/node-pty": "1.2.0-beta.14",

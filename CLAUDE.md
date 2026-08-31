@@ -1432,6 +1432,11 @@ pattern are left ready.
   the portable one needs its own `artifactName`: both emit a `.exe` and would fight over the same file
   name. They deliberately share the `appId`, and therefore the same `userData` and the same
   single-instance lock.
+- **The test suite is not all pure units.** Around 60 tests fork a real `git` against a temporary
+  repository and a few drive a real pty; the slowest measures 2.4 s on this machine. Hence
+  `testTimeout: 30_000` in `vitest.config.ts`: a Windows CI runner spawns processes markedly slower,
+  and Vitest's 5 s default leaves a margin whose loss shows up as a failed release rather than a
+  failed test. The two pty tests keep their own explicit 15 s, lower and deliberate.
 - **The icon is `resources/icon.ico`**, multi-size (16 to 256), generated rather than drawn by hand:
   each size is traced at its own resolution, with a proportionally thicker stroke below 32 px where
   downscaling turns the glyph to mush. `windowIcon()` only passes it to windows **in dev**: a packaged
@@ -1478,8 +1483,34 @@ npm run dev        # run the dashboard from source
 npm test           # Vitest on the pure units
 npm run lint       # ESLint, zero warnings tolerated
 npm run typecheck  # tsc on the node, web and test projects
-npm run dist       # installer in release/
+npm run dist       # installer, zip and portable build in release/
+npm run dist:zip   # only the zip, under the name the GitHub release carries
 ```
+
+## Release
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`: the gates (lint, tests, typecheck), the zip
+build, then the publication. It is the only workflow and therefore the only gate, so a breakage only
+shows up at tag time, and a failure means moving the tag rather than re-running the job: Actions
+resolves the workflow and the code from the pushed ref, so a re-run rebuilds the same broken commit.
+Three rules the workflow enforces and that a change must not break silently:
+
+- **The tag has to equal the `package.json` version**, or the job fails early and on purpose. The
+  title bar is the only way to tell which build is running, and all the artifacts share one
+  `userData`, so a tag lying about the version would make that reading useless.
+- **One release lives at a time.** The earlier ones are deleted after the new one is published, in
+  that order, so a failure never leaves zero releases. **Tags are kept**: they are the only link
+  from a version to a commit.
+- **The asset name is stable** (`oxum-dev-dashboard-win-x64.zip`), imposed by `-c.win.artifactName`
+  on the `dist:zip` command line and not by `electron-builder.yml`: `TargetConfiguration` has no
+  per-target `artifactName`, and the versioned pattern in `win.artifactName` is what the other two
+  targets need. Putting `${version}` back would break the permanent URL
+  `releases/latest/download/oxum-dev-dashboard-win-x64.zip`, which is the whole point of keeping a
+  single release.
+
+A repository with no workflow at all reads `no-runs` in the Workflows column, and this one now has
+one: if the dashboard watches its own repository, that cell moves to a real pipeline state while a
+release is building.
 
 ## Conventions
 

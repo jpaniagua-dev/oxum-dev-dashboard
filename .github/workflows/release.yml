@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+# Two tags pushed close together would otherwise race on the prune step below.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        # The default shell on a Windows runner is pwsh; every script here is bash.
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Release notes are computed from the previous tag, so the history is needed.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      # The version in the title bar comes from package.json, and every packaged build
+      # shares one userData, so a tag disagreeing with it would ship a build nobody can
+      # identify once it is running.
+      - name: Check the tag against package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run dist:zip # typecheck runs inside npm run build
+
+      - name: Publish the one living release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          previous=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
+          range="$tag"
+          if [ -n "$previous" ]; then range="$previous..$tag"; fi
+          git log --no-merges --pretty='- %s' "$range" > notes.md
+
+          # Lets a re-run of a failed job work instead of failing on an existing release.
+          gh release delete "$tag" --yes 2>/dev/null || true
+          gh release create "$tag" --title "$tag" --notes-file notes.md --latest release/oxum-dev-dashboard-win-x64.zip
+
+          # One package alive. Creating before pruning matters: a failure never leaves zero
+          # releases. Tags are kept, being the only link from a version to a commit.
+          # grep exits 1 once it filters everything out and the step runs with pipefail, so
+          # the "nothing to prune" case is handled here instead of failing the job.
+          olds=$(gh release list --limit 100 --json tagName --jq '.[].tagName' | grep -vxF "$tag" || true)
+          if [ -n "$olds" ]; then
+            echo "$olds" | xargs -I{} gh release delete {} --yes
+          fi

@@ -8,10 +8,24 @@ nothing ever sends you to an external console.
 
 ## Install
 
+One permanent link, always the latest build:
+
+**[Download oxum-dev-dashboard-win-x64.zip](https://github.com/jpaniagua-dev/oxum-dev-dashboard/releases/latest/download/oxum-dev-dashboard-win-x64.zip)**
+
+Right-click the archive before unpacking, Properties, **Unblock**. The build is unsigned, so Windows
+marks it as coming from the internet and SmartScreen warns on the first launch; unblocking the zip once
+saves unblocking every file inside it. Then unpack it anywhere and run `Oxum Dev Dashboard.exe`.
+
+Close a running dashboard before replacing its folder: open files cannot be overwritten, and all the
+builds share one single-instance lock, so launching the new exe would only focus the window already up.
+
+### Build it yourself
+
 ```bash
 npm install
 npm run dev          # run from source
-npm run dist         # build the installer and the portable build
+npm run dist         # build the installer, the zip and the portable build
+npm run dist:zip     # only the zip, under the name the GitHub release carries
 ```
 
 `dist` produces three artifacts in `release/`, and the choice between them is a measured trade-off:
@@ -21,6 +35,10 @@ npm run dist         # build the installer and the portable build
 | `…-<version>-x64.exe` (NSIS installer) | yes | ~10 s |
 | `…-<version>-x64.zip` | no, unpack once | ~10 s |
 | `…-<version>-portable.exe` | no, single file | **~26 s, every launch** |
+
+The GitHub release carries that same zip under a version-free name, which is what keeps the download
+link above permanent; `dist:zip` is the script that renames it. Which version you are running is in the
+title bar.
 
 The single-file portable target unpacks the whole ~100 MB app into `%TEMP%` at **every** start, and it
 does not cache: measured at 30 s cold and 26,5 s on the next launch, against 9,6 s once unpacked. Prefer
