@@ -6,6 +6,7 @@ import type {
   PrReview,
   PullRequest,
   ServerState,
+  WorkflowsState,
 } from '@shared/contracts.js';
 import { hasWorktreeChange, isStaged } from '@shared/git-changes.js';
 
@@ -186,6 +187,43 @@ export function presentChecks(checks: ChecksState | null, git: GitState | null):
       };
     case 'unknown':
       return { label: '?', tone: 'neutral', title: checks.error ?? 'Unknown state' };
+  }
+}
+
+/**
+ * Label and tone for the workflows column.
+ *
+ * It says *that* something runs, never *what*: the column exists to be read from across the table
+ * while working in the terminal below, and a workflow name would need room the strip does not have.
+ * Whoever wants the name has the repository one click away. The counts go in the tooltip, which is
+ * where a number has room to be explained.
+ *
+ * Running and queued are shown as one figure, because they are one answer — CI is busy on this
+ * project — and split again in the tooltip, because "3 queued, none started" is a different morning
+ * from "3 running" for anyone waiting on the result.
+ */
+export function presentWorkflows(workflows: WorkflowsState | null): Pill {
+  if (workflows === null) {
+    return { label: '…', tone: 'neutral', title: 'Not queried yet' };
+  }
+
+  switch (workflows.verdict) {
+    case 'running':
+      return {
+        label: `running ${workflows.running + workflows.queued}`,
+        tone: 'busy',
+        title: `${workflows.running} run(s) in progress, ${workflows.queued} queued`,
+      };
+    case 'idle':
+      return { label: 'idle', tone: 'neutral', title: 'No workflow run in flight' };
+    case 'no-runs':
+      // Distinct from `idle` on purpose: this repository has never run a workflow, so there is no
+      // pipeline to be idle. Same reason `no-checks` is not `passing`.
+      return { label: 'no runs', tone: 'neutral', title: 'No workflow run in this repository' };
+    case 'no-repo':
+      return { label: 'no remote', tone: 'neutral', title: 'No GitHub remote to query' };
+    case 'unknown':
+      return { label: '?', tone: 'neutral', title: workflows.error ?? 'Unknown state' };
   }
 }
 

@@ -791,218 +791,360 @@ body {
 /* --------------------------------------------------------------- settings */
 
 /*
- * The settings window's own layout: header and footer pinned, body scrolling.
+ * The settings window.
  *
- * This used to be a centred panel over a dimmed backdrop. It is a real window now, so it fills the
- * frame: no border, no shadow, and the content column simply centred once the window is wide.
+ * Three regions: a rail down the left, the scrolling body, a footer across the bottom.
+ *
+ * The rail is not only navigation. Each entry carries a one-line readout of what its section is
+ * currently set to — how many projects, which shell, whether Jira is connected — so the questions
+ * this window exists to answer are answered before any scrolling. A rail holding five words would
+ * not be worth 196px; a rail holding the configuration is.
+ *
+ * This used to be a centred panel over a dimmed backdrop, then a single scrolling column. It is a
+ * real window: it fills the frame, and the only thing that scrolls is the body.
  */
 .settings-page {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100%;
   background: var(--surface);
 }
 
-.settings__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-raised);
-}
+/* ------------------------------------------------------------------- rail */
 
-.settings__title {
-  margin: 0;
-  font-size: var(--font-xl);
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-
-.settings__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  /* Centred with a ceiling: cards stretched across a maximised window would put the label and the
-     Delete button a screen apart. */
-  padding: 16px;
+.settings-rail {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface-inset);
 }
 
-.settings__section {
+/*
+ * The one large piece of type in the window. Barlow at the top of the ladder, tightened: the app
+ * ships no font file (the CSP allows none and the stack falls back to Segoe), so weight, size and
+ * tracking are what carry the display voice here.
+ */
+.settings-rail__title {
+  margin: 0 0 16px;
+  padding: 0 16px;
+  color: var(--text);
+  font-size: var(--font-3xl);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.settings-rail__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-rail__link {
+  display: block;
   width: 100%;
-  max-width: 860px;
-  margin: 0 auto;
+  padding: 7px 14px;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-rail__link:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/*
+ * The current section, and the only saturated red in the window besides Save. Red is spent here on
+ * "where you are" and on the three states that mean "not yet true" (unsaved, invalid, error);
+ * everything else is greyscale, which is what keeps those four things findable.
+ */
+.settings-rail__link[aria-current='true'] {
+  border-left-color: var(--primary);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.settings-rail__link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.settings-rail__name {
+  display: block;
+  font-size: var(--font-md);
+  font-weight: 500;
+}
+
+/*
+ * The readout: what the section is set to right now, in the mono face because it is the machine
+ * answering. Truncated rather than wrapped — a rail entry that grows to two lines stops being a
+ * scannable column.
+ */
+.settings-rail__state {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-3xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-rail__state--warn {
+  color: var(--warning);
+}
+
+.settings-rail__state--error {
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------------- body */
+
+.settings__body {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 28px 40px;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings__body {
+    scroll-behavior: auto;
+  }
+}
+
+/*
+ * A ceiling on the measure, not a centred column: the window is left-anchored against the rail, and
+ * a form that drifts to the middle of a maximised window puts a label and its Delete button a screen
+ * apart. The rule between sections is the only separator any of them needs.
+ */
+.settings__section {
+  max-width: 760px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings__section:last-child {
+  border-bottom: 0;
 }
 
 .settings__section-title {
-  margin: 0 0 4px;
-  font-size: var(--font-xs);
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: var(--font-2xl);
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-faint);
+  letter-spacing: -0.01em;
 }
 
+/*
+ * Explanatory prose, and it is meant to be read: `--text-dim` and not `--text-faint`, which is the
+ * weight for a value nobody looks at twice. The measure is capped in characters because these notes
+ * are the only running text in the app.
+ */
 .settings__note {
-  margin: 0 0 10px;
-  color: var(--text-faint);
+  max-width: 64ch;
+  margin: 0 0 16px;
+  color: var(--text-dim);
   font-size: var(--font-sm);
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .settings__note code {
   font-family: var(--font-mono);
-  font-size: var(--font-xs);
+  font-size: var(--font-2xs);
 }
 
 .settings__empty {
-  margin: 0 0 10px;
-  padding: 10px;
+  margin: 0 0 12px;
+  padding: 14px;
   border: 1px dashed var(--border);
   border-radius: var(--radius);
-  color: var(--text-faint);
-  font-size: var(--font-md);
+  color: var(--text-dim);
+  font-size: var(--font-sm);
 }
 
+.settings__row-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ----------------------------------------------------------------- footer */
+
 .settings__footer {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 11px 28px 11px 16px;
   border-top: 1px solid var(--border);
   background: var(--surface-raised);
 }
 
+/*
+ * The two states already differ in words ("unsaved changes" / "changes saved"), so the colour is the
+ * redundant half and no dot or icon is added on top of it. Amber marks the one that is a claim about
+ * work not yet done.
+ */
 .settings__status {
   margin-right: auto;
   color: var(--warning);
   font-size: var(--font-sm);
 }
 
-/* A save confirmation is not a warning, and reusing the amber would read as one. */
 .settings__status--ok {
   color: var(--text-faint);
 }
 
-.settings__row-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
+/* ------------------------------------------------------------------ entry */
+
+/*
+ * One project, or one shell profile.
+ *
+ * Hairlines and not cards. What this window configures is the dashboard's table, and a stack of
+ * bordered cards each holding three more bordered fields is four frames deep before any content
+ * appears. The rule separates; nothing else has to.
+ */
+/*
+ * One ring for the whole window.
+ *
+ * The fields draw a brand ring, and without this the buttons between them kept the browser's black
+ * one: tabbing through a project alternated two different focus indicators. Scoped to this page
+ * because `.button` is the dashboard's button too, and that is not what was asked for here.
+ */
+.settings-page .button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
 }
 
-/* ------------------------------------------------------------ settings card */
-
-.settings-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-raised);
-}
-
-/* A configuration with a broken path cannot produce a working row, so it is marked, not hidden. */
-.settings-card--error {
-  border-color: var(--primary-border);
-  background: var(--primary-soft);
-}
-
-.settings-card__header {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.settings-card__header .settings-field {
-  flex: 1;
-}
-
-.settings-card__title {
-  flex: 1;
-  font-weight: 600;
-  font-size: var(--font-lg);
-}
-
-.settings-card__badge {
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--surface-inset);
-  color: var(--text-faint);
-  font-size: var(--font-3xs);
-}
-
-.settings-card__path {
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-}
-
-.settings-card__path .settings-field {
-  flex: 1;
-}
-
-/* ------------------------------------------------------- actions per project */
-
-.settings-actions {
+.settings-entry {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--border);
+  gap: 10px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
 }
 
-.settings-actions__title {
-  font-size: var(--font-2xs);
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-}
-
-.settings-actions__empty {
-  margin: 0;
-  color: var(--warning);
-  font-size: var(--font-sm);
+.settings-entry:first-of-type {
+  padding-top: 0;
+  border-top: 0;
 }
 
 /*
- * One row per action. The command takes the space that is left because it is the field that actually
- * gets long; the label, the shell and the role are all short and fixed.
+ * A configuration with a broken path cannot produce a working row, so it is marked, not hidden.
+ *
+ * A bar on the leading edge rather than the tinted wash this used to be: the wash coloured every
+ * field in the entry, and the fields are exactly what has to stay readable while the path is being
+ * corrected. Drawn with an inset shadow so marking an entry never shifts the ones below it.
  */
-.settings-action {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) 130px 110px auto;
-  align-items: end;
-  gap: 8px;
-  width: 100%;
+.settings-entry--error {
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--primary);
 }
 
-.settings-action .settings-field {
+.settings-entry__header {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+/*
+ * The name field is capped rather than stretched, and Delete stays right beside it. A name field the
+ * width of the window puts a project's label and the button that removes it a screen apart, which is
+ * the mistake worth avoiding here — not the empty space to the right of a short name.
+ */
+.settings-entry__header .settings-field {
+  flex: 0 1 320px;
+}
+
+/* Where the value came from, which is the machine's own report, hence the mono face. */
+.settings-entry__badge {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-3xs);
+  white-space: nowrap;
+}
+
+/* A field with a button on its line: a folder to browse for, a token to test. */
+.settings-inline {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.settings-inline .settings-field {
+  flex: 1;
   min-width: 0;
 }
 
-.settings-card__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
+/*
+ * Fields that answer a question about the whole entry, on one line: the kind, the port, whether the
+ * row follows pull requests. They wrap rather than shrink, because a port field squeezed to 60px is
+ * unusable while a wrapped line is only two lines.
+ */
+.settings-entry__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
 }
 
-.settings-card__issues {
-  margin: 0;
-  padding-left: 16px;
+.settings-entry__row .settings-field {
+  flex: 0 1 auto;
+}
+
+.settings-entry__row .settings-check {
+  /* Aligned on the inputs beside it rather than on their labels. */
+  padding-bottom: 6px;
+}
+
+/* A fact that belongs to one control rather than to the section, so it sits beside it, not above. */
+.settings-aside {
+  padding-bottom: 6px;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.settings-entry__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+/*
+ * Equal columns would cut the site URL, which is the longest of the three by a wide margin and the
+ * one that has to be read back to be checked. Weighted by what each field actually holds.
+ */
+.settings-entry__grid--jira {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1.1fr) minmax(0, 1fr);
+}
+
+.settings-entry__issues {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin: 0;
+  padding-left: 16px;
 }
 
 .issue {
@@ -1017,38 +1159,254 @@ body {
   color: var(--warning);
 }
 
-.settings-card__hint {
+.settings-entry__hint {
+  overflow: hidden;
   margin: 0;
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: var(--font-2xs);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-/* ------------------------------------------------------------------ fields */
+/* ------------------------------------------------------- actions per entry */
+
+/*
+ * The rule on the left says these belong to the project above them, which a dashed separator above
+ * them did not: it read as "and now, something else".
+ */
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid var(--border);
+}
+
+.settings-actions__title {
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.settings-actions__empty {
+  margin: 0;
+  color: var(--warning);
+  font-size: var(--font-sm);
+}
+
+/*
+ * One row per action. The command takes what is left because it is the only field that actually gets
+ * long; the label, the shell and the role are short and fixed.
+ */
+.settings-action {
+  display: grid;
+  grid-template-columns: minmax(80px, 112px) minmax(0, 1fr) minmax(0, 118px) minmax(0, 92px) auto;
+  align-items: end;
+  gap: 8px;
+  width: 100%;
+}
+
+.settings-action .settings-field {
+  min-width: 0;
+}
+
+/* The delete button is one of the row's controls, so it stands as tall as the fields beside it. */
+.settings-action > .button,
+.settings-inline > .button {
+  height: calc(var(--font-sm) * 1.4 + 14px);
+}
+
+/*
+ * The column headings are written once, on the first row.
+ *
+ * Four eyebrows repeated down every action turned a three-line list into twelve lines of label. They
+ * stay in the DOM on the rows below — each input is inside its `<label>`, and that is what names the
+ * field for a screen reader — and are only taken out of the picture.
+ */
+.visually-hidden {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+/* ---------------------------------------------------------------- candidates */
+
+.settings-candidates {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.settings-candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-candidate:first-child {
+  border-top: 0;
+}
+
+.settings-candidate__label {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.settings-candidate__meta {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+/* ----------------------------------------------------------------- fields */
 
 .settings-field {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
+  min-width: 0;
 }
 
 /*
- * Fields that stand on their own above a list of cards rather than inside one.
- * Cards carry their own bottom margin, so without this they sat glued to the first of them.
+ * Fields that stand on their own above a list of entries rather than inside one. The entries space
+ * themselves, so without this the row sat flush against the first of them.
  */
 .settings-field--section {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+}
+
+/*
+ * A number that is two or four digits wide has no business being as wide as a path. Wide enough to
+ * hold `inferred 4200`, which is the longest thing these fields ever have to show.
+ */
+.settings-field--narrow {
+  flex: 0 0 132px;
+  width: 132px;
+}
+
+.settings-field--kind {
+  flex: 0 1 200px;
+}
+
+/*
+ * The eyebrow. Barlow, not the mono face: mono means one thing in this window, and a label is not it.
+ */
+.settings-field__label {
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/*
+ * The height is stated rather than left to each control.
+ *
+ * A native `select` is two pixels taller than a text input with the same padding, which is invisible
+ * on its own and obvious in a row of four: every label above them sat at a different height. The value
+ * is the input's own natural height written out, so it still follows `--ui-font-size` like everything
+ * else on the ladder.
+ */
+.settings-field__input,
+.settings-field__select {
+  width: 100%;
+  height: calc(var(--font-sm) * 1.4 + 14px);
+  padding: 6px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--font-sm);
+  line-height: 1.4;
+}
+
+/*
+ * Monospace is reserved for values the machine has to read back exactly: paths, commands, ports,
+ * model ids, project keys. A name and a button label are words a person chose, and they are set in
+ * the interface face like every other word in the app. The face is switched on the wrapper rather
+ * than field by field, so the distinction stays a rule instead of a decision taken twelve times.
+ */
+.settings-field--mono .settings-field__input {
+  font-family: var(--font-mono);
+}
+
+.settings-field__input:focus,
+.settings-field__select:focus {
+  border-color: var(--primary);
+}
+
+/*
+ * A real focus ring. The border alone was a one-pixel colour change, which is not a keyboard
+ * indicator: at this type size it is invisible on a form of twenty identical fields.
+ */
+.settings-field__input:focus-visible,
+.settings-field__select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+/*
+ * A value the store will not keep.
+ *
+ * It exists because the alternative is a setting that is typed, saved, silently dropped and never
+ * mentioned again. The wash is what makes it visible without a message beside it; the field's own
+ * `title` says what is wrong. It survives focus, since correcting the value is done with the field
+ * focused and that is precisely when the mark has to still be there.
+ */
+.settings-field__input--invalid,
+.settings-field__input--invalid:focus {
+  border-color: var(--danger);
+  background: var(--primary-soft);
+}
+
+/*
+ * A placeholder must never be mistaken for a saved value: where one remains it states what happens if
+ * the field is left alone (`inferred 4200`, `none`, a token already stored), and it says so in italics
+ * and much dimmer than real text.
+ */
+.settings-field__input::placeholder {
+  opacity: 0.75;
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 /* A checkbox reads as one line, unlike the stacked label-over-input of the text fields. */
 .settings-check {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   cursor: pointer;
+}
+
+/* Brand red like every other control here; without it Windows draws its own blue. */
+.settings-check__input {
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.settings-check__input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .settings-check__label {
@@ -1056,91 +1414,111 @@ body {
   font-size: var(--font-sm);
 }
 
-/* The profile picker takes the width it needs; the font size is two digits and asks for no more. */
+/* The default profile takes the width a shell name needs; the font size is two digits and asks for
+   no more. Neither grows with the window: a picker of four options does not get better at 600px. */
 .settings-terminal-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 130px;
-  gap: 8px;
-  margin-bottom: 14px;
+  grid-template-columns: minmax(0, 320px) 132px;
+  gap: 10px;
+  margin-bottom: 18px;
 }
 
 .settings-terminal-row .settings-field--section {
   margin-bottom: 0;
 }
 
-.settings-field__label {
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
+/* -------------------------------------------------------- narrow settings */
 
-.settings-field__input {
-  padding: 5px 8px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
+/*
+ * Below 820px the five-column action row stops fitting: the command field, the one that needs the
+ * space, is the first to be crushed. Label and command take the top line, the two pickers and the
+ * delete button the second.
+ */
+@media (max-width: 820px) {
+  /*
+   * Placed cell by cell rather than left to auto-flow: the row has five children and auto-flow puts
+   * the delete button on a third line of its own, away from the action it deletes.
+   */
+  .settings-action {
+    grid-template-columns: minmax(80px, 112px) minmax(0, 1fr) minmax(0, 92px) auto;
+  }
+
+  .settings-action > :nth-child(1) {
+    grid-area: 1 / 1;
+  }
+
+  .settings-action > :nth-child(2) {
+    grid-area: 1 / 2 / 2 / -1;
+  }
+
+  .settings-action > :nth-child(3) {
+    grid-area: 2 / 1 / 3 / 3;
+  }
+
+  .settings-action > :nth-child(4) {
+    grid-area: 2 / 3;
+  }
+
+  .settings-action > :nth-child(5) {
+    grid-area: 2 / 4;
+  }
 }
 
 /*
- * A value the store will not keep.
- *
- * The border and nothing else: there is no message to place, and the field's own `title` says what is
- * wrong. It exists because the alternative is the failure `asPatch` already records, a setting that is
- * typed, saved, silently dropped and never mentioned again.
+ * Below 700px the body needs the width more than the navigation does, so the rail lies down across
+ * the top. The readouts go with it rather than being truncated to three characters: a readout that
+ * cannot be read is worse than none, and the sections themselves are two swipes away.
  */
-.settings-field__input--invalid {
-  border-color: var(--error);
-}
+@media (max-width: 700px) {
+  .settings-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
 
-.settings-field__input:focus {
-  outline: none;
-  border-color: var(--primary);
-}
+  .settings-rail {
+    grid-row: 1;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
 
-/*
- * A placeholder must never be mistaken for a saved value: where one remains, it is an inferred fallback
- * (`inferred 4200`, `none`), and it says so in italics and much dimmer than real text.
- */
-.settings-field__input::placeholder {
-  color: var(--text-faint);
-  font-style: italic;
-  opacity: 0.75;
-}
+  .settings-rail__title {
+    display: none;
+  }
 
-/* -------------------------------------------------------------- candidates */
+  .settings-rail__list {
+    flex-direction: row;
+  }
 
-.settings-candidates {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-inset);
-}
+  .settings-rail__link {
+    padding: 9px 14px;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
 
-.settings-candidate {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 6px;
-  font-size: var(--font-md);
-}
+  .settings-rail__link[aria-current='true'] {
+    border-left-color: transparent;
+    border-bottom-color: var(--primary);
+  }
 
-.settings-candidate__label {
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
-}
+  .settings-rail__state {
+    display: none;
+  }
 
-.settings-candidate__meta {
-  color: var(--text-faint);
-  font-size: var(--font-xs);
+  .settings__body {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 0 18px 32px;
+  }
+
+  .settings__footer {
+    grid-row: 3;
+    padding-right: 18px;
+  }
 }
 
 /* ---------------------------------------------------------------- resizer */
@@ -2648,7 +3026,6 @@ body {
   min-width: 0;
   white-space: nowrap;
 }
-
 
 /* ----------------------------------------------------------- servers window */
 

@@ -25,10 +25,9 @@ type ActionDraft = { -readonly [K in keyof ProjectAction]: ProjectAction[K] };
  * element type would still carry the readonly `role` from `ProjectAction` and the form could not edit
  * it. `Omit` drops the original member outright.
  */
-type ProjectDraft = Omit<
-  { -readonly [K in keyof ProjectConfig]: ProjectConfig[K] },
-  'actions'
-> & { actions: ActionDraft[] };
+type ProjectDraft = Omit<{ -readonly [K in keyof ProjectConfig]: ProjectConfig[K] }, 'actions'> & {
+  actions: ActionDraft[];
+};
 type ProfileDraft = { -readonly [K in keyof ShellProfile]: ShellProfile[K] } & { args: string[] };
 
 /**
@@ -93,6 +92,7 @@ interface ClaudeModelDrafts {
 }
 
 export interface SettingsFormHosts {
+  readonly rail: HTMLElement;
   readonly interface: HTMLElement;
   readonly projects: HTMLElement;
   readonly terminal: HTMLElement;
@@ -106,6 +106,47 @@ export interface SettingsFormActions {
   readonly onDirtyChange: (dirty: boolean) => void;
   /** Asks the host to close the window. */
   readonly onRequestClose: () => void;
+  /** Asks the host to bring a section into view. Scrolling belongs to the window, not to the form. */
+  readonly onNavigate: (sectionId: string) => void;
+}
+
+/**
+ * How a rail readout reads: neutral is a plain fact and takes no colour, while `warn` and `error` are
+ * claims that the section will not do what it says. Colour is spent on those two and on nothing else,
+ * which is what keeps them findable in a column of five lines.
+ */
+type RailTone = 'neutral' | 'warn' | 'error';
+
+interface RailEntry {
+  /** Id of the `<section>` in `settings.html` this entry scrolls to. */
+  readonly id: string;
+  readonly name: string;
+  /** One line saying what the section is set to right now. */
+  readonly state: string;
+  readonly tone: RailTone;
+}
+
+/** `1 project` / `4 projects`, so the readout never says "1 projects". */
+function count(n: number, singular: string): string {
+  return `${n} ${singular}${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * The host of a Jira site, which is what identifies it at a glance.
+ *
+ * The field is edited character by character, so it is a malformed URL most of the time it is read:
+ * anything `URL` refuses comes back as typed rather than as an empty readout.
+ */
+function jiraHost(siteUrl: string): string {
+  const trimmed = siteUrl.trim();
+  if (trimmed.length === 0) {
+    return '';
+  }
+  try {
+    return new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`).hostname;
+  } catch {
+    return trimmed;
+  }
 }
 
 /**
@@ -148,6 +189,8 @@ export class SettingsForm {
    * renamed in the dashboard table.
    */
   private baseline = '';
+  /** Section the rail marks as current. Driven by the window's scroll, not by the last click. */
+  private activeSection = 'section-interface';
 
   constructor(
     private readonly hosts: SettingsFormHosts,
@@ -209,6 +252,122 @@ export class SettingsForm {
     this.renderClaude();
     this.renderJira();
     this.renderFooter();
+    this.renderRail();
+  }
+
+  /**
+   * Marks the section the window is currently looking at.
+   *
+   * Attributes are patched in place rather than rebuilding the rail: this is called on every scroll
+   * event the observer reports, and rebuilding five buttons at that rate would fight the pointer.
+   */
+  setActiveSection(sectionId: string): void {
+    if (this.activeSection === sectionId) {
+      return;
+    }
+    this.activeSection = sectionId;
+    this.applyRailCurrent();
+  }
+
+  /**
+   * The rail.
+   *
+   * Each entry names a section and says what that section is set to right now. That readout is the
+   * reason the rail is worth its width: "is Jira connected", "how many projects", "which shell" are
+   * the questions this window is opened to answer, and answering them in the navigation means not
+   * scrolling through the whole form to find out.
+   */
+  private renderRail(): void {
+    clearChildren(this.hosts.rail);
+
+    for (const entry of this.railEntries()) {
+      const item = createElement('li');
+      const link = createElement('button', { className: 'settings-rail__link' });
+      link.type = 'button';
+      link.dataset.section = entry.id;
+      link.setAttribute('aria-current', entry.id === this.activeSection ? 'true' : 'false');
+      link.append(createElement('span', { className: 'settings-rail__name', text: entry.name }));
+      link.append(
+        createElement('span', {
+          className:
+            entry.tone === 'neutral'
+              ? 'settings-rail__state'
+              : `settings-rail__state settings-rail__state--${entry.tone}`,
+          text: entry.state,
+        }),
+      );
+      link.addEventListener('click', () => this.actions.onNavigate(entry.id));
+      item.append(link);
+      this.hosts.rail.append(item);
+    }
+  }
+
+  private applyRailCurrent(): void {
+    for (const link of this.hosts.rail.querySelectorAll('button')) {
+      link.setAttribute(
+        'aria-current',
+        link.dataset.section === this.activeSection ? 'true' : 'false',
+      );
+    }
+  }
+
+  /** The five readouts, each computed from the draft rather than from what was last saved. */
+  private railEntries(): readonly RailEntry[] {
+    const failing = this.validations.filter((entry) =>
+      entry.issues.some((issue) => issue.level === 'error'),
+    ).length;
+    const profile = this.profiles.find((entry) => entry.id === this.defaultProfileId);
+    const models = [this.claudeModels.analysis, this.claudeModels.work, this.claudeModels.commit];
+    const invalid = models.filter((model) => !isValidModel(model)).length;
+    const pinned = models.filter((model) => model.trim().length > 0).length;
+    const host = jiraHost(this.jira.siteUrl);
+
+    return [
+      {
+        id: 'section-interface',
+        name: 'Interface',
+        state: `${this.uiFontSize} px`,
+        tone: 'neutral',
+      },
+      {
+        id: 'section-projects',
+        name: 'Projects',
+        state:
+          this.projects.length === 0
+            ? 'no project'
+            : failing > 0
+              ? `${count(this.projects.length, 'project')} · ${count(failing, 'error')}`
+              : count(this.projects.length, 'project'),
+        tone: this.projects.length === 0 ? 'warn' : failing > 0 ? 'error' : 'neutral',
+      },
+      {
+        id: 'section-terminal',
+        name: 'Terminal',
+        state:
+          profile === undefined ? 'no default profile' : `${profile.label} · ${this.fontSize} px`,
+        tone: profile === undefined ? 'warn' : 'neutral',
+      },
+      {
+        id: 'section-claude',
+        name: 'Claude Code',
+        state:
+          invalid > 0
+            ? count(invalid, 'invalid model')
+            : pinned === 0
+              ? 'Claude Code default'
+              : `${pinned} of 3 pinned`,
+        tone: invalid > 0 ? 'error' : 'neutral',
+      },
+      {
+        id: 'section-jira',
+        name: 'Jira',
+        // A connected site is stated, not coloured: naming the host already says it is configured, and
+        // green at this size does not hold its contrast against the rail.
+        state:
+          host.length === 0 ? 'not configured' : this.jira.hasToken ? host : `${host} · no token`,
+        tone: host.length === 0 || this.jira.hasToken ? 'neutral' : 'warn',
+      },
+    ];
   }
 
   /**
@@ -224,20 +383,29 @@ export class SettingsForm {
   private renderInterface(): void {
     clearChildren(this.hosts.interface);
 
-    const row = createElement('div', { className: 'settings-terminal-row' });
+    const row = createElement('div', { className: 'settings-entry__row' });
+    // "Font size" and not "Interface font size": the section it sits in is called Interface, and the
+    // longer label wrapped onto two lines above a field two digits wide.
+    const size = this.field(
+      'Font size',
+      String(this.uiFontSize),
+      (value) => {
+        const parsed = Number.parseInt(value, 10);
+        // Same rule as the terminal's field: an unusable value falls back to the default instead of
+        // being kept, since this is the field that would become unreadable.
+        this.uiFontSize = Number.isFinite(parsed) ? parsed : UI_FONT_SIZE.default;
+        this.touch();
+      },
+      `${UI_FONT_SIZE.min} to ${UI_FONT_SIZE.max}`,
+    );
+    // Two digits wide, so it is given the width of two digits rather than the width of the window.
+    size.classList.add('settings-field--narrow');
+    row.append(size);
     row.append(
-      this.field(
-        'Interface font size',
-        String(this.uiFontSize),
-        (value) => {
-          const parsed = Number.parseInt(value, 10);
-          // Same rule as the terminal's field: an unusable value falls back to the default instead of
-          // being kept, since this is the field that would become unreadable.
-          this.uiFontSize = Number.isFinite(parsed) ? parsed : UI_FONT_SIZE.default;
-          this.touch();
-        },
-        `${UI_FONT_SIZE.min} to ${UI_FONT_SIZE.max}, default ${UI_FONT_SIZE.default}`,
-      ),
+      createElement('span', {
+        className: 'settings-aside',
+        text: `Default ${UI_FONT_SIZE.default} px. Takes effect on save, and resizes this window with it.`,
+      }),
     );
     this.hosts.interface.append(row);
   }
@@ -277,7 +445,9 @@ export class SettingsForm {
       },
     ];
 
+    const grid = createElement('div', { className: 'settings-entry__grid' });
     for (const entry of fields) {
+      // A model id is a string the machine has to match exactly, so it is set in the mono face.
       const field = this.field(
         entry.label,
         this.claudeModels[entry.key],
@@ -287,13 +457,15 @@ export class SettingsForm {
           this.touch();
         },
         'default',
+        true,
       );
       // The hint on hover rather than in the placeholder: a placeholder long enough to explain the run
       // is one that hides the value as soon as there is one.
       field.title = entry.hint;
       this.markModelField(field, this.claudeModels[entry.key]);
-      this.hosts.claude.append(field);
+      grid.append(field);
     }
+    this.hosts.claude.append(grid);
   }
 
   /** Flags a model field whose value the store would drop, so the silence is broken before the save. */
@@ -319,20 +491,35 @@ export class SettingsForm {
   private renderJira(): void {
     clearChildren(this.hosts.jira);
 
-    const grid = createElement('div', { className: 'settings-card__grid' });
+    const grid = createElement('div', {
+      className: 'settings-entry__grid settings-entry__grid--jira',
+    });
     // No example placeholders here: a greyed example reads as a value already saved, and the question
     // "is this configured or not" has to be answerable at a glance. An empty field means empty.
+    // All three are identifiers something else has to match exactly, so all three are mono.
     grid.append(
-      this.field('Site', this.jira.siteUrl, (value) => {
-        this.jira = { ...this.jira, siteUrl: value };
-        this.touch();
-      }),
+      this.field(
+        'Site',
+        this.jira.siteUrl,
+        (value) => {
+          this.jira = { ...this.jira, siteUrl: value };
+          this.touch();
+        },
+        '',
+        true,
+      ),
     );
     grid.append(
-      this.field('Account email', this.jira.email, (value) => {
-        this.jira = { ...this.jira, email: value };
-        this.touch();
-      }),
+      this.field(
+        'Account email',
+        this.jira.email,
+        (value) => {
+          this.jira = { ...this.jira, email: value };
+          this.touch();
+        },
+        '',
+        true,
+      ),
     );
     grid.append(
       this.field(
@@ -348,20 +535,30 @@ export class SettingsForm {
           };
           this.touch();
         },
+        '',
+        true,
       ),
     );
     this.hosts.jira.append(grid);
 
-    const secret = createElement('div', { className: 'settings-card__path' });
-    // The label carries the state, not a placeholder: a token can never be shown, so the field is always
-    // empty and only its label can say whether one is stored.
+    const secret = createElement('div', { className: 'settings-inline' });
+    /*
+     * The state is in the placeholder, not in the label.
+     *
+     * It used to be the label, which meant the label read "Token saved, enter a new one to replace it"
+     * — a label doing two jobs, and changing text under the field it names. The placeholder is where
+     * this window already says what happens if a field is left alone, which is exactly what a stored
+     * token means. The field itself is still always empty: it is never told the saved value.
+     */
     const token = this.field(
-      this.jira.hasToken ? 'Token saved, enter a new one to replace it' : 'Jeton d’API',
+      'API token',
       '',
       (value) => {
         this.jiraToken = value;
         this.touch();
       },
+      this.jira.hasToken ? 'a token is saved — type a new one to replace it' : '',
+      true,
     );
     const input = token.querySelector('input');
     if (input !== null) {
@@ -394,7 +591,7 @@ export class SettingsForm {
 
     if (this.jiraStatus.length > 0) {
       this.hosts.jira.append(
-        createElement('p', { className: 'settings-card__hint', text: this.jiraStatus }),
+        createElement('p', { className: 'settings-entry__hint', text: this.jiraStatus }),
       );
     }
   }
@@ -412,7 +609,7 @@ export class SettingsForm {
     }
 
     for (const project of this.projects) {
-      this.hosts.projects.append(this.buildProjectCard(project));
+      this.hosts.projects.append(this.buildProjectEntry(project));
     }
 
     const actions = createElement('div', { className: 'settings__row-actions' });
@@ -434,15 +631,16 @@ export class SettingsForm {
     }
   }
 
-  private buildProjectCard(project: ProjectDraft): HTMLElement {
+  private buildProjectEntry(project: ProjectDraft): HTMLElement {
     const validation = this.validations.find((entry) => entry.id === project.id);
     const hasError = validation?.issues.some((issue) => issue.level === 'error') ?? false;
 
     const card = createElement('div', {
-      className: `settings-card${hasError ? ' settings-card--error' : ''}`,
+      className: `settings-entry${hasError ? ' settings-entry--error' : ''}`,
     });
 
-    const header = createElement('div', { className: 'settings-card__header' });
+    const header = createElement('div', { className: 'settings-entry__header' });
+    // The name is a word the user chose, so it is set in the interface face, not in the mono one.
     header.append(
       this.field('Name', project.label, (value) => {
         project.label = value;
@@ -461,12 +659,18 @@ export class SettingsForm {
     header.append(remove);
     card.append(header);
 
-    const pathRow = createElement('div', { className: 'settings-card__path' });
+    const pathRow = createElement('div', { className: 'settings-inline' });
     pathRow.append(
-      this.field('Folder', project.path, (value) => {
-        project.path = value;
-        this.touch();
-      }),
+      this.field(
+        'Folder',
+        project.path,
+        (value) => {
+          project.path = value;
+          this.touch();
+        },
+        '',
+        true,
+      ),
     );
     const browse = createElement('button', { className: 'button', text: '…' });
     browse.type = 'button';
@@ -483,52 +687,59 @@ export class SettingsForm {
     pathRow.append(browse);
     card.append(pathRow);
 
-    const grid = createElement('div', { className: 'settings-card__grid' });
+    /*
+     * The three settings that describe the row rather than the repository, on one line: what kind of
+     * process it runs, on which port, and whether it follows pull requests. They were a grid and a
+     * checkbox on separate lines, which spread three short answers over the width of the window.
+     */
+    const row = createElement('div', { className: 'settings-entry__row' });
 
     // Both of these are inferred from the repository, so the placeholder states what will be used
     // when the field is left alone rather than pretending the value is unset.
-    grid.append(
-      this.select(
-        'Type',
-        [
-          { value: '', label: `inferred (${validation?.inferredKind ?? '?'})` },
-          { value: 'server', label: 'server' },
-          { value: 'watch', label: 'watch' },
-        ],
-        project.kind ?? '',
-        (value) => {
-          project.kind = value === 'server' || value === 'watch' ? value : null;
-          this.touch();
-        },
-      ),
+    const kind = this.select(
+      'Type',
+      [
+        { value: '', label: `inferred (${validation?.inferredKind ?? '?'})` },
+        { value: 'server', label: 'server' },
+        { value: 'watch', label: 'watch' },
+      ],
+      project.kind ?? '',
+      (value) => {
+        project.kind = value === 'server' || value === 'watch' ? value : null;
+        this.touch();
+      },
     );
+    kind.classList.add('settings-field--kind');
+    row.append(kind);
 
-    grid.append(
-      this.field(
-        'Port',
-        project.expectedPort === null ? '' : String(project.expectedPort),
-        (value) => {
-          const parsed = Number.parseInt(value, 10);
-          project.expectedPort = Number.isFinite(parsed) ? parsed : null;
-          this.touch();
-        },
-        validation?.inferredPort === null || validation?.inferredPort === undefined
-          ? 'none'
-          : `inferred ${validation.inferredPort}`,
-      ),
+    const port = this.field(
+      'Port',
+      project.expectedPort === null ? '' : String(project.expectedPort),
+      (value) => {
+        const parsed = Number.parseInt(value, 10);
+        project.expectedPort = Number.isFinite(parsed) ? parsed : null;
+        this.touch();
+      },
+      validation?.inferredPort === null || validation?.inferredPort === undefined
+        ? 'none'
+        : `inferred ${validation.inferredPort}`,
+      true,
     );
+    port.classList.add('settings-field--narrow');
+    row.append(port);
 
-    card.append(grid);
-    card.append(
+    row.append(
       this.checkbox('Follow pull requests', project.followPulls, (checked) => {
         project.followPulls = checked;
         this.touch();
       }),
     );
+
+    card.append(row);
     card.append(this.buildActionsEditor(project, validation));
 
     if (validation !== undefined && validation.issues.length > 0) {
-      const issues = createElement('ul', { className: 'settings-card__issues' });
+      const issues = createElement('ul', { className: 'settings-entry__issues' });
       for (const issue of validation.issues) {
         issues.append(
           createElement('li', {
@@ -543,8 +754,8 @@ export class SettingsForm {
     if (validation !== undefined && validation.scripts.length > 0) {
       card.append(
         createElement('p', {
-          className: 'settings-card__hint',
-          text: `Scripts disponibles : ${validation.scripts.slice(0, 8).join(', ')}`,
+          className: 'settings-entry__hint',
+          text: `Scripts available: ${validation.scripts.slice(0, 8).join(', ')}`,
         }),
       );
     }
@@ -564,9 +775,7 @@ export class SettingsForm {
     validation: ProjectValidation | undefined,
   ): HTMLElement {
     const box = createElement('div', { className: 'settings-actions' });
-    box.append(
-      createElement('span', { className: 'settings-actions__title', text: 'Actions' }),
-    );
+    box.append(createElement('span', { className: 'settings-actions__title', text: 'Actions' }));
 
     if (project.actions.length === 0) {
       box.append(
@@ -577,9 +786,11 @@ export class SettingsForm {
       );
     }
 
-    for (const action of project.actions) {
-      box.append(this.buildActionRow(project, action, validation));
-    }
+    // Only the first row is labelled: the four eyebrows are column headings, and a list of actions is
+    // a table, not four independent forms stacked on top of each other.
+    project.actions.forEach((action, index) => {
+      box.append(this.buildActionRow(project, action, validation, index === 0));
+    });
 
     const add = createElement('button', { className: 'button', text: '+ Action' });
     add.type = 'button';
@@ -606,11 +817,14 @@ export class SettingsForm {
     project: ProjectDraft,
     action: ActionDraft,
     validation: ProjectValidation | undefined,
+    showLabels: boolean,
   ): HTMLElement {
     const row = createElement('div', { className: 'settings-action' });
 
+    // The button's text is a word the user chose; the command is a line a shell has to run. One face
+    // each, which is the whole rule.
     row.append(
-      this.field('Bouton', action.label, (value) => {
+      this.field('Button', action.label, (value) => {
         // Only the label changes: the id keys the terminal tab, so re-deriving it here would orphan a
         // process the user started from this very button.
         action.label = value;
@@ -620,7 +834,7 @@ export class SettingsForm {
 
     row.append(
       this.field(
-        'Commande',
+        'Command',
         action.command,
         (value) => {
           action.command = value;
@@ -629,6 +843,7 @@ export class SettingsForm {
         action.role === 'server' && validation?.serverCommand !== undefined
           ? 'npm run start'
           : 'command to run',
+        true,
       ),
     );
 
@@ -683,6 +898,13 @@ export class SettingsForm {
     });
     row.append(remove);
 
+    if (!showLabels) {
+      // Hidden from view, kept for the accessible name: each input sits inside this `<label>`.
+      for (const label of row.querySelectorAll('.settings-field__label')) {
+        label.classList.add('visually-hidden');
+      }
+    }
+
     return row;
   }
 
@@ -690,7 +912,10 @@ export class SettingsForm {
     const box = createElement('div', { className: 'settings-candidates' });
     if (this.candidates.length === 0) {
       box.append(
-        createElement('p', { className: 'settings__empty', text: 'No candidate repository found.' }),
+        createElement('p', {
+          className: 'settings__empty',
+          text: 'No candidate repository found.',
+        }),
       );
       return box;
     }
@@ -740,7 +965,7 @@ export class SettingsForm {
     row.append(defaults);
     row.append(
       this.field(
-        'Terminal font size',
+        'Font size',
         String(this.fontSize),
         (value) => {
           const parsed = Number.parseInt(value, 10);
@@ -750,13 +975,14 @@ export class SettingsForm {
           this.touch();
         },
         `${TERMINAL_FONT_SIZE.min} to ${TERMINAL_FONT_SIZE.max}`,
+        true,
       ),
     );
     this.hosts.terminal.append(row);
 
     for (const profile of this.profiles) {
-      const card = createElement('div', { className: 'settings-card' });
-      const header = createElement('div', { className: 'settings-card__header' });
+      const card = createElement('div', { className: 'settings-entry' });
+      const header = createElement('div', { className: 'settings-entry__header' });
       // The name is editable like any other field: "Git Bash" is only what detection guessed, and a
       // profile the user points elsewhere deserves a name that says so.
       header.append(
@@ -766,20 +992,26 @@ export class SettingsForm {
           this.touch();
         }),
         createElement('span', {
-          className: 'settings-card__badge',
+          className: 'settings-entry__badge',
           // Says where the value came from, so an overridden profile is obviously deliberate.
           text: profile.detected ? 'detected' : 'custom',
         }),
       );
       card.append(header);
 
-      const row = createElement('div', { className: 'settings-card__path' });
+      const row = createElement('div', { className: 'settings-inline' });
       row.append(
-        this.field('Binary path', profile.file, (value) => {
-          profile.file = value;
-          profile.detected = false;
-          this.touch();
-        }),
+        this.field(
+          'Binary path',
+          profile.file,
+          (value) => {
+            profile.file = value;
+            profile.detected = false;
+            this.touch();
+          },
+          '',
+          true,
+        ),
       );
       const browse = createElement('button', { className: 'button', text: '…' });
       browse.type = 'button';
@@ -796,18 +1028,30 @@ export class SettingsForm {
       row.append(browse);
       card.append(row);
 
-      const grid = createElement('div', { className: 'settings-card__grid' });
+      const grid = createElement('div', { className: 'settings-entry__grid' });
       grid.append(
-        this.field('Arguments', profile.args.join(' '), (value) => {
-          profile.args = value.split(/\s+/).filter((arg) => arg.length > 0);
-          this.touch();
-        }),
+        this.field(
+          'Arguments',
+          profile.args.join(' '),
+          (value) => {
+            profile.args = value.split(/\s+/).filter((arg) => arg.length > 0);
+            this.touch();
+          },
+          '',
+          true,
+        ),
       );
       grid.append(
-        this.field('Starting folder', profile.cwd, (value) => {
-          profile.cwd = value;
-          this.touch();
-        }),
+        this.field(
+          'Starting folder',
+          profile.cwd,
+          (value) => {
+            profile.cwd = value;
+            this.touch();
+          },
+          '',
+          true,
+        ),
       );
       card.append(grid);
       this.hosts.terminal.append(card);
@@ -819,11 +1063,7 @@ export class SettingsForm {
 
     const status = createElement('span', {
       className: this.dirty ? 'settings__status' : 'settings__status settings__status--ok',
-      text: this.dirty
-        ? 'unsaved changes'
-        : this.saved
-          ? 'changes saved'
-          : '',
+      text: this.dirty ? 'unsaved changes' : this.saved ? 'changes saved' : '',
     });
     this.hosts.footer.append(status);
 
@@ -923,6 +1163,7 @@ export class SettingsForm {
     this.renderTerminal();
     this.renderJira();
     this.renderFooter();
+    this.renderRail();
   }
 
   private signature(): string {
@@ -932,7 +1173,11 @@ export class SettingsForm {
   private touch(): void {
     this.saved = false;
     this.setDirty(true);
-    void this.revalidate().then(() => this.renderFooter());
+    // The rail reports the draft, not the saved file, so it follows every keystroke the footer does.
+    void this.revalidate().then(() => {
+      this.renderFooter();
+      this.renderRail();
+    });
   }
 
   /** Single place where the dirty flag changes, so the window is always told. */
@@ -947,13 +1192,24 @@ export class SettingsForm {
 
   /* ---------------------------------------------------------------- fields */
 
+  /**
+   * A labelled text field.
+   *
+   * `mono` is the one typographic decision this window makes and it is made here rather than in the
+   * stylesheet: the mono face is reserved for values something else has to read back exactly — a path,
+   * a command, a port, a model id, a project key. A name and a button label are words a person chose,
+   * and they are set in the interface face like the rest of the app.
+   */
   private field(
     label: string,
     value: string,
     onChange: (value: string) => void,
     placeholder = '',
+    mono = false,
   ): HTMLElement {
-    const wrapper = createElement('label', { className: 'settings-field' });
+    const wrapper = createElement('label', {
+      className: mono ? 'settings-field settings-field--mono' : 'settings-field',
+    });
     wrapper.append(createElement('span', { className: 'settings-field__label', text: label }));
     const input = createElement('input', { className: 'settings-field__input' });
     input.type = 'text';
@@ -989,7 +1245,8 @@ export class SettingsForm {
   ): HTMLElement {
     const wrapper = createElement('label', { className: 'settings-field' });
     wrapper.append(createElement('span', { className: 'settings-field__label', text: label }));
-    const select = createElement('select', { className: 'settings-field__input' });
+    // Never mono: the options are picked, not typed, and one of these lists holds profile names.
+    const select = createElement('select', { className: 'settings-field__select' });
     for (const option of options) {
       const element = createElement('option', { text: option.label });
       element.value = option.value;
