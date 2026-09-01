@@ -356,6 +356,7 @@ describe('readRepoWorktrees, against a real repository', () => {
       actions: [],
       kind: 'server',
       expectedPort: null,
+      tags: [],
     };
   }
 

@@ -71,6 +71,14 @@ export interface ProjectConfig {
   readonly enabled: boolean;
   /** Include this repository's pull requests in the pull request tab. */
   readonly followPulls: boolean;
+  /**
+   * Free-form labels used to group the table, `backend` and `front` being the case it was built for.
+   *
+   * Plain strings and not ids into a registry: the set of tags that exists **is** the set in use, and
+   * `shared/project-tags.ts` derives it. The rules on these values (folding by case, deduplication,
+   * length and count caps) live there too, and the store applies them on the way in.
+   */
+  readonly tags: readonly string[];
 }
 
 /** A repository found by scanning the projects root, offered when adding a project. */
@@ -114,6 +122,8 @@ export interface Project {
   readonly kind: ProjectKind;
   /** Port the dev server is expected to listen on. Null for `watch` projects. */
   readonly expectedPort: number | null;
+  /** Carried through to the runtime list so the table can show them and, later, filter on them. */
+  readonly tags: readonly string[];
 }
 
 /* ------------------------------------------------------------------ *

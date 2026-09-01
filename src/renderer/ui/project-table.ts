@@ -1,4 +1,6 @@
 import type { ProjectId, ProjectRow } from '@shared/contracts.js';
+import { MAX_TAGS_PER_PROJECT, hasTag } from '@shared/project-tags.js';
+import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, hitsInteractive } from './dom.js';
 import {
   canStop,
@@ -43,6 +45,15 @@ export interface TableActions {
   onReorder: (moved: ProjectId, before: ProjectId | null) => void;
   /** Called when a drag starts and ends, so the caller can pause re-rendering, as it does for a rename. */
   onDraggingChange: (dragging: boolean) => void;
+  /**
+   * Adds a tag to a project, or removes one.
+   *
+   * Two callbacks and not one toggle: the menu already knows which of the two it is offering, having
+   * split the vocabulary into what the project carries and what it does not, and a toggle would make
+   * the entry's label a claim the handler could contradict.
+   */
+  onAddTag: (projectId: ProjectId, tag: string) => void;
+  onRemoveTag: (projectId: ProjectId, tag: string) => void;
 }
 
 /**
@@ -65,6 +76,7 @@ let dragging: ProjectId | null = null;
 export function renderProjectTable(
   tbody: HTMLElement,
   rows: readonly ProjectRow[],
+  vocabulary: readonly string[],
   actions: TableActions,
 ): void {
   clearChildren(tbody);
@@ -83,13 +95,14 @@ export function renderProjectTable(
   for (const [index, row] of rows.entries()) {
     // The row after this one names the drop position for "below this row", which is why the whole list
     // is handed down rather than the row alone.
-    tbody.append(buildRow(row, rows[index + 1]?.project.id ?? null, actions));
+    tbody.append(buildRow(row, rows[index + 1]?.project.id ?? null, vocabulary, actions));
   }
 }
 
 function buildRow(
   row: ProjectRow,
   next: ProjectId | null,
+  vocabulary: readonly string[],
   actions: TableActions,
 ): HTMLTableRowElement {
   const tr = createElement('tr');
@@ -109,8 +122,38 @@ function buildRow(
   // Project. The port is deliberately not repeated here: the server pill already shows it as
   // `sert :4201` when it matters, and a static "port 4200" said nothing the pill did not.
   const projectCell = createElement('td');
-  projectCell.append(buildProjectName(row, actions));
+  const name = buildProjectName(row, actions);
+  projectCell.append(name.element);
   tr.append(projectCell);
+
+  /*
+   * Right click on the row opens everything the row can do.
+   *
+   * The buttons stay: they are the discoverable half, and this is the fast one, the same pairing the
+   * Git tab's `...` button and the fold's double-click record. It is what makes the tag gestures
+   * bearable, tagging a workspace being a pass over twenty rows, and the alternative was a trip to the
+   * settings window per project.
+   *
+   * The menu is built on every open rather than once per render, like the Jira transitions and the
+   * repository menu: half its entries depend on state that moves under it (a server that is now
+   * running, a tag added a second ago), and a remembered list would offer a `Run` the row has already
+   * turned into `Stop`.
+   *
+   * A right click **inside a field** is left to the browser: the rename input and the tag input are
+   * the only ones in this table, and taking their native menu away would remove the paste that put a
+   * path or a ticket key in there.
+   */
+  tr.addEventListener('contextmenu', (event) => {
+    if (event.target instanceof Element && event.target.closest('input') !== null) {
+      return;
+    }
+    event.preventDefault();
+    showContextMenu(
+      event.clientX,
+      event.clientY,
+      buildRowMenuItems(row, vocabulary, actions, name, event.clientX, event.clientY),
+    );
+  });
 
   // Server
   const serverCell = createElement('td');
@@ -357,7 +400,42 @@ function above(tr: HTMLTableRowElement, clientY: number): boolean {
  * than wanting to discard it. The caller is told when an edit opens so it can hold off re-rendering,
  * because this table refreshes on every git poll and would otherwise wipe the field mid-typing.
  */
-function buildProjectName(row: ProjectRow, actions: TableActions): HTMLElement {
+/**
+ * The tags of a row, as chips.
+ *
+ * Neutral, with no colour and no per-tag hue, which is the same rule the rest of this interface
+ * follows: colour here claims something is wrong (a dirty tree, a failed lint, a gap with the
+ * remote), and a tag claims nothing. A palette keyed on the tag would put five colours in the one
+ * column that has to stay quiet, and it would spend them on the only cell of the row that is never a
+ * state. Returns `null` rather than an empty element, so an untagged project costs no node.
+ */
+function buildTags(tags: readonly string[]): HTMLElement | null {
+  if (tags.length === 0) {
+    return null;
+  }
+  const host = createElement('span', { className: 'cell-tags' });
+  for (const tag of tags) {
+    host.append(createElement('span', { className: 'tag', text: tag }));
+  }
+  return host;
+}
+
+/**
+ * The project cell, plus the two gestures that open a field in it.
+ *
+ * Returns them rather than only its element, because both are reachable from **two** places now: the
+ * double-click that has always started a rename, and the row's context menu. The alternative was for
+ * the menu builder to reach back into this cell's DOM with a `querySelector`, which is the version
+ * that breaks silently the day a class is renamed.
+ */
+interface ProjectNameCell {
+  readonly element: HTMLElement;
+  readonly startRename: () => void;
+  /** Opens the field that adds a tag, the rename input's twin. */
+  readonly startTagInput: () => void;
+}
+
+function buildProjectName(row: ProjectRow, actions: TableActions): ProjectNameCell {
   const host = createElement('span', { className: 'cell-project' });
 
   const label = createElement('button', {
@@ -368,8 +446,7 @@ function buildProjectName(row: ProjectRow, actions: TableActions): HTMLElement {
   });
   label.type = 'button';
 
-  label.addEventListener('dblclick', (event) => {
-    event.preventDefault();
+  const startRename = (): void => {
     actions.onEditingChange(true);
     // The row stays draggable the rest of the time, but not while an input is up: selecting text in a
     // field inside a draggable ancestor starts a drag instead of a selection. The tabs met the same
@@ -410,10 +487,213 @@ function buildProjectName(row: ProjectRow, actions: TableActions): HTMLElement {
     label.replaceWith(input);
     input.focus();
     input.select();
+  };
+
+  label.addEventListener('dblclick', (event) => {
+    event.preventDefault();
+    startRename();
   });
 
-  host.append(label);
-  return host;
+  /*
+   * The name and the chips share ONE line, and that is a table decision rather than a style one: a
+   * second line per row would nearly double the height of a list this strip has to show without
+   * scrolling, and it would do it for the sake of a word that is context, not state. The wrapper is
+   * there whether or not the project has tags, so the row has one shape; `replaceWith` on the rename
+   * works either way, the label being the node it swaps.
+   */
+  const line = createElement('span', { className: 'cell-project__line' });
+  line.append(label);
+  const tags = buildTags(row.project.tags);
+  if (tags !== null) {
+    line.append(tags);
+  }
+
+  /**
+   * Opens a field at the end of the line to type a new tag.
+   *
+   * Modelled on the rename, down to the guards, because it is the same situation: a field living in a
+   * table that rebuilds itself on every git poll, inside a row that is draggable. So it raises
+   * `onEditingChange` (a poll landing here would delete the field mid-word) and clears `draggable`
+   * (selecting text inside a draggable ancestor starts a drag instead of a selection).
+   *
+   * It closes on Enter, on Escape and on blur. Enter does not keep it open for a second tag, and that
+   * is a consequence rather than a choice: an accepted tag is saved, the save comes back as a
+   * broadcast, and the table is rebuilt from it, so the field would be destroyed under the caret
+   * whatever this function did. The context menu is one right click away for the next one.
+   */
+  const startTagInput = (): void => {
+    if (line.querySelector('.cell-tag-input') !== null) {
+      return;
+    }
+    actions.onEditingChange(true);
+    setDraggable(host, false);
+
+    const input = createElement('input', { className: 'cell-tag-input' });
+    input.type = 'text';
+    input.placeholder = 'tag';
+    input.setAttribute('aria-label', 'Add a tag to ' + row.project.label);
+
+    let settled = false;
+    const close = (): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      actions.onEditingChange(false);
+      setDraggable(host, true);
+      input.remove();
+    };
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const typed = input.value.trim();
+        // Closed BEFORE the save: the broadcast that follows rebuilds this table, and the editing flag
+        // is exactly what would make that rebuild the one skipped.
+        close();
+        if (typed.length > 0) {
+          actions.onAddTag(row.project.id, typed);
+        }
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+      }
+    });
+    input.addEventListener('blur', () => close());
+
+    line.append(input);
+    input.focus();
+  };
+
+  host.append(line);
+  return { element: host, startRename, startTagInput };
+}
+
+/**
+ * Everything the row can do, as one flat list.
+ *
+ * Flat because every other menu in this app is: `MenuItem` carries no separator, and adding one would
+ * be a change to a shared widget made for a single caller. The order is by use and not by kind, the
+ * configured actions first because they are what a row is for, and the tag entries last because they
+ * change configuration rather than run something.
+ *
+ * The tag entries open a **second menu at the same spot**, this app's standing answer to a submenu
+ * (the Jira tab's repository picker and the Triage handoff both do it): a real submenu needs hover
+ * timers, edge flipping and a keyboard model, which is a menu framework for a list of five words.
+ */
+function buildRowMenuItems(
+  row: ProjectRow,
+  vocabulary: readonly string[],
+  actions: TableActions,
+  cell: ProjectNameCell,
+  x: number,
+  y: number,
+): MenuItem[] {
+  const items: MenuItem[] = [];
+
+  // The same rule the buttons follow, so the two never offer different things: the server action
+  // becomes `Stop` while it owns a live process, and every other action is itself.
+  for (const action of row.project.actions) {
+    if (action.role === 'server' && canStop(row.server)) {
+      items.push({
+        label: 'Stop "' + action.label + '"',
+        hint: 'Stops the process this row owns',
+        run: () => actions.onStop(row.project.id),
+      });
+      continue;
+    }
+    items.push({
+      label: action.label,
+      hint:
+        action.role === 'server'
+          ? action.command + '\n(restart: a process still running is stopped first)'
+          : action.command,
+      run: () => actions.onRunAction(row.project.id, action.id),
+    });
+  }
+
+  items.push({
+    label: 'Open a terminal here',
+    hint: 'New tab in ' + row.project.path,
+    run: () => actions.onNewTerminal(row.project.id),
+  });
+  items.push({
+    label: 'Open the folder',
+    hint: row.project.path,
+    run: () => actions.onOpenFolder(row.project.id),
+  });
+  items.push({
+    label: 'Rename the project',
+    hint: 'The folder is untouched: only the label in this table changes',
+    run: () => cell.startRename(),
+  });
+
+  // What this project does not already carry. The vocabulary is every tag configured anywhere,
+  // disabled projects included, so a tag does not vanish from the suggestions because the only row
+  // holding it is hidden.
+  const available = vocabulary.filter((tag) => !hasTag(row.project.tags, tag));
+  /*
+   * Disabled at the cap, and that is not a nicety: `addTag` refuses past it and the save would then be
+   * a no-op, so the entry would open a menu, accept a click and change nothing. A control that looks
+   * fine and does nothing is the one failure mode this app's own rules name outright.
+   */
+  const full = row.project.tags.length >= MAX_TAGS_PER_PROJECT;
+  items.push({
+    label: 'Add a tag',
+    disabled: full,
+    hint: full
+      ? String(MAX_TAGS_PER_PROJECT) + ' tags maximum: remove one first'
+      : available.length === 0
+        ? 'No tag in use yet: a field opens on the row to type the first one'
+        : 'Pick one of the ' + String(available.length) + ' in use, or type a new one',
+    /*
+     * Straight to the field when there is nothing to pick from, which is the state of a fresh install
+     * and of the first project ever tagged. A second menu holding a single `New tag` entry is a click
+     * spent asking a question with one answer.
+     */
+    run: () => {
+      if (available.length === 0) {
+        cell.startTagInput();
+        return;
+      }
+      showContextMenu(x, y, [
+        ...available.map((tag) => ({
+          label: tag,
+          hint: 'Tags ' + row.project.label + ' as ' + tag,
+          run: () => actions.onAddTag(row.project.id, tag),
+        })),
+        {
+          label: 'New tag',
+          hint: 'Opens a field on the row',
+          run: () => cell.startTagInput(),
+        },
+      ]);
+    },
+  });
+
+  // Absent rather than disabled on an untagged project: a permanently dead entry in a menu this short
+  // is noise, and the chips on the row already say there is nothing to remove.
+  if (row.project.tags.length > 0) {
+    items.push({
+      label: 'Remove a tag',
+      hint: String(row.project.tags.length) + ' on this project',
+      run: () => {
+        showContextMenu(
+          x,
+          y,
+          row.project.tags.map((tag) => ({
+            label: tag,
+            hint: 'Removes ' + tag + ' from ' + row.project.label,
+            run: () => actions.onRemoveTag(row.project.id, tag),
+          })),
+        );
+      },
+    });
+  }
+
+  return items;
 }
 
 /** Builds a status pill with its coloured dot. */

@@ -76,6 +76,20 @@ describe('sanitizeSettings', () => {
     expect(settings.projects[0]?.actions.map((action) => action.label)).toEqual(['Run', 'Commit']);
   });
 
+  it('reads the tags of a project, and gives none to a configuration written before they existed', () => {
+    const settings = sanitizeSettings({
+      projects: [
+        { id: 'web', label: 'Web', path: 'C:/repos/web', tags: ['Backend', 'backend', ' front '] },
+        { id: 'admin', label: 'Admin', path: 'C:/repos/admin-front' },
+      ],
+    });
+    // Deduplicated on the key, trimmed, first spelling kept: the rules of `sanitizeTags`, applied at
+    // the boundary rather than trusted from whoever wrote the file.
+    expect(settings.projects[0]?.tags).toEqual(['Backend', 'front']);
+    // An untagged project is visible under every filter, so an absent list must not become a tag.
+    expect(settings.projects[1]?.tags).toEqual([]);
+  });
+
   it('drops a project entry with no path, since nothing can be inferred for it', () => {
     expect(sanitizeSettings({ projects: [{ id: 'ghost', label: 'Ghost' }] }).projects).toEqual([]);
   });

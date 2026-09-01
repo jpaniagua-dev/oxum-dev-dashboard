@@ -65,6 +65,9 @@ export function resolveProjects(configs: readonly ProjectConfig[]): Project[] {
         actions: config.actions,
         kind: config.kind ?? inferred.kind,
         expectedPort: config.expectedPort ?? inferred.port,
+        // Passed straight through: unlike `kind` and `expectedPort`, a tag is not inferable from a
+        // repository. It is the only thing here the user alone knows.
+        tags: config.tags,
       };
     });
 }
@@ -149,6 +152,9 @@ export function configFromPath(path: string): ProjectConfig {
     expectedPort: null,
     enabled: true,
     followPulls: FOLLOW_PULLS_DEFAULT,
+    // Untagged, and no guess attempted from the folder name: a wrong tag is worse than none, since
+    // the whole point of the field is to filter the table on it.
+    tags: [],
   };
 }
 

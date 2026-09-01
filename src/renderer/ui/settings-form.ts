@@ -10,6 +10,13 @@ import {
   type ShellProfile,
 } from '@shared/contracts.js';
 import { isValidModel } from '@shared/claude-model.js';
+import {
+  MAX_TAGS_PER_PROJECT,
+  addTag,
+  parseTagInput,
+  removeTag,
+  tagSuggestions,
+} from '@shared/project-tags.js';
 import { clearChildren, createElement } from './dom.js';
 
 /**
@@ -67,6 +74,10 @@ function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: strin
       project.expectedPort,
       project.enabled,
       project.followPulls,
+      // Listed like every other field, and for the reason this function exists rather than a
+      // `JSON.stringify`: a tag edited here has to count as a change, or the footer would report the
+      // form clean while holding an unsaved one.
+      [...project.tags],
       project.actions.map((action) => [
         action.id,
         action.label,
@@ -736,6 +747,7 @@ export class SettingsForm {
     );
 
     card.append(row);
+    card.append(this.buildTagsEditor(project));
     card.append(this.buildActionsEditor(project, validation));
 
     if (validation !== undefined && validation.issues.length > 0) {
@@ -761,6 +773,110 @@ export class SettingsForm {
     }
 
     return card;
+  }
+
+  /**
+   * The tags of one project: the chips it carries, and one field to add more.
+   *
+   * **This block repaints itself and never calls `render()`.** Every other edit in this form is a
+   * keystroke in a field that survives its own handler, whereas adding a tag replaces a list of
+   * elements: a full render would destroy the input mid-sentence and take the focus with it, and
+   * tagging twenty projects is a dozen tags typed one after another. So `paint` rebuilds the chips and
+   * the suggestion list in place, `touch()` still reports the change, and the caret never leaves the
+   * field.
+   *
+   * The suggestions are a native `<datalist>`, not a popup: the vocabulary is the handful of words
+   * already in use, the browser already knows how to filter and place that list, and a widget of our
+   * own would need a keyboard model for it. Same judgement that keeps this app on context menus rather
+   * than modals.
+   */
+  private buildTagsEditor(project: ProjectDraft): HTMLElement {
+    const box = createElement('div', { className: 'settings-tags' });
+    box.append(createElement('span', { className: 'settings-tags__title', text: 'Tags' }));
+
+    const chips = createElement('div', { className: 'settings-tags__chips' });
+    box.append(chips);
+
+    const input = createElement('input', { className: 'settings-tags__input' });
+    input.type = 'text';
+    input.setAttribute('aria-label', `Add a tag to ${project.label}`);
+    // Sanitised rather than trusted: an id straight out of `makeId` is `[a-z0-9-]`, but a hand-edited
+    // `settings.json` may carry anything, and an id holding a space silently detaches the datalist.
+    const list = createElement('datalist');
+    list.id = `tags-${project.id.replace(/[^a-zA-Z0-9_-]+/g, '-')}`;
+    input.setAttribute('list', list.id);
+    box.append(list);
+
+    const paint = (): void => {
+      clearChildren(chips);
+      for (const tag of project.tags) {
+        const chip = createElement('span', { className: 'tag tag--editable', text: tag });
+        const drop = createElement('button', { className: 'tag__remove', text: '×' });
+        drop.type = 'button';
+        drop.title = `Remove the tag ${tag}`;
+        drop.setAttribute('aria-label', `Remove the tag ${tag}`);
+        drop.addEventListener('click', () => {
+          project.tags = removeTag(project.tags, tag);
+          this.touch();
+          paint();
+          input.focus();
+        });
+        chip.append(drop);
+        chips.append(chip);
+      }
+
+      clearChildren(list);
+      for (const suggestion of tagSuggestions(this.projects, project.tags)) {
+        const option = createElement('option');
+        option.value = suggestion;
+        list.append(option);
+      }
+
+      const full = project.tags.length >= MAX_TAGS_PER_PROJECT;
+      input.disabled = full;
+      // The cap is stated in the field rather than only enforced, or a field that silently stops
+      // accepting words reads as a broken one.
+      input.placeholder = full ? `${MAX_TAGS_PER_PROJECT} tags maximum` : 'backend, dotnet';
+    };
+
+    const commit = (): void => {
+      const parsed = parseTagInput(input.value);
+      if (parsed.length === 0) {
+        input.value = '';
+        return;
+      }
+      for (const tag of parsed) {
+        project.tags = addTag(project.tags, tag);
+      }
+      input.value = '';
+      this.touch();
+      paint();
+    };
+
+    input.addEventListener('keydown', (event) => {
+      // The comma commits as well as separating, so a list typed in one go lands tag by tag instead of
+      // waiting for Enter. `preventDefault` on it, or the character stays in the field just cleared.
+      if (event.key === 'Enter' || event.key === ',') {
+        event.preventDefault();
+        commit();
+        return;
+      }
+      // Backspace on an empty field removes the last chip, the gesture every tag field has. Guarded on
+      // an empty value, or it would eat a chip while the user is correcting a word.
+      if (event.key === 'Backspace' && input.value.length === 0 && project.tags.length > 0) {
+        event.preventDefault();
+        project.tags = project.tags.slice(0, -1);
+        this.touch();
+        paint();
+      }
+    });
+    // Committed on blur too: a word typed and left behind by a click on Save is a tag the user thinks
+    // they added, and losing it would be silent.
+    input.addEventListener('blur', () => commit());
+
+    paint();
+    box.append(input);
+    return box;
   }
 
   /**

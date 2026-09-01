@@ -10,6 +10,7 @@ const config = (id: string): ProjectConfig => ({
   actions: [],
   kind: null,
   expectedPort: null,
+  tags: [],
   enabled: true,
   followPulls: true,
 });

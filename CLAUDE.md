@@ -1417,6 +1417,88 @@ pattern are left ready.
   display. The port shown by the `serving :4201` badge comes from the process output, not from that setting.
   Still to decide: remove it or make it read-only.
 
+## Tags on a project
+
+Added on 2026-09-01, when the table grew past what a strip can be read at: with the backend services
+watched alongside the fronts, the answer to "which stack am I looking at" had to be on the row. The
+filter bar that consumes them is **not** written yet, and the shape below is what it will read.
+
+- **A tag is a string a project carries, not an entity with an id.** There is no tag registry in
+  `settings.json` and there must not be one. A registry buys an atomic rename and a colour per tag;
+  the colour is refused on principle (below), and a rename across a handful of projects is one field
+  edited on each. What it would cost is real and permanent: a second shape to sanitise, orphans to
+  collect when a project leaves, and two records able to disagree about which tags exist. The
+  vocabulary is therefore **derived** from usage (`tagVocabulary`), which is what feeds the
+  suggestions and will feed the filter, and nothing can be out of sync with usage because usage is
+  the only record.
+- **A tag takes no colour, in the table or in the settings.** Colour in this interface claims
+  something is not as it should be: a dirty tree, a failed lint, a gap with the remote, an unsaved
+  form. A tag claims nothing, and a hue keyed on the tag name would spend five colours on the one
+  cell of the row that is never a state, in the column that has to stay quiet. It is the same rule the
+  settings window follows, and it is also what removes the last argument for a registry.
+- **The rules live in `shared/project-tags.ts`, pure and tested**, because three sides apply them: the
+  store sanitises on the way in, the settings form edits drafts, and the filter will read the
+  vocabulary. Case is **preserved** for display and **folded** for comparison (`tagKey`), so `Backend`
+  and `backend` are one tag spelled the way it was first written. Caps on the length (24) and the
+  count (8) are layout constraints, not storage ones, and they are enforced at the boundary rather
+  than in the editor alone: a hand-edited `settings.json` reaches the table without passing a form.
+- **A comma separates, a space does not.** `design system` is one tag; a dashboard whose tags cannot
+  hold a space pushes the user to invent an encoding. That is also why the comma is stripped from a
+  tag rather than kept: the editor splits on it, so a tag holding one would not survive a round trip.
+- **An absent list becomes no tags, never an inferred one.** An untagged project is visible under
+  every filter, so a migration that guessed a tag from a folder name would be a migration that hides
+  rows, and a wrong tag is worse than none precisely because the field exists to filter on.
+- **The tag editor repaints itself and never calls `render()`.** It is the only block of that form
+  that does: every other edit is a keystroke in a field that survives its own handler, whereas adding
+  a chip replaces a list of elements, and a full render would destroy the input mid-sentence. Tagging
+  a workspace is a dozen tags typed one after another. Suggestions are a native `<datalist>` rather
+  than a popup of our own, the same judgement that keeps this app on context menus rather than modals.
+- **The chips share the project name's line**, they are not a second line. A line per row would nearly
+  double the height of a list this strip has to show without scrolling, and it would do it for a word
+  that is context rather than state. The chips shrink before the name does, the name being what
+  identifies the row.
+
+### The row's context menu
+
+Right click on a project row opens everything that row can do: its configured actions (the server one
+reading `Stop` while it runs), a terminal, the folder, the rename, and the two tag gestures. The
+buttons stay, and that is the point: they are the discoverable half, the menu is the fast one, exactly
+the pairing the Git tab's `...` button and the fold's double-click already record.
+
+- **It exists because of the tags.** The settings window is the right place to *configure* a project
+  and the wrong place to tag twenty of them, which is a pass over the table. Everything else in the
+  menu was already reachable and is there because a menu that only held tags would be a menu nobody
+  opens for anything else.
+- **Built on every open**, like the Jira transitions and the Git tab's repository menu: half its
+  entries depend on state that moves under it, and a remembered list would offer a `Run` the row has
+  already turned into `Stop`.
+- **Flat, no separator.** `MenuItem` has none, and adding one to a shared widget for one caller is the
+  change to refuse. Ordered by use rather than by kind: the actions first, the tag entries last, being
+  the ones that edit configuration rather than run something.
+- **The tag entries open a SECOND menu at the same spot**, the app's standing answer to a submenu
+  (the Jira repository picker and the Triage handoff both do it). A real submenu means hover timers,
+  edge flipping and a keyboard model, which is a menu framework for a list of five words.
+- **`Add a tag` goes straight to the field when the vocabulary is empty.** A second menu holding a
+  single `New tag` entry is a click spent asking a question with one answer. That is the state of a
+  fresh install and of the first project ever tagged.
+- **`Add a tag` is disabled at the cap, and `Remove a tag` is absent when there is nothing to remove.**
+  Past `MAX_TAGS_PER_PROJECT` the save is a no-op, so a live entry would accept a click and change
+  nothing, which is the failure the distributable-feature rule names outright. Absent rather than
+  disabled for the other one: a permanently dead entry in a menu this short is noise, and the row's
+  chips already say there is nothing there.
+- **The inline tag field is the rename input's twin, guards included**: `onEditingChange` so a git poll
+  does not delete it mid-word, and `draggable` cleared so selecting text does not start a drag. It
+  closes on Enter as a **consequence**, not a choice: an accepted tag is saved, the save comes back as
+  a broadcast, and the table is rebuilt from it, so the field would be destroyed under the caret
+  whatever the handler did. Hence `close()` **before** the save, or that very rebuild is the one the
+  editing guard skips.
+- **A right click inside a field is left to the browser.** The rename input and the tag input are the
+  only ones in this table, and taking their native menu away would remove the paste that puts a path
+  or a ticket key in there.
+- **The vocabulary comes from the stored configuration, not from the rows.** `resolveProjects` drops a
+  disabled project and one whose folder is gone, and a suggestion list shrinking with them would lose a
+  word the user had introduced.
+
 ## Verified traps
 
 - **`stripAnsi` must be anchored on `\x1b`.** Without the anchor, the pattern eats `[ERROR]` itself.

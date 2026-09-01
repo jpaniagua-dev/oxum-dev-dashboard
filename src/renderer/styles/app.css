@@ -206,6 +206,49 @@ body {
   gap: 1px;
 }
 
+.cell-project__line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * The chips beside a project name.
+ *
+ * They wrap rather than scroll, and they shrink to nothing before the name does: the name is what
+ * identifies the row and a tag is what groups it, so the name has to be the last thing to give way
+ * when the column is narrow.
+ */
+.cell-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+/*
+ * A tag, in the table and in the settings alike.
+ *
+ * Deliberately the same pill as `.settings-entry__badge`, greyscale and bordered: colour in this app
+ * says something is not as it should be, and a tag says nothing of the kind. Set in the interface
+ * face, not the mono one, because a tag is a word a person chose, like a project's name.
+ */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 140px;
+  padding: 1px 7px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .cell-project__name {
   padding: 0;
   border: none;
@@ -235,6 +278,27 @@ body {
 }
 
 .cell-project__input:focus {
+  outline: none;
+}
+
+/*
+ * The field that adds a tag, at the end of the project's line.
+ *
+ * Sized like the chip it is about to become rather than like the rename input, which is as wide as the
+ * name it replaces: a tag is one short word, and a field three times its content invites a sentence.
+ */
+.cell-tag-input {
+  width: 90px;
+  padding: 1px 6px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-3xs);
+}
+
+.cell-tag-input:focus {
   outline: none;
 }
 
@@ -1167,6 +1231,84 @@ body {
   font-size: var(--font-2xs);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------- tags per entry */
+
+/*
+ * The tag row of a project entry.
+ *
+ * Laid out like a single field rather than like the actions block below it: a tag is one short answer
+ * about the whole project, in the same class as the type and the port, and the vertical rule that
+ * marks the actions as belonging to the project above would claim a structure this row does not have.
+ */
+.settings-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-tags__title {
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.settings-tags__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Room for one word and no more: the field is where a tag is typed, not where the list is read. */
+.settings-tags__input {
+  width: 150px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+.settings-tags__input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.settings-tags__input:disabled {
+  background: var(--surface-inset);
+  color: var(--text-faint);
+}
+
+/* An editable chip carries its own remove button, so it keeps the padding on that side for it. */
+.tag--editable {
+  padding-right: 3px;
+}
+
+/*
+ * The cross that drops a tag.
+ *
+ * It only takes colour on hover, and it takes the app's one accent: a row of chips each showing a red
+ * cross would read as five things being wrong, which is the opposite of what a tag list is.
+ */
+.tag__remove {
+  padding: 0 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--font-2xs);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tag__remove:hover {
+  color: var(--primary);
 }
 
 /* ------------------------------------------------------- actions per entry */

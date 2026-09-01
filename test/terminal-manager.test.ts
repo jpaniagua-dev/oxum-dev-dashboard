@@ -102,6 +102,7 @@ describe('isUnreachable', () => {
     actions: [action(), action({ id: 'commit', label: 'Commit', command: 'commit', role: 'task' })],
     kind: 'server',
     expectedPort: 4200,
+    tags: [],
   };
 
   it('never touches a free shell, which belongs to no project', () => {
@@ -193,6 +194,7 @@ function serverProject(command: string): { project: Project; action: ProjectActi
       actions: [serverAction],
       kind: 'server',
       expectedPort: 4200,
+      tags: [],
     },
     action: serverAction,
   };

@@ -21,6 +21,7 @@ import type {
   WorktreeCommand,
 } from '@shared/contracts.js';
 import { moveProject } from '@shared/project-order.js';
+import { addTag, removeTag, tagVocabulary } from '@shared/project-tags.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
@@ -368,7 +369,17 @@ class App {
       // rebuilding the dragged element cancels the gesture in Chromium.
       return;
     }
-    renderProjectTable(requireElement('project-tbody'), this.rows, {
+    /*
+     * Read from the stored configuration and not from the rows, so a tag stays in the vocabulary while
+     * the only project carrying it is disabled or its folder is gone: `resolveProjects` drops those
+     * rows, and a suggestion list that shrank with them would lose a word the user had introduced.
+     * Falls back to the rows before the bootstrap has landed, which is the one moment there are rows
+     * and no settings.
+     */
+    const vocabulary = tagVocabulary(
+      this.settings?.projects ?? this.rows.map((row) => row.project),
+    );
+    renderProjectTable(requireElement('project-tbody'), this.rows, vocabulary, {
       onRunAction: (projectId, actionId) => void this.runAction(projectId, actionId),
       onRename: (projectId, label) => void this.renameProject(projectId, label),
       onEditingChange: (editing) => {
@@ -382,6 +393,9 @@ class App {
       onDraggingChange: (dragging) => {
         this.draggingRow = dragging;
       },
+      onAddTag: (projectId, tag) => void this.retagProject(projectId, (tags) => addTag(tags, tag)),
+      onRemoveTag: (projectId, tag) =>
+        void this.retagProject(projectId, (tags) => removeTag(tags, tag)),
     });
   }
 
@@ -1250,6 +1264,41 @@ class App {
     await window.api.saveProjects(
       this.settings.projects.map((project) =>
         project.id === projectId ? { ...project, label } : project,
+      ),
+    );
+  }
+
+  /**
+   * Rewrites one project's tags, through the same channel as a rename.
+   *
+   * One method for adding and removing, taking the change as a function: both are a save of the whole
+   * project list, and the difference between them is one call in `shared/project-tags.ts`, which is
+   * where the rules on a tag list live. Nothing is painted optimistically, for the reason the reorder
+   * gives: the main process answers with what it saved and broadcasts the rows, so a chip on screen
+   * always exists on disk.
+   *
+   * A save that changes nothing (a duplicate tag, a cap reached) is **not** sent. It would be
+   * harmless, the store sanitising it back to the same list, but it would still rebuild the table and
+   * make a refused gesture look like an accepted one.
+   */
+  private async retagProject(
+    projectId: ProjectId,
+    change: (tags: readonly string[]) => string[],
+  ): Promise<void> {
+    if (this.settings === null) {
+      return;
+    }
+    const target = this.settings.projects.find((project) => project.id === projectId);
+    if (target === undefined) {
+      return;
+    }
+    const tags = change(target.tags);
+    if (tags.length === target.tags.length && tags.every((tag, at) => tag === target.tags[at])) {
+      return;
+    }
+    await window.api.saveProjects(
+      this.settings.projects.map((project) =>
+        project.id === projectId ? { ...project, tags } : project,
       ),
     );
   }

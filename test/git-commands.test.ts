@@ -45,7 +45,15 @@ function write(name: string, content: string): void {
 }
 
 function project(): Project {
-  return { id: 'fixture', label: 'Fixture', path: repo, actions: [], kind: 'server', expectedPort: null };
+  return {
+    id: 'fixture',
+    label: 'Fixture',
+    path: repo,
+    actions: [],
+    kind: 'server',
+    expectedPort: null,
+    tags: [],
+  };
 }
 
 beforeAll(() => {

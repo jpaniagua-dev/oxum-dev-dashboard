@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { normalizeModel } from '@shared/claude-model.js';
+import { sanitizeTags } from '@shared/project-tags.js';
 import {
   TERMINAL_FONT_SIZE,
   UI_FONT_SIZE,
@@ -247,6 +248,10 @@ function asProjects(value: unknown): ProjectConfig[] {
       // Followed unless said otherwise, so an existing configuration gains the pull request tab without
       // being edited first.
       followPulls: typeof input.followPulls === 'boolean' ? input.followPulls : true,
+      // Absent from every configuration written before tags existed, and an empty list is the right
+      // answer there: an untagged project is visible under every filter, so a migration that invented
+      // a tag would be a migration that hid rows.
+      tags: sanitizeTags(input.tags),
     });
   }
   return result;
