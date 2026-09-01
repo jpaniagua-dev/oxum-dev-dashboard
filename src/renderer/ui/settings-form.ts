@@ -8,14 +8,21 @@ import {
   type ProjectConfig,
   type ProjectValidation,
   type ShellProfile,
+  type TagColors,
 } from '@shared/contracts.js';
 import { isValidModel } from '@shared/claude-model.js';
+import { hasAnyTag, sortProjectsByTag } from '@shared/project-order.js';
 import {
   MAX_TAGS_PER_PROJECT,
+  TAG_COLORS,
   addTag,
   parseTagInput,
   removeTag,
+  tagColorOf,
   tagSuggestions,
+  tagVocabulary,
+  withAssignedTagColors,
+  withTagColor,
 } from '@shared/project-tags.js';
 import { clearChildren, createElement } from './dom.js';
 
@@ -64,7 +71,11 @@ function nextActionId(base: string, taken: readonly { id: string }[]): string {
  * `JSON.stringify` would call those two different. Profiles are left out because only this window
  * edits them, so they cannot change behind its back.
  */
-function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: string): string {
+function signatureOf(
+  projects: readonly ProjectConfig[],
+  defaultProfileId: string,
+  colors: TagColors,
+): string {
   return JSON.stringify({
     projects: projects.map((project) => [
       project.id,
@@ -87,6 +98,7 @@ function signatureOf(projects: readonly ProjectConfig[], defaultProfileId: strin
       ]),
     ]),
     defaultProfileId,
+    colors,
   });
 }
 
@@ -200,6 +212,13 @@ export class SettingsForm {
    * renamed in the dashboard table.
    */
   private baseline = '';
+  /**
+   * Colour per tag, as a draft like everything else in this form.
+   *
+   * Not deep-copied, unlike `projects`: the map is flat and every write here replaces it with a new
+   * object (`withTagColor`), so the dashboard's own copy is never reachable from this one.
+   */
+  private tagColors: TagColors = {};
   /** Section the rail marks as current. Driven by the window's scroll, not by the last click. */
   private activeSection = 'section-interface';
 
@@ -227,6 +246,7 @@ export class SettingsForm {
       ...project,
       actions: project.actions.map((action) => ({ ...action })),
     }));
+    this.tagColors = { ...settings.tagColors };
     this.profiles = profiles.map((profile) => ({ ...profile, args: [...profile.args] }));
     this.defaultProfileId = settings.defaultShellProfileId;
     this.fontSize = settings.terminalFontSize;
@@ -251,7 +271,10 @@ export class SettingsForm {
    * Lets the host drop the echo of its own save instead of reloading and losing the confirmation.
    */
   matchesLoadedState(settings: AppSettings): boolean {
-    return signatureOf(settings.projects, settings.defaultShellProfileId) === this.baseline;
+    return (
+      signatureOf(settings.projects, settings.defaultShellProfileId, settings.tagColors) ===
+      this.baseline
+    );
   }
 
   /* ------------------------------------------------------------- rendering */
@@ -635,7 +658,37 @@ export class SettingsForm {
     detect.addEventListener('click', () => void this.detect());
     actions.append(detect);
 
+    /*
+     * Grouping lives here and not in the table, because it is a **save**: the stored order is the
+     * displayed order everywhere, so a grouping applied to the view alone would leave the table
+     * disagreeing with this window, the new-tab menu and the servers window. Doing it on the draft has
+     * a second benefit the table could not offer: the result is on screen before anything is written,
+     * and closing without saving undoes it.
+     *
+     * Disabled while nothing is tagged, the same rule as the row menu's `Add a tag` at its cap: the
+     * command would be a permanent no-op, and a control that looks fine and does nothing is the
+     * failure this app's own rules name outright.
+     */
+    const group = createElement('button', { className: 'button', text: 'Group by tag' });
+    group.type = 'button';
+    const taggable = hasAnyTag(this.projects);
+    group.disabled = !taggable;
+    group.title = taggable
+      ? 'Reorders the list so the projects of one tag sit together, untagged ones last. The order inside a group is kept, and a drag still works afterwards.'
+      : 'No project is tagged yet: there would be nothing to group.';
+    group.addEventListener('click', () => {
+      this.projects = sortProjectsByTag(this.projects);
+      this.touch();
+      void this.revalidate().then(() => this.render());
+    });
+    actions.append(group);
+
     this.hosts.projects.append(actions);
+
+    const palette = this.buildPalette();
+    if (palette !== null) {
+      this.hosts.projects.append(palette);
+    }
 
     if (this.showCandidates) {
       this.hosts.projects.append(this.buildCandidates());
@@ -776,6 +829,80 @@ export class SettingsForm {
   }
 
   /**
+   * The palette: every tag in use, once, with the colour it is painted in.
+   *
+   * **One list for the whole window and not a control per project**, because that is what the colour
+   * is: a property of the word, shared by every project carrying it. A picker inside a project card
+   * would suggest the opposite, and the first person to set `backend` blue on one row and green on
+   * another would be right to call it a bug.
+   *
+   * It is the keyboard-reachable half of the feature. The fast half is a right click on a chip in the
+   * table, which is two levels and names the tag by what was aimed at; this one is a `<select>` per
+   * tag, reachable with Tab, and it also happens to be where the whole vocabulary can be seen at once.
+   * Same pairing as the Git tab's `...` button beside its right click.
+   *
+   * Returns `null` when nothing is tagged: a section titled "Tag colours" above an empty list is a
+   * feature announcing itself to somebody who has not used it yet.
+   */
+  private buildPalette(): HTMLElement | null {
+    const vocabulary = tagVocabulary(this.projects);
+    if (vocabulary.length === 0) {
+      return null;
+    }
+
+    const box = createElement('div', { className: 'settings-palette' });
+    box.append(
+      createElement('span', { className: 'settings-actions__title', text: 'Tag colours' }),
+    );
+
+    for (const tag of vocabulary) {
+      const row = createElement('div', { className: 'settings-palette__row' });
+      const color = tagColorOf(this.tagColors, tag);
+
+      const chip = createElement('span', { className: `tag tag--${color}` });
+      chip.append(createElement('span', { className: 'tag__dot' }));
+      chip.append(createElement('span', { text: tag }));
+      row.append(chip);
+
+      const select = createElement('select', { className: 'settings-palette__select' });
+      select.setAttribute('aria-label', `Colour of the tag ${tag}`);
+      for (const option of TAG_COLORS) {
+        const element = createElement('option', { text: option });
+        element.value = option;
+        select.append(element);
+      }
+      select.value = color;
+      select.addEventListener('change', () => {
+        const picked = TAG_COLORS.find((entry) => entry === select.value);
+        if (picked === undefined) {
+          return;
+        }
+        this.tagColors = withTagColor(this.tagColors, tag, picked);
+        this.touch();
+        // Repainted straight away: the chip beside the select is the preview, and a preview that waits
+        // for a save is not one. The whole projects section is rebuilt because the same tag also
+        // appears on every project card that carries it.
+        this.renderProjects();
+      });
+      row.append(select);
+
+      // Says how far the choice reaches, which is the one thing a per-tag control has to make obvious.
+      const count = this.projects.filter((project) => project.tags.some((entry) => entry === tag))
+        .length;
+      row.append(
+        createElement('span', {
+          className: 'settings-palette__count',
+          text: count === 1 ? 'on 1 project' : `on ${String(count)} projects`,
+        }),
+      );
+
+      box.append(row);
+    }
+
+    return box;
+  }
+
+  /**
    * The tags of one project: the chips it carries, and one field to add more.
    *
    * **This block repaints itself and never calls `render()`.** Every other edit in this form is a
@@ -810,7 +937,11 @@ export class SettingsForm {
     const paint = (): void => {
       clearChildren(chips);
       for (const tag of project.tags) {
-        const chip = createElement('span', { className: 'tag tag--editable', text: tag });
+        const chip = createElement('span', {
+          className: `tag tag--editable tag--${tagColorOf(this.tagColors, tag)}`,
+        });
+        chip.append(createElement('span', { className: 'tag__dot' }));
+        chip.append(createElement('span', { text: tag }));
         const drop = createElement('button', { className: 'tag__remove', text: '×' });
         drop.type = 'button';
         drop.title = `Remove the tag ${tag}`;
@@ -1248,6 +1379,7 @@ export class SettingsForm {
       claudeAnalysisModel: this.claudeModels.analysis,
       claudeWorkModel: this.claudeModels.work,
       claudeCommitModel: this.claudeModels.commit,
+      tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
     this.uiFontSize = saved.uiFontSize;
@@ -1259,6 +1391,10 @@ export class SettingsForm {
       work: saved.claudeWorkModel,
       commit: saved.claudeCommitModel,
     };
+    // Read back like the sizes and the models, and here it matters more than for either: the store
+    // **completes** this map, giving a colour to any tag added in this very session, so the draft would
+    // otherwise stay short of what was stored and the signature would never match the echo.
+    this.tagColors = { ...saved.tagColors };
 
     // The token travels only when one was actually typed: an empty field means "keep the stored one".
     const jira = await window.api.saveJira(
@@ -1282,8 +1418,22 @@ export class SettingsForm {
     this.renderRail();
   }
 
+  /**
+   * The draft's signature, with the colour map **completed the way the store will complete it**.
+   *
+   * Not a detail: `baseline` is recorded before the writes, because each one broadcasts and the echo
+   * has to be recognised when it lands. The store assigns a colour to every tag in use, so a tag added
+   * in this session comes back with one the draft never had, and comparing the raw draft would make
+   * every save look like an external change: the form would reload and wipe the confirmation it had
+   * just shown, which is the exact failure this mechanism exists to prevent. Running the same pure
+   * function on the same inputs is what keeps the two sides in step.
+   */
   private signature(): string {
-    return signatureOf(this.projects, this.defaultProfileId);
+    return signatureOf(
+      this.projects,
+      this.defaultProfileId,
+      withAssignedTagColors(this.tagColors, this.projects),
+    );
   }
 
   private touch(): void {

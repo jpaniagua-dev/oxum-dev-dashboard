@@ -1,4 +1,5 @@
 import type { AppSettings } from '@shared/contracts.js';
+import { sanitizeTagColors } from '@shared/project-tags.js';
 
 /**
  * Settings the dashboard writes about its own geometry.
@@ -81,6 +82,21 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   }
   if (typeof input.claudeWorkModel === 'string') patch.claudeWorkModel = input.claudeWorkModel;
   if (typeof input.claudeCommitModel === 'string') patch.claudeCommitModel = input.claudeCommitModel;
+  /*
+   * The tag palette, written by **both** renderers: the settings window on save, and the dashboard on
+   * a right click on a chip. Broadcast, and therefore not in `LOCAL_ONLY_KEYS`, since recolouring a
+   * tag in one window has to repaint it in the other.
+   *
+   * Sanitised here as well as in the store, which is the exception to the rule the model names
+   * record. Those are passed on as typed because rejecting a typo in two places would mean two
+   * answers to what a model name is. A colour map is different: it is a whole object rather than a
+   * scalar, so passing it on unchecked would put `undefined` values into a `Partial<AppSettings>`
+   * that `update()` spreads over the cache, and the map would be replaced by a malformed one before
+   * the store ever looked at it.
+   */
+  if (typeof input.tagColors === 'object' && input.tagColors !== null) {
+    patch.tagColors = sanitizeTagColors(input.tagColors);
+  }
 
   return patch;
 }

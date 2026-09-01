@@ -59,6 +59,18 @@
   --danger: var(--brand-error);
   --info: var(--brand-info);
 
+  /* --- tag palette ------------------------------------------------------
+     Six colours, taken from the ramp above and from nowhere else, so this file's claim that every
+     colour here is a palette value stays true. They paint a chip's border and its dot, never text on
+     a coloured ground: the status pills carry their colour in the TEXT, and a tag has to read as a
+     different kind of thing rather than as a sixth pill state. */
+  --tag-blue: var(--brand-info);
+  --tag-green: var(--brand-success);
+  --tag-yellow: var(--brand-accent);
+  --tag-orange: var(--brand-warning);
+  --tag-red: var(--brand-primary);
+  --tag-grey: var(--grey-500);
+
   --selection: var(--brand-primary-extra-light);
   --active-line: #00000005;
   --shadow: 0 3px 5px #0000000a, 0 0 2px #0000000d, 0 1px 4px #00000014;
@@ -170,6 +182,17 @@
   --warning: var(--brand-warning-light);
   --danger: var(--brand-error-light);
   --info: #b8bfe7;
+
+  /* Each tag colour steps up to its lighter sibling, the same reasoning as the status colours right
+     above: the saturated values are unreadable as a 1px border on #131313. `--brand-info` is
+     near-black navy and takes the tint already used for `--info` here; yellow and grey are legible as
+     they are. */
+  --tag-blue: #b8bfe7;
+  --tag-green: var(--brand-success-light);
+  --tag-yellow: var(--brand-accent);
+  --tag-orange: var(--brand-warning-light);
+  --tag-red: var(--brand-primary-light);
+  --tag-grey: var(--grey-400);
 
   --selection: #3a1f26;
   --active-line: #ffffff06;

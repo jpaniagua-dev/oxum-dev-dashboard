@@ -1,6 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { normalizeModel } from '@shared/claude-model.js';
-import { sanitizeTags } from '@shared/project-tags.js';
+import {
+  sanitizeTagColors,
+  sanitizeTags,
+  withAssignedTagColors,
+} from '@shared/project-tags.js';
 import {
   TERMINAL_FONT_SIZE,
   UI_FONT_SIZE,
@@ -80,6 +84,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
   // default here would come back every time the user deleted a project.
   projects: [],
+  // Filled by `sanitizeSettings` from the tags actually in use, so this is only the shape and never a
+  // set of colours somebody would have to undo.
+  tagColors: {},
 };
 
 export const DEFAULT_BOUNDS: WindowBounds = { x: -1, y: -1, width: 1180, height: 760 };
@@ -130,6 +137,9 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     return { ...DEFAULT_SETTINGS };
   }
   const input = raw as Record<string, unknown>;
+  // Read before the object literal because two of its fields need it: the list itself, and the colour
+  // map, which is completed from the tags that list actually carries.
+  const projects = asProjects(input.projects);
 
   return {
     themeMode: asThemeMode(input.themeMode),
@@ -199,7 +209,16 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     claudeAnalysisModel: asModel(input.claudeAnalysisModel),
     claudeWorkModel: asModel(input.claudeWorkModel),
     claudeCommitModel: asModel(input.claudeCommitModel),
-    projects: asProjects(input.projects),
+    projects: projects,
+    /*
+     * Completed here rather than at each call site, and this is the choke point every write passes
+     * through: the settings form, the table's context menu, and a file edited by hand. So a tag typed
+     * anywhere comes back with a colour, and no renderer ever has to invent one.
+     *
+     * The assignment reads the **sanitised** project list, not the raw input, or a tag the guards
+     * above dropped would still be given a colour.
+     */
+    tagColors: withAssignedTagColors(sanitizeTagColors(input.tagColors), projects),
   };
 }
 

@@ -90,6 +90,32 @@ describe('sanitizeSettings', () => {
     expect(settings.projects[1]?.tags).toEqual([]);
   });
 
+  it('gives a colour to every tag in use, and keeps the ones already chosen', () => {
+    const settings = sanitizeSettings({
+      projects: [
+        { id: 'web', label: 'Web', path: 'C:/repos/web', tags: ['front'] },
+        { id: 'api', label: 'Api', path: 'C:/repos/api', tags: ['backend'] },
+      ],
+      tagColors: { front: 'red', ghost: 'blue', broken: '#ff00bb' },
+    });
+    // Chosen colours survive, an unknown one is dropped, and the tag that had none is assigned a
+    // colour different from the one already taken.
+    expect(settings.tagColors.front).toBe('red');
+    expect(settings.tagColors.broken).toBeUndefined();
+    expect(settings.tagColors.backend).toBeDefined();
+    expect(settings.tagColors.backend).not.toBe('red');
+    // A colour whose tag has gone is kept: it is what brings the colour back with the tag.
+    expect(settings.tagColors.ghost).toBe('blue');
+  });
+
+  it('assigns from the SANITISED project list, not from the raw input', () => {
+    // The entry has no path, so it is dropped: its tag must not receive a colour on the way out.
+    const settings = sanitizeSettings({
+      projects: [{ id: 'ghost', label: 'Ghost', tags: ['phantom'] }],
+    });
+    expect(settings.tagColors).toEqual({});
+  });
+
   it('drops a project entry with no path, since nothing can be inferred for it', () => {
     expect(sanitizeSettings({ projects: [{ id: 'ghost', label: 'Ghost' }] }).projects).toEqual([]);
   });

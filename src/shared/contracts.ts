@@ -77,9 +77,32 @@ export interface ProjectConfig {
    * Plain strings and not ids into a registry: the set of tags that exists **is** the set in use, and
    * `shared/project-tags.ts` derives it. The rules on these values (folding by case, deduplication,
    * length and count caps) live there too, and the store applies them on the way in.
+   *
+   * The **colour** of a tag is not here: it belongs to the tag and not to the project, or the same
+   * word would be blue on one row and green on the next. It lives in `AppSettings.tagColors`.
    */
   readonly tags: readonly string[];
 }
+
+/**
+ * One of the six tag colours.
+ *
+ * A closed union and not a hex value: the palette is defined once in the stylesheet, in both themes,
+ * so a stored colour is a **name** the CSS resolves. Letting a project store `#ff00bb` would put a
+ * colour on screen that nobody chose for the dark theme, and it is exactly how a design system stops
+ * being one.
+ */
+export type TagColor = 'blue' | 'green' | 'yellow' | 'orange' | 'red' | 'grey';
+
+/**
+ * The colour of each tag, keyed by the folded tag name (`tagKey`).
+ *
+ * A flat map rather than a registry of tag entities, and that distinction is the whole point: it does
+ * **not** say which tags exist, which stays derived from usage. It only answers "what colour is this
+ * word", so it cannot disagree with the projects about the vocabulary. An entry for a tag nobody uses
+ * any more is kept on purpose, being what makes a tag re-added come back the colour it had.
+ */
+export type TagColors = Readonly<Record<string, TagColor>>;
 
 /** A repository found by scanning the projects root, offered when adding a project. */
 export interface ProjectCandidate {
@@ -1212,6 +1235,8 @@ export interface AppSettings {
    * useful immediately without asking the user to configure anything first.
    */
   projects: ProjectConfig[];
+  /** Colour per tag, completed by the store so every tag in use has one. */
+  tagColors: TagColors;
 }
 
 /** Window bounds remembered across sessions. */

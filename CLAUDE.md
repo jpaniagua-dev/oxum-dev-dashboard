@@ -1423,19 +1423,68 @@ Added on 2026-09-01, when the table grew past what a strip can be read at: with 
 watched alongside the fronts, the answer to "which stack am I looking at" had to be on the row. The
 filter bar that consumes them is **not** written yet, and the shape below is what it will read.
 
-- **A tag is a string a project carries, not an entity with an id.** There is no tag registry in
-  `settings.json` and there must not be one. A registry buys an atomic rename and a colour per tag;
-  the colour is refused on principle (below), and a rename across a handful of projects is one field
-  edited on each. What it would cost is real and permanent: a second shape to sanitise, orphans to
-  collect when a project leaves, and two records able to disagree about which tags exist. The
-  vocabulary is therefore **derived** from usage (`tagVocabulary`), which is what feeds the
-  suggestions and will feed the filter, and nothing can be out of sync with usage because usage is
-  the only record.
-- **A tag takes no colour, in the table or in the settings.** Colour in this interface claims
-  something is not as it should be: a dirty tree, a failed lint, a gap with the remote, an unsaved
-  form. A tag claims nothing, and a hue keyed on the tag name would spend five colours on the one
-  cell of the row that is never a state, in the column that has to stay quiet. It is the same rule the
-  settings window follows, and it is also what removes the last argument for a registry.
+- **A tag is a string a project carries, not an entity with an id.** There is no registry of tag
+  *entities* in `settings.json` and there must not be one: it would mean a second shape to sanitise,
+  orphans to collect when a project leaves, and two records able to disagree about which tags exist.
+  The vocabulary is **derived** from usage (`tagVocabulary`), which feeds the suggestions and will
+  feed the filter, and nothing can be out of sync with usage because usage is the only record.
+- **The colour is the one exception, and it is a flat map, not a registry.** `AppSettings.tagColors`
+  is `tagKey -> colour name`. It does **not** say which tags exist, so it cannot contradict the
+  projects about the vocabulary; it only answers "what colour is this word". The distinction is what
+  keeps the paragraph above true.
+- **The colour belongs to the TAG, never to the project.** Stored per project, `backend` would be
+  blue on one row and green on the next, which destroys the only thing the colour is for. That is why
+  `onRecolorTag` takes no project id: a signature that took one would invite the wrong storage.
+- **A tag's colour is a border and a dot, never text on a coloured ground.** The status pills of the
+  columns to the right carry their colour in the **text**; two kinds of statement sitting side by side
+  in one row need two kinds of paint, or a tag reads as a sixth pill state. The dot is the same 7px
+  circle as `.pill__dot` on purpose: the app already says "which family is this" with a dot, and a
+  second idiom for the same statement would be one more thing to learn. It does not inherit
+  `currentColor` the way the pill's does, the tag's text staying neutral.
+  *(This replaces the rule that stood here until 5.8.0, which refused tag colours outright on the
+  grounds that colour in this interface only ever claims something is wrong. Overruled deliberately:
+  with the backend services watched alongside the fronts, telling two stacks apart at a glance is
+  worth a second colour vocabulary, and keeping it out of the text is what stops the two from
+  colliding.)*
+- **Six colours, from the ramp and nowhere else**, so `tokens.css` keeps its claim that every colour
+  in it is a palette value. Each steps up to its lighter sibling in the dark theme, the same reasoning
+  the status colours already record. A seventh tag reuses a colour rather than getting a shade nobody
+  can name.
+- **The colour is ASSIGNED and stored, not derived on read**, and both cheaper options were tried on
+  paper and are worse. Deriving from the tag's rank in the sorted vocabulary never collides and
+  repaints every tag after an insertion, so the association it exists to build is destroyed by adding
+  a word. Deriving from a hash of the name is stable and collides constantly: five tags over six
+  colours is better than even odds of two chips sharing one. Storing is the only option that is both
+  stable and collision-free while the palette lasts. `withAssignedTagColors` picks the **least used**
+  colour, so the first six tags of a workspace are six different colours with nobody having chosen
+  anything.
+- **Assignment happens in `sanitizeSettings`**, which is the choke point every write passes through:
+  the settings form, the table's chip menu, and a file edited by hand. It reads the **sanitised**
+  project list, or a tag the guards had just dropped would still be given a colour. Nothing is ever
+  pruned: an entry for a vanished tag is a few bytes and it is what makes a tag deleted by mistake
+  come back the colour it had.
+- **`tagColors` passes TWO gates, like every settings key**, `asPatch` and the store, and it is
+  sanitised in **both**, which is the exception to the rule the model names record. A model name is a scalar
+  passed on as typed so that one place decides what a valid name is; a colour map is a whole object,
+  so an unchecked one would put malformed entries into a patch that `update()` spreads over the cache,
+  replacing the stored map before the store ever looked at it. Locked by `test/settings-patch.test.ts`
+  and `test/settings-store.test.ts`.
+- **The form's signature completes the map the way the store will.** `baseline` is recorded *before*
+  the writes, because each one broadcasts and the echo has to be recognised when it lands. The store
+  assigns colours to tags added in that very session, so comparing the raw draft would make every save
+  look like an external change: the form would reload and wipe the confirmation it had just shown,
+  which is precisely the failure the signature exists to prevent. `signature()` therefore runs
+  `withAssignedTagColors` itself: the same pure function on the same inputs.
+- **Two surfaces, and they are not redundant.** A right click on a chip in the table is the fast path:
+  two levels, and the tag is named by what was aimed at. The `Tag colours` block in the settings is
+  the complete one: keyboard-reachable, one row per tag with the count of projects it reaches, and the
+  only place the whole vocabulary is visible at once. Same pairing as the Git tab's `...` button
+  beside its right click. A third level under the row's menu (pick a tag, then pick a colour) was the
+  alternative, and a three-deep chain of context menus for a choice among six words is the version
+  nobody uses twice.
+- **The current colour is skipped in the chip menu, not shown ticked.** `MenuItem` has no checked
+  state, a disabled entry among six would read as a colour that is unavailable, and the chip that was
+  right-clicked is already painted in it.
 - **The rules live in `shared/project-tags.ts`, pure and tested**, because three sides apply them: the
   store sanitises on the way in, the settings form edits drafts, and the filter will read the
   vocabulary. Case is **preserved** for display and **folded** for comparison (`tagKey`), so `Backend`
@@ -1498,6 +1547,34 @@ the pairing the Git tab's `...` button and the fold's double-click already recor
 - **The vocabulary comes from the stored configuration, not from the rows.** `resolveProjects` drops a
   disabled project and one whose folder is gone, and a suggestion list shrinking with them would lose a
   word the user had introduced.
+
+### Grouping the table by tag
+
+- **It is a REORDER, never a sort key**, and that is the invariant on the stored order applied rather
+  than bent. `sortProjectsByTag` permutes the configuration and the settings window saves it, so the
+  grouping reaches the table, the new-tab menu and the servers window the way a drag does. A sort held
+  in the view would make the table disagree with the other three, and a drag would then be arithmetic
+  on a list nobody displays. Corollary, and the reason it needs no toggle: there is nothing to turn
+  off, and a drag afterwards refines the result instead of fighting it.
+- **The Jira tab's column sort is not a precedent against this.** That list is *fetched*, so it has no
+  stored order to contradict and a sort there is the only order it has. This one has one, and it is
+  the configuration.
+- **A project is grouped by its FIRST tag.** A project has to land in one group; the chips are in
+  insertion order and the user controls that order, so the key is something they can change rather
+  than something derived behind their back.
+- **Untagged projects go last**, being the residue and not a group: first, they would push every
+  grouped project below the fold.
+- **The order inside a group is the order it already had**, which is `Array.prototype.sort` being
+  stable since ES2019. That is a reliance and not a coincidence, hence its own test: a group is
+  arranged by drags, and reshuffling it on every click would throw that arrangement away.
+- **The command lives in the settings window, beside `Add` and `Detect`.** It edits the **draft**, so
+  the result is on screen before anything is written and closing without saving undoes it, which the
+  table could not offer: there, every gesture saves immediately. Disabled while nothing is tagged,
+  same rule as `Add a tag` at its cap.
+- **A grouping click must not disturb a running server**, and nothing was needed for that: the result
+  is a permutation, so `sameProjectSet` holds and the monitors adopt the new order instead of being
+  rebuilt. Pinned by a test in `test/project-order.test.ts`, because it is the property that would
+  break silently if grouping ever started dropping or adding an entry.
 
 ## Verified traps
 

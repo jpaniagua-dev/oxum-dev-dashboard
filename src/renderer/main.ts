@@ -16,12 +16,18 @@ import type {
   RepoWorktrees,
   ShellProfile,
   StripTab,
+  TagColor,
   ThemeMode,
   ThemeState,
   WorktreeCommand,
 } from '@shared/contracts.js';
 import { moveProject } from '@shared/project-order.js';
-import { addTag, removeTag, tagVocabulary } from '@shared/project-tags.js';
+import {
+  addTag,
+  removeTag,
+  tagVocabulary,
+  withTagColor,
+} from '@shared/project-tags.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
@@ -379,7 +385,7 @@ class App {
     const vocabulary = tagVocabulary(
       this.settings?.projects ?? this.rows.map((row) => row.project),
     );
-    renderProjectTable(requireElement('project-tbody'), this.rows, vocabulary, {
+    renderProjectTable(requireElement('project-tbody'), this.rows, vocabulary, this.settings?.tagColors ?? {}, {
       onRunAction: (projectId, actionId) => void this.runAction(projectId, actionId),
       onRename: (projectId, label) => void this.renameProject(projectId, label),
       onEditingChange: (editing) => {
@@ -396,6 +402,7 @@ class App {
       onAddTag: (projectId, tag) => void this.retagProject(projectId, (tags) => addTag(tags, tag)),
       onRemoveTag: (projectId, tag) =>
         void this.retagProject(projectId, (tags) => removeTag(tags, tag)),
+      onRecolorTag: (tag, color) => void this.recolorTag(tag, color),
     });
   }
 
@@ -1301,6 +1308,22 @@ class App {
         project.id === projectId ? { ...project, tags } : project,
       ),
     );
+  }
+
+  /**
+   * Repaints one tag, everywhere it appears.
+   *
+   * Goes through `updateSettings` and not `saveProjects`, because the colour is not on the project:
+   * the map is keyed by the tag, so one write repaints every row carrying that word. That patch is
+   * broadcast, deliberately, so the settings window's own palette follows without being told.
+   */
+  private async recolorTag(tag: string, color: TagColor): Promise<void> {
+    if (this.settings === null) {
+      return;
+    }
+    await window.api.updateSettings({
+      tagColors: withTagColor(this.settings.tagColors, tag, color),
+    });
   }
 
   /**

@@ -237,16 +237,104 @@ body {
 .tag {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   max-width: 140px;
   padding: 1px 7px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid var(--tag-colour, var(--border));
   border-radius: 999px;
   color: var(--text-dim);
   font-size: var(--font-3xs);
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/*
+ * The colour patch, and the thing the eye actually scans.
+ *
+ * Deliberately the same 7px circle as `.pill__dot`, because the app already says "which family is
+ * this" with a dot and a second idiom for the same statement would be one to learn. It does **not**
+ * inherit `currentColor` the way the pill's does: the text of a tag stays neutral, the colour being a
+ * property of the word rather than a claim about a state.
+ */
+.tag__dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tag-colour, var(--border-strong));
+}
+
+/*
+ * One class per palette entry, setting a single custom property that the border and the dot both
+ * read. A rule per painted part would be twelve rules saying six things, and the day a third part
+ * takes the colour it would be eighteen.
+ */
+.tag--blue {
+  --tag-colour: var(--tag-blue);
+}
+
+.tag--green {
+  --tag-colour: var(--tag-green);
+}
+
+.tag--yellow {
+  --tag-colour: var(--tag-yellow);
+}
+
+.tag--orange {
+  --tag-colour: var(--tag-orange);
+}
+
+.tag--red {
+  --tag-colour: var(--tag-red);
+}
+
+.tag--grey {
+  --tag-colour: var(--tag-grey);
+}
+
+/* Interactive in the table: a right click on it recolours or removes that one tag. */
+.tag--menu {
+  cursor: context-menu;
+}
+
+/*
+ * One row of the tag palette in the settings, so a colour is chosen next to the word it paints rather
+ * than from a list of six names on their own.
+ */
+.settings-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0 2px 12px;
+  border-left: 1px solid var(--border);
+}
+
+.settings-palette__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The chip is the preview, so it keeps its size and the select takes what it needs beside it. */
+.settings-palette__row .tag {
+  flex: none;
+}
+
+.settings-palette__select {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-2xs);
+}
+
+.settings-palette__count {
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
 }
 
 .cell-project__name {

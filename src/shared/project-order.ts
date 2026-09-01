@@ -1,4 +1,5 @@
 import type { ProjectConfig, ProjectId } from './contracts.js';
+import { tagKey } from './project-tags.js';
 
 /**
  * The order of the project table, as a value.
@@ -57,4 +58,61 @@ export function sameProjectSet(
   }
   const ids = new Set(a.map((entry) => entry.id));
   return b.every((entry) => ids.has(entry.id));
+}
+
+/**
+ * The tag a project is grouped under: its **first** one, folded, or empty when it has none.
+ *
+ * The first and not "all of them", because a project with `backend` and `dotnet` has to land in one
+ * place and only one. The chips are in insertion order and the user controls it, so the group key is
+ * something they can change rather than something derived behind their back.
+ */
+function groupKeyOf(config: Pick<ProjectConfig, 'tags'>): string {
+  return tagKey(config.tags[0] ?? '');
+}
+
+/**
+ * Groups the list by tag, as a permutation of the configuration.
+ *
+ * **This is a reorder, not a sort key**, and that distinction is the whole design. The stored
+ * `projects` array *is* the display order: the table, the settings window, the new-tab menu and the
+ * servers window all read it as it stands. A sort applied in the view would make the table disagree
+ * with the other three, and a drag would then be arithmetic on a list nobody displays. So grouping is
+ * a save, exactly like `moveProject`, and it composes with a drag afterwards instead of overruling it.
+ * That is also why it is a one-shot command and not a mode: there is nothing to turn off.
+ *
+ * The Jira tab does have a real column sort, and the difference is not inconsistency: that list is
+ * **fetched**, so it has no stored order to contradict, and a sort there is the only order it has.
+ *
+ * Two rules carry the result. Untagged projects go **last**, being the residue rather than a group;
+ * putting them first would push every grouped project below the fold. And the order *inside* a group
+ * is the order it already had, which is `Array.prototype.sort` being stable since ES2019 and the
+ * property this function actually depends on: a group reshuffled on every click would throw away the
+ * drags that arranged it.
+ */
+export function sortProjectsByTag<T extends Pick<ProjectConfig, 'tags'>>(
+  // Generic, and typed on the one field it reads: the settings form holds mutable drafts of a
+  // configuration, and a signature fixed on `ProjectConfig` would hand them back as readonly and force
+  // a cast at the only call site.
+  configs: readonly T[],
+): T[] {
+  return [...configs].sort((left, right) => {
+    const a = groupKeyOf(left);
+    const b = groupKeyOf(right);
+    if (a === b) {
+      return 0;
+    }
+    if (a.length === 0) {
+      return 1;
+    }
+    if (b.length === 0) {
+      return -1;
+    }
+    return a.localeCompare(b);
+  });
+}
+
+/** Whether grouping could change anything, which is what decides if the command is offered. */
+export function hasAnyTag(configs: readonly { readonly tags: readonly string[] }[]): boolean {
+  return configs.some((config) => config.tags.length > 0);
 }

@@ -1,4 +1,4 @@
-import type { ProjectConfig } from './contracts.js';
+import type { ProjectConfig, TagColor, TagColors } from './contracts.js';
 
 /**
  * Tags, as a value.
@@ -174,4 +174,120 @@ export function tagSuggestions(
   own: readonly string[],
 ): string[] {
   return tagVocabulary(projects).filter((tag) => !hasTag(own, tag));
+}
+
+/* ------------------------------------------------------------------ *
+ * Colours
+ * ------------------------------------------------------------------ */
+
+/**
+ * The tag palette, in the order it is offered and assigned.
+ *
+ * Six, and six on purpose: past that the eye stops telling two chips apart at a glance, which is the
+ * only job the colour has. A seventh tag therefore reuses a colour rather than getting a shade nobody
+ * can name, and that is stated in the interface rather than hidden.
+ *
+ * The order is read as a spectrum, and it is also the order assignment walks. `red` sits late for a
+ * reason: it is this app's one accent, spent everywhere else on "not yet true" (unsaved, invalid,
+ * broken path), so handing it to the very first tag somebody creates would put an alert colour on a
+ * label that claims nothing. `grey` is last, being the absence of a choice more than a choice.
+ */
+export const TAG_COLORS = ['blue', 'green', 'yellow', 'orange', 'red', 'grey'] as const;
+
+/** The colour a tag falls back to when nothing has been assigned yet. */
+export const DEFAULT_TAG_COLOR: TagColor = 'grey';
+
+export function isTagColor(value: unknown): value is TagColor {
+  return typeof value === 'string' && (TAG_COLORS as readonly string[]).includes(value);
+}
+
+/**
+ * Coerces arbitrary JSON into the colour map.
+ *
+ * Keyed by `tagKey` and not by the spelling: the colour belongs to the **tag**, so `Backend` and
+ * `backend` are one entry, and a map keyed on the display form would paint the same word two colours
+ * depending on which project was tagged first. Unknown colours and unusable keys are dropped rather
+ * than defaulted, a stored `#ff00ff` being exactly as unusable as no value at all.
+ */
+export function sanitizeTagColors(value: unknown): TagColors {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return {};
+  }
+
+  const result: Record<string, TagColor> = {};
+  for (const [key, color] of Object.entries(value as Record<string, unknown>)) {
+    const folded = tagKey(key);
+    if (folded.length === 0 || !isTagColor(color)) {
+      continue;
+    }
+    result[folded] = color;
+  }
+  return result;
+}
+
+/**
+ * Gives a colour to every tag that has none, and answers the completed map.
+ *
+ * **Assigned and stored, rather than derived on read**, and the two alternatives are worth recording
+ * because both look cheaper and are worse. Deriving from the tag's position in the sorted vocabulary
+ * costs nothing and collides never, but inserting `angular` in front of `backend` repaints every tag
+ * after it: a colour that moves destroys the association it exists to create. Deriving from a hash of
+ * the name is stable and collides constantly, five tags over six colours giving better than even odds
+ * of two chips sharing one. Storing the assignment is the only option that is both stable and free of
+ * collisions while the palette lasts.
+ *
+ * The colour picked is the **least used** one, ties broken by palette order, so the first six tags of
+ * a workspace are six different colours with nobody having chosen anything.
+ *
+ * Nothing is ever **removed**: an entry whose tag is gone is a few bytes, and keeping it is what makes
+ * a tag deleted by mistake come back the colour it had. Pruning would trade that for nothing.
+ */
+export function withAssignedTagColors(
+  colors: TagColors,
+  projects: readonly { readonly tags: readonly string[] }[],
+): TagColors {
+  const result: Record<string, TagColor> = { ...colors };
+  // Sorted, so the assignment does not depend on the project order: the same workspace saved twice
+  // must not paint its tags differently.
+  for (const tag of tagVocabulary(projects)) {
+    const key = tagKey(tag);
+    if (result[key] === undefined) {
+      result[key] = leastUsedColor(Object.values(result));
+    }
+  }
+  return result;
+}
+
+function leastUsedColor(used: readonly TagColor[]): TagColor {
+  const counts = new Map<TagColor, number>(TAG_COLORS.map((color) => [color, 0]));
+  for (const color of used) {
+    counts.set(color, (counts.get(color) ?? 0) + 1);
+  }
+  let best: TagColor = TAG_COLORS[0];
+  for (const color of TAG_COLORS) {
+    if ((counts.get(color) ?? 0) < (counts.get(best) ?? 0)) {
+      best = color;
+    }
+  }
+  return best;
+}
+
+/**
+ * The colour of one tag.
+ *
+ * Falls back rather than throwing: the map is completed by the store on every write, so a missing
+ * entry only happens for a tag typed a moment ago whose save has not come back yet, and a grey chip
+ * for one frame is the right answer to that.
+ */
+export function tagColorOf(colors: TagColors, tag: string): TagColor {
+  return colors[tagKey(tag)] ?? DEFAULT_TAG_COLOR;
+}
+
+/** Sets one tag's colour, keyed the way the map is. */
+export function withTagColor(colors: TagColors, tag: string, color: TagColor): TagColors {
+  const key = tagKey(tag);
+  if (key.length === 0) {
+    return { ...colors };
+  }
+  return { ...colors, [key]: color };
 }

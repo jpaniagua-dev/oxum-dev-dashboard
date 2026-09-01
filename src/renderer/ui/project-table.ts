@@ -1,5 +1,10 @@
-import type { ProjectId, ProjectRow } from '@shared/contracts.js';
-import { MAX_TAGS_PER_PROJECT, hasTag } from '@shared/project-tags.js';
+import type { Project, ProjectId, ProjectRow, TagColor, TagColors } from '@shared/contracts.js';
+import {
+  MAX_TAGS_PER_PROJECT,
+  TAG_COLORS,
+  hasTag,
+  tagColorOf,
+} from '@shared/project-tags.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, hitsInteractive } from './dom.js';
 import {
@@ -54,6 +59,15 @@ export interface TableActions {
    */
   onAddTag: (projectId: ProjectId, tag: string) => void;
   onRemoveTag: (projectId: ProjectId, tag: string) => void;
+  /**
+   * Repaints a tag, everywhere it appears.
+   *
+   * No project id, and that is the shape of the feature rather than an omission: a colour belongs to
+   * the **tag**, so recolouring `backend` from one row repaints it on every row that carries it. A
+   * signature taking a project would invite an implementation that stored the colour per project, and
+   * the same word would then be blue here and green one line down.
+   */
+  onRecolorTag: (tag: string, color: TagColor) => void;
 }
 
 /**
@@ -77,6 +91,7 @@ export function renderProjectTable(
   tbody: HTMLElement,
   rows: readonly ProjectRow[],
   vocabulary: readonly string[],
+  colors: TagColors,
   actions: TableActions,
 ): void {
   clearChildren(tbody);
@@ -95,7 +110,7 @@ export function renderProjectTable(
   for (const [index, row] of rows.entries()) {
     // The row after this one names the drop position for "below this row", which is why the whole list
     // is handed down rather than the row alone.
-    tbody.append(buildRow(row, rows[index + 1]?.project.id ?? null, vocabulary, actions));
+    tbody.append(buildRow(row, rows[index + 1]?.project.id ?? null, vocabulary, colors, actions));
   }
 }
 
@@ -103,6 +118,7 @@ function buildRow(
   row: ProjectRow,
   next: ProjectId | null,
   vocabulary: readonly string[],
+  colors: TagColors,
   actions: TableActions,
 ): HTMLTableRowElement {
   const tr = createElement('tr');
@@ -122,7 +138,7 @@ function buildRow(
   // Project. The port is deliberately not repeated here: the server pill already shows it as
   // `sert :4201` when it matters, and a static "port 4200" said nothing the pill did not.
   const projectCell = createElement('td');
-  const name = buildProjectName(row, actions);
+  const name = buildProjectName(row, colors, actions);
   projectCell.append(name.element);
   tr.append(projectCell);
 
@@ -401,23 +417,86 @@ function above(tr: HTMLTableRowElement, clientY: number): boolean {
  * because this table refreshes on every git poll and would otherwise wipe the field mid-typing.
  */
 /**
- * The tags of a row, as chips.
+ * The tags of a row, as chips, each in its tag's colour.
  *
- * Neutral, with no colour and no per-tag hue, which is the same rule the rest of this interface
- * follows: colour here claims something is wrong (a dirty tree, a failed lint, a gap with the
- * remote), and a tag claims nothing. A palette keyed on the tag would put five colours in the one
- * column that has to stay quiet, and it would spend them on the only cell of the row that is never a
- * state. Returns `null` rather than an empty element, so an untagged project costs no node.
+ * The colour is carried by a **border and a dot**, never by the text on a coloured ground, and that is
+ * what keeps a chip from reading as a sixth pill state: the status pills of the columns to the right
+ * put their colour in the text. Two kinds of statement, two kinds of paint, in a row where they sit
+ * side by side.
+ *
+ * Returns `null` rather than an empty element, so an untagged project costs no node.
  */
-function buildTags(tags: readonly string[]): HTMLElement | null {
+function buildTags(
+  project: Project,
+  colors: TagColors,
+  actions: TableActions,
+): HTMLElement | null {
+  const tags = project.tags;
   if (tags.length === 0) {
     return null;
   }
   const host = createElement('span', { className: 'cell-tags' });
   for (const tag of tags) {
-    host.append(createElement('span', { className: 'tag', text: tag }));
+    const color = tagColorOf(colors, tag);
+    const chip = createElement('span', {
+      className: `tag tag--${color} tag--menu`,
+      title: `${tag}\n(right-click: colour or remove)`,
+    });
+    chip.append(createElement('span', { className: 'tag__dot' }));
+    chip.append(createElement('span', { text: tag }));
+
+    /*
+     * The chip answers its own right click, which is the fast path: two levels, and the tag is already
+     * named by the thing that was aimed at. The alternative was a third level under the row's menu
+     * (pick a tag, then pick a colour), and a three-deep chain of context menus for a choice among six
+     * words is the version nobody uses twice.
+     *
+     * `stopPropagation` so the row's own menu does not also open: they would stack at the same point,
+     * the second replacing the first, and the user would see the wrong one.
+     */
+    chip.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showContextMenu(
+        event.clientX,
+        event.clientY,
+        buildTagMenuItems(project, tag, color, actions),
+      );
+    });
+
+    host.append(chip);
   }
   return host;
+}
+
+/**
+ * What can be done to one tag, from its own chip.
+ *
+ * The colours come first because they are why the menu exists, and the current one is **skipped**
+ * rather than shown ticked: `MenuItem` has no checked state, a disabled entry in a list of six would
+ * read as a colour that is unavailable, and the chip that was right-clicked is already painted in it.
+ */
+function buildTagMenuItems(
+  project: Project,
+  tag: string,
+  current: TagColor,
+  actions: TableActions,
+): MenuItem[] {
+  const items: MenuItem[] = TAG_COLORS.filter((color) => color !== current).map((color) => ({
+    label: color,
+    hint: `Paints ${tag} ${color}, on every project carrying it`,
+    run: () => actions.onRecolorTag(tag, color),
+  }));
+
+  // Last, being the one entry that is not about colour, and the one that changes this project rather
+  // than the tag: the same word stays on every other row that carries it.
+  items.push({
+    label: `Remove from ${project.label}`,
+    hint: `${tag} stays on the other projects carrying it`,
+    run: () => actions.onRemoveTag(project.id, tag),
+  });
+
+  return items;
 }
 
 /**
@@ -435,7 +514,11 @@ interface ProjectNameCell {
   readonly startTagInput: () => void;
 }
 
-function buildProjectName(row: ProjectRow, actions: TableActions): ProjectNameCell {
+function buildProjectName(
+  row: ProjectRow,
+  colors: TagColors,
+  actions: TableActions,
+): ProjectNameCell {
   const host = createElement('span', { className: 'cell-project' });
 
   const label = createElement('button', {
@@ -503,7 +586,7 @@ function buildProjectName(row: ProjectRow, actions: TableActions): ProjectNameCe
    */
   const line = createElement('span', { className: 'cell-project__line' });
   line.append(label);
-  const tags = buildTags(row.project.tags);
+  const tags = buildTags(row.project, colors, actions);
   if (tags !== null) {
     line.append(tags);
   }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ProjectConfig } from '../src/shared/contracts.js';
-import { moveProject, sameProjectSet } from '../src/shared/project-order.js';
+import {
+  hasAnyTag,
+  moveProject,
+  sameProjectSet,
+  sortProjectsByTag,
+} from '../src/shared/project-order.js';
 
 /** A configuration reduced to what an order cares about: an id, and something to prove it travelled. */
 const config = (id: string): ProjectConfig => ({
@@ -17,6 +22,9 @@ const config = (id: string): ProjectConfig => ({
 
 const list = (...ids: string[]): ProjectConfig[] => ids.map(config);
 const ids = (configs: readonly ProjectConfig[]): string[] => configs.map((entry) => entry.id);
+
+/** A project carrying tags, the first of which is its group. */
+const tagged = (id: string, ...tags: string[]): ProjectConfig => ({ ...config(id), tags });
 
 describe('moveProject', () => {
   it('inserts in front of the named neighbour', () => {
@@ -92,5 +100,65 @@ describe('sameProjectSet', () => {
 
   it('holds for two empty lists', () => {
     expect(sameProjectSet([], [])).toBe(true);
+  });
+});
+
+describe('sortProjectsByTag', () => {
+  it('gathers the projects of one tag together, tags in alphabetical order', () => {
+    const configs = [
+      tagged('web', 'front'),
+      tagged('ratings', 'backend'),
+      tagged('admin', 'front'),
+      tagged('gateway', 'backend'),
+    ];
+    expect(ids(sortProjectsByTag(configs))).toEqual(['ratings', 'gateway', 'web', 'admin']);
+  });
+
+  it('keeps the order a group already had', () => {
+    // The load-bearing property: a group is arranged by drags, and reshuffling it on every click would
+    // throw that arrangement away. `Array.prototype.sort` is stable, and this pins that reliance.
+    const configs = [
+      tagged('third', 'backend'),
+      tagged('first', 'backend'),
+      tagged('second', 'backend'),
+    ];
+    expect(ids(sortProjectsByTag(configs))).toEqual(['third', 'first', 'second']);
+  });
+
+  it('sends the untagged projects to the end', () => {
+    const configs = [config('loose'), tagged('web', 'front'), config('other')];
+    expect(ids(sortProjectsByTag(configs))).toEqual(['web', 'loose', 'other']);
+  });
+
+  it('groups on the FIRST tag, a project belonging to one group only', () => {
+    // `dotnet` is on both, and it decides nothing: the group is the first chip, which the user orders.
+    const configs = [tagged('web', 'front', 'dotnet'), tagged('ratings', 'backend', 'dotnet')];
+    expect(ids(sortProjectsByTag(configs))).toEqual(['ratings', 'web']);
+  });
+
+  it('groups two spellings of one tag together', () => {
+    const configs = [tagged('a', 'Backend'), tagged('b', 'front'), tagged('c', 'backend')];
+    expect(ids(sortProjectsByTag(configs))).toEqual(['a', 'c', 'b']);
+  });
+
+  it('does not mutate the list it is given', () => {
+    // `sort` sorts in place, so the copy is not decorative: the caller holds the stored configuration.
+    const configs = [tagged('web', 'front'), tagged('ratings', 'backend')];
+    sortProjectsByTag(configs);
+    expect(ids(configs)).toEqual(['web', 'ratings']);
+  });
+
+  it('is a permutation, so the monitors keep their state', () => {
+    // `sameProjectSet` is what tells a reorder from a change to the set, and what stops a running dev
+    // server from being rebuilt as `stopped` by a grouping click.
+    const configs = [tagged('web', 'front'), tagged('ratings', 'backend'), config('loose')];
+    expect(sameProjectSet(configs, sortProjectsByTag(configs))).toBe(true);
+  });
+});
+
+describe('hasAnyTag', () => {
+  it('is false while nothing is tagged, which is when grouping cannot do anything', () => {
+    expect(hasAnyTag(list('a', 'b'))).toBe(false);
+    expect(hasAnyTag([config('a'), tagged('b', 'front')])).toBe(true);
   });
 });

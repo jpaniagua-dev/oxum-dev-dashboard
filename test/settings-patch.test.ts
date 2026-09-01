@@ -75,6 +75,19 @@ describe('asPatch', () => {
     );
   });
 
+  it('lets the tag palette through, sanitised', () => {
+    /*
+     * The colour map is written by both renderers, so it has to pass this gate as well as the store's.
+     * Sanitised here and not merely typed, unlike the model names: it is a whole object, so passing it
+     * on unchecked would put malformed entries into a patch `update()` spreads over the cache, and the
+     * stored map would be replaced before the store ever looked at it.
+     */
+    expect(asPatch({ tagColors: { Backend: 'green', bad: '#ff00bb' } })).toEqual({
+      tagColors: { backend: 'green' },
+    });
+    expect(asPatch({ tagColors: 'blue' })).toEqual({});
+  });
+
   it('drops values of the wrong type rather than trusting them', () => {
     expect(asPatch({ projectsHeight: '250', stripCollapsed: 'oui', activeStrip: 'mails' })).toEqual({});
   });
