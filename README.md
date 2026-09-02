@@ -6,6 +6,43 @@ nothing ever sends you to an external console.
 
 ![Dashboard](docs/screenshot.png)
 
+## What you need on the machine
+
+The dashboard runs commands rather than reimplementing them, so what it can do depends on what is
+already installed. Nothing here is bundled, and nothing here is fatal: a missing tool disables the
+features that use it and says so where the command was going to run.
+
+| Tool | Needed for | Without it |
+| --- | --- | --- |
+| **Windows 10/11 x64** | everything | the app is Windows-only (ConPTY, `taskkill`) |
+| **git** on `PATH` | every column of the strip, the whole Git tab | rows read `?` and the Git tab reports the failure |
+| **Git Bash** | the shells that expand aliases, the `Commit` action | those actions print `command not found` in their tab |
+| **`gh`**, authenticated (`gh auth login`) | Checks, Workflows, the Pull requests tab | those columns read `?`, the tab stays empty |
+| **`claude`** on `PATH`, signed in | Triage, `Work on this`, `Generate` a commit message | the run fails in its own tab or line |
+| **A Jira API token** | the Jira tab, the Triage tab | nothing is queried at all, no error |
+| **Node 20+** | only to build from source | irrelevant to a downloaded build |
+
+**One** feature expects a shell helper that does not ship with the app: the **Worktrees** tab's
+create, rename and remove entries run a shell function called `wt`. It prints `command not found` in
+the tab it opened, which names what is missing in the place it was going to be used, and nothing else
+is affected. Reimplementing it is deliberately refused: `git worktree add` and `remove` carry rules
+(a shared `node_modules` junction to unlink first, a refusal on a folder git no longer knows, a stale
+registration to prune) that a second implementation would get wrong, and getting one wrong deletes
+work. The reasoning is in `CLAUDE.md`.
+
+Two other features used to need one and no longer do. **Create a branch** in the Jira tab creates
+`KEY-slug-of-the-summary` with git directly, and the seeded **`Commit`** action is gone: the Git tab
+commits with a real form, an amend and `Generate` writing the message from the staged diff. Actions
+are configuration anyway, so a row button running anything you like is one line in the settings.
+
+### First launch
+
+A fresh install watches **nothing**, on purpose: a project costs a `git` process on every poll, so the
+app does not adopt repositories nobody chose. The table's empty state offers the two ways in, `Add a
+folder` for one repository, or the settings to name the folder your clones live in and then `Detect
+repositories`. Everything else (poll cadences, the Jira connection, the Claude models) has a working
+default or is inert until configured.
+
 ## Install
 
 One permanent link, always the latest build:
@@ -371,7 +408,7 @@ Defaults on a new project, and why each ships with the shell it does:
 
 - **Run** → `npm run start` in **cmd**, because a pty does not resolve the `.cmd` shims that make a
   bare `npm` work. Never disabled: see **Run restarts** below.
-- **Commit** → `commit` in **Git Bash**, because it is a shell **alias**: bash does not expand aliases
+- **Commit** was seeded until 5.8.2 and no longer is, because it ran a shell **alias**: bash does not expand aliases
   in a non-interactive shell, so it is run with `-ic`. It is a full-screen prompt_toolkit TUI, which is
   the reason this app embeds a real pseudo-terminal rather than a log view.
 

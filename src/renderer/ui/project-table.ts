@@ -68,6 +68,15 @@ export interface TableActions {
    * the same word would then be blue here and green one line down.
    */
   onRecolorTag: (tag: string, color: TagColor) => void;
+  /**
+   * The two ways out of an empty table, offered by the empty state itself.
+   *
+   * They are the header's `Add a folder` button and the settings window, wired here rather than
+   * duplicated: an empty state that names a control living somewhere else is a dead end for whoever
+   * has just installed the app, and this table's first launch is now the only onboarding there is.
+   */
+  onAddProject: () => void;
+  onOpenSettings: () => void;
 }
 
 /**
@@ -97,13 +106,7 @@ export function renderProjectTable(
   clearChildren(tbody);
 
   if (rows.length === 0) {
-    const row = createElement('tr');
-    const cell = createElement('td', {
-      text: 'No project found. Check the paths in the registry.',
-    });
-    cell.colSpan = 7;
-    row.append(cell);
-    tbody.append(row);
+    tbody.append(buildEmptyState(actions));
     return;
   }
 
@@ -112,6 +115,56 @@ export function renderProjectTable(
     // is handed down rather than the row alone.
     tbody.append(buildRow(row, rows[index + 1]?.project.id ?? null, vocabulary, colors, actions));
   }
+}
+
+/**
+ * What the table says when nothing is configured, which is every first launch.
+ *
+ * It said `No project found. Check the paths in the registry.` and that line was wrong twice over: it
+ * named a "registry" that exists nowhere in the interface, and it asked the reader to go and fix
+ * something without saying where. Since a fresh install adds no project at all (see the note in
+ * `main/index.ts`), this is the whole onboarding of the app, so it carries the two routes as **real
+ * buttons** rather than as a sentence pointing at controls elsewhere.
+ *
+ * Two routes and not one, because they answer two different situations: somebody trying the app on one
+ * repository wants the folder picker, and somebody who keeps every clone in one place wants to set that
+ * folder once and let `Detect repositories` do the rest.
+ */
+function buildEmptyState(actions: TableActions): HTMLTableRowElement {
+  const row = createElement('tr');
+  const cell = createElement('td');
+  cell.colSpan = 7;
+
+  const box = createElement('div', { className: 'table-empty' });
+  box.append(
+    createElement('p', {
+      className: 'table-empty__title',
+      text: 'No project watched yet.',
+    }),
+  );
+  box.append(
+    createElement('p', {
+      className: 'table-empty__hint',
+      text: 'Add a repository folder, or point the settings at the folder holding your clones and let Detect find them.',
+    }),
+  );
+
+  const buttons = createElement('div', { className: 'table-empty__actions' });
+  const add = createElement('button', { className: 'button button--primary', text: 'Add a folder' });
+  add.type = 'button';
+  add.addEventListener('click', () => actions.onAddProject());
+  buttons.append(add);
+
+  const settings = createElement('button', { className: 'button', text: 'Open the settings' });
+  settings.type = 'button';
+  settings.title = 'Set the folder your repositories live in, then Detect';
+  settings.addEventListener('click', () => actions.onOpenSettings());
+  buttons.append(settings);
+
+  box.append(buttons);
+  cell.append(box);
+  row.append(cell);
+  return row;
 }
 
 function buildRow(

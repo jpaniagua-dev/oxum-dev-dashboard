@@ -183,8 +183,8 @@ const api: RendererApi = {
   startTicketBranch: (
     projectId: ProjectId,
     issueKey: string,
-  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
-    ipcRenderer.invoke(IpcChannel.JiraBranch, projectId, issueKey),
+    summary: string,
+  ): Promise<GitResult> => ipcRenderer.invoke(IpcChannel.JiraBranch, projectId, issueKey, summary),
 
   onRowsChanged: (listener: (rows: ProjectRow[]) => void): (() => void) => {
     const handler = (_event: unknown, rows: ProjectRow[]): void => listener(rows);

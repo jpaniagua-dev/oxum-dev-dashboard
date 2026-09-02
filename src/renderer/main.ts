@@ -21,6 +21,7 @@ import type {
   ThemeState,
   WorktreeCommand,
 } from '@shared/contracts.js';
+import { branchNameFor } from '@shared/branch-name.js';
 import { moveProject } from '@shared/project-order.js';
 import {
   addTag,
@@ -403,6 +404,10 @@ class App {
       onRemoveTag: (projectId, tag) =>
         void this.retagProject(projectId, (tags) => removeTag(tags, tag)),
       onRecolorTag: (tag, color) => void this.recolorTag(tag, color),
+      // The same two gestures the header offers, handed to the empty state so a fresh install has
+      // somewhere to go without reading the README first.
+      onAddProject: () => void this.addProject(),
+      onOpenSettings: () => void window.api.openSettings(),
     });
   }
 
@@ -546,8 +551,11 @@ class App {
       ordered.map((project) => ({
         label:
           project.id === this.lastBranchProject ? `${project.label} (last)` : project.label,
-        hint: `dev ${issue.key} in ${project.path}`,
-        run: () => void this.startBranch(project.id, issue.key),
+        // The branch is named before it is created, which is the rule every write in this app follows.
+        // `branchNameFor` is shared with the main process precisely so this promise cannot drift from
+        // what the checkout actually does.
+        hint: `${branchNameFor(issue.key, issue.summary)} in ${project.path}`,
+        run: () => void this.startBranch(project.id, issue.key, issue.summary),
       })),
     );
   }
@@ -633,15 +641,35 @@ class App {
    * Focused straight away for the reason the commit tab is: the alias prints what it did and can ask
    * something, and a tab created behind the current one would be invisible until it had finished.
    */
-  private async startBranch(projectId: ProjectId, issueKey: string): Promise<void> {
-    const { terminalId, result } = await window.api.startTicketBranch(projectId, issueKey);
+  /**
+   * Creates or switches to a ticket's branch, natively.
+   *
+   * No terminal tab to bring forward since 5.8.2: the branch is created by `git` through `execFile`,
+   * the way every other quick write in the Git tab is, so the outcome is one line in the strip. The
+   * summary travels with the key because the branch name is built from it, and the Jira tab already
+   * has it on screen: asking the main process to fetch it again would be a second round trip for
+   * something already known.
+   *
+   * The project is remembered on **success only**. `lastBranchProject` is what puts a repository at
+   * the top of the next menu, and a failed checkout is not evidence that this was the right
+   * repository.
+   */
+  private async startBranch(
+    projectId: ProjectId,
+    issueKey: string,
+    summary: string,
+  ): Promise<void> {
+    const result = await window.api.startTicketBranch(projectId, issueKey, summary);
     this.stampMessage(result.message);
-    if (terminalId === null) {
+    if (!result.ok) {
       console.warn('[branch]', result.message);
       return;
     }
     this.lastBranchProject = projectId;
-    await this.focusTerminal(terminalId);
+    // The working tree moved, so the row is stale until this lands. Same call the Refresh button
+    // makes, rather than waiting up to a poll for the branch that was just created to show up.
+    this.rows = await window.api.refreshNow();
+    this.renderTable();
   }
 
   /** Runs a Jira write and reports its outcome where the user is looking. */

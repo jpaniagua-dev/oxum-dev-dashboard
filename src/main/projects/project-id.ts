@@ -37,15 +37,24 @@ export function makeId(folder: string): ProjectId {
 /**
  * Actions given to a project that declares none.
  *
- * They reproduce exactly the two buttons that used to be hardcoded, including the shell each ran in:
- * `cmd` for npm, because a pty does not resolve the `.cmd` shims a shell would, and Git Bash for
- * `commit`, which is a bash alias. Seeding with the same shells keeps a first run behaving as before
- * while making both editable.
+ * **One action, and it used to be two.** A `Commit` button ran a command literally called `commit`,
+ * which is a bash alias in the author's own profile: on any other machine that button opened a tab
+ * saying `command not found`, and this file's own rules name that as the mistake not to repeat. It was
+ * dropped in 5.8.2 rather than repointed, because the app grew a better answer in the meantime: the
+ * Git tab commits with a real form, a message file, an amend, and `Generate` writing the message from
+ * the staged diff through a headless Claude Code run. A row button that shells out to a script is a
+ * second implementation of that, and the worse one.
+ *
+ * Existing configurations are **untouched**: stored actions are read as they were saved, so a project
+ * that already carries a `Commit` button keeps it. Only a project added from now on starts with `Run`
+ * alone.
+ *
+ * `cmd` for npm and not the default shell, which is not cosmetic: a pty does not resolve the `.cmd`
+ * shims a shell would, so a bare `npm` fails outside it.
  */
 export function defaultActions(startScript = 'start'): ProjectAction[] {
   return [
     { id: 'run', label: 'Run', command: `npm run ${startScript}`, role: 'server', profileId: 'cmd' },
-    { id: 'commit', label: 'Commit', command: 'commit', role: 'task', profileId: 'git-bash' },
   ];
 }
 

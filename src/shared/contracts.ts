@@ -421,14 +421,6 @@ export const RESERVED_ACTION_PREFIX = 'git:';
 export const GIT_COMMIT_ACTION_ID = `${RESERVED_ACTION_PREFIX}commit`;
 
 /**
- * Action id of the tab that runs `dev <TICKET>` from the Jira tab.
- *
- * Reserved like the commit tab, and for the same reason: it belongs to no configured action, so
- * without the prefix every settings save would close it mid-run.
- */
-export const TICKET_BRANCH_ACTION_ID = `${RESERVED_ACTION_PREFIX}branch`;
-
-/**
  * Action id **prefix** of the tabs where the Triage tab hands tickets to Claude Code.
  *
  * A prefix and not an id, unlike the three above, and that is the whole point:
@@ -1448,6 +1440,14 @@ export const IpcChannel = {
    * The command is **built in the main process** from a key matched against `ISSUE_KEY_PATTERN`:
    * the renderer names a ticket and a project, never a command line.
    */
+  /**
+   * invoke: (projectId, issueKey, summary) => GitResult
+   *
+   * Creates `<KEY>-<slug of the summary>` in that project and checks it out, or switches to it when
+   * it exists. Native since 5.8.2: it ran a `dev <TICKET>` shell alias until then, which only existed
+   * on the author's machine. No terminal tab, the Git tab's own dividing line: a checkout is a quick
+   * write whose result is read in the strip.
+   */
   JiraBranch: 'jira:branch',
   /**
    * invoke: (projectId, issueKeys[]) => { terminalId, result }
@@ -1594,16 +1594,13 @@ export interface RendererApi {
   transitionJira(key: string, transitionId: string): Promise<{ ok: boolean; message: string }>;
   assignJiraToMe(key: string): Promise<{ ok: boolean; message: string }>;
   /**
-   * Starts a ticket's branch in a terminal tab, by running the `dev <TICKET>` alias.
+   * Creates the ticket's branch in that project and checks it out, or switches to it when it exists.
    *
-   * A tab rather than a silent `execFile`, for the same reason a commit gets one: the alias is a
-   * script that talks back, and the branch it creates is the user's to watch being created. Returns
-   * the tab so the caller can bring it forward, exactly like `gitCommit`.
+   * `<KEY>-<slug of the summary>`, built by `branchNameFor` so the menu can name the branch before it
+   * is created. Native since 5.8.2: it ran a `dev <TICKET>` shell alias until then. No tab, unlike
+   * `gitCommit`: a checkout is a quick write whose outcome is one line in the strip.
    */
-  startTicketBranch(
-    projectId: ProjectId,
-    issueKey: string,
-  ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
+  startTicketBranch(projectId: ProjectId, issueKey: string, summary: string): Promise<GitResult>;
   /** Opens a pull request in the real browser. Only http(s) is followed, checked in the main process. */
   openExternal(url: string): Promise<void>;
   /**
@@ -1641,7 +1638,7 @@ export interface RendererApi {
    * call would replace all of that with a one-line verdict written by this app, about a command it did
    * not run.
    *
-   * Returns the tab like `gitCommit` and `startTicketBranch` do, so the caller can bring it forward.
+   * Returns the tab like `gitCommit` does, so the caller can bring it forward.
    */
   runWorktreeCommand(
     projectId: ProjectId,

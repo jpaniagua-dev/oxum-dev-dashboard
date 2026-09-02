@@ -33,20 +33,6 @@ export function serverAction(actions: readonly ProjectAction[]): ProjectAction |
 }
 
 /**
- * Folder names looked for under the repositories root on a fresh install.
- *
- * Placeholders, deliberately: they are common enough names to seed a row now and then, and a folder
- * that is missing is skipped rather than shown broken (see `seedProjects`), so an unrecognised layout
- * simply starts with an empty table. Adjust this list to your own folders, or add projects from the
- * settings dialog, which is how every project is meant to be managed after the first launch.
- */
-const SEED_FOLDERS: readonly { folder: string; label: string }[] = [
-  { folder: 'web-app', label: 'Web' },
-  { folder: 'admin-front', label: 'Admin' },
-  { folder: 'design-system', label: 'Design' },
-];
-
-/**
  * Turns stored configuration into the runtime project list.
  *
  * `kind` and `expectedPort` fall back to what the repository's own `package.json` says, so a project
@@ -75,21 +61,6 @@ export function resolveProjects(configs: readonly ProjectConfig[]): Project[] {
 /** Looks a project up by id. */
 export function findProject(projects: readonly Project[], id: ProjectId): Project | undefined {
   return projects.find((project) => project.id === id);
-}
-
-/**
- * Builds the initial configuration for a fresh install.
- *
- * Seed folders that are missing are simply skipped, so a machine with a different layout starts with
- * whatever it actually has rather than three broken rows.
- */
-export function seedProjects(root: string): ProjectConfig[] {
-  return SEED_FOLDERS.filter((seed) => existsSync(join(root, seed.folder))).map((seed) => ({
-    ...configFromPath(join(root, seed.folder)),
-    // The seed carries a short label rather than the folder name: a column of names is read at a
-    // glance, and a long folder name is the thing that stops being readable first. Still editable.
-    label: seed.label,
-  }));
 }
 
 /**

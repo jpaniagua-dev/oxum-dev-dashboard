@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { asActions, sanitizeSettings } from '../src/main/store/settings-store.js';
 
 describe('asActions', () => {
-  it('gives the default two actions when a project declares none', () => {
+  it('gives the one default action when a project declares none', () => {
+    /*
+     * One, since 5.8.2. The second used to be a `Commit` button running a command called `commit`,
+     * which only exists in the author's bash profile: every other machine got a tab reading
+     * `command not found`. The Git tab's commit form replaced it, and dropping it from the seeding is
+     * what stops a fresh project from shipping a broken button.
+     */
     const actions = asActions(undefined);
-    expect(actions.map((action) => action.id)).toEqual(['run', 'commit']);
+    expect(actions.map((action) => action.id)).toEqual(['run']);
+    // `cmd` and not the default shell: a pty does not resolve the `.cmd` shims, so a bare `npm` fails.
     expect(actions[0]).toMatchObject({ command: 'npm run start', role: 'server', profileId: 'cmd' });
-    // Git Bash, because `commit` is a bash alias and nothing else expands it.
-    expect(actions[1]).toMatchObject({ command: 'commit', role: 'task', profileId: 'git-bash' });
   });
 
   it('migrates a pre-actions project, keeping a customised start script', () => {
@@ -30,7 +35,6 @@ describe('asActions', () => {
     // A button that runs nothing is worse than no button; an empty list reads as a broken dashboard.
     expect(asActions([{ label: 'Vide', command: '   ', role: 'task' }]).map((a) => a.id)).toEqual([
       'run',
-      'commit',
     ]);
   });
 
@@ -73,7 +77,9 @@ describe('sanitizeSettings', () => {
     const settings = sanitizeSettings({
       projects: [{ id: 'web', label: 'Web', path: 'C:/repos/web', startScript: 'start' }],
     });
-    expect(settings.projects[0]?.actions.map((action) => action.label)).toEqual(['Run', 'Commit']);
+    // The migration reads the old `startScript` into the seeded `Run`, which is the whole point: a
+    // customised start script must survive the move to actions.
+    expect(settings.projects[0]?.actions.map((action) => action.label)).toEqual(['Run']);
   });
 
   it('reads the tags of a project, and gives none to a configuration written before they existed', () => {

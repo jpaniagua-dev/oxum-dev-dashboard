@@ -65,8 +65,8 @@ exceptions:
   - **Defaults derive from `homedir()`** and every one of them is editable in the settings, the way
     `projectsRoot` and `claudeContextRoot` are.
   - **A missing dependency degrades visibly and locally**, never silently and never fatally: a
-    skipped row (`seedProjects`), a disabled control, or an honest `command not found` in the tab that
-    was going to run it. Never a button that looks fine and does nothing.
+    disabled control, an honest `command not found` in the tab that was going to run it, or a `?` pill
+    where a missing `gh` should have answered. Never a button that looks fine and does nothing.
   - **Everything written goes through `AppPaths`**, so state stays per user account. No file the app
     owns lives next to the repositories or in a shared folder.
   - **A secret belongs to `SecretStore`**, encrypted per Windows account, never in `settings.json`.
@@ -543,13 +543,27 @@ exceptions:
   it would shift by the width of the scrollbar as soon as the list overflows, and a column misaligned
   with its values is worse than no header. It reuses the `.issue` grid, the only way for a label to stay
   above the column it names.
-- **"Create a branch" runs the `dev <ISSUE>` alias, never a command assembled in the renderer.** The
-  channel takes a project and a key; the main process assembles `dev <KEY>` after validating the key
-  against `ISSUE_KEY_PATTERN`. This is the only place in the app where input from the renderer reaches a
-  shell, so the pattern is anchored and deliberately narrow: letters, hyphen, digits. It also requires an
-  **interactive bash** (`resolveBashProfile`), because `dev` is a `.bashrc` alias: no bash means no
-  command and a message naming the missing shell, rather than a `command not found` in a tab that looks
-  like it worked.
+- **"Create a branch" is native, and it ran a `dev <ISSUE>` alias until 5.8.2.** That alias is a
+  Python script in the author's own profile, so on every other machine the gesture opened a tab reading
+  `command not found`. It was replaced rather than repointed, and the native version is the better
+  shape on three counts: the **summary is already on screen**, so the name needs no second round trip
+  to Jira; `git check-ref-format` validates it, which is stricter than the script's own slug and is
+  the app's standing answer to "is this a legal branch name"; and the outcome is one line in the strip
+  instead of a terminal tab, which is the line the Git tab already draws (a quick write goes through
+  `execFile`, only a commit earns a tab).
+- **The branch name is built by `branchNameFor`, in `shared/`, and that placement is the point.** The
+  main process creates the branch and the Jira tab's menu **names it in the hint before creating it**,
+  which is the rule every write in this app follows. Two implementations would let the menu promise a
+  name the checkout does not use. The shape, `PROJ-123-migrate-to-angular-22`, is the convention the
+  team already writes by hand and the one the replaced script produced, so a branch made from the
+  dashboard is indistinguishable from one made in a terminal.
+- **The key still passes `ISSUE_KEY_PATTERN`, and the summary never reaches a shell.** The renderer
+  names a ticket and a project, never a command line. The summary is free text, and it is safe for a
+  different reason than the key: `branchNameFor` reduces it to letters, digits and hyphens, and git is
+  called with an argument array. There is no shell left in this path at all.
+- **An existing branch is switched to, not refused.** What the replaced script did, and the honest
+  reading of the gesture: clicking a ticket twice means "put me on that ticket". A checkout blocked by
+  local changes still fails, with git's own message about which files are in the way.
 - **Choosing the project is a SECOND context menu in the same place**, not a modal and not a real
   submenu. A modal is excluded on principle here (a `mousedown` inside released outside fires a `click`
   on the common ancestor: the bug that got the settings modal removed). A real submenu would need hover
@@ -1392,8 +1406,13 @@ pattern are left ready.
 ## Configurable projects
 
 - **Projects are configuration, not code.** `ProjectId` is a free string and the list lives in
-  `settings.json`. Do not reintroduce a hardcoded list: `SEED_FOLDERS` is only there for the first
-  launch's seeding.
+  `settings.json`. Do not reintroduce a hardcoded list, and that includes a seeding one: a
+  `SEED_FOLDERS` pass over three placeholder names existed until 5.8.2 and matched **nothing on any
+  machine**, so the empty table was already every user's first launch. Auto-detecting instead is
+  refused on a measured ground, not a stylistic one: each project costs a `git` process per poll, so a
+  first launch that adopted twenty-five repositories would hand the user a freeze nobody chose.
+  `Detect repositories` offers that list on demand, and the table's **empty state** carries the first
+  launch with the two routes in as real buttons.
 - **`kind` and `expectedPort` stay `null` by default** so they follow the repository's `package.json`.
   Filling them in by force would let the configuration drift from the real project.
 - **The id is derived from the folder, the label is editable.** A rename must never change the id, or the

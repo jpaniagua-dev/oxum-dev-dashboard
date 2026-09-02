@@ -17,8 +17,7 @@ import { buildJql, searchIssues } from './jira/jira-service.js';
 import { SecretStore } from './store/secret-store.js';
 import { sameProjectSet } from '@shared/project-order.js';
 import { ProjectMonitor } from './projects/project-monitor.js';
-import { DEFAULT_PROJECTS_ROOT } from './projects/project-id.js';
-import { resolveProjects, seedProjects } from './projects/registry.js';
+import { resolveProjects } from './projects/registry.js';
 import { ServersWindow, SERVERS_WINDOW_BOUNDS } from './servers-window.js';
 import { SettingsWindow, SETTINGS_WINDOW_BOUNDS } from './settings-window.js';
 import { AppPaths } from './store/paths.js';
@@ -66,18 +65,23 @@ async function bootstrap(): Promise<void> {
   const settingsStore = new SettingsStore(AppPaths.settings());
   const settings = await settingsStore.load();
 
-  // First launch: seed the project list from the repositories root so the app is immediately useful.
-  // Done once and then stored, so deleting a project makes it stay deleted.
-  if (settings.projects.length === 0) {
-    // Guard against an empty root: a blank value would make the scan silently find nothing and the
-    // dashboard would start with an empty table and no error, which is exactly how this failed once.
-    const root = settings.projectsRoot.trim().length > 0 ? settings.projectsRoot : DEFAULT_PROJECTS_ROOT;
-    const seeded = seedProjects(root);
-    console.log(`[projects] seeded from ${root}: ${seeded.length} project(s)`);
-    if (seeded.length > 0) {
-      await settingsStore.update({ projects: seeded, projectsRoot: root });
-    }
-  }
+  /*
+   * A first launch adds nothing, and that is a decision rather than a gap.
+   *
+   * There used to be a seeding pass over three hardcoded folder names (`web-app`, `admin-front`,
+   * `design-system`). Those names are placeholders this repository is public with, so the pass matched
+   * **nothing on any machine**, the author's included: the empty table was already every user's first
+   * launch, under a message that told them to "check the paths in the registry".
+   *
+   * Detecting repositories automatically instead was the obvious replacement and is refused on a
+   * measured ground: every project costs a `git` process on every poll, and creating a process is
+   * expensive here (see the performance section of `CLAUDE.md`). A first launch that silently adopted
+   * twenty-five repositories would hand the user a freeze nobody chose. `Detect repositories` offers
+   * exactly that list, on demand, and then the choice belongs to whoever will live with it.
+   *
+   * What carries the first launch is therefore the empty state of the table, which names the two ways
+   * in and is reachable without reading anything.
+   */
 
   let projects = resolveProjects(settingsStore.get().projects);
   const windowStateStore = new WindowStateStore(AppPaths.windowState());

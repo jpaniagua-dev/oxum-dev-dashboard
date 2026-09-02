@@ -410,6 +410,42 @@ body {
   font-size: var(--font-xs);
 }
 
+/*
+ * The table's empty state, which is the whole onboarding of a fresh install.
+ *
+ * Centred and given room, unlike the one-line message it replaces: this is the first thing a new user
+ * sees, and a sentence squeezed into a table cell reads as an error rather than as an invitation.
+ */
+.table-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 16px;
+  text-align: center;
+}
+
+.table-empty__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-lg);
+  font-weight: 600;
+}
+
+/* Capped to a readable measure: a hint spanning seven columns of a wide window is a line nobody reads. */
+.table-empty__hint {
+  max-width: 46ch;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+.table-empty__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 /* -------------------------------------------------------------- status pill */
 
 .pill {

@@ -5,7 +5,6 @@ import {
   GIT_COMMIT_ACTION_ID,
   IpcChannel,
   ISSUE_KEY_PATTERN,
-  TICKET_BRANCH_ACTION_ID,
   workActionId,
   WORK_BATCH_LIMIT,
   WORKTREE_ACTION_ID,
@@ -43,6 +42,7 @@ import {
   cherryPick,
   createBranch,
   discardPaths,
+  readBranches,
   readDiff,
   readRepoState,
   readSequencer,
@@ -52,6 +52,7 @@ import {
   sync,
 } from './git/git-commands.js';
 import { generateCommitMessage } from './git/generate-commit.js';
+import { branchNameFor } from '@shared/branch-name.js';
 import { readGitState } from './git/git-service.js';
 import { GIT_PTY_FILE } from './git/run-git.js';
 import { readAllWorktrees } from './git/git-worktrees.js';
@@ -594,14 +595,24 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   );
 
   /**
-   * Starts a ticket's branch by running the `dev <TICKET>` alias in a terminal tab.
+   * Creates a ticket's branch, or switches to it when it is already there.
    *
-   * Three decisions worth keeping. The command is **assembled here**, from a key matched against
-   * `ISSUE_KEY_PATTERN`: the renderer names a ticket and a project, never a command line, so this
-   * channel cannot become a general "run anything" hole in an otherwise sandboxed renderer. It needs
-   * an **interactive bash** because `dev` is an alias, and no bash means no command rather than a
-   * `command not found` in a tab that looks like it worked. And it lands in a tab, like the commit,
-   * because the alias talks: it prints what it created and sometimes asks something.
+   * **Native since 5.8.2, and it used to shell out to a `dev <TICKET>` alias.** That alias is a Python
+   * script in the author's own profile, so on any other machine this opened a tab reading
+   * `command not found`. Replacing it was not merely a portability fix, it is a better shape on three
+   * counts: the summary is already on screen, so no second round trip to Jira is needed to build the
+   * name; `git check-ref-format` validates it, which is stricter and more honest than the script's
+   * own slug; and the outcome is one line in the strip instead of a terminal tab, which is the line
+   * the Git tab already draws (a quick write goes through `execFile`, only a commit earns a tab).
+   *
+   * The renderer still names a ticket and a project, never a command line, and the key is matched
+   * against `ISSUE_KEY_PATTERN` before anything happens. The summary is free text and never reaches a
+   * shell: `branchNameFor` reduces it to letters, digits and hyphens, and `createBranch` calls git
+   * with an argument array.
+   *
+   * An existing branch is **switched to**, not reported as a failure. That is what the script did and
+   * it is the honest reading of the gesture: clicking a ticket twice means "put me on that ticket",
+   * not "create it again". A checkout blocked by local changes still fails, with git's own message.
    */
   ipcMain.handle(
     IpcChannel.JiraBranch,
@@ -609,45 +620,24 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       _event,
       projectId: unknown,
       issueKey: unknown,
-    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      summary: unknown,
+    ): Promise<GitResult> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
-        return { terminalId: null, result: { ok: false, message: 'Project not found' } };
+        return { ok: false, message: 'Project not found' };
       }
       const key = typeof issueKey === 'string' ? issueKey.trim().toUpperCase() : '';
       if (!ISSUE_KEY_PATTERN.test(key)) {
-        return { terminalId: null, result: { ok: false, message: 'Invalid issue key' } };
+        return { ok: false, message: 'Invalid issue key' };
       }
 
-      const profile = resolveBashProfile(
-        deps.profiles(),
-        deps.settings.get().defaultShellProfileId,
-      );
-      if (profile === undefined) {
-        return {
-          terminalId: null,
-          result: { ok: false, message: 'No bash profile: the "dev" alias cannot be launched' },
-        };
+      const name = branchNameFor(key, typeof summary === 'string' ? summary : '');
+      const existing = await readBranches(project.path);
+      if (existing.some((branch) => branch.name === name)) {
+        const switched = await checkoutBranch(project.path, name);
+        return switched.ok ? { ok: true, message: `Switched to ${name}` } : switched;
       }
-
-      const resolved = resolveShellCommand(profile, `dev ${key}`);
-      const terminalId = deps.terminals.runProjectCommand({
-        project,
-        actionId: TICKET_BRANCH_ACTION_ID,
-        title: `${project.label} · ${key}`,
-        file: resolved.file,
-        args: resolved.args,
-        size: deps.terminalSize(),
-        profileId: profile.id,
-      });
-
-      return {
-        terminalId,
-        result:
-          terminalId === null
-            ? { ok: false, message: 'Could not open the tab' }
-            : { ok: true, message: `dev ${key} launched in ${project.label}` },
-      };
+      return createBranch(project.path, name, true);
     },
   );
 
