@@ -449,73 +449,55 @@ describe('selectIssues', () => {
     issue('PROJ-4', 'todo', ''),
   ];
 
-  it('skips what is in progress whatever the scope, and counts it', () => {
-    const { analysed, skipped } = selectIssues(sprint, 'all', '');
+  it('skips what is in progress, and counts it', () => {
+    const { analysed, skipped } = selectIssues(sprint);
 
     expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-1', 'PROJ-3', 'PROJ-4']);
-    expect(skipped).toEqual({ inProgress: 1, notMine: 0 });
+    expect(skipped).toEqual({ inProgress: 1 });
   });
 
   it('reads the stage and not the status name, which is per-project and renamed at will', () => {
     // "In review" is in progress on this board; a filter matching the words "in progress" would send
     // it to the model, and would send nothing at all on a board whose statuses are in French.
-    const [skippedIssue] = selectIssues([issue('PROJ-9', 'in-progress', 'me')], 'all', '').analysed;
+    const [skippedIssue] = selectIssues([issue('PROJ-9', 'in-progress', 'me')]).analysed;
     expect(skippedIssue).toBeUndefined();
   });
 
-  it('keeps only the tickets assigned to the account under `mine`', () => {
-    const { analysed, skipped } = selectIssues(sprint, 'mine', 'me');
-
-    expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-1']);
-    // Counted apart: one is somebody's current work, the other is one scope change away.
-    expect(skipped).toEqual({ inProgress: 1, notMine: 2 });
-  });
-
-  it('counts an unassigned ticket as somebody else, since nobody holds it', () => {
-    const { analysed } = selectIssues([issue('PROJ-4', 'todo', '')], 'mine', 'me');
-    expect(analysed).toEqual([]);
-  });
-
-  it('keeps nothing under `mine` when the account id could not be read', () => {
-    // The service refuses to run in that case. If it ever stopped, an empty selection is the failure
-    // that shows, where a silent fallback to the whole sprint is the one that costs money quietly.
-    const { analysed, skipped } = selectIssues(sprint, 'mine', '');
-    expect(analysed).toEqual([]);
-    expect(skipped.notMine).toBe(3);
+  it('keeps every ticket that is not in progress, whoever holds it', () => {
+    // The `mine` scope was removed in 5.8.1: an assignee no longer decides what a run reads, and an
+    // unassigned ticket is analysed like any other.
+    const { analysed } = selectIssues([
+      issue('PROJ-3', 'todo', 'someone-else'),
+      issue('PROJ-4', 'todo', ''),
+    ]);
+    expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-4']);
   });
 
   it('leaves `done` alone, the sprint search having already excluded it', () => {
     // Two authorities on the same exclusion is how the two would drift.
-    const { analysed } = selectIssues([issue('PROJ-8', 'done', 'me')], 'all', 'me');
+    const { analysed } = selectIssues([issue('PROJ-8', 'done', 'me')]);
     expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-8']);
   });
 });
 
 describe('describeCoverage', () => {
-  it('says nothing when a full-sprint run left nothing out', () => {
+  it('says nothing when the run left nothing out', () => {
     // A line reading "0 skipped" is a line the eye has to read every time to learn nothing.
-    expect(describeCoverage('all', { inProgress: 0, notMine: 0 })).toBe('');
+    expect(describeCoverage({ inProgress: 0 })).toBe('');
   });
 
-  it('names the scope even when nothing was skipped by it', () => {
-    // A `mine` run of a sprint that happens to be all yours still answered a narrower question.
-    expect(describeCoverage('mine', { inProgress: 0, notMine: 0 })).toContain('your tickets only');
-  });
-
-  it('counts the two exclusions apart', () => {
-    const line = describeCoverage('mine', { inProgress: 2, notMine: 5 });
-    expect(line).toContain('2 in progress skipped');
-    expect(line).toContain('5 of others skipped');
+  it('counts what was skipped', () => {
+    expect(describeCoverage({ inProgress: 2 })).toContain('2 in progress skipped');
   });
 });
 
 describe('describeEmptyResult', () => {
   it('says a sprint is empty when it really is', () => {
-    expect(describeEmptyResult({ inProgress: 0, notMine: 0 })).toBe('No ticket in this sprint.');
+    expect(describeEmptyResult({ inProgress: 0 })).toBe('No ticket in this sprint.');
   });
 
   it('says a sprint was filtered down to nothing, which looks identical on screen', () => {
-    const message = describeEmptyResult({ inProgress: 9, notMine: 0 });
+    const message = describeEmptyResult({ inProgress: 9 });
     expect(message).toContain('9 already in progress');
     expect(message).not.toContain('No ticket in this sprint');
   });

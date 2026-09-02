@@ -881,16 +881,6 @@ export interface Sprint {
  */
 export type TriageVerdict = 'ready' | 'needs-decision' | 'backend' | 'unclear' | 'blocked';
 
-/**
- * Which of a sprint's tickets a run is asked to read.
- *
- * `mine` is not a display filter over an analysis that already happened: it decides what the run is
- * given, so it changes what the tokens are spent on. Hence a scope on the **result** as well
- * (`TriageResult.scope`), without which "Ready 0" would mean two different things and nothing on
- * screen could tell them apart.
- */
-export type TriageScope = 'all' | 'mine';
-
 export const TRIAGE_VERDICTS: readonly TriageVerdict[] = [
   'ready',
   'needs-decision',
@@ -944,25 +934,20 @@ export interface TriageResult {
   readonly tickets: readonly TriagedTicket[];
   /** Set when the run failed; the previous result is kept on screen and this explains why. */
   readonly error: string | null;
-  /** The scope the run was launched with, so a stored list says what it covered. */
-  readonly scope: TriageScope;
   /**
-   * What the sprint held and the run was not given, per reason.
+   * What the sprint held and the run was not given.
    *
    * Counted and shown rather than dropped in silence, the same rule that adds a forgotten ticket back
-   * as `unclear`: a filtered list and a short sprint look identical on screen, and that is exactly the
-   * failure nobody notices. The two reasons stay apart because they are answered differently: an
-   * in-progress ticket is somebody's current work, a ticket that is not yours is one scope change away.
+   * as `unclear`: a shortened list and a short sprint look identical on screen, and that is exactly
+   * the failure nobody notices.
    */
   readonly skipped: TriageSkips;
 }
 
-/** Why a sprint's tickets were left out of a run. Both counts are zero on a full-sprint analysis. */
+/** Why a sprint's tickets were left out of a run. Zero on a sprint nobody has started. */
 export interface TriageSkips {
   /** Already being worked on: `statusCategory` is `indeterminate`. */
   readonly inProgress: number;
-  /** Assigned to somebody else, or to nobody, under the `mine` scope. */
-  readonly notMine: number;
 }
 
 /**
@@ -1483,14 +1468,14 @@ export const IpcChannel = {
   /** invoke: () => TriageState, re-reads the sprints from Jira and returns the stored results */
   TriageRefresh: 'triage:refresh',
   /**
-   * invoke: (sprintId, scope: TriageScope) => TriageState
+   * invoke: (sprintId) => TriageState
    *
    * Fetches the sprint's issues, hands them to a headless Claude Code run for classification, and
    * stores the verdicts. The previous result stays on screen for the whole run and is only replaced
    * when a new one lands, which is the point of storing it at all.
    *
-   * The scope travels with the run rather than being read from the settings: it decides what a paid
-   * run is given, so it belongs to the click that started it and to the result it produced.
+   * A run reads the whole sprint, minus what is already in progress. It took a scope until 5.8.1;
+   * see the note in `CLAUDE.md` for why that went.
    */
   TriageAnalyse: 'triage:analyse',
   /**
@@ -1583,7 +1568,7 @@ export interface RendererApi {
     issueKeys: string[],
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   startInJira(issueKeys: string[]): Promise<GitResult>;
-  analyseSprint(sprintId: number, scope: TriageScope): Promise<TriageState>;
+  analyseSprint(sprintId: number): Promise<TriageState>;
   /** Drops one row from a stored analysis. Touches `triage.json` and nothing in Jira. */
   dismissTriageTicket(sprintId: number, issueKey: string): Promise<TriageState>;
   onTriageChanged(listener: (state: TriageState) => void): () => void;

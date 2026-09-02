@@ -2752,18 +2752,6 @@ body {
  * The bottom border is what separates "what will be read" from "which sprint": two questions, one
  * column, and no line between them would read as one list with two odd entries at the top.
  */
-.triage__scope {
-  display: flex;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  flex: none;
-  gap: 2px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
 .triage__state {
   display: inline-grid;
   place-items: center;

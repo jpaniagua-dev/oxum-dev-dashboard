@@ -27,7 +27,6 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
-  type TriageScope,
   type TriageState,
   type ProjectValidation,
   type RepoPulls,
@@ -186,15 +185,12 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
    */
   ipcMain.handle(
     IpcChannel.TriageAnalyse,
-    async (_event, sprintId: unknown, scope: unknown): Promise<TriageState> => {
+    async (_event, sprintId: unknown): Promise<TriageState> => {
       const id = Number(sprintId);
       if (!Number.isInteger(id)) {
         return deps.triage().state();
       }
-      // `all` is the default of an unreadable value on purpose: it is the scope that hides nothing,
-      // and a run that quietly narrowed itself is the failure this whole feature has to avoid.
-      const wanted: TriageScope = scope === 'mine' ? 'mine' : 'all';
-      return deps.triage().analyse(id, wanted);
+      return deps.triage().analyse(id);
     },
   );
 

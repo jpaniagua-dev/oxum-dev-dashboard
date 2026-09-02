@@ -5,7 +5,6 @@ import {
   type TriagedTicket,
   type TriageProgress,
   type TriageResult,
-  type TriageScope,
   type TriageSkips,
   type TriageState,
   type TriageVerdict,
@@ -47,10 +46,10 @@ export interface TriagePanelActions {
   /**
    * Runs the analysis on one sprint. Long, so the row says so while it runs.
    *
-   * The scope travels with the click rather than being read anywhere else: it decides what the run is
+   * The sprint travels with the click rather than being read anywhere else: it decides what the run is
    * given, so the button and the run have to agree about it by construction.
    */
-  onAnalyse: (sprintId: number, scope: TriageScope) => void;
+  onAnalyse: (sprintId: number) => void;
   onSelect: (sprintId: number) => void;
   /** Opens a ticket in the browser: there is no local equivalent of a ticket. */
   onOpen: (key: string) => void;
@@ -120,17 +119,6 @@ export class TriagePanel {
    * says nothing about the next.
    */
   private verdict: TriageVerdict | null = null;
-  /**
-   * What the **next** run will be given.
-   *
-   * Session-local and never persisted, like the Jira tab's assignee filter and for the stronger
-   * version of the same reason: this one does not hide rows, it decides what a paid run reads, so a
-   * scope that came back on the next launch would quietly halve an analysis somebody paid for. It
-   * survives a sprint change, unlike the verdict, because "only my tickets" is a statement about how
-   * you work rather than about one sprint, and it sits above the sprint list where it is read before
-   * every `Analyse` rather than remembered.
-   */
-  private scope: TriageScope = 'all';
   /** Key of the ticket the overview describes. Session-local, like the verdict. */
   private ticket: string | null = null;
   /** Last state, so the elapsed clock can repaint without the app pushing a new one. */
@@ -184,7 +172,6 @@ export class TriagePanel {
 
   private renderSprints(state: TriageState): void {
     clearChildren(this.hosts.sprints);
-    this.hosts.sprints.append(this.buildScopeBar(state));
 
     if (state.sprints.length === 0) {
       this.hosts.sprints.append(
@@ -199,53 +186,6 @@ export class TriagePanel {
     for (const sprint of state.sprints) {
       this.hosts.sprints.append(this.buildSprintRow(sprint, state));
     }
-  }
-
-  /**
-   * The two scopes, above the sprints rather than in the bar on the right.
-   *
-   * This column is the one that answers "what is about to be read": the sprint is chosen here and the
-   * run is started here, so the third half of that sentence belongs here too. In the bar it would sit
-   * among the verdict counts, which describe an analysis that already happened, and the reader would
-   * have every reason to take it for a filter over those counts.
-   *
-   * Always visible, which is what makes a narrowing scope safe: a filter you can see is a question
-   * asked once, a filter you cannot is a list that silently stopped showing half the sprint. Choosing
-   * one never starts a run either, since a click that spent a minute of compute is not a toggle.
-   */
-  private buildScopeBar(state: TriageState): HTMLElement {
-    const bar = createElement('div', { className: 'triage__scope' });
-    bar.setAttribute('role', 'tablist');
-    bar.setAttribute('aria-label', 'What an analysis reads');
-
-    const options: { scope: TriageScope; label: string; title: string }[] = [
-      { scope: 'all', label: 'All', title: 'Analyse every ticket of the sprint' },
-      { scope: 'mine', label: 'Mine', title: 'Analyse only the tickets assigned to you' },
-    ];
-
-    for (const option of options) {
-      const selected = option.scope === this.scope;
-      const button = createElement('button', {
-        className: `subtab${selected ? ' subtab--active' : ''}`,
-        text: option.label,
-      });
-      button.type = 'button';
-      button.title = option.title;
-      button.setAttribute('role', 'tab');
-      button.setAttribute('aria-selected', String(selected));
-      // Disabled while a run is going, like the Analyse buttons: the scope of the run in flight is
-      // already decided, and a control that appears to change it would be lying about it.
-      button.disabled = state.running !== null;
-      button.addEventListener('click', () => {
-        this.scope = option.scope;
-        if (this.last !== null) {
-          this.render(this.last);
-        }
-      });
-      bar.append(button);
-    }
-
-    return bar;
   }
 
   private buildSprintRow(sprint: Sprint, state: TriageState): HTMLElement {
@@ -282,14 +222,11 @@ export class TriagePanel {
     const running = state.running === sprint.id;
     const button = createIconButton(ANALYSE_ICON, {
       label: running ? 'Analysing this sprint' : 'Analyse this sprint',
-      // The scope is named in the tooltip as well as shown above the list. It is the one thing about
-      // this button that changes what it costs and what it comes back with, and a control whose
-      // behaviour depends on a switch elsewhere has to say so where it is pressed.
+      // What the run will read is stated where the run is started: it is the one thing about this
+      // button that decides what it costs and what it comes back with.
       title: running
         ? 'Claude Code is reading the sprint'
-        : this.scope === 'mine'
-          ? 'Classify the tickets assigned to you, skipping what is in progress'
-          : 'Classify this sprint with Claude Code, skipping what is in progress',
+        : 'Classify this sprint with Claude Code, skipping what is in progress',
       className: `triage__analyse${running ? ' triage__analyse--running' : ''}`,
     });
     // Disabled for every sprint while one runs: they share a single process and a single file.
@@ -298,7 +235,7 @@ export class TriagePanel {
       // Selecting first, so the run you just started is the one you are watching. Without it,
       // pressing Analyse on a sprint you are not looking at leaves the panel on another one.
       this.actions.onSelect(sprint.id);
-      this.actions.onAnalyse(sprint.id, this.scope);
+      this.actions.onAnalyse(sprint.id);
     });
     row.append(button);
 
@@ -375,7 +312,7 @@ export class TriagePanel {
      *
      * The coverage sits with the age because they answer the same question, "how much of this can I
      * trust": an analysis from this morning that read four of nineteen tickets is not the answer the
-     * counts above it look like. Its own element rather than one long string, so a scope that leaves
+     * counts above it look like. Its own element rather than one long string, so a run that left
      * nothing out costs no words at all.
      */
     this.hosts.bar.append(
@@ -384,7 +321,7 @@ export class TriagePanel {
         text: describeAge(result.analysedAt),
       }),
     );
-    const coverage = describeCoverage(result.scope, result.skipped);
+    const coverage = describeCoverage(result.skipped);
     if (coverage.length > 0) {
       this.hosts.bar.append(
         createElement('span', {
@@ -842,24 +779,17 @@ export function describeWork(keys: readonly string[], estimate: number | null): 
 /**
  * What a stored analysis did **not** cover, in the fewest words that stay true.
  *
- * Empty when a full-sprint run left nothing out, because a line saying "0 skipped" is a line the eye
- * has to read every time to learn nothing. It is the only place the reader is told a list is partial,
- * which is why the scope is stated even when the counts are zero: a `mine` run of a sprint where
- * everything happens to be yours still answered a narrower question than the tab's other rows did.
+ * Empty when the run left nothing out, because a line saying "0 skipped" is a line the eye has to read
+ * every time to learn nothing. It is the only place the reader is told a list is partial.
  *
  * Pure and exported: a coverage line that quietly disagrees with the run is worse than none, since it
- * is the sentence the counts above it are trusted on.
+ * is the sentence the counts above it are trusted on. It kept a `scope` argument until 5.8.1, when the
+ * `mine` scope was removed; the shape is unchanged so a future narrowing rule adds a clause here.
  */
-export function describeCoverage(scope: TriageScope, skipped: TriageSkips): string {
+export function describeCoverage(skipped: TriageSkips): string {
   const parts: string[] = [];
-  if (scope === 'mine') {
-    parts.push('your tickets only');
-  }
   if (skipped.inProgress > 0) {
     parts.push(`${skipped.inProgress} in progress skipped`);
-  }
-  if (skipped.notMine > 0) {
-    parts.push(`${skipped.notMine} of others skipped`);
   }
   return parts.join(' · ');
 }
@@ -867,25 +797,18 @@ export function describeCoverage(scope: TriageScope, skipped: TriageSkips): stri
 /**
  * Why a finished analysis holds no ticket.
  *
- * Three different facts wear the same empty list: a sprint with nothing in it, a sprint everybody is
- * already working on, and a scope that matched none of your tickets. Only the last two are worth
- * acting on, and both are one sentence away from being obvious.
+ * Two different facts wear the same empty list: a sprint with nothing in it, and a sprint everybody is
+ * already working on. Only the second is worth acting on, and it is one sentence away from being
+ * obvious.
  *
  * Pure and exported for the reason every empty state in this app is: it is the only thing on screen,
  * so being wrong there is being wrong about the whole tab.
  */
 export function describeEmptyResult(skipped: TriageSkips): string {
-  const reasons: string[] = [];
-  if (skipped.inProgress > 0) {
-    reasons.push(`${skipped.inProgress} already in progress`);
-  }
-  if (skipped.notMine > 0) {
-    reasons.push(`${skipped.notMine} assigned to somebody else`);
-  }
-  if (reasons.length === 0) {
+  if (skipped.inProgress === 0) {
     return 'No ticket in this sprint.';
   }
-  return `Nothing left to analyse: ${reasons.join(', ')}.`;
+  return `Nothing left to analyse: ${skipped.inProgress} already in progress.`;
 }
 
 /** Counts per verdict, for the sub-tab badges. Exported for testing. */

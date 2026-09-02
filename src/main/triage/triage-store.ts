@@ -179,12 +179,11 @@ function readResult(value: unknown): TriageResult | null {
     sprintName: typeof record['sprintName'] === 'string' ? record['sprintName'] : '',
     analysedAt: typeof record['analysedAt'] === 'string' ? record['analysedAt'] : '',
     error: typeof record['error'] === 'string' ? record['error'] : null,
-    // A file written before the scope existed carries none, and `all` is what those runs did. Reading
-    // it as `mine` would relabel every old analysis as a partial one.
-    scope: record['scope'] === 'mine' ? 'mine' : 'all',
+    // A `scope` and a `notMine` count sit in every file written before 5.8.1, when the `mine` scope was
+    // removed. They are simply not read: an unknown key is dropped here like anywhere else, so an old
+    // analysis loses the two fields and keeps everything a reader acts on.
     skipped: {
       inProgress: readCount(skipped['inProgress']),
-      notMine: readCount(skipped['notMine']),
     },
     tickets: record['tickets'].flatMap((ticket) => {
       const entry = ticket as Record<string, unknown>;

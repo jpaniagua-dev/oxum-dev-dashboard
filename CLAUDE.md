@@ -943,26 +943,30 @@ exceptions:
   words, and a filter matching the string "in progress" finds neither. `done` is deliberately **not**
   filtered here: the sprint search already excludes it, and a second authority on the same exclusion
   is how the two would drift.
-- **The `mine` scope decides what a run reads, which is why it is not a display filter.** Two
-  sub-tabs at the top of the sprint column, `All` and `Mine`, because that column is where the sprint
-  is chosen and the run is started; in the bar on the right they would sit among counts describing an
-  analysis that already happened, and read as a filter over those. Matched on the **account id**, not
-  on a display name or an email: Jira Cloud hides `emailAddress` behind a privacy setting, and a
-  scope quietly matching nobody would look exactly like a sprint with no ticket of yours in it. An
-  unassigned ticket counts as somebody else's, nobody holding it. Failing to read the account id
-  **stops** the run rather than falling back to the whole sprint: forty tickets analysed after four
-  were asked for is money spent on a question nobody asked, and nothing in the list would say which
-  of the two happened. Session-local and never persisted, the stronger version of the reason the Jira
-  tab's assignee filter is not either, and always on screen, which is what makes a narrowing scope
-  safe.
-- **What was skipped is counted, stored and shown.** `TriageResult` carries its `scope` and a
-  `skipped` pair, and the bar states them next to the age. This is the same rule that adds a
-  forgotten ticket back as `unclear`: a filtered list and a short sprint are the same picture, so
-  "No ticket in this sprint" over nine in-progress tickets is the tab lying about its own filter.
-  The two reasons stay apart because they are answered differently, and the scope is named even when
-  it skipped nothing, a `mine` run of a sprint that happens to be all yours having still answered a
-  narrower question. `describeCoverage` and `describeEmptyResult` are pure and tested, being the only
-  places the difference is ever stated.
+- **A run reads the whole sprint, minus what is in progress. There is no scope.** An `All` / `Mine`
+  pair of sub-tabs sat at the top of the sprint column until 5.8.1, matched on the token account's
+  `accountId`, and it was **removed on request**: it did not behave as expected in use. The epitaph
+  matters more than the feature, because the removal is not a verdict on the idea:
+  - **No defect was found in the code**, and it was looked for. The scope was stored, repainted and
+    travelled with the click; `assignee` was requested from the Agile API and `accountId` compared,
+    never a display name or an email, which Jira Cloud hides behind a privacy setting.
+  - **The likeliest explanation is not a bug at all**, and it is the one to check first if a scope is
+    ever wanted again: in-progress tickets are skipped **before** any other rule, so a sprint whose
+    tickets assigned to you are mostly started leaves `Mine` legitimately empty, which reads exactly
+    like a filter that matches nothing. Two subtractive rules stacked on the same list is the shape
+    that produced it, and any second rule added to `selectIssues` will have it too.
+  - What went with it: `TriageScope`, `TriageResult.scope`, `TriageSkips.notMine`, the `myAccountId`
+    read in the service, the scope parameter on the `TriageAnalyse` channel, and `.triage__scope`.
+    `selectIssues` keeps its shape, returning a selection **and** its counts, which is what a
+    narrowing rule needs: putting one back is a branch there rather than a change of contract.
+- **What was skipped is counted, stored and shown.** `TriageResult` carries a `skipped` count and the
+  bar states it next to the age. This is the same rule that adds a forgotten ticket back as
+  `unclear`: a shortened list and a short sprint are the same picture, so "No ticket in this sprint"
+  over nine in-progress tickets is the tab lying about what it read. `describeCoverage` and
+  `describeEmptyResult` are pure and tested, being the only places the difference is ever stated.
+- **A stored analysis written before 5.8.1 carries a `scope` and a `notMine` count**, and they are
+  simply not read: `triage.json` is parsed key by key, so an unknown one is dropped. An old analysis
+  loses those two fields and keeps everything a reader acts on.
 - **A row can be removed from a result, and that is the one deletion needing no confirmation.**
   Right-click on the ticket, plus a `Remove from the list` button in the overview: the expert gesture
   does not have to be the discoverable one, but one of them has to be, the same pairing as the Git

@@ -3,12 +3,10 @@ import type {
   Sprint,
   TriageProgress,
   TriageResult,
-  TriageScope,
   TriageState,
 } from '@shared/contracts.js';
 import {
   listSprints,
-  readMyAccountId,
   readSprintIssues,
   searchIssues,
   type JiraCredentials,
@@ -188,7 +186,7 @@ export class TriageService {
    * it decides what the run is given, so a stored analysis that could not say whether it covered the
    * whole sprint or only your own tickets would make every "Ready 0" ambiguous.
    */
-  async analyse(sprintId: number, scope: TriageScope): Promise<TriageState> {
+  async analyse(sprintId: number): Promise<TriageState> {
     if (this.running !== null) {
       // One at a time: the run is long and costs tokens, and two would race on the same file.
       return this.state();
@@ -212,7 +210,7 @@ export class TriageService {
     this.push();
 
     try {
-      const result = await this.run(sprint, scope);
+      const result = await this.run(sprint);
       await this.store.save(result);
     } catch (failure) {
       this.error = failure instanceof Error ? failure.message : String(failure);
@@ -223,7 +221,7 @@ export class TriageService {
     return this.push();
   }
 
-  private async run(sprint: Sprint, scope: TriageScope): Promise<TriageResult> {
+  private async run(sprint: Sprint): Promise<TriageResult> {
     const previous = this.store.get(sprint.id);
     const keep = (error: string): TriageResult => ({
       sprintId: sprint.id,
@@ -231,10 +229,9 @@ export class TriageService {
       analysedAt: previous?.analysedAt ?? '',
       tickets: previous?.tickets ?? [],
       error,
-      // The scope and the counts of the answer being **kept**, not of the run that just failed: they
-      // describe the tickets on screen, and those are the previous ones.
-      scope: previous?.scope ?? scope,
-      skipped: previous?.skipped ?? { inProgress: 0, notMine: 0 },
+      // The counts of the answer being **kept**, not of the run that just failed: they describe the
+      // tickets on screen, and those are the previous ones.
+      skipped: previous?.skipped ?? { inProgress: 0 },
     });
 
     const credentials = await this.credentials();
@@ -247,30 +244,13 @@ export class TriageService {
       return keep(error);
     }
 
-    /*
-     * Who "me" is, asked of Jira and only when the scope needs it.
-     *
-     * A failure here **stops** the run rather than falling back to the whole sprint: analysing forty
-     * tickets after being asked for four is money spent on a question nobody asked, and the reader
-     * would have no way of telling from the list which of the two happened.
-     */
-    let myAccountId = '';
-    if (scope === 'mine') {
-      const me = await readMyAccountId(credentials);
-      if (me.error !== null) {
-        return keep(`Jira could not say who you are: ${me.error}`);
-      }
-      myAccountId = me.accountId;
-    }
-
-    const { analysed, skipped } = selectIssues(issues, scope, myAccountId);
+    const { analysed, skipped } = selectIssues(issues);
     const empty = (error: string | null): TriageResult => ({
       sprintId: sprint.id,
       sprintName: sprint.name,
       analysedAt: now(),
       tickets: [],
       error,
-      scope,
       skipped,
     });
     if (analysed.length === 0) {
@@ -314,7 +294,6 @@ export class TriageService {
       analysedAt: now(),
       tickets,
       error: null,
-      scope,
       skipped,
     };
   }
