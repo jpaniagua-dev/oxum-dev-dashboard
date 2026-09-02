@@ -110,6 +110,23 @@ export async function tryGit(
  * git's stderr is far more informative than `Command failed with exit code 1`, and the first line is
  * almost always the reason; the rest is advice addressed to a terminal user.
  */
+/**
+ * The name to hand a **pty** when git is the program being launched.
+ *
+ * `.exe` is not decoration and it is not the same rule as everywhere else in this file. `execFile`
+ * and `CreateProcessW` both append the extension themselves, so `git` is enough for the dozens of
+ * calls above. **`node-pty` does not**: `pty.spawn('git', ...)` throws `File not found`, while
+ * `pty.spawn('git.exe', ...)` resolves it from `PATH` and runs. Verified on this machine on
+ * 2026-09-02, and it had shipped broken: the Git tab's commit and amend both launched a tab whose
+ * only content was `Could not launch git`, which reads as git being absent from the machine.
+ *
+ * It lives here rather than at the call site because this module is the single answer to "how is git
+ * called in this app", and the pty is one of the two ways. `test/windows-pty.test.ts` pins it against
+ * a real pty, which is the only thing that can catch this: no type and no lint rule can tell that one
+ * spawner needs an extension the other does not.
+ */
+export const GIT_PTY_FILE = 'git.exe';
+
 export function describeGitError(error: unknown): string {
   if (error instanceof Error) {
     const stderr = (error as { stderr?: string }).stderr;

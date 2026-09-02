@@ -147,7 +147,6 @@ const CLEAN: GitState = {
   behind: 0,
   ahead: 0,
   hasUpstream: true,
-  stashes: 0,
   error: null,
 };
 

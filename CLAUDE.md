@@ -1580,6 +1580,52 @@ the pairing the Git tab's `...` button and the fold's double-click already recor
   rebuilt. Pinned by a test in `test/project-order.test.ts`, because it is the property that would
   break silently if grouping ever started dropping or adding an entry.
 
+## Performance: a process is not cheap here
+
+Measured on 2026-09-02 after the app grew visible micro-freezes, up to a second while typing in the
+terminal. The renderer was innocent (0.39 CPU seconds over a 30 s idle window, against **3.73 for the
+main process**, 12% of a core to poll and nothing else). Everything below is a number, not a theory.
+
+- **Creating a process costs 31 ms on a managed Windows machine.** `cmd /c exit`, which does nothing
+  at all: 31 ms. `git --version`: 37 ms. `gh --version`: **79 ms**. Against 3 to 8 ms unmanaged. Two
+  real-time scanners hook process creation there and the exclusion list is locked by policy, so this
+  is not a setting anyone can turn off. **Design as if starting a process were expensive**, because
+  here it is.
+- **`uv_spawn` creates processes synchronously on the event loop thread**, so every spawn *blocks* the
+  main process rather than merely occupying it. And a keystroke's echo travels renderer to main to pty
+  to main to renderer: a blocked main loop is literally a frozen terminal. That is the whole mechanism,
+  and it is why the fix is about **counting spawns**, not about making git faster.
+- **Measured worst timer lateness during one poll**, on the real ten-project configuration:
+
+  | shape | spawns | loop blocked |
+  |---|---|---|
+  | four git calls per project, all at once (until 5.8.1) | 40 | 489 ms, 1390 ms cold |
+  | four git calls per project, pool of 4 | 40 | 208 ms |
+  | one git call per project, all at once | 10 | 48 ms |
+  | **one git call per project, pool of 4 (now)** | **10** | **10 ms** |
+  | two `gh` calls per project, all at once (until 5.8.1) | 20 | 1799 ms |
+  | two `gh` calls per project, pool of 4 | 20 | 392 ms |
+
+- **`readGitState` makes ONE call**, `git status --porcelain=v2 --branch`, which answers the branch,
+  the upstream, the gap and every changed file at once. It made four, and 148 of those 170 ms per
+  project were the creation tax rather than git working. Do not split it back up for tidiness: the
+  parser is `parsePorcelainV2`, pure and tested, and the two traps it records (a **missing**
+  `branch.upstream` is what "no upstream" looks like; `branch.ab` prints **ahead first**, the opposite
+  order from `rev-list`) are the whole reason it is not three functions.
+- **Every poll goes through `mapWithLimit` with `POLL_CONCURRENCY`.** The pool does **not** reduce the
+  work, and that is the honest framing: it converts one long stall into several short ones. Cutting the
+  call count is the lever that reduces work and is applied first. The limit is 4 because that is where
+  the stall drops below one frame while the wall time stays within a few percent.
+- **The two GitHub columns are chained, not fired together.** They share the checks tick, and two
+  pooled refreshes started at the same instant put twice the pool in flight. `refreshAll` stays
+  parallel on purpose: it answers a click, and the user is waiting on it.
+- **A field nothing displays still costs a process.** `GitState.stashes` was read by a `git stash list`
+  per project per poll and had **no consumer at all**. Before adding a number to a polled shape, name
+  the thing that shows it.
+- **The portable build is not the cause and was suspected.** It unpacks to a fresh temporary folder on
+  each launch, which the scanner has never seen, so the launch and the first poll are slower (that is
+  the 1390 ms cold figure). Steady-state typing is identical.
+
 ## Verified traps
 
 - **`stripAnsi` must be anchored on `\x1b`.** Without the anchor, the pattern eats `[ERROR]` itself.
@@ -1591,6 +1637,19 @@ the pairing the Git tab's `...` button and the fold's double-click already recor
 - **The pty is a prebuilt Node-API binary** (`@lydell/node-pty`), so it loads into Electron without
   recompilation. The machine has no Visual Studio C++ workload: do not introduce a native dependency
   that would require `node-gyp`.
+- **node-pty does NOT append `.exe`, and it is the only spawner here that does not.**
+  `pty.spawn('git', ...)` throws `File not found`; `pty.spawn('git.exe', ...)` resolves it from `PATH`
+  and runs. `execFile` and `CreateProcessW` both add the extension themselves, which is why `git` is
+  enough for every other call in the app and why this one looked right. It shipped broken: the Git
+  tab's commit **and** amend opened a tab whose only content was `Could not launch git`, which reads
+  as git being absent from the machine. Hence `GIT_PTY_FILE` in `run-git.ts`, next to the runner that
+  already owns "how git is called here", and a real-pty test in `test/terminal-manager.test.ts` that
+  pins **both** directions: no type and no lint rule can tell that one spawner needs an extension the
+  other does not.
+- **ConPTY splits the first character of a program's output from the rest.** It emits that character,
+  then the window-title OSC sequence, then the remainder, so a raw buffer reads
+  `g<title escape>it version`. Any test or parser matching a word at the start of a pty's output has
+  to go through `stripAnsi` first, whose OSC branch closes the word back up.
 - **Packaging**: `**/*.node` must be in `asarUnpack`. Two targets are produced, NSIS and portable, and
   the portable one needs its own `artifactName`: both emit a `.exe` and would fight over the same file
   name. They deliberately share the `appId`, and therefore the same `userData` and the same

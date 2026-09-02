@@ -53,6 +53,7 @@ import {
 } from './git/git-commands.js';
 import { generateCommitMessage } from './git/generate-commit.js';
 import { readGitState } from './git/git-service.js';
+import { GIT_PTY_FILE } from './git/run-git.js';
 import { readAllWorktrees } from './git/git-worktrees.js';
 import {
   buildWorktreeCommand,
@@ -488,11 +489,14 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         project,
         actionId: GIT_COMMIT_ACTION_ID,
         title: `${project.label} · ${amend === true ? 'amend' : 'commit'}`,
-        // `git` straight from PATH, no shell: the app already calls it that way everywhere else.
+        // git straight from PATH, no shell: the app already calls it that way everywhere else.
         // `--cleanup=strip` drops comment lines and trailing blanks the way an editor session would.
         // The amend runs in the same tab for the same reason the commit does: it fires the very same
         // hooks, and rewriting HEAD silently is worse than rewriting it in front of the user.
-        file: 'git',
+        //
+        // `GIT_PTY_FILE` and not `'git'`: node-pty is the one spawner in this app that does not append
+        // `.exe`, so a bare name throws and the tab shows `Could not launch git`. See its own note.
+        file: GIT_PTY_FILE,
         args:
           amend === true
             ? ['commit', '--amend', '--cleanup=strip', '-F', file]

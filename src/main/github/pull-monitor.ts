@@ -1,4 +1,5 @@
 import type { AppSettings, Project, ProjectId, RepoPulls } from '@shared/contracts.js';
+import { POLL_CONCURRENCY, mapWithLimit } from '../concurrency.js';
 import { readRemoteSlug } from '../git/git-service.js';
 import { readRepoPulls } from './pulls-service.js';
 import { readViewerLogin } from './viewer.js';
@@ -70,26 +71,27 @@ export class PullMonitor {
     const login = await readViewerLogin();
     const targets = this.projects.filter((project) => this.followed(project.id));
 
-    await Promise.all(
-      targets.map(async (project) => {
-        const slug = await this.slugOf(project);
-        if (slug === null) {
-          // Not a GitHub remote: recorded as such so the row can say why it is empty rather than look
-          // like a failed lookup.
-          this.pulls.set(project.id, { ...idle(project), checkedAt: new Date().toISOString() });
-          return;
-        }
-        const { pulls, error } = await readRepoPulls(slug, login);
-        this.pulls.set(project.id, {
-          projectId: project.id,
-          label: project.label,
-          slug,
-          pulls,
-          checkedAt: new Date().toISOString(),
-          error,
-        });
-      }),
-    );
+    // Pooled: one `gh pr list` per followed repository, and `gh` costs 79 ms of pure process creation
+    // on a machine with endpoint protection, blocking the event loop each time. See
+    // `main/concurrency.ts` for the measurements.
+    await mapWithLimit(targets, POLL_CONCURRENCY, async (project) => {
+      const slug = await this.slugOf(project);
+      if (slug === null) {
+        // Not a GitHub remote: recorded as such so the row can say why it is empty rather than look
+        // like a failed lookup.
+        this.pulls.set(project.id, { ...idle(project), checkedAt: new Date().toISOString() });
+        return;
+      }
+      const { pulls, error } = await readRepoPulls(slug, login);
+      this.pulls.set(project.id, {
+        projectId: project.id,
+        label: project.label,
+        slug,
+        pulls,
+        checkedAt: new Date().toISOString(),
+        error,
+      });
+    });
 
     this.onChange(this.rows());
   }

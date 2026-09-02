@@ -211,8 +211,15 @@ export interface GitState {
    * column has nothing to look up and the dashboard should say so rather than show an error.
    */
   readonly hasUpstream: boolean;
-  readonly stashes: number;
-  /** Set when git itself failed, e.g. the path is not a repository. */
+  /**
+   * Set when git itself failed, e.g. the path is not a repository.
+   *
+   * A `stashes` count sat here until 5.8.1 and was read on every poll, for every project, by a `git
+   * stash list` of its own. **Nothing ever displayed it**: the Git tab reads `GitRepoState.stashes`,
+   * a richer shape fetched on demand, and the Worktrees tab deliberately hides the number because a
+   * stash belongs to the clone rather than to a worktree. So it cost one process per project per poll
+   * to answer a question nobody asked. Do not put it back without a consumer.
+   */
   readonly error: string | null;
 }
 

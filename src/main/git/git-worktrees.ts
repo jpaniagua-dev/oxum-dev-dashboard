@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
 import type { Project, RepoWorktrees, Worktree } from '@shared/contracts.js';
+import { POLL_CONCURRENCY, mapWithLimit } from '../concurrency.js';
 import { readGitState } from './git-service.js';
 import { describeGitError, git } from './run-git.js';
 
@@ -173,13 +174,16 @@ export async function readRepoWorktrees(project: Project): Promise<RepoWorktrees
     return { ...base, worktrees: [], error: describeGitError(error) };
   }
 
-  const worktrees = await Promise.all(
-    entries.map(
-      async (entry): Promise<Worktree> => ({
-        ...entry,
-        git: entry.prunable === null ? await readGitState(entry.path) : null,
-      }),
-    ),
+  // Pooled like the project poll, and for the same measured reason: this is the widest read in the
+  // app, one `worktree list` per project and then a status per worktree, and every one of those is a
+  // process whose creation blocks the event loop. See `main/concurrency.ts`.
+  const worktrees = await mapWithLimit(
+    entries,
+    POLL_CONCURRENCY,
+    async (entry): Promise<Worktree> => ({
+      ...entry,
+      git: entry.prunable === null ? await readGitState(entry.path) : null,
+    }),
   );
 
   return { ...base, worktrees, error: null };

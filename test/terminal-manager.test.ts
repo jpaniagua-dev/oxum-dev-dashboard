@@ -13,6 +13,8 @@ import {
   type ShellProfile,
   type TerminalSession,
 } from '../src/shared/contracts.js';
+import { GIT_PTY_FILE } from '../src/main/git/run-git.js';
+import { stripAnsi } from '../src/main/projects/output-parser.js';
 
 function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {
@@ -199,6 +201,87 @@ function serverProject(command: string): { project: Project; action: ProjectActi
     action: serverAction,
   };
 }
+
+/*
+ * The Git tab's commit and amend, launched the way the tab launches them.
+ *
+ * Driven through `runProjectCommand` against a real pty rather than by asserting a string, because
+ * the bug this pins was invisible to every other kind of test: `pty.spawn('git', ...)` **throws**
+ * `File not found` on Windows, where `execFile('git', ...)` and `CreateProcessW` both append `.exe`
+ * themselves. node-pty is the one spawner in this app that does not, so the Git tab shipped with a
+ * commit and an amend that opened a tab reading `Could not launch git`, which any reader would take
+ * for git being absent from the machine.
+ *
+ * No type and no lint rule can catch that: both spellings are strings, and the failing one is the one
+ * that looks right everywhere else in the codebase.
+ */
+describe.runIf(onWindows)('the git binary a pty is handed', () => {
+  const gitProject = (): Project => ({
+    id: 'git-fixture',
+    label: 'Fixture',
+    path: process.cwd(),
+    actions: [],
+    kind: 'server',
+    expectedPort: null,
+    tags: [],
+  });
+
+  const manager = (): TerminalManager =>
+    new TerminalManager({
+      onOutput: () => {},
+      onParsed: () => {},
+      onProjectStartExit: () => {},
+      onSessionsChanged: () => {},
+      onLayoutChanged: () => {},
+    });
+
+  it('launches and runs under GIT_PTY_FILE', async () => {
+    const instance = manager();
+    const id = instance.runProjectCommand({
+      project: gitProject(),
+      actionId: GIT_COMMIT_ACTION_ID,
+      title: 'Fixture commit',
+      file: GIT_PTY_FILE,
+      args: ['--version'],
+      size: { cols: 80, rows: 24 },
+    });
+    expect(id).not.toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    /*
+     * Stripped before matching, and that is not tidiness. ConPTY emits the first character of the
+     * output, then the window-title OSC sequence, then the rest, so the raw buffer literally reads
+     * `g<title escape>it version`: a plain `toContain('git version')` fails on a run that worked.
+     * `stripAnsi` is the app's own, and its OSC branch is what closes the word back up.
+     */
+    const buffer = stripAnsi(instance.buffer(id as string));
+    expect(buffer).toContain('git version');
+    expect(buffer).not.toContain('Could not launch');
+    instance.stopAll();
+  }, 15_000);
+
+  it('does NOT launch under a bare name, which is why the constant exists', async () => {
+    /*
+     * Pinning a quirk of a dependency, deliberately, because it is the reason for a line of code that
+     * otherwise looks redundant. If node-pty ever starts resolving a bare name, this test fails and
+     * that failure is the signal to simplify `GIT_PTY_FILE` away, not to weaken the assertion.
+     */
+    const instance = manager();
+    const id = instance.runProjectCommand({
+      project: gitProject(),
+      actionId: GIT_COMMIT_ACTION_ID,
+      title: 'Fixture commit',
+      file: 'git',
+      args: ['--version'],
+      size: { cols: 80, rows: 24 },
+    });
+    expect(id).not.toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(instance.buffer(id as string)).toContain('Could not launch git');
+    instance.stopAll();
+  }, 15_000);
+});
 
 describe.runIf(onWindows)('exit reporting', () => {
   it('reports the exit of a session it still owns', async () => {

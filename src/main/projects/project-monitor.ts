@@ -8,6 +8,7 @@ import type {
   ServerState,
   WorkflowsState,
 } from '@shared/contracts.js';
+import { POLL_CONCURRENCY, mapWithLimit } from '../concurrency.js';
 import { readGitState, readRemoteSlug } from '../git/git-service.js';
 import { readChecksState } from '../github/checks-service.js';
 import { readWorkflowsState } from '../github/runs-service.js';
@@ -102,9 +103,13 @@ export class ProjectMonitor {
     // Workflow runs ride the checks cadence rather than getting a timer of their own: same cost class
     // (one `gh` call per project, over the network) and same thing being watched, so a second setting
     // would only offer a way to make the two GitHub columns disagree about how stale they are.
+    //
+    // Chained rather than fired together, which is the other half of the concurrency limit: two pooled
+    // refreshes started at the same instant put twice the pool in flight, and `gh` is the most
+    // expensive process this app starts (79 ms of pure creation cost, measured). One after the other
+    // keeps the tick inside one pool's worth of spawns.
     this.checksTimer = setInterval(() => {
-      void this.refreshChecks();
-      void this.refreshWorkflows();
+      void this.refreshGitHub();
     }, this.settings().checksPollSeconds * 1000);
   }
 
@@ -119,10 +124,22 @@ export class ProjectMonitor {
     }
   }
 
-  /** Forces a full refresh, for the manual refresh button. */
+  /**
+   * Forces a full refresh, for the manual refresh button.
+   *
+   * Left parallel across the three sources, unlike the timer tick: this one answers a click, the user
+   * is waiting on it, and each source is pooled internally. A burst of three pools is 12 spawns at
+   * worst, on a gesture nobody makes twice a second.
+   */
   async refreshAll(): Promise<ProjectRow[]> {
     await Promise.all([this.refreshGit(), this.refreshChecks(), this.refreshWorkflows()]);
     return this.rows();
+  }
+
+  /** The two GitHub columns, one after the other. See the note in `start`. */
+  private async refreshGitHub(): Promise<void> {
+    await this.refreshChecks();
+    await this.refreshWorkflows();
   }
 
   /* ------------------------------------------------------------ server side */
@@ -191,12 +208,10 @@ export class ProjectMonitor {
   /* --------------------------------------------------------------- git side */
 
   private async refreshGit(): Promise<void> {
-    const results = await Promise.all(
-      this.projects.map(async (project) => ({
-        id: project.id,
-        state: await readGitState(project.path),
-      })),
-    );
+    const results = await mapWithLimit(this.projects, POLL_CONCURRENCY, async (project) => ({
+      id: project.id,
+      state: await readGitState(project.path),
+    }));
     for (const { id, state } of results) {
       this.git.set(id, state);
     }
@@ -206,15 +221,13 @@ export class ProjectMonitor {
   /* ------------------------------------------------------------ checks side */
 
   private async refreshChecks(): Promise<void> {
-    const results = await Promise.all(
-      this.projects.map(async (project) => {
-        // The git state decides whether a lookup is worth making at all: a branch with no upstream
-        // cannot have a pull request.
-        const git = this.git.get(project.id);
-        const hasUpstream = git?.hasUpstream ?? false;
-        return { id: project.id, state: await readChecksState(project.path, hasUpstream) };
-      }),
-    );
+    const results = await mapWithLimit(this.projects, POLL_CONCURRENCY, async (project) => {
+      // The git state decides whether a lookup is worth making at all: a branch with no upstream
+      // cannot have a pull request.
+      const git = this.git.get(project.id);
+      const hasUpstream = git?.hasUpstream ?? false;
+      return { id: project.id, state: await readChecksState(project.path, hasUpstream) };
+    });
     for (const { id, state } of results) {
       this.checks.set(id, state);
     }
@@ -224,12 +237,10 @@ export class ProjectMonitor {
   /* --------------------------------------------------------- workflows side */
 
   private async refreshWorkflows(): Promise<void> {
-    const results = await Promise.all(
-      this.projects.map(async (project) => ({
-        id: project.id,
-        state: await readWorkflowsState(await this.slugOf(project)),
-      })),
-    );
+    const results = await mapWithLimit(this.projects, POLL_CONCURRENCY, async (project) => ({
+      id: project.id,
+      state: await readWorkflowsState(await this.slugOf(project)),
+    }));
     for (const { id, state } of results) {
       this.workflows.set(id, state);
     }
