@@ -1127,8 +1127,23 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/*
+ * The last section has to be tall enough to be scrolled to the TOP, and that is a fix rather than a
+ * detail of taste.
+ *
+ * A scroller stops at `scrollHeight - clientHeight`, so a section whose remaining content is shorter
+ * than the viewport can never reach the top: clicking `Jira` in the rail scrolled as far as it could
+ * and left the section starting halfway down the window. The rail then disagreed with the screen on
+ * top of it, because `watchSections` only counts a section as current while its top sits in the top
+ * 20% of the scroller (`rootMargin: 0 0 -80% 0`), a band the last section could never enter.
+ *
+ * One rule fixes both symptoms: given a viewport's worth of height, the section reaches the top, and
+ * the observer then sees it arrive with no change of its own. The trailing space below a short form is
+ * the price, and it is the end of the page.
+ */
 .settings__section:last-child {
   border-bottom: 0;
+  min-height: 100%;
 }
 
 .settings__section-title {
