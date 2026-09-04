@@ -12,12 +12,14 @@ import type {
   GitSyncOp,
   Project,
   ProjectId,
+  TagColors,
 } from '@shared/contracts.js';
 import { hasStagedChanges, hasWorktreeChange, isStaged } from '@shared/git-changes.js';
 import { clearChildren, createElement, createIcon, createIconButton, hitsInteractive } from './dom.js';
 import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
 import { presentChange, presentTrack } from './presenters.js';
+import { buildTagDots, type TagPalette } from './tags.js';
 
 /**
  * Which working area the middle column shows.
@@ -68,6 +70,14 @@ export interface GitPanelHosts {
 export interface GitPanelState {
   /** Every watched project: the Git tab follows all of them, not just the ones with pull requests. */
   readonly projects: readonly Project[];
+  /**
+   * `tagKey -> colour`, for the dots beside the names in the repository column.
+   *
+   * The words come off `projects`, which already carries them; only the colour map has to be handed
+   * over, and it is the whole map rather than a per-project slice because the colour belongs to the
+   * tag and one row cannot be told what a word is painted anywhere else.
+   */
+  readonly tagColors: TagColors;
   readonly selectedProject: ProjectId | null;
   /** Null while the first read of the selected repository is still in flight. */
   readonly repo: GitRepoState | null;
@@ -235,6 +245,8 @@ export function renderGitPanel(
 function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelActions): void {
   clearChildren(host);
 
+  const palette: TagPalette = { projects: state.projects, colors: state.tagColors };
+
   for (const project of state.projects) {
     const active = project.id === state.selectedProject;
     // The wrapper exists only so the terminal icon can be a sibling of the row; see `buildRepoTerminal`.
@@ -243,6 +255,12 @@ function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelA
       className: `pulls__repo${active ? ' pulls__repo--active' : ''}`,
     });
     row.type = 'button';
+    // Before the name, same as in the pull request column and for the same reason: the dots of every
+    // row then start on one edge, which is what makes a column of them scannable.
+    const dots = buildTagDots(palette, project.id);
+    if (dots !== null) {
+      row.append(dots);
+    }
     row.append(createElement('span', { className: 'pulls__repo-name', text: project.label }));
 
     // Only the selected repository has been read, so only it can show a count. Guessing one for the

@@ -1,12 +1,8 @@
-import type { Project, ProjectId, ProjectRow, TagColor, TagColors } from '@shared/contracts.js';
-import {
-  MAX_TAGS_PER_PROJECT,
-  TAG_COLORS,
-  hasTag,
-  tagColorOf,
-} from '@shared/project-tags.js';
+import type { ProjectId, ProjectRow, TagColor, TagColors } from '@shared/contracts.js';
+import { MAX_TAGS_PER_PROJECT, hasTag } from '@shared/project-tags.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, hitsInteractive } from './dom.js';
+import { buildTagChips } from './tags.js';
 import {
   canStop,
   presentChecks,
@@ -463,96 +459,6 @@ function above(tr: HTMLTableRowElement, clientY: number): boolean {
 }
 
 /**
- * The project name, renameable in place on a double-click.
- *
- * Enter commits, Escape cancels, blur commits: clicking away after typing a name is far more common
- * than wanting to discard it. The caller is told when an edit opens so it can hold off re-rendering,
- * because this table refreshes on every git poll and would otherwise wipe the field mid-typing.
- */
-/**
- * The tags of a row, as chips, each in its tag's colour.
- *
- * The colour is carried by a **border and a dot**, never by the text on a coloured ground, and that is
- * what keeps a chip from reading as a sixth pill state: the status pills of the columns to the right
- * put their colour in the text. Two kinds of statement, two kinds of paint, in a row where they sit
- * side by side.
- *
- * Returns `null` rather than an empty element, so an untagged project costs no node.
- */
-function buildTags(
-  project: Project,
-  colors: TagColors,
-  actions: TableActions,
-): HTMLElement | null {
-  const tags = project.tags;
-  if (tags.length === 0) {
-    return null;
-  }
-  const host = createElement('span', { className: 'cell-tags' });
-  for (const tag of tags) {
-    const color = tagColorOf(colors, tag);
-    const chip = createElement('span', {
-      className: `tag tag--${color} tag--menu`,
-      title: `${tag}\n(right-click: colour or remove)`,
-    });
-    chip.append(createElement('span', { className: 'tag__dot' }));
-    chip.append(createElement('span', { text: tag }));
-
-    /*
-     * The chip answers its own right click, which is the fast path: two levels, and the tag is already
-     * named by the thing that was aimed at. The alternative was a third level under the row's menu
-     * (pick a tag, then pick a colour), and a three-deep chain of context menus for a choice among six
-     * words is the version nobody uses twice.
-     *
-     * `stopPropagation` so the row's own menu does not also open: they would stack at the same point,
-     * the second replacing the first, and the user would see the wrong one.
-     */
-    chip.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      showContextMenu(
-        event.clientX,
-        event.clientY,
-        buildTagMenuItems(project, tag, color, actions),
-      );
-    });
-
-    host.append(chip);
-  }
-  return host;
-}
-
-/**
- * What can be done to one tag, from its own chip.
- *
- * The colours come first because they are why the menu exists, and the current one is **skipped**
- * rather than shown ticked: `MenuItem` has no checked state, a disabled entry in a list of six would
- * read as a colour that is unavailable, and the chip that was right-clicked is already painted in it.
- */
-function buildTagMenuItems(
-  project: Project,
-  tag: string,
-  current: TagColor,
-  actions: TableActions,
-): MenuItem[] {
-  const items: MenuItem[] = TAG_COLORS.filter((color) => color !== current).map((color) => ({
-    label: color,
-    hint: `Paints ${tag} ${color}, on every project carrying it`,
-    run: () => actions.onRecolorTag(tag, color),
-  }));
-
-  // Last, being the one entry that is not about colour, and the one that changes this project rather
-  // than the tag: the same word stays on every other row that carries it.
-  items.push({
-    label: `Remove from ${project.label}`,
-    hint: `${tag} stays on the other projects carrying it`,
-    run: () => actions.onRemoveTag(project.id, tag),
-  });
-
-  return items;
-}
-
-/**
  * The project cell, plus the two gestures that open a field in it.
  *
  * Returns them rather than only its element, because both are reachable from **two** places now: the
@@ -567,6 +473,13 @@ interface ProjectNameCell {
   readonly startTagInput: () => void;
 }
 
+/**
+ * The project name, renameable in place on a double-click.
+ *
+ * Enter commits, Escape cancels, blur commits: clicking away after typing a name is far more common
+ * than wanting to discard it. The caller is told when an edit opens so it can hold off re-rendering,
+ * because this table refreshes on every git poll and would otherwise wipe the field mid-typing.
+ */
 function buildProjectName(
   row: ProjectRow,
   colors: TagColors,
@@ -639,7 +552,7 @@ function buildProjectName(
    */
   const line = createElement('span', { className: 'cell-project__line' });
   line.append(label);
-  const tags = buildTags(row.project, colors, actions);
+  const tags = buildTagChips(row.project, colors, actions);
   if (tags !== null) {
     line.append(tags);
   }

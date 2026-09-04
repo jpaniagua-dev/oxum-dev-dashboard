@@ -3,6 +3,7 @@ import { clearChildren, createElement, createIconButton, hitsInteractive } from 
 import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
 import { presentInvolvement, presentPullChecks, presentReview } from './presenters.js';
+import { buildTagDots, type TagPalette } from './tags.js';
 
 /** The two sub-tabs, in display order. Labelled here so the view and its counts stay together. */
 export const PULL_SCOPES: readonly { id: PullScope; label: string; hint: string }[] = [
@@ -70,6 +71,7 @@ export function renderPullList(
   repos: readonly RepoPulls[],
   selected: ProjectId | null,
   scope: PullScope,
+  tags: TagPalette,
   actions: PullListActions,
 ): void {
   clearChildren(hosts.repos);
@@ -94,6 +96,17 @@ export function renderPullList(
       className: `pulls__repo${repo.projectId === active?.projectId ? ' pulls__repo--active' : ''}`,
     });
     row.type = 'button';
+    /*
+     * Before the name and not after it, so the dots of the whole column line up on one edge: a strip
+     * that followed the name would sit at a different offset on every row, which is the alignment this
+     * column is scanned on. Absent entirely for an untagged repository rather than reserved as an
+     * empty gutter: most of a workspace carries no tag at all, so the gutter would be paid for by
+     * every row to align the few that have one.
+     */
+    const dots = buildTagDots(tags, repo.projectId);
+    if (dots !== null) {
+      row.append(dots);
+    }
     row.append(createElement('span', { className: 'pulls__repo-name', text: repo.label }));
 
     if (repo.error !== null) {

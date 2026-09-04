@@ -1255,6 +1255,54 @@ exceptions:
   container dropped into a grid cell unchanged is the clearest sign `createTerminalView` was cut at the
   right seam.
 
+### Ending a terminal from the tile
+
+Added on 2026-09-04. The window could show a server and hand it back, and not end it: every tile in it
+is a `server`, so the dashboard's cross was never available for one, and there was no `Stop` here
+either. Killing a build meant a trip back to the dashboard for the row's own button.
+
+- **ONE slot with two states, driven by `session.closable`.** That is the field the main process
+  already derives for this exact question, so a tile and a dashboard tab can never disagree about
+  whether a process may be ended: a shell and a one-shot task always may, a `server` only once it has
+  stopped. Reading the same field is also what makes a shell dragged into this window behave here the
+  way it does over there, with no rule of this window's own.
+- **A bare cross was the obvious version and is refused.** `TerminalManager.close` does stop a running
+  process on its way out, so a single `×` would have worked mechanically, and that is precisely the
+  trap: this window is several running builds side by side, and one misclick would take one down with
+  no step in between. Two states cost a click and turn a slip into a stop, whose tab and output survive.
+- **Not two buttons with one of them permanently disabled**, on a window whose tiles are servers by
+  construction: that is the dead control the projects table refuses on `Add a tag` at its cap.
+- **The session is looked up at CLICK time.** The head is built once per tile and survives every
+  render, so a handler closed over the session the tile was born with would still be stopping a process
+  that exited ten minutes ago. `this.sessions` is replaced whole on every broadcast, so reading it in
+  the handler is reading the state the button is painted for.
+- **`paintLifecycle` runs from `ensure`, not from `paintPhases`.** The two follow different clocks, the
+  same split the phase pill already records: the phase changes on the project monitor's poll, while
+  this entry flips when a process exits, which is a **session** broadcast. Putting it in the phase pass
+  would have it follow the wrong one.
+- **`stopPty`, never `stopProjectServer`.** A tile IS a session and it knows which one. Going through
+  the project would ask the manager to find "a" running server action for it, which is the same pty
+  here and an indirection that can only ever aim at the wrong one. The projects table uses the other
+  call because a row is a project, not a session.
+- **The stop square is small and NEUTRAL, and only the cross is painted.** `--primary` is this app's
+  red: right on the send-back arrow beside it, which is a hairline glyph, and wrong on `■`, which at
+  the head's font size is a solid block, so the accent turned every *healthy* server into a red mark on
+  hover. That is the one thing this interface's colour rule forbids. The cross takes
+  `.terminal__tab-close`'s own values, size included: `■` stops a process that keeps its output and is
+  recoverable, `×` forgets the session in both windows, and one vocabulary for "this discards
+  something" beats a shade chosen fresh here.
+- **Both controls stay quiet until the tile is hovered**, like the send-back arrow always has. For this
+  one the fade earns a second keep: a permanently lit kill switch on each of four builds is a row of
+  things to misclick. `:focus-visible` keeps both reachable by keyboard regardless.
+- **Two `min-width: 0` were needed in the head, and their absence was a latent bug.** The tile is a
+  **grid** and the head is one of its items, so it defaulted to `min-width: auto` and refused to shrink
+  below its content: measured at 336px inside a 290px tile, which is how a long title pushed the
+  send-back button out through the right edge instead of truncating. The title had the same default.
+  Letting the title shrink was necessary and not sufficient, the head being the box that was too wide;
+  both lines are needed, the head agreeing to be narrow and the title being what gives way. Three
+  columns of tiles is a normal arrangement here and `neos-rating-acquisition-front · run` a normal
+  title, so this was reachable before the second control existed and simply less visible.
+
 ## Claude Code runs: three of them, three models
 
 - **Three settings and not one, and the reason is not configurability for its own sake.** These are
@@ -1598,6 +1646,160 @@ the pairing the Git tab's `...` button and the fold's double-click already recor
   is a permutation, so `sameProjectSet` holds and the monitors adopt the new order instead of being
   rebuilt. Pinned by a test in `test/project-order.test.ts`, because it is the property that would
   break silently if grouping ever started dropping or adding an entry.
+
+### The Worktrees tab's `PR checks` column
+
+Added on 2026-09-04, the projects table's `Checks` column asked for on a tab whose rows are branches.
+
+- **It is a JOIN, not a query, and that is the whole design.** The obvious build was
+  `readChecksState(worktree.path, ...)`: that function runs `gh pr view` in a folder and reads the pull
+  request of whatever is checked out there, which is exactly the question, and a worktree is exactly a
+  folder with its own branch. Refused on cost. `gh --version` alone measures 79 ms here (see the
+  performance section below), a `gh pr view` is that plus a network round trip, and this would be one
+  per worktree on every poll, on the tab whose read is already the widest in the strip. Meanwhile
+  `gh pr list` runs once per followed repository and already returns `headRefName` and
+  `statusCheckRollup` for every open pull request, because the pull request tab needs both. So the
+  answer is in a payload the renderer holds, and `presentWorktreeChecks` matches a branch name against
+  it. No new IPC, no new service, no new spawn.
+- **`presentWorktreeChecks` takes a branch and a repository's pulls, not a row.** What it does is match
+  a name against a list; handing it the whole worktree would hide that and invite it to grow a
+  dependency on the tab.
+- **Five silent states, and none of them may be flattened.** `not followed` (this project does not
+  follow pull requests, so nothing was ever asked, and it is the one state with a fix, named in the
+  title), `?` (gh failed, with the reason), `not pushed` (no upstream, so no pull request can exist),
+  `…` (followed, not read yet) and `no PR` (pushed, read, nothing open). Reporting the first as `no PR`
+  would answer a question nobody asked, which is the failure `no-checks` versus `passing` already
+  records. The upstream test comes **before** the lookup for the same reason: a miss there would come
+  back as `no PR` and read as an answer rather than as a precondition.
+- **A detached worktree needs no special case.** `detached@<sha>` is not a branch name, matches
+  nothing, and lands on `no PR`, which is the right answer. Pinned by a test so nobody adds a branch
+  for it.
+- **Only OPEN pull requests are listed**, so a merged branch whose worktree is still around reads
+  `no PR`. That is the correct answer to "is anything waiting on this branch" and it is worth knowing
+  it is not the same sentence as "this was never reviewed".
+- **The column sits BEFORE the branch, which is not where it would be read.** Measured, having put it
+  between the branch and the state first: the verdicts landed on **six different x positions across
+  nine rows**. The state track is `auto`, so it is sized by its own row's badges, and what it takes
+  comes out of the `1fr` branch; anything after that `1fr` therefore moves with the width of the badges
+  two columns along. Before it, the offset is two fixed tracks and two gaps, identical on every row.
+  This is the rule `.worktree` already stated for its other tracks, applied to one more: the `1fr` has
+  to be the last flexible thing before the right-aligned end. Verified after the move: one x per
+  column, at 980px and at 760px.
+- **112px, because `not followed` measures 102px** in a pill at `--font-xs` 600 with its dot. Fixed and
+  not `auto`, since each row is its own grid and an `auto` track would be sized per row, which is the
+  thing a column is not.
+- **A prunable row gets an empty cell, not a verdict.** Its folder is gone, so `hasUpstream` was never
+  read and the branch's pull request is beside the point: the one thing to do with that row is prune
+  it, which its own pill says. The cell is still emitted, or the tracks after it would shift up a
+  column on that line.
+- **Unreadable git counts as "not pushed", not as pushed.** It is the branch of a folder this tab could
+  not read, and claiming an upstream would send the join looking for a pull request on a branch name
+  nothing confirmed.
+- **Nothing was added to keep it fresh, and that is deliberate.** The tab already re-renders on the git
+  poll while it is visible (10 s by default) and the pulls arrive every 180 s, so the column trails a
+  new payload by at most one git poll. A repaint hung off `onPullsChanged` would be a second trigger
+  racing the slower source for no gain.
+
+### The header row
+
+Added on 2026-09-04, the tab having had five columns and no way to know what any of them was.
+
+- **It reuses the row's own grid CLASSES, not a copy of its tracks.** `.worktree-row worktree-row--head`
+  wrapping `.worktree worktree--head`, which is the only way a label can sit over the column it names:
+  one grid definition, so a width changed on the row cannot leave the header pointing at the wrong
+  thing. This is `.issue--head` in the Jira tab, down to the reason for each override. The **outer**
+  wrapper matters as much as the inner grid: it carries the 22px track of the life-cycle menu, and
+  without it the five headings would spread over a row 24px wider than every line below.
+- **Sticky, and INSIDE the scroller.** Hoisted into the bar above, it would be a box of its own and
+  would drift by exactly the width of the scrollbar the moment the list overflows, which on this tab is
+  most of the time. Measured with a scrollbar present: 877px of header over 877px of row, and columns
+  1 to 4 aligned to the pixel.
+- **`top: 0`, and a negative offset is the trap.** It was tried first, to cover the 6px grid gap between
+  the bar and the list, and it is wrong twice: that gap is outside the scroller and never shows
+  anything, and content placed above a scrollport is **clipped** by the very `overflow` that makes
+  sticky work. It only sliced the top off the headings.
+- **`background: var(--surface)`, and there is no `--bg` token.** The first version used one, which
+  resolved to nothing and left the header transparent, so the rows scrolled visibly through it. It has
+  to be opaque, and `--surface` is what `body` is painted with and what `.issue--head` uses.
+- **`.worktree` is a class, not an element selector**, so a `div` wearing it inherits the row's hover
+  rule as well as its grid. The heading needs the same three overrides `.issue--head` needs: no
+  pointer, no hover highlight, and the border reduced to its bottom edge.
+- **The `State` heading is right-aligned, and that is forced rather than chosen.** Its track is `auto`,
+  so it is sized by its own row's badges and the header's is sized by the word itself: their left edges
+  cannot agree and their right edges always do, that being the edge the badges themselves line up on.
+  Measured: 6px apart on the left, 0 on the right.
+- **Not sortable, unlike the Jira header it copies.** This tab's order is the configured project order
+  and then the folder name with numeric collation, a decision recorded in `flattenWorktrees`, and a
+  click that reshuffled it would be the sort-held-in-the-view that the grouping rule already refuses.
+  So plain labels, and the hint of each column in its `title`.
+- **Emitted only with rows behind it, and after the per-project errors.** A header over "No worktree in
+  these projects" is five words explaining an empty box, and a project whose `git worktree list` failed
+  is not a column of anything.
+- **`WORKTREE_COLUMNS` holds the labels in track order**, one list so a label and its track cannot drift
+  apart, the same reason `JIRA_COLUMNS` exists. The type is `.table th`'s: uppercase, `--font-2xs`,
+  600, letter-spaced. Two tabs of one app naming their columns in two different types would read as two
+  applications.
+- **No `role` at all, deliberately.** These rows are buttons in a list, not cells in a table, so
+  `columnheader` would be a promise with no `table` or `grid` behind it to keep. (The Jira header does
+  set `role="row"` on a div with no table ancestor, which is a half-pattern worth not copying.) The
+  labels stay readable as plain text, which is what a sighted reader gets too, and each row's own
+  `aria-label` already names the worktree it opens.
+
+### The tags on the OTHER tabs: dots, not chips
+
+Added on 2026-09-03. Three surfaces name a project outside the projects table, and all three now show
+its tags: the pull request tab's repository column, the Git tab's, and the project cell of every
+worktree row. Triage lists sprints and Jira lists issues, so there is nothing to tag there.
+
+- **The chip does not travel; the dot does.** All three surfaces are fixed-width and read down their
+  length: 190px for the pull request repositories, 170px for the Git ones, a 104px grid track for a
+  worktree's project. A labelled chip in any of them has to be paid for by widening the column the
+  strip is actually read in, and the question these rows ask is "which stack is this line", not "what
+  is this tag called". So the word stays in the projects table, which is the permanent legend, and what
+  travels is the half of a chip the eye was scanning anyway. `shared/project-tags.ts` already said the
+  dot is the thing the eye scans; this is that sentence applied.
+- **Both densities live in `renderer/ui/tags.ts`**, `buildTagChips` and `buildTagDots`, and the chip
+  builder moved out of `project-table.ts` to get there. They reach `--tag-colour` through the same
+  `tag--<colour>` class, and that shared class name is the drift surface: a palette entry renamed in
+  one file and not the other paints nothing, with no error anywhere. The settings window keeps its own
+  two variants (an editable chip with a remove button, a preview chip beside a colour select) because
+  they are different drawings, not the same one at another size.
+- **Read-only there, and that is not laziness.** A tag is configuration in the projects table and
+  *context* on these rows, so both gestures stay where the tag is edited. It also settles a collision:
+  a right click on a Git repository line already opens that repository's menu (fetch, pull, push), and
+  a chip answering the same gesture on the same target would open one menu over the other.
+- **`RepoPulls` and `RepoWorktrees` are NOT widened with a `tags` field**, and the reason is freshness
+  rather than tidiness. Those two payloads arrive from **polls**; a tag change arrives as a settings
+  broadcast. A tag carried on them would appear in the projects table at once and in the pull request
+  column at the next GitHub poll, which is up to a minute of two tabs disagreeing about one word.
+  `TagPalette` is assembled in the renderer from `this.projects`, the list the main process built those
+  payloads from, so the lookup always hits and can never be stale. The Git tab needs only `tagColors`
+  in its state, `GitPanelState.projects` already carrying the words.
+- **The dots come BEFORE the name**, so the coloured marks of a whole column start on one edge, which
+  is what makes a column of them scannable at all. The cost is accepted and it is real: an untagged row
+  starts at the left edge while a tagged one is indented, so the *names* no longer align perfectly. No
+  gutter is reserved to fix that, an empty 41px column being paid for by every row to align a handful.
+- **Four dots, and the fifth is clipped rather than dropped.** `MAX_TAGS_PER_PROJECT` is eight, which
+  at ten pixels each is eighty of a hundred and ninety: at the cap the strip would leave the project's
+  name a stub, and eight dots answer the question no better than four. `max-width: 41px` on
+  `.tag-dots` shows four whole dots and a sliver of a fifth, and that sliver **is** the cue, the
+  ellipsis of a name said in the only vocabulary a strip of dots has. Nothing is lost: the `title`
+  names every tag whatever the width shows.
+- **The strip is one `role="img"` with the tag list as its label**, the pattern the Triage tab's state
+  marker already uses. A `title` on a span holding no text is announced by nothing, so without it the
+  dots would be a statement that exists for a sighted reader only. One image and not one per dot, for
+  the same reason there is one tooltip: the fact is the set, and five images announcing a colour each
+  is a row nobody can listen to.
+- **Two CSS rules stopped being scoped, and both were latent bugs.** `.pulls__repo-name` now truncates
+  in every column rather than only inside `.git__repo-line`: the pull request column wrapped a long
+  name over three lines, and the dots beside it are what made that visible. And it takes `flex: 1`,
+  because `justify-content: space-between` kept the count on the right edge only while the row had
+  exactly two children; with three it spread them evenly and left the name floating in the middle.
+  Stated on the name rather than left to the distribution, so the row survives the next thing added.
+- **The worktree row grew no fifth track.** The dots share the existing 104px project cell, which is a
+  flex row now: a track wide enough for the dots would be a track most rows leave empty, on a grid
+  whose minimum width is the sum of its fixed columns. The truncation moved from `.worktree__project`
+  onto `.worktree__project-label`, the cell now being the row rather than the text.
 
 ## Performance: a process is not cheap here
 

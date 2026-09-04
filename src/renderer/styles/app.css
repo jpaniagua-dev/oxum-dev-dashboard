@@ -300,6 +300,56 @@ body {
 }
 
 /*
+ * The same tags, at the density the other tabs have room for: the dots alone.
+ *
+ * Every surface that shows these is a fixed-width column read down its length (190px for the pull
+ * request repositories, 170px for the Git ones, a 104px grid track for a worktree's project), and a
+ * labelled chip there would have to be paid for by widening the column the strip is actually read in.
+ * The dot is the half of a chip the eye scans anyway, so it is the half that travels; the word is in
+ * the strip's `title`, and the projects table is the permanent legend.
+ *
+ * `flex: none` is load-bearing on all three: two of those columns truncate a project name with an
+ * ellipsis, and without it the dots would be the thing that gives way, which is the opposite of the
+ * point. The strip does not wrap either, for the same reason the row it sits on does not.
+ */
+.tag-dots {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  /*
+   * Four dots, and the fifth is CLIPPED rather than laid out.
+   *
+   * `MAX_TAGS_PER_PROJECT` is eight, which at ten pixels each is eighty of the pull request column's
+   * hundred and ninety: at the cap the strip would take a third of the column and leave the project's
+   * name a stub, and eight dots do not answer "which stack is this" any better than four do. The
+   * remaining dots are still in the DOM and still in the `title`, which names every tag whatever the
+   * width shows, so nothing is lost that hovering does not return.
+   *
+   * Clipped and not dropped, because the sliver of the fifth dot IS the cue: it is the ellipsis of a
+   * name, said in the only vocabulary this strip has. `37px` is exactly four dots and three gaps, so a
+   * project at four tags shows four whole dots and no hint of a fifth.
+   */
+  max-width: 41px;
+  overflow: hidden;
+  cursor: help;
+}
+
+/*
+ * The 7px circle of `.tag__dot` and `.pill__dot`, reading the same `--tag-colour` the chip's border
+ * does: `tag--<colour>` sets that property and nothing else, which is what lets it carry a colour to
+ * an element that is not a chip. `--border-strong` is the fallback for a tag whose colour has not come
+ * back from the store yet, exactly as on the chip.
+ */
+.tag-dots__dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tag-colour, var(--border-strong));
+}
+
+/*
  * One row of the tag palette in the settings, so a colour is chosen next to the word it paints rather
  * than from a list of six names on their own.
  */
@@ -776,6 +826,31 @@ body {
   border-color: var(--border);
   color: var(--text);
   font-weight: 600;
+}
+
+/*
+ * The name absorbs the slack, which is what keeps the count on the row's right edge.
+ *
+ * `justify-content: space-between` did that job while the row had exactly two children. It stopped
+ * being enough the day a tag strip joined them: with three, space-between spreads them evenly and the
+ * name ends up floating in the middle of the row. Stated on the name rather than left to the
+ * distribution, so the row survives the next thing added to it.
+ */
+.pulls__repo-name {
+  flex: 1;
+  min-width: 0;
+  /*
+   * Truncated at the END, because what distinguishes two project names is their beginning.
+   *
+   * This was scoped to the Git column while that was the only one where something else shared the
+   * width, and the pull request column wrapped a long name over three lines instead. The tag dots put
+   * a second occupant in every column that uses this class, so the rule belongs on the class: a name
+   * wrapping to three lines beside a strip of dots is the shape that made the wrap visible, and
+   * truncation was already the right answer in the column that had it.
+   */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pulls__repo-count {
@@ -2266,14 +2341,6 @@ body {
   min-width: 0;
 }
 
-/* A project name truncates at the end: what distinguishes two of them is their beginning. Scoped to
-   this column, the only one where a control now shares the width. */
-.git__repo-line .pulls__repo-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /*
  * Faded until its line is hovered, exactly like the pull request list's `Terminal` button and for the
  * same reason: a column of repository names should read as names, and one control per line at full
@@ -3210,8 +3277,21 @@ body {
    * arrived: two glyphs at the end of one line read as two buttons, and only one of them was. The
    * 34 pixels that frees are the reason the row is narrower now than before the menu existed, which
    * matters on a grid whose minimum width is the sum of its fixed tracks.
+   *
+   * `PR checks` is the third track, and it sits BEFORE the branch rather than after it, which is not
+   * where it would naturally be read. Measured, after putting it between the branch and the state
+   * first: the verdicts landed on six different x positions across nine rows. The state track is
+   * `auto`, so it is sized by its own row's badges, and what it takes comes out of the `1fr` branch;
+   * anything placed AFTER that `1fr` therefore moves with the width of the badges two columns along.
+   * Before it, its offset is the sum of two fixed tracks and two gaps, which is the same on every
+   * row. This is the rule the paragraph above already states, applied to one more column: the `1fr`
+   * has to be the last flexible thing before the right-aligned end, and the branch keeps lining up on
+   * its start because that is where a left-aligned track begins.
+   *
+   * 112px is the widest label plus a little: `not followed`, in a pill at `--font-xs` 600 with its
+   * dot, measures 102px.
    */
-  grid-template-columns: 104px 264px minmax(0, 1fr) auto;
+  grid-template-columns: 104px 264px 112px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 5px 8px;
@@ -3253,13 +3333,100 @@ body {
   cursor: default;
 }
 
-/* The clone it belongs to: context rather than identity, so it is dimmed and it shrinks first. */
-.worktree__project {
+/*
+ * The column headings.
+ *
+ * They reuse `.worktree-row` and `.worktree` rather than declaring tracks of their own, which is the
+ * only way a label can sit over the column it names: one grid definition, so a width changed on the
+ * row cannot leave the header pointing at the wrong thing. Same arrangement as `.issue--head` in the
+ * Jira tab, down to the reason for each override.
+ *
+ * `position: sticky` and INSIDE the scroller. Hoisted into the bar above it would be a box of its own,
+ * and it would then drift by exactly the width of the scrollbar the moment the list overflows, which
+ * on this tab is most of the time. Measured: 877px of header over 877px of row with a 15px scrollbar
+ * present.
+ *
+ * `top: 0` and nothing clever. A negative offset was tried first, on the theory that the 6px grid gap
+ * between the bar and the list needed covering, and it is wrong twice: that gap is outside the
+ * scroller and never shows anything, and content placed above a scrollport is **clipped** by the very
+ * `overflow` that makes sticky work, so it only sliced the top off the headings.
+ *
+ * `background: var(--surface)`, which is what `body` is painted with and what `.issue--head` uses. It
+ * has to be opaque, the rows scrolling under it, and it cannot be `var(--bg)`: there is no such token,
+ * so that resolved to nothing and left the header transparent.
+ */
+.worktree-row--head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.worktree--head {
+  padding-top: 2px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-faint);
+  cursor: default;
+}
+
+/*
+ * One heading, in the projects table's own heading type.
+ *
+ * Deliberately `.table th`'s values: uppercase, `--font-2xs`, 600, letter-spaced. Two tabs of one app
+ * naming their columns in two different types would read as two applications, and this tab is the one
+ * that came late.
+ */
+.worktree__head {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The state column is right-aligned in the rows, so its heading is too. See `WORKTREE_COLUMNS`. */
+.worktree__head--end {
+  text-align: right;
+}
+
+/*
+ * The heading is not a target, so it must not light up like one.
+ *
+ * `.worktree` is a class and not an element selector, so a `div` wearing it inherits the row's hover
+ * rule as well as its grid. Same three overrides `.issue--head` needs, and for the same reason: the
+ * only thing shared with a row is the geometry.
+ */
+.worktree--head:hover {
+  background: var(--surface);
+  border-color: transparent;
+  border-bottom-color: var(--border);
+}
+
+/*
+ * The clone it belongs to: context rather than identity, so it is dimmed and it shrinks first.
+ *
+ * A flex row now, because the tag dots share this track with the label. Not a track of their own: the
+ * comment on `.worktree` says this grid's minimum width is the sum of its fixed columns, and a fifth
+ * one sized for eight dots would be a column most rows leave empty. The dots are `flex: none`, so the
+ * label keeps being the part that gives way, which is what it did before they arrived.
+ */
+.worktree__project {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
   color: var(--text-dim);
   font-size: var(--font-sm);
+}
+
+/* The truncation moved off the cell and onto the label, the cell now being the flex row. */
+.worktree__project-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /*
@@ -3284,6 +3451,19 @@ body {
  */
 .worktree .cell-branch {
   max-width: none;
+}
+
+/*
+ * The `PR checks` verdict, in its own track.
+ *
+ * Left-aligned, unlike the state column beside it: a fixed track read down its length lines up on its
+ * start, and this cell is a single pill whose width varies with the verdict. Empty on a prunable row,
+ * where the cell is still emitted so the tracks after it do not shift.
+ */
+.worktree__checks {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 /* Counts then badges, pushed against the terminal button so they line up down the list. */
@@ -3379,26 +3559,43 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  /*
+   * `min-width: 0`, and it is the half of the fix the title alone could not provide.
+   *
+   * The tile is a **grid** and this head is one of its items, so it defaults to `min-width: auto` and
+   * refuses to shrink below its own content: measured at 336px inside a 290px tile, which is how a
+   * long title pushed the send-back button out through the right edge rather than truncating. Letting
+   * the title shrink was necessary and not sufficient, the head being the box that was too wide.
+   * Both lines are needed, in that order: the head agrees to be narrow, the title is what gives way.
+   */
+  min-width: 0;
   padding: 3px 8px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-inset);
 }
 
-/* The phase pill, pushed against the send-back button so every tile's state sits on the same edge. */
+/* The phase pill, pushed against the head's buttons so every tile's state sits on the same edge. */
 .servers__tile-phase {
   display: flex;
+  flex: none;
   align-items: center;
   margin-left: auto;
 }
 
 /*
- * Sends one tile back to the dashboard, without closing the window.
+ * The two controls at the end of a tile's head: send it back, and end it.
  *
- * Quiet until the tile is hovered, unlike the phase beside it: the phase is the reason to look at this
- * window and this is a correction you make once. Same judgement, and the same opposite conclusion, as
- * the Worktrees tab's dots.
+ * One shape for both, because they are the same kind of thing in the same place, and a second set of
+ * dimensions for a neighbouring 20px button is how two glyphs on one line stop lining up.
+ *
+ * Quiet until the tile is hovered, unlike the phase beside them: the phase is the reason to look at
+ * this window, and these are things you do to a tile once. Same judgement, and the same opposite
+ * conclusion, as the Worktrees tab's dots. For the life-cycle control the fade earns a second keep:
+ * this window is several running builds side by side, and a permanently lit kill switch on each of
+ * them is a row of things to misclick. `:focus-visible` keeps both reachable by keyboard regardless.
  */
-.servers__tile-back {
+.servers__tile-back,
+.servers__tile-life {
   flex: none;
   width: 20px;
   height: 20px;
@@ -3414,9 +3611,60 @@ body {
 }
 
 .servers__tile:hover .servers__tile-back,
-.servers__tile-back:focus-visible {
+.servers__tile-back:focus-visible,
+.servers__tile:hover .servers__tile-life,
+.servers__tile-life:focus-visible {
   opacity: 1;
+}
+
+/* The send-back arrow keeps the accent it always had: a thin glyph, and the gesture is not destructive. */
+.servers__tile:hover .servers__tile-back,
+.servers__tile-back:focus-visible {
   color: var(--primary);
+}
+
+/*
+ * The stop square: small, and NEUTRAL.
+ *
+ * `--primary` is this app's red, which is right on the neighbouring arrow (a hairline glyph) and wrong
+ * here: `■` at the head's own font size is a solid block, so the accent turned every *healthy* server
+ * into a red mark on hover, which is the one thing this interface's colour rule forbids. Its size is
+ * cut to 9px for the same reason a border carries a tag's colour rather than its text: a stop is a
+ * control, not a verdict, and the pill beside it is what states how the server is doing.
+ */
+.servers__tile-life {
+  font-size: 9px;
+}
+
+.servers__tile:hover .servers__tile-life,
+.servers__tile-life:focus-visible {
+  color: var(--text);
+}
+
+/*
+ * The cross, once the process is gone, painted the way this app's other terminal cross is.
+ *
+ * Only this half takes the danger colour: `■` stops a process that keeps its tab and its output, which
+ * is recoverable, while the cross forgets the session in both windows. `.terminal__tab-close` already
+ * makes exactly that distinction with exactly these two values, and one vocabulary for "this discards
+ * something" is worth more than a shade chosen fresh here.
+ */
+/*
+ * The cross, once the process is gone, drawn and painted the way this app's other terminal cross is.
+ *
+ * Only this half takes the danger colour, and only on its own hover: `■` stops a process that keeps
+ * its tab and its output, which is recoverable, while the cross forgets the session in both windows.
+ * `.terminal__tab-close` already makes exactly that distinction with exactly these values, size
+ * included, and one vocabulary for "this discards something" beats a shade chosen fresh here.
+ */
+.servers__tile-life--close {
+  font-size: var(--font-xl);
+}
+
+.servers__tile-life--close:hover,
+.servers__tile-life--close:focus-visible {
+  background: var(--primary-soft);
+  color: var(--danger);
 }
 
 /*
@@ -3443,6 +3691,14 @@ body {
 
 /* Truncated on the right: a tab title opens with the project, which is the half that identifies it. */
 .servers__tile-title {
+  /*
+   * `min-width: 0` is the load-bearing line, and its absence was a latent bug the second head control
+   * made visible. A flex item defaults to `min-width: auto`, which refuses to shrink below its own
+   * content, so the three declarations under it never fired: a long title in a narrow tile pushed the
+   * send-back button clean out of the head instead of truncating. Three columns of tiles is a normal
+   * arrangement here and `neos-rating-acquisition-front · run` is a normal title.
+   */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

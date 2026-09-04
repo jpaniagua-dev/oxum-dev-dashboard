@@ -55,6 +55,7 @@ import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
 import { renderPullList } from './ui/pull-list.js';
 import { renderWorktreeList } from './ui/worktree-list.js';
+import type { TagPalette } from './ui/tags.js';
 import { TriagePanel } from './ui/triage-panel.js';
 import { StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
@@ -411,10 +412,37 @@ class App {
     });
   }
 
+  /**
+   * What the three tabs that show tag dots read.
+   *
+   * Assembled here rather than widened into `RepoPulls` and `RepoWorktrees`, and the reason is
+   * freshness and not tidiness: those two payloads arrive from polls, while a tag change arrives as a
+   * settings broadcast, so a field carried on them would leave the projects table and the pull request
+   * column disagreeing about a word for up to a poll. `this.projects` is the list the main process
+   * built those payloads from, so a lookup on it always hits and can never be behind.
+   */
+  private tagPalette(): TagPalette {
+    return { projects: this.projects, colors: this.settings?.tagColors ?? {} };
+  }
+
+  /**
+   * The pull requests the Worktrees tab joins its `PR checks` column against, keyed by project.
+   *
+   * Built here from `this.pulls`, which is the pull request tab's own payload: `gh pr list` already
+   * returns the head branch and the check rollup of every open pull request, so a worktree finds its
+   * own with a `find` and GitHub is not asked a second time. A repository with no entry is a project
+   * that does not follow pull requests, which the column reports as such rather than as "no PR".
+   */
+  private pullsByProject(): Map<ProjectId, RepoPulls> {
+    return new Map(this.pulls.map((repo) => [repo.projectId, repo]));
+  }
+
   private renderWorktrees(): void {
     renderWorktreeList(
       { bar: requireElement('worktrees-bar'), list: requireElement('worktrees-list') },
       this.worktrees,
+      this.tagPalette(),
+      this.pullsByProject(),
       {
         // A path and a name, straight from the row: there is no project to resolve, a worktree not
         // being one. The title is the folder name rather than the repository's label, because that is
@@ -697,6 +725,7 @@ class App {
       this.pulls,
       this.selectedRepo,
       this.pullScope,
+      this.tagPalette(),
       {
         // Same gesture as a click on a project row, and it goes through the same reuse path: seeing a
         // pull request usually means going to work on it.
@@ -747,6 +776,7 @@ class App {
   private gitPanelState(): GitPanelState {
     return {
       projects: this.projects,
+      tagColors: this.settings?.tagColors ?? {},
       selectedProject: this.gitProject,
       repo: this.gitRepo,
       view: this.gitView,

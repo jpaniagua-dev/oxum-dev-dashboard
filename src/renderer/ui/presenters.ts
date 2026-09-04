@@ -146,6 +146,85 @@ export function presentInvolvement(pull: PullRequest): Pill | null {
   return null;
 }
 
+/**
+ * What a worktree can be told about its branch's pull request, without asking GitHub again.
+ *
+ * The Worktrees tab wanted the projects table's `Checks` column, and the obvious way to build it was
+ * `readChecksState(worktree.path, ...)`: that function runs `gh pr view` in a folder and reads the
+ * pull request of whatever branch is checked out there, which is exactly the question, and a worktree
+ * is exactly a folder with its own branch. It is refused on cost. `gh --version` alone measures 79 ms
+ * on this machine (see the performance section of `CLAUDE.md`), a `gh pr view` is that plus a network
+ * round trip, and this would be one per worktree on every poll. Meanwhile `gh pr list` already runs
+ * once per followed repository and already returns `headRefName` and `statusCheckRollup` for every
+ * open pull request, so the answer is in a payload the app has in hand. The join costs a `find`.
+ *
+ * Which is why this takes a **branch** and a repository's pulls rather than a worktree: what it does
+ * is match a branch name against a list, and giving it the whole row would hide that.
+ *
+ * The five silent states are all distinct, and flattening any of them would be a lie of the kind
+ * `no-checks` already exists to avoid:
+ *
+ * - **`repo === null`**: this project does not follow pull requests, so nothing was ever asked. NOT
+ *   `no PR`, which claims a question was answered. This is the one state with a fix, and the title
+ *   names it.
+ * - **`repo.error`**: `gh` failed or is unauthenticated. Shown as unknown with the reason, never as an
+ *   absence.
+ * - **`repo.checkedAt === null`**: followed, not read yet. The first paint after opening the app.
+ * - **`hasUpstream === false`**: never pushed, so no pull request can exist. Same wording and same
+ *   reasoning as `presentChecks`, and cheaper than any lookup.
+ * - **no match**: pushed, read, and no open pull request on this branch. The only one that is
+ *   genuinely `no PR`.
+ *
+ * A **detached** worktree is `no PR` by the same route as any other miss: `detached@<sha>` is not a
+ * branch name, so it matches nothing, and no special case is needed to reach the right answer.
+ *
+ * Only OPEN pull requests are listed, so a merged branch whose worktree is still around reads `no PR`.
+ * That is the correct answer to "is anything waiting on this branch" and it is worth knowing that it
+ * is not the same sentence as "this was never reviewed".
+ */
+export function presentWorktreeChecks(
+  branch: string,
+  hasUpstream: boolean,
+  repo: {
+    readonly pulls: readonly PullRequest[];
+    readonly checkedAt: string | null;
+    readonly error: string | null;
+  } | null,
+): Pill {
+  if (repo === null) {
+    return {
+      label: 'not followed',
+      tone: 'neutral',
+      title:
+        'This project does not follow pull requests. Tick "Follow pull requests" on it in the settings.',
+    };
+  }
+  if (repo.error !== null) {
+    return { label: '?', tone: 'neutral', title: repo.error };
+  }
+  if (!hasUpstream) {
+    // Before the lookup rather than after: a branch with no upstream cannot have a pull request, so a
+    // miss here would be reported as `no PR` and read as an answer instead of a precondition.
+    return { label: 'not pushed', tone: 'neutral', title: 'The branch has no upstream' };
+  }
+  if (repo.checkedAt === null) {
+    return { label: '…', tone: 'neutral', title: 'Not queried yet' };
+  }
+
+  const pull = repo.pulls.find((candidate) => candidate.branch === branch);
+  if (pull === undefined) {
+    return { label: 'no PR', tone: 'neutral', title: 'No open PR on this branch' };
+  }
+  return {
+    ...presentPullChecks(pull),
+    // The pill's own title says how many checks are in which state; the number and the heading are
+    // what tell you WHICH pull request answered, on a tab where several branches of one repository
+    // are on screen together.
+    title: `#${pull.number} ${pull.title}
+${presentPullChecks(pull).title}`,
+  };
+}
+
 /** Label and tone for the checks column. */
 export function presentChecks(checks: ChecksState | null, git: GitState | null): Pill {
   if (git !== null && !git.hasUpstream) {
@@ -271,7 +350,6 @@ export function presentGit(git: GitState | null): GitSummary {
 
   return { parts, warning: flags.length > 0 ? flags.join(' ') : null };
 }
-
 
 /* ------------------------------------------------------------------ *
  * Git tab

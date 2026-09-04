@@ -231,6 +231,10 @@ class ServersView {
     const existing = this.views.get(session.id);
     if (existing !== undefined) {
       existing.title.textContent = session.title;
+      // Repainted here rather than in `paintPhases`, because it changes on the cadence of the session
+      // list and not of the project poll: a server's exit broadcasts sessions, which is what flips this
+      // entry from `Stop` to a cross. Putting it in the phase pass would have it follow the wrong clock.
+      paintLifecycle(existing, session);
       return existing;
     }
 
@@ -256,6 +260,48 @@ class ServersView {
     back.setAttribute('aria-label', `Send ${session.title} back to the dashboard`);
     back.addEventListener('click', () => void window.api.moveTerminalToServers(session.id, false));
     head.append(back);
+
+    /*
+     * Ending a terminal from here, which this window could not do at all until now.
+     *
+     * ONE slot with two states, driven by `session.closable`, which is the field that already answers
+     * "may this be ended now" for the whole app: a shell and a one-shot task always may, a `server`
+     * only once its process has stopped, so `Stop` stays the deliberate way to end a build. The
+     * dashboard reads the same field to decide whether a tab gets a cross at all.
+     *
+     * A bare cross was the obvious version and is the wrong one here. `TerminalManager.close` does
+     * stop a running process on its way out, so it would have worked mechanically, and that is exactly
+     * the trap: this window is several running builds side by side, and one misclick would take one
+     * down with no step in between. Two states cost a click and turn a slip into a stop.
+     *
+     * Not two buttons either, one of them permanently disabled on a window whose tiles are servers by
+     * construction: that is the dead control the projects table refuses on its `Add a tag` entry.
+     */
+    const lifecycle = createElement('button', { className: 'servers__tile-life' });
+    lifecycle.type = 'button';
+    lifecycle.addEventListener('click', () => {
+      /*
+       * The session is looked up at CLICK time and not captured here.
+       *
+       * The head is built once per tile and survives every render, so a handler closed over the
+       * session this tile was born with would still be stopping a process that exited ten minutes
+       * ago. `this.sessions` is replaced whole on every broadcast, so reading it now is reading the
+       * state the button is currently painted for.
+       */
+      const current = this.sessions.find((entry) => entry.id === session.id);
+      if (current === undefined) {
+        return;
+      }
+      if (current.closable) {
+        void window.api.closeTerminal(session.id);
+      } else {
+        // `stopPty` and not `stopProjectServer`: a tile IS a session, and it knows which one. Going
+        // through the project would ask the manager to find "a" running server action for it, which is
+        // the same pty here and an indirection that can only ever aim at the wrong one.
+        void window.api.stopPty(session.id);
+      }
+    });
+    head.append(lifecycle);
     element.append(head);
 
     const view = createTerminalView({
@@ -272,8 +318,9 @@ class ServersView {
     view.element.hidden = false;
     element.append(view.element);
 
-    const tile: Tile = { element, title, phase, view, sent: null };
+    const tile: Tile = { element, title, phase, lifecycle, view, sent: null };
     this.views.set(session.id, tile);
+    paintLifecycle(tile, session);
     return tile;
   }
 
@@ -352,12 +399,44 @@ class ServersView {
   }
 }
 
+/**
+ * Paints the tile's one life-cycle control for the state the session is in.
+ *
+ * Free function rather than a method, because it touches nothing but the two arguments it is given,
+ * and because both callers of `ensure` need it: a tile is painted when it is created and repainted
+ * every time the session list is broadcast.
+ *
+ * The two states are `closable`, and they are not a matter of taste. It is the field the main process
+ * already derives for exactly this question, so a tile and a dashboard tab can never disagree about
+ * whether a process may be ended: a shell and a one-shot task always may, a `server` only once it has
+ * stopped. The label follows the field rather than the role, which is what makes a shell dragged into
+ * this window behave here the way it does over there.
+ */
+function paintLifecycle(tile: Tile, session: TerminalSession): void {
+  const stop = !session.closable;
+  // The stop square and the cross of `.terminal__tab-close`, in text like the `→` beside them: this
+  // head has never held an SVG, and a glyph nobody else draws does not belong in `icons.ts`.
+  tile.lifecycle.textContent = stop ? '■' : '×';
+  tile.lifecycle.title = stop
+    ? 'Stop this server (its output stays, and a cross then closes the tile)'
+    : 'Close this terminal, here and in the dashboard';
+  tile.lifecycle.setAttribute(
+    'aria-label',
+    stop ? `Stop ${session.title}` : `Close ${session.title}`,
+  );
+  // The tone follows the state, so the destructive half is the only one painted as such. Mirrors
+  // `.terminal__tab-close`, which is the app's other cross on a terminal.
+  tile.lifecycle.classList.toggle('servers__tile-life--close', !stop);
+}
+
 /** One server on screen: its terminal, its heading, and the geometry its pty was last told. */
 interface Tile {
   readonly element: HTMLElement;
   readonly title: HTMLElement;
   /** Where the phase pill goes, repainted on its own cadence. See `paintPhases`. */
   readonly phase: HTMLElement;
+  /** The stop-then-close control, whose two states follow `session.closable`. See `paintLifecycle`. */
+  readonly lifecycle: HTMLButtonElement;
   readonly view: TerminalView;
   /** Last geometry announced to the pty. See `fitAll` for why a redundant resize is not free. */
   sent: { cols: number; rows: number } | null;

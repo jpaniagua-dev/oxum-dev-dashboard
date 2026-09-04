@@ -1,9 +1,16 @@
-import type { ProjectId, RepoWorktrees, Worktree, WorktreeCommand } from '@shared/contracts.js';
+import type {
+  ProjectId,
+  RepoPulls,
+  RepoWorktrees,
+  Worktree,
+  WorktreeCommand,
+} from '@shared/contracts.js';
 import { clearChildren, createElement, createIconButton } from './dom.js';
 import { showContextMenu } from './context-menu.js';
 import { MORE_ICON } from './icons.js';
-import { presentGit } from './presenters.js';
+import { presentGit, presentWorktreeChecks } from './presenters.js';
 import { buildPill } from './project-table.js';
+import { buildTagDots, type TagPalette } from './tags.js';
 
 export interface WorktreeListActions {
   /**
@@ -39,6 +46,84 @@ export interface WorktreeRow {
   readonly projectLabel: string;
   readonly worktree: Worktree;
 }
+
+/**
+ * The column headings, in track order.
+ *
+ * One list, so a label and the track it names cannot drift apart, the same reason `JIRA_COLUMNS`
+ * exists. Not sortable, unlike that one: this tab's order is the configured project order and then the
+ * folder name with numeric collation, which is a decision recorded in `flattenWorktrees`, and a click
+ * that reshuffled it would be the sort held in the view that the grouping rule already refuses.
+ *
+ * `align` marks the one column whose label goes against the row's right edge. The state track is
+ * `auto`, so it is sized by its own row's badges and the header's is sized by the word `State`: their
+ * left edges cannot agree and their right edges always do, that being the edge the badges themselves
+ * line up on.
+ */
+export const WORKTREE_COLUMNS: readonly {
+  readonly label: string;
+  readonly hint: string;
+  readonly align?: 'end';
+}[] = [
+  { label: 'Project', hint: 'The clone this worktree belongs to, and its tags' },
+  { label: 'Folder', hint: 'Folder name of the worktree, which is what a cd would show' },
+  { label: 'PR checks', hint: 'Checks of the open pull request on this branch, if there is one' },
+  { label: 'Branch', hint: 'Branch checked out in this worktree' },
+  {
+    label: 'State',
+    hint: 'Uncommitted work, distance from the remote, and whether git is holding a lock',
+    align: 'end',
+  },
+];
+
+/**
+ * The one row that is not a worktree: the column headings.
+ *
+ * Built from **the row's own grid classes** plus a `--head` modifier, which is the only way a label can
+ * sit over the column it names, and it is the arrangement the Jira tab's sortable header already
+ * records. The outer `.worktree-row` matters as much as the inner grid: it carries the 22px track of
+ * the life-cycle menu, so without it the five headings would be spread over a row 24px wider than
+ * every line below.
+ *
+ * `position: sticky` in the stylesheet, and inside the scroller rather than hoisted into the bar
+ * above: a header in a box of its own drifts by exactly the width of the scrollbar the moment the list
+ * overflows, which on this tab is most of the time.
+ *
+ * **No `role` at all, deliberately.** These rows are buttons in a list, not cells in a table, so
+ * `columnheader` would be a promise with no `table` or `grid` behind it to keep. The labels are left
+ * readable as plain text instead, which is what a sighted reader gets too, and each row's own
+ * `aria-label` already names the worktree it opens.
+ */
+function buildHeaderRow(): HTMLElement {
+  const host = createElement('div', { className: 'worktree-row worktree-row--head' });
+  const head = createElement('div', { className: 'worktree worktree--head' });
+  for (const column of WORKTREE_COLUMNS) {
+    head.append(
+      createElement('span', {
+        className: column.align === 'end' ? 'worktree__head worktree__head--end' : 'worktree__head',
+        text: column.label,
+        title: column.hint,
+      }),
+    );
+  }
+  host.append(head);
+  return host;
+}
+
+/**
+ * The open pull requests of every followed repository, keyed by project.
+ *
+ * What the `PR checks` column joins against, and it is deliberately the payload the pull request tab
+ * already receives rather than anything new: `gh pr list` returns `headRefName` and
+ * `statusCheckRollup` for each of them, so a worktree's branch finds its pull request with a `find`
+ * and no second call to GitHub. See `presentWorktreeChecks` for why the per-worktree `gh pr view` was
+ * refused.
+ *
+ * A `Map` and not the array, because this is read once per row and the tab lists every worktree of
+ * every project: scanning the repository list per row would make the join quadratic in a list whose
+ * whole point is to span clones.
+ */
+export type PullsByProject = ReadonlyMap<ProjectId, RepoPulls>;
 
 /**
  * One entry of a row's life-cycle menu.
@@ -192,6 +277,8 @@ export function summarizeWorktrees(repos: readonly RepoWorktrees[]): string {
 export function renderWorktreeList(
   hosts: { bar: HTMLElement; list: HTMLElement },
   repos: readonly RepoWorktrees[] | null,
+  tags: TagPalette,
+  pulls: PullsByProject,
   actions: WorktreeListActions,
 ): void {
   clearChildren(hosts.bar);
@@ -243,8 +330,13 @@ export function renderWorktreeList(
     return;
   }
 
+  // After the errors and immediately above what it names: a project whose `git worktree list` failed
+  // is not a column of anything. Emitted only with rows behind it, a header over "No worktree in these
+  // projects" being five words explaining an empty box.
+  hosts.list.append(buildHeaderRow());
+
   for (const row of rows) {
-    hosts.list.append(buildWorktreeRow(row, actions));
+    hosts.list.append(buildWorktreeRow(row, tags, pulls, actions));
   }
 }
 
@@ -376,7 +468,12 @@ function openCreateField(
  * target. `pull-list` keeps its glyph because there the terminal is genuinely a *second* gesture, on a
  * row whose own click opens a browser.
  */
-function buildWorktreeRow(row: WorktreeRow, actions: WorktreeListActions): HTMLElement {
+function buildWorktreeRow(
+  row: WorktreeRow,
+  tags: TagPalette,
+  pulls: PullsByProject,
+  actions: WorktreeListActions,
+): HTMLElement {
   const host = createElement('div', { className: 'worktree-row' });
   const { worktree } = row;
   const element = createElement('button', { className: 'worktree' });
@@ -401,13 +498,27 @@ function buildWorktreeRow(row: WorktreeRow, actions: WorktreeListActions): HTMLE
       : `${worktree.path} (folder missing)`;
   element.addEventListener('click', () => actions.onOpenTerminal(worktree.path, worktree.name));
 
-  element.append(
+  /*
+   * The dots and the clone's name share the first grid track, in a cell of their own.
+   *
+   * Not a fifth track, which was the obvious move and is the wrong one: this grid's minimum width is
+   * the sum of its fixed tracks, a comment on `.worktree` says so, and a track wide enough for the
+   * dots would be a track most rows leave empty. Inside the cell instead, where the dots are
+   * `flex: none` and the label is the part that truncates, which it already did.
+   */
+  const project = createElement('span', { className: 'worktree__project' });
+  const dots = buildTagDots(tags, row.projectId);
+  if (dots !== null) {
+    project.append(dots);
+  }
+  project.append(
     createElement('span', {
-      className: 'worktree__project',
+      className: 'worktree__project-label',
       text: row.projectLabel,
       title: `Worktree of ${row.projectLabel}`,
     }),
   );
+  element.append(project);
   const name = createElement('span', {
     className: 'worktree__name',
     text: worktree.name,
@@ -416,6 +527,42 @@ function buildWorktreeRow(row: WorktreeRow, actions: WorktreeListActions): HTMLE
     title: worktree.path,
   });
   element.append(name);
+  /*
+   * The `PR checks` column, joined from the pull request tab's own payload.
+   *
+   * Its own grid track and not a badge inside `worktree__state`, because that is what the word column
+   * means on this tab: the whole reason these rows are a grid with fixed tracks is that the list is
+   * read by scanning DOWN, and a verdict tucked in among the conditional badges would sit at a
+   * different offset on every line.
+   *
+   * A prunable row gets an EMPTY cell rather than a verdict. Its folder is gone, so `git.hasUpstream`
+   * was never read and the branch's own pull request is beside the point: the one thing to do with the
+   * row is prune it, which its `prunable` pill says. The cell is still appended, so the tracks after
+   * it do not shift up a column on that line.
+   *
+   * Before the branch and not after it, which is where it would naturally be read: the track order it
+   * has to follow is explained on `.worktree` in `app.css`, and the short version is that the flexible
+   * branch track has to be the last one, or this verdict moves with the width of the badges two
+   * columns along.
+   */
+  const checks = createElement('span', { className: 'worktree__checks' });
+  if (worktree.prunable === null) {
+    const git = worktree.git;
+    checks.append(
+      buildPill(
+        presentWorktreeChecks(
+          worktree.branch,
+          // Unreadable git counts as "not pushed" rather than as pushed: it is the branch of a folder
+          // this tab could not read, and claiming an upstream would send the join looking for a pull
+          // request on a branch name nothing confirmed.
+          git !== null && git.error === null && git.hasUpstream,
+          pulls.get(row.projectId) ?? null,
+        ),
+      ),
+    );
+  }
+  element.append(checks);
+
   // `.cell-branch` is the project table's own branch cell, reused rather than copied: one definition
   // of how a branch name is drawn, for the reason `.subtab` was renamed out of the Git tab.
   element.append(
