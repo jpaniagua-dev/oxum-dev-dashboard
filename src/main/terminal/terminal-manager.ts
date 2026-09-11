@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import * as pty from '@lydell/node-pty';
 import type { IPty } from '@lydell/node-pty';
 import { RESERVED_ACTION_PREFIX } from '@shared/contracts.js';
@@ -17,12 +16,16 @@ import type {
   TerminalSize,
 } from '@shared/contracts.js';
 import { normalizeGroups } from '@shared/terminal-groups.js';
+import { spawnOffThread } from '../spawn/spawn-pool.js';
+import { Scrollback } from './scrollback.js';
 import { parseOutputChunk, type ParsedOutput } from '../projects/output-parser.js';
 
 /**
- * Output retained per session so a tab can be reopened without losing history.
+ * Characters of output retained per session, so a tab can be reopened without losing history.
  *
- * Bounded: a dev server left running for hours would otherwise grow this without limit.
+ * Bounded: a dev server left running for hours would otherwise grow this without limit. How the
+ * bound is enforced is {@link Scrollback}'s business, and it is not a detail: the obvious enforcement
+ * recopies all 200 000 characters on every chunk a pty emits, which is what this used to do.
  */
 const BUFFER_LIMIT = 200_000;
 
@@ -78,7 +81,7 @@ interface Entry {
    * server state, both of which are the main process's business, not the renderer's.
    */
   readonly role: ActionRole | null;
-  buffer: string;
+  readonly scrollback: Scrollback;
 }
 
 export interface TerminalHooks {
@@ -262,7 +265,7 @@ export class TerminalManager {
   }
 
   buffer(terminalId: TerminalId): string {
-    return this.entries.get(terminalId)?.buffer ?? '';
+    return this.entries.get(terminalId)?.scrollback.text() ?? '';
   }
 
   /** Projects with a running `server` action, used by the quit guard. */
@@ -492,7 +495,7 @@ export class TerminalManager {
     if (entry === undefined) {
       return;
     }
-    entry.buffer = '';
+    entry.scrollback.clear();
     try {
       entry.pty?.clear();
     } catch {
@@ -670,8 +673,9 @@ export class TerminalManager {
         session: { ...baseSession(id, options), running: false, closable: true },
         pty: null,
         role: options.role,
-        // A session that failed to launch still gets a tab and a pane: its buffer carries the reason.
-        buffer: `\u001b[31mCould not launch ${options.file}\u001b[39m\r\n${message}\r\n`,
+        // A session that failed to launch still gets a tab and a pane: its scrollback carries the
+        // reason.
+        scrollback: failedScrollback(options.file, message),
       });
       this.hooks.onSessionsChanged(this.sessions());
       return id;
@@ -681,7 +685,7 @@ export class TerminalManager {
       session: { ...baseSession(id, options), running: true, closable: false },
       pty: child,
       role: options.role,
-      buffer: '',
+      scrollback: new Scrollback(BUFFER_LIMIT),
     };
     this.entries.set(id, entry);
     /*
@@ -697,7 +701,7 @@ export class TerminalManager {
     }
 
     child.onData((data) => {
-      entry.buffer = `${entry.buffer}${data}`.slice(-BUFFER_LIMIT);
+      entry.scrollback.push(data);
       this.hooks.onOutput(id, data);
       // Only a `server` action's output describes a server. A commit TUI or an interactive shell could
       // otherwise print something that looks like a build marker and rewrite a row's state.
@@ -750,6 +754,13 @@ export class TerminalManager {
       (entry) => entry.session.projectId === projectId && entry.session.actionId === actionId,
     );
   }
+}
+
+/** The scrollback a session that never launched is born with: one red line saying why. */
+function failedScrollback(file: string, message: string): Scrollback {
+  const scrollback = new Scrollback(BUFFER_LIMIT);
+  scrollback.push(`\u001b[31mCould not launch ${file}\u001b[39m\r\n${message}\r\n`);
+  return scrollback;
 }
 
 function baseSession(
@@ -910,7 +921,15 @@ function killTree(child: IPty): void {
     child.kill();
     return;
   }
-  execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => {
-    // A non-zero exit just means the process was already gone.
-  });
+  // Off the main thread like every other spawn in the app, and this one is worth stating: `Stop` is a
+  // click, so nobody is typing at that instant, but a spawn holds the thread for over 100 ms about
+  // one time in thirteen here, and a button that freezes the window for half a second is the same bug
+  // wearing a different hat. The outcome is ignored on purpose: a non-zero exit just means the process
+  // was already gone.
+  void spawnOffThread({
+    file: 'taskkill',
+    args: ['/PID', String(pid), '/T', '/F'],
+    timeout: 10_000,
+    maxBuffer: 64 * 1024,
+  }).catch(() => undefined);
 }

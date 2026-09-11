@@ -147,57 +147,96 @@ function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
+/** The registrations of one project, or the error that stopped them being read. */
+interface Listing {
+  readonly project: Project;
+  readonly entries: readonly WorktreeEntry[];
+  readonly error: string | null;
+}
+
+/** Lists one project's registrations. One child process, and it cannot fail the whole read. */
+async function listWorktrees(project: Project): Promise<Listing> {
+  try {
+    return {
+      project,
+      entries: parseWorktreeList(
+        await git(project.path, ['worktree', 'list', '--porcelain']),
+        canonicalPath(project.path),
+      ),
+      error: null,
+    };
+  } catch (error) {
+    // A folder that is not a repository is a normal row here, exactly as it is in the project table:
+    // reported, so it cannot be read as "this project has no worktree".
+    return { project, entries: [], error: describeGitError(error) };
+  }
+}
+
 /**
  * Reads one project's linked worktrees, with the working tree of each.
  *
  * The state comes from `readGitState`, the very function the project table's rows are built from,
- * rather than from a narrower read of its own. That is deliberate and it costs two extra git calls per
+ * rather than from a narrower read of its own. That is deliberate and it costs a git call per
  * worktree: the alternative is a second definition of "modified", "clean" and "ahead" living next to
  * the first, which is the failure this codebase has already paid for with `verdictFor` and `isStaged`.
- * The bill is in line with what the app already pays, the projects monitor running the same function
- * over every project on each git poll.
  *
  * A `prunable` worktree is **not** read: its folder is gone, so every call would fail and report an
  * error that says nothing the `prunable` badge does not already say better.
+ *
+ * Kept as the single-project entry point, and it delegates to {@link readAllWorktrees} rather than
+ * the other way round: the pool has to see every spawn of the read to be worth anything, so the
+ * pooling belongs to the plural function and this one is the list of length one.
  */
 export async function readRepoWorktrees(project: Project): Promise<RepoWorktrees> {
-  const base = { projectId: project.id, label: project.label, path: project.path };
-  let entries: WorktreeEntry[];
-  try {
-    entries = parseWorktreeList(
-      await git(project.path, ['worktree', 'list', '--porcelain']),
-      canonicalPath(project.path),
-    );
-  } catch (error) {
-    // A folder that is not a repository is a normal row here, exactly as it is in the project table:
-    // reported, so it cannot be read as "this project has no worktree".
-    return { ...base, worktrees: [], error: describeGitError(error) };
-  }
-
-  // Pooled like the project poll, and for the same measured reason: this is the widest read in the
-  // app, one `worktree list` per project and then a status per worktree, and every one of those is a
-  // process whose creation blocks the event loop. See `main/concurrency.ts`.
-  const worktrees = await mapWithLimit(
-    entries,
-    POLL_CONCURRENCY,
-    async (entry): Promise<Worktree> => ({
-      ...entry,
-      git: entry.prunable === null ? await readGitState(entry.path) : null,
-    }),
-  );
-
-  return { ...base, worktrees, error: null };
+  const [only] = await readAllWorktrees([project]);
+  // Non-null: `readAllWorktrees` maps its input, so a list of one answers with one.
+  return only as RepoWorktrees;
 }
 
 /**
  * Reads every watched project's worktrees, in the configured order.
  *
- * Projects with none are kept in the payload rather than filtered out. The view needs them to say
- * "eight worktrees across two of seven projects", and a project silently absent from a list is
+ * **One pool for the whole read, in two passes**, and that is the point of the shape. It used to be
+ * a `Promise.all` over the projects with a pool of four *inside* each of them, which bounds nothing:
+ * on eleven projects, eleven `worktree list` processes started in the same tick and up to forty-four
+ * status reads followed. Measured on 2026-09-09, that shape blocked the main process for **2343 ms**
+ * in one go, against about 430 ms once every spawn of the read shares a single pool of four. Neither
+ * figure is the cost of git working: `uv_spawn` calls `CreateProcessW` on the event loop thread, and
+ * on this machine roughly one spawn in thirteen is held there for over 100 ms by the endpoint
+ * scanner. A blocked main process is a frozen terminal, so the count and the width of this read are
+ * a latency budget, not a throughput one. See `main/concurrency.ts`.
+ *
+ * The two passes are forced by the data: the second pass's items are the registrations the first
+ * pass discovers, so they cannot be queued until it has answered. Flattening them into one list
+ * before reading any of them is what keeps the second pass at four in flight across all projects
+ * instead of four per project.
+ *
+ * Projects with no worktree are kept in the payload rather than filtered out. The view needs them to
+ * say "eight worktrees across two of seven projects", and a project silently absent from a list is
  * indistinguishable from a project the tab forgot to look at.
  */
 export async function readAllWorktrees(
   projects: readonly Project[],
 ): Promise<RepoWorktrees[]> {
-  return Promise.all(projects.map((project) => readRepoWorktrees(project)));
+  const listings = await mapWithLimit(projects, POLL_CONCURRENCY, listWorktrees);
+
+  // A `prunable` registration is not read, so it must not take a slot in the pool either.
+  const pending = listings.flatMap((listing) =>
+    listing.entries.filter((entry) => entry.prunable === null),
+  );
+  const states = await mapWithLimit(pending, POLL_CONCURRENCY, (entry) => readGitState(entry.path));
+  const readByPath = new Map(pending.map((entry, index) => [entry.path, states[index] ?? null]));
+
+  return listings.map(({ project, entries, error }) => ({
+    projectId: project.id,
+    label: project.label,
+    path: project.path,
+    worktrees: entries.map(
+      (entry): Worktree => ({
+        ...entry,
+        git: entry.prunable === null ? (readByPath.get(entry.path) ?? null) : null,
+      }),
+    ),
+    error,
+  }));
 }

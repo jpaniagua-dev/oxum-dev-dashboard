@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
+import { VIEW_CONCURRENCY, allWithLimit } from '../concurrency.js';
 import type {
   GitBranch,
   GitChange,
@@ -15,7 +16,6 @@ import type {
   GitSyncOp,
   Project,
 } from '@shared/contracts.js';
-import { readUpstream } from './git-service.js';
 import {
   FIELD_SEPARATOR as SEP,
   parseBranchLines,
@@ -45,8 +45,26 @@ const LOG_LIMIT = 60;
 /**
  * Everything the Git tab shows for one repository, in a single pass.
  *
- * The four reads run concurrently because none depends on another and they are all local: doing them
- * in sequence would make the tab's refresh four round trips long for no benefit.
+ * **Five child processes, on worker threads, six allowed in flight.** It was seven fired at once on
+ * the main thread, which blocked that thread for 486 ms: `uv_spawn` calls `CreateProcessW` on the
+ * event loop thread of whoever calls it, and a stalled main process is a terminal that stops echoing
+ * what is typed into it. It now measures 173 ms of wall time and 14 ms of worst main-loop lag.
+ * Measured on 2026-09-09; see `main/concurrency.ts` and `main/spawn/spawn-pool.ts`.
+ *
+ * A concurrency limit alone would not have been enough, because it spreads the stalls out without
+ * removing them. Two things had to happen: the spawns left the main thread, and two of the seven
+ * calls turned out to be **redundant** and went rather than being spread out.
+ *
+ * - **`readUpstream`** asked `rev-list --left-right --count @{upstream}...HEAD` for the gap to the
+ *   remote. `readBranches` already requests `%(upstream:track)`, which is git's own
+ *   `[ahead 2, behind 1]` for **every** branch, so the answer for the current one was already in a
+ *   payload this function held. A `gone` upstream is the one case where the two disagreed and it is
+ *   handled explicitly below: `rev-list` fails on a deleted remote branch, so the old code reported
+ *   no upstream, and `Push` has to keep offering `-u` there.
+ * - **`readSequencer`'s `rev-parse`** became a `readFileSync` of `.git`. See {@link resolveGitDir}.
+ *
+ * A third call, **`readHead`**, was already lazy and stays so: it is only reached on a detached HEAD,
+ * which `for-each-ref refs/heads` cannot name, so it is not part of the five.
  *
  * A failure of the whole thing degrades to a state carrying the message rather than throwing. The
  * folder may simply not be a repository, which is a normal row in this app, not an exception.
@@ -65,16 +83,20 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
   };
 
   try {
-    const [branches, changes, commits, stashes, headMessage, sequencer, upstream] =
-      await Promise.all([
-        readBranches(project.path),
-        readChanges(project.path),
-        readCommits(project.path),
-        readStashes(project.path),
-        readHeadMessage(project.path),
-        readSequencer(project.path),
-        readUpstream(project.path),
-      ]);
+    const [branches, changes, commits, stashes, headMessage] = await allWithLimit(
+      // `VIEW_CONCURRENCY` and not the poll's limit: this read answers a click as well as the poll,
+      // and at four its five calls needed two waves, which measured 1068 ms against 173 ms. See the
+      // table on that constant.
+      VIEW_CONCURRENCY,
+      () => readBranches(project.path),
+      () => readChanges(project.path),
+      () => readCommits(project.path),
+      () => readStashes(project.path),
+      () => readHeadMessage(project.path),
+    );
+    // No process of its own any more, so it is not in the pool: two stats and, in a worktree, a
+    // sixty-byte read.
+    const sequencer = readSequencer(project.path);
 
     const current = branches.find((branch) => branch.current);
     return {
@@ -89,9 +111,13 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
       // a detached HEAD matches no entry in `refs/heads`, and reporting an empty name there would
       // make the tab look broken rather than detached.
       branch: current?.name ?? (await readHead(project.path)),
-      ahead: upstream.ahead,
-      behind: upstream.behind,
-      hasUpstream: upstream.hasUpstream,
+      ahead: current?.ahead ?? 0,
+      behind: current?.behind ?? 0,
+      // A `gone` upstream is configured but no longer exists on the remote, so pushing still needs
+      // `-u`: reporting it as an upstream would offer a bare `git push` for a branch that has to be
+      // republished. This is the one disagreement with the `rev-list` call that used to answer here,
+      // and it is preserved deliberately rather than inherited.
+      hasUpstream: current !== undefined && current.upstream !== null && !current.gone,
       checkedAt: new Date().toISOString(),
       error: null,
     };
@@ -188,7 +214,7 @@ export async function readHeadMessage(repoPath: string): Promise<string> {
  * stopped on a conflicted cherry-pick has both, and naming the rebase is what leads to the command
  * that actually finishes it.
  */
-export async function readSequencer(repoPath: string): Promise<GitSequencer> {
+export function readSequencer(repoPath: string): GitSequencer {
   try {
     const markers: readonly (readonly [GitSequencer, string])[] = [
       ['rebase', 'rebase-merge'],
@@ -197,8 +223,8 @@ export async function readSequencer(repoPath: string): Promise<GitSequencer> {
       ['revert', 'REVERT_HEAD'],
       ['merge', 'MERGE_HEAD'],
     ];
-    const gitDir = (await git(repoPath, ['rev-parse', '--absolute-git-dir'])).trim();
-    if (gitDir.length === 0) {
+    const gitDir = resolveGitDir(repoPath);
+    if (gitDir === null) {
       return 'none';
     }
     for (const [state, marker] of markers) {
@@ -210,6 +236,50 @@ export async function readSequencer(repoPath: string): Promise<GitSequencer> {
   } catch {
     return 'none';
   }
+}
+
+/**
+ * Where this checkout's git directory is, read off the disk instead of asked of git.
+ *
+ * This used to be `git rev-parse --absolute-git-dir`, and the answer was right; what was wrong was
+ * paying a child process for it. On this machine a spawn costs about 40 ms and roughly one in
+ * thirteen blocks the main process for over 100 ms, against a `readFileSync` of sixty bytes here.
+ * The read is synchronous like the marker probes just above it, and stays that way for the same
+ * reason: a stat is microseconds, so moving these to promises would buy nothing and split one
+ * question across two styles.
+ *
+ * Two layouts, and the second is the whole reason the git directory has to be resolved at all: in a
+ * main checkout `.git` is the directory, while in a **linked worktree** it is a file holding
+ * `gitdir: <path>` that points into the main repository's `worktrees/<name>`. That is where a
+ * worktree's own sequencer markers live, so joining `.git/CHERRY_PICK_HEAD` onto the folder would
+ * answer "nothing in progress" for every worktree.
+ */
+export function resolveGitDir(repoPath: string): string | null {
+  const dotGit = join(repoPath, '.git');
+  if (!existsSync(dotGit)) {
+    return null;
+  }
+  if (statSync(dotGit).isDirectory()) {
+    return dotGit;
+  }
+  return parseGitDirFile(readFileSync(dotGit, 'utf8'), repoPath);
+}
+
+/**
+ * Reads the `gitdir: <path>` pointer a linked worktree's `.git` file carries.
+ *
+ * Pure and exported for testing. The path git writes there is absolute in practice, but the format
+ * allows a relative one, so it is resolved against the checkout rather than trusted flat: a relative
+ * pointer taken literally would be joined onto the process's working directory, which is somewhere
+ * else entirely and would silently report `none` forever.
+ */
+export function parseGitDirFile(content: string, repoPath: string): string | null {
+  const match = /^gitdir:\s*(.+)$/m.exec(content);
+  const target = match?.[1]?.trim() ?? '';
+  if (target.length === 0) {
+    return null;
+  }
+  return isAbsolute(target) ? target : resolve(repoPath, target);
 }
 
 /**

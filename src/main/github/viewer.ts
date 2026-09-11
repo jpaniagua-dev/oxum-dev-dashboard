@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawnOffThread } from '../spawn/spawn-pool.js';
 
-const execFileAsync = promisify(execFile);
 
 /** Resolved once and kept: the signed-in account does not change while the app runs. */
 let cached: string | null = null;
@@ -20,9 +18,11 @@ export async function readViewerLogin(): Promise<string> {
     return cached;
   }
   try {
-    const { stdout } = await execFileAsync('gh', ['api', 'user', '--jq', '.login'], {
+    const { stdout } = await spawnOffThread({
+      file: 'gh',
+      args: ['api', 'user', '--jq', '.login'],
       timeout: 15_000,
-      windowsHide: true,
+      maxBuffer: 1024 * 1024,
     });
     cached = stdout.trim();
   } catch {

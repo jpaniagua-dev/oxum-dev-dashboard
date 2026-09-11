@@ -1,7 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
+import { spawnOffThread } from '../spawn/spawn-pool.js';
 
 /**
  * Budget for a local read.
@@ -38,9 +35,15 @@ export interface GitRunOptions {
 /**
  * Runs a git command in a repository and returns its stdout.
  *
- * `execFile` with an argument array and **no shell**: branch names, paths and commit messages reach
- * git as single arguments, so nothing a user types can be read as shell syntax. That property is why
- * every git call in this app goes through here rather than through a command string.
+ * An argument array and **no shell**: branch names, paths and commit messages reach git as single
+ * arguments, so nothing a user types can be read as shell syntax. That property is why every git call
+ * in this app goes through here rather than through a command string.
+ *
+ * It goes through {@link spawnOffThread} rather than `execFile` directly, and that is the whole point
+ * of this module being the single door: `CreateProcessW` blocks the thread that calls it, and about
+ * one spawn in thirteen blocks it for over 100 ms on this machine, which is a terminal that stops
+ * echoing. One import here moves every git call in the app off the main thread. The rejection shape
+ * is unchanged, so `describeGitError` below still reads git's own stderr.
  *
  * Throws on a non-zero exit, which is what the read paths want: they turn it into a state carrying
  * the message. Writes use `tryGit` instead.
@@ -50,22 +53,22 @@ export async function git(
   args: readonly string[],
   options: GitRunOptions = {},
 ): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['-C', repoPath, ...args], runOptions(options));
+  const { stdout } = await spawnOffThread(request(repoPath, args, options));
   return stdout;
 }
 
-/** The `execFile` options every call shares, so the two runners cannot drift on a budget or a variable. */
-function runOptions(options: GitRunOptions): {
-  timeout: number;
-  windowsHide: boolean;
-  maxBuffer: number;
-  env?: NodeJS.ProcessEnv;
-} {
+/** The request every call shares, so the two runners cannot drift on a budget or a variable. */
+function request(
+  repoPath: string,
+  args: readonly string[],
+  options: GitRunOptions,
+): Parameters<typeof spawnOffThread>[0] {
   return {
+    file: 'git',
+    args: ['-C', repoPath, ...args],
     timeout: options.timeoutMs ?? GIT_TIMEOUT_MS,
-    windowsHide: true,
     maxBuffer: options.maxBuffer ?? 4 * 1024 * 1024,
-    ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+    ...(options.env === undefined ? {} : { env: options.env }),
   };
 }
 
@@ -91,11 +94,7 @@ export async function tryGit(
   options: GitRunOptions = {},
 ): Promise<{ ok: boolean; stdout: string; message: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync(
-      'git',
-      ['-C', repoPath, ...args],
-      runOptions(options),
-    );
+    const { stdout, stderr } = await spawnOffThread(request(repoPath, args, options));
     // git says most of what it did on stderr even when it succeeded, and that is the interesting
     // half: "Switched to branch 'x'", "Everything up-to-date".
     return { ok: true, stdout, message: firstLine(stderr) || firstLine(stdout) || 'Done' };

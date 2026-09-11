@@ -185,8 +185,6 @@ export interface ServerState {
   readonly errorSummary: string | null;
   /** Number of errors in the last failed build, when the toolchain reports it. */
   readonly errorCount: number;
-  /** ISO timestamp of the last successful build. */
-  readonly lastSuccessAt: string | null;
   /** True when the dashboard spawned this process and can therefore stop it. */
   readonly owned: boolean;
 }
@@ -509,20 +507,6 @@ export type ChecksVerdict =
   | 'failing'
   | 'unknown';
 
-export interface ChecksState {
-  readonly verdict: ChecksVerdict;
-  readonly prNumber: number | null;
-  readonly prUrl: string | null;
-  readonly prTitle: string | null;
-  readonly isDraft: boolean;
-  readonly passed: number;
-  readonly failed: number;
-  readonly pending: number;
-  /** ISO timestamp of the last successful lookup. */
-  readonly checkedAt: string | null;
-  readonly error: string | null;
-}
-
 /* ------------------------------------------------------------------ *
  * GitHub Actions runs
  * ------------------------------------------------------------------ */
@@ -697,7 +681,6 @@ export interface ProjectRow {
   readonly project: Project;
   readonly server: ServerState;
   readonly git: GitState | null;
-  readonly checks: ChecksState | null;
   readonly workflows: WorkflowsState | null;
 }
 
@@ -1322,6 +1305,22 @@ export const IpcChannel = {
   Bootstrap: 'app:bootstrap',
   /** on: (rows: ProjectRow[]) => void, pushed whenever any project's state changes */
   RowsChanged: 'projects:rows-changed',
+  /**
+   * on: () => void, pushed once every time the git poll has finished reading every project.
+   *
+   * The heartbeat of the two tabs that read git on demand, the Git tab and the Worktrees tab, and it
+   * exists because `RowsChanged` is **not** that heartbeat even though it used to be used as one.
+   * That channel is pushed from five places: the git poll, the checks poll, the workflows poll, a
+   * reorder, and every server-output patch. Hanging the widest read in the app (one `worktree list`
+   * per project, then a status per worktree) off it meant a dev server printing a build marker fired
+   * eighteen child processes, and each of those has about a one-in-thirteen chance of blocking the
+   * main process for over 100 ms, which is a frozen terminal. Measured on 2026-09-09; see
+   * `main/concurrency.ts`.
+   *
+   * Carries no payload on purpose: the rows arrive on `RowsChanged` a moment earlier, so a second
+   * copy here would be a second authority for the same state.
+   */
+  GitPolled: 'projects:git-polled',
   /** invoke: () => ProjectRow[], forces a full refresh */
   RefreshNow: 'projects:refresh',
   /** on: (repos: RepoPulls[]) => void, pushed whenever pull requests are re-read */
@@ -1352,8 +1351,8 @@ export const IpcChannel = {
    * invoke: () => RepoWorktrees[], every project's linked worktrees with their working-tree state
    *
    * Pulled and never pushed, like the Git tab: there is no monitor behind it, so nothing is read for
-   * a tab nobody is looking at. Its heartbeat is the git poll's `RowsChanged`, which describes the
-   * very working trees this list is about.
+   * a tab nobody is looking at. Its heartbeat is `GitPolled`, which describes the very working trees
+   * this list is about, and which fires once per poll rather than once per state change.
    */
   WorktreesRead: 'worktrees:read',
   /**
@@ -1563,6 +1562,8 @@ export interface RendererApi {
   bootstrap(): Promise<BootstrapState>;
   refreshNow(): Promise<ProjectRow[]>;
   onRowsChanged(listener: (rows: ProjectRow[]) => void): () => void;
+  /** Fires once per finished git poll. The heartbeat of the Git and Worktrees tabs. */
+  onGitPolled(listener: () => void): () => void;
 
   refreshPulls(): Promise<RepoPulls[]>;
   onPullsChanged(listener: (repos: RepoPulls[]) => void): () => void;

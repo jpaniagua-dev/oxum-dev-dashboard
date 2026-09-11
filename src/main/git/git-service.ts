@@ -13,18 +13,16 @@ import { describeGitError, git } from './run-git.js';
  * **One call, and the count is the point.** This function used to make four (`rev-parse` for the
  * branch, `status` for the files, `rev-list` for the upstream gap, `stash list` for a count), which
  * was harmless on the assumption that starting a process is cheap. It is not, on a machine with
- * corporate endpoint protection: measured on 2026-09-02, a process that does nothing at all costs
- * 31 ms there, so the four calls cost 170 ms per project of which only about 22 ms was git actually
- * working. Ten projects on a ten-second poll is 40 spawns, and because `uv_spawn` creates processes
- * synchronously on the event loop thread, that blocked the main process for 489 ms every ten seconds.
+ * corporate endpoint protection: a spawn there costs about 40 ms in the median and, roughly one time
+ * in thirteen, holds the calling thread for over 100 ms while a scanner inspects it. Eleven projects
+ * on a ten-second poll therefore meant 44 spawns where 11 would do, and each one removed is a real
+ * reduction rather than a rearrangement. See `main/concurrency.ts` for the distribution, and
+ * `main/spawn/spawn-pool.ts` for why the calls no longer happen on the thread that draws.
  * See `main/concurrency.ts` for the measurements.
  *
  * `--porcelain=v2 --branch` answers all of it at once: the branch name, the upstream and its gap in
  * the `# branch.*` header, then one record per changed file. The stash count went with the change and
  * was not replaced, because **nothing displayed it** (see `GitState`).
- *
- * `readUpstream` below is kept even though this no longer calls it: the Git tab reads a single
- * repository on demand, where one focused call is the right shape.
  */
 export async function readGitState(repoPath: string): Promise<GitState> {
   try {
@@ -187,36 +185,6 @@ function describeHead(head: string, oid: string): string {
     return head;
   }
   return oid.length > 0 ? `detached@${oid.slice(0, 7)}` : 'detached';
-}
-
-/**
- * Reads how far the branch is from its upstream.
- *
- * A branch with no upstream is a normal state, not an error: it simply has not been pushed, which
- * also means no pull request can exist for it. `rev-list` exits non-zero in that case, so the
- * failure is caught and reported as `hasUpstream: false`.
- */
-export async function readUpstream(
-  repoPath: string,
-): Promise<{ behind: number; ahead: number; hasUpstream: boolean }> {
-  try {
-    const out = await git(repoPath, ['rev-list', '--left-right', '--count', '@{upstream}...HEAD']);
-    return { ...parseAheadBehind(out), hasUpstream: true };
-  } catch {
-    return { behind: 0, ahead: 0, hasUpstream: false };
-  }
-}
-
-/**
- * `git rev-list --left-right --count` prints "<behind>\t<ahead>".
- *
- * Behind first, and worth stating next to `parsePorcelainV2`, which reads the same two numbers from
- * `# branch.ab` in the **opposite** order. Two readers of one fact with two orders is exactly the kind
- * of pair that gets copied wrongly.
- */
-export function parseAheadBehind(stdout: string): { behind: number; ahead: number } {
-  const [behind, ahead] = stdout.trim().split(/\s+/);
-  return { behind: toCount(behind), ahead: toCount(ahead) };
 }
 
 function toCount(value: string | undefined): number {

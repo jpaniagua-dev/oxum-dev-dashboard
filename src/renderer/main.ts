@@ -23,6 +23,7 @@ import type {
 } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { moveProject } from '@shared/project-order.js';
+import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
 import {
   addTag,
   removeTag,
@@ -114,6 +115,8 @@ class App {
    * row under the cursor. Same mechanism as `editingRow` and `gitEditing`.
    */
   private worktreesEditing = false;
+  /** Single-flight state for the worktree read. See {@link singleFlight}. */
+  private readonly worktreesFlight: Flight = idleFlight();
   private triage: TriageState | null = null;
   private triagePanel: TriagePanel | null = null;
   private selectedJiraView: JiraViewId = 'mine';
@@ -162,6 +165,8 @@ class App {
    */
   private gitGenerating = false;
   private gitEditing = false;
+  /** Single-flight state for the Git tab's read. See {@link singleFlight}. */
+  private readonly gitFlight: Flight = idleFlight();
   private strip: StripTabs | null = null;
   /** Whether the top strip is folded down to its tab row. Mirrors `settings.stripCollapsed`. */
   private stripCollapsed = false;
@@ -250,23 +255,34 @@ class App {
     window.api.onRowsChanged((rows) => {
       this.rows = rows;
       this.renderTable();
-      // The git poll is the natural heartbeat for the Git tab too: the working tree it describes is
-      // the very thing that tab shows. Only when it is on screen, since reading branches, history and
-      // status for a hidden tab is work for nobody.
+      this.stampRefresh();
+    });
+    /*
+     * The git poll, and ONLY the git poll, is the heartbeat of the two tabs that read git on demand.
+     *
+     * This used to hang off `onRowsChanged`, which reads like the same thing and is not: that channel
+     * is pushed by the checks poll, the workflows poll, a reorder and every server-output patch as
+     * well, so a dev server printing `Building` fired the widest read in the app (one
+     * `worktree list` per project, then a status per worktree). Measured on 2026-09-09, that read is
+     * eighteen child processes on this configuration and each spawn has about a one-in-thirteen
+     * chance of blocking the main process for over 100 ms. The tab was refreshing itself into a
+     * frozen terminal. See `main/concurrency.ts`.
+     */
+    window.api.onGitPolled(() => {
       if (this.strip?.active === 'git') {
         void this.loadGit();
       }
-      // The Worktrees tab describes working trees too, so the same heartbeat carries it. Its read is
-      // the widest of the strip (one `git worktree list` per project, then a status per worktree),
-      // which is exactly why it is bound to the visible tab and to nothing else.
       if (this.strip?.active === 'worktrees') {
         void this.loadWorktrees();
       }
-      this.stampRefresh();
     });
     window.api.onPullsChanged((repos) => {
       this.pulls = repos;
       this.renderPulls();
+      // The table's `Checks` column is a join against this payload, so the pulls poll is now one of
+      // the two things that can change what that column says. Before the column stopped being its own
+      // `gh pr view` per project, this push only concerned the Pull requests tab.
+      this.renderTable();
     });
     window.api.onJiraChanged((state) => {
       this.jira = state;
@@ -387,7 +403,13 @@ class App {
     const vocabulary = tagVocabulary(
       this.settings?.projects ?? this.rows.map((row) => row.project),
     );
-    renderProjectTable(requireElement('project-tbody'), this.rows, vocabulary, this.settings?.tagColors ?? {}, {
+    renderProjectTable(
+      requireElement('project-tbody'),
+      this.rows,
+      vocabulary,
+      this.settings?.tagColors ?? {},
+      this.pullsByProject(),
+      {
       onRunAction: (projectId, actionId) => void this.runAction(projectId, actionId),
       onRename: (projectId, label) => void this.renameProject(projectId, label),
       onEditingChange: (editing) => {
@@ -982,8 +1004,10 @@ class App {
     if (this.worktreesEditing) {
       return;
     }
-    this.worktrees = await window.api.readWorktrees();
-    this.renderWorktrees();
+    return singleFlight(this.worktreesFlight, async () => {
+      this.worktrees = await window.api.readWorktrees();
+      this.renderWorktrees();
+    });
   }
 
   /**
@@ -1015,7 +1039,18 @@ class App {
     await this.loadWorktrees();
   }
 
+  /**
+   * Reads the Git tab, at most one read at a time.
+   *
+   * Same guard as the worktree read and for the same reason: this is five child processes, its
+   * triggers are a poll plus every button in the tab, and overlapping reads stacked those spawns
+   * while racing each other to set `gitRepo`.
+   */
   private async loadGit(): Promise<void> {
+    return singleFlight(this.gitFlight, () => this.readGitTab());
+  }
+
+  private async readGitTab(): Promise<void> {
     if (this.gitEditing) {
       return;
     }

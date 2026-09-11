@@ -65,7 +65,15 @@ export class DashboardWindow {
     return this.window;
   }
 
-  send(channel: string, payload: unknown): void {
+  /**
+   * Pushes on a channel, with a payload when the channel carries one.
+   *
+   * Optional because a signal channel is a real shape here: `GitPolled` says "the working trees were
+   * just re-read" and deliberately carries nothing, the rows having arrived a moment earlier on their
+   * own channel. Forcing a `null` argument at that call site would read as a payload somebody
+   * forgot to fill in.
+   */
+  send(channel: string, payload?: unknown): void {
     const window = this.window;
     if (window !== null && !window.isDestroyed()) {
       window.webContents.send(channel, payload);

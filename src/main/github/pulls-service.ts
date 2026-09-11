@@ -1,9 +1,7 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawnOffThread } from '../spawn/spawn-pool.js';
 import type { PrReview, PullRequest } from '@shared/contracts.js';
-import { classifyCheck, verdictFor } from './checks-service.js';
+import { classifyCheck, verdictFor } from './check-verdict.js';
 
-const execFileAsync = promisify(execFile);
 
 const TIMEOUT_MS = 25_000;
 /** Enough to cover a busy repository without pulling a year of history into the strip. */
@@ -41,11 +39,12 @@ export async function readRepoPulls(
   login: string,
 ): Promise<{ pulls: PullRequest[]; error: string | null }> {
   try {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', String(LIMIT), '--json', FIELDS],
-      { timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
-    );
+    const { stdout } = await spawnOffThread({
+      file: 'gh',
+      args: ['pr', 'list', '--repo', slug, '--state', 'open', '--limit', String(LIMIT), '--json', FIELDS],
+      timeout: TIMEOUT_MS,
+      maxBuffer: 8 * 1024 * 1024,
+    });
     return { pulls: parsePullPayload(stdout, login), error: null };
   } catch (error) {
     return { pulls: [], error: describeError(error) };

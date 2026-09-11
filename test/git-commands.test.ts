@@ -14,10 +14,12 @@ import {
   readChanges,
   readCommits,
   readDiff,
+  parseGitDirFile,
   readHeadMessage,
   readRepoState,
   readSequencer,
   readStashes,
+  resolveGitDir,
   resolveSequencer,
   stagePaths,
   stashPush,
@@ -429,7 +431,7 @@ describe('cherry-pick', () => {
 
     expect(await cherryPick(sandbox, source?.sha ?? '', false)).toMatchObject({ ok: true });
     expect((await readCommits(sandbox))[0]?.subject).toBe('feat: a reprendre');
-    expect(await readSequencer(sandbox)).toBe('none');
+    expect(readSequencer(sandbox)).toBe('none');
   });
 
   it('stages without committing under -n', async () => {
@@ -481,10 +483,10 @@ describe('cherry-pick', () => {
     const result = await cherryPick(sandbox, conflicting?.sha ?? '', false);
     expect(result.ok).toBe(false);
     expect(result.message).toContain('Conflict');
-    expect(await readSequencer(sandbox)).toBe('cherry-pick');
+    expect(readSequencer(sandbox)).toBe('cherry-pick');
 
     expect(await resolveSequencer(sandbox, 'cherry-pick', 'abort')).toMatchObject({ ok: true });
-    expect(await readSequencer(sandbox)).toBe('none');
+    expect(readSequencer(sandbox)).toBe('none');
     expect(await readChanges(sandbox)).toEqual([]);
   });
 
@@ -507,15 +509,115 @@ describe('cherry-pick', () => {
     }).trim();
 
     expect(await cherryPick(sandbox, conflicting, false)).toMatchObject({ ok: false });
-    expect(await readSequencer(sandbox)).toBe('cherry-pick');
+    expect(readSequencer(sandbox)).toBe('cherry-pick');
 
     // Resolve it the way a user would, in the terminal this tab keeps sending them to.
     writeFileSync(join(sandbox, 'base.ts'), 'const base = "resolu";\n', 'utf8');
     local(['add', 'base.ts']);
 
     expect(await resolveSequencer(sandbox, 'cherry-pick', 'continue')).toMatchObject({ ok: true });
-    expect(await readSequencer(sandbox)).toBe('none');
+    expect(readSequencer(sandbox)).toBe('none');
     expect(await readChanges(sandbox)).toEqual([]);
+  });
+});
+
+/**
+ * The git directory, and the layout that made a spawn look unavoidable.
+ *
+ * `readSequencer` used to ask `git rev-parse --absolute-git-dir` for this, which was correct and cost
+ * a child process on every read of the Git tab. It now reads `.git` off the disk, and the only reason
+ * that is not trivially equivalent is the **linked worktree**: there, `.git` is a file pointing into
+ * the main repository, and every sequencer marker lives at the far end of that pointer. A version
+ * that just joined `.git/CHERRY_PICK_HEAD` onto the folder would answer "nothing in progress" for
+ * every worktree, which is silent and wrong in the state where the tab matters most.
+ */
+describe('the git directory', () => {
+  let host = '';
+  let linked = '';
+
+  beforeAll(() => {
+    host = mkdtempSync(join(tmpdir(), 'oxum-gitdir-'));
+    const at = (args: string[]): void => {
+      execFileSync('git', ['-C', host, ...args], { windowsHide: true, stdio: 'pipe' });
+    };
+    execFileSync('git', ['init', '-b', 'main', host], { windowsHide: true, stdio: 'pipe' });
+    at(['config', 'user.email', 'dev@example.com']);
+    at(['config', 'user.name', 'Dev']);
+    writeFileSync(join(host, 'base.ts'), 'const base = 1;\n', 'utf8');
+    at(['add', '.']);
+    at(['commit', '-m', 'chore: base']);
+    linked = mkdtempSync(join(tmpdir(), 'oxum-gitdir-linked-'));
+    // `worktree add` needs the folder not to exist yet, so the unique name is taken and the
+    // directory handed back.
+    rmSync(linked, { recursive: true, force: true });
+    at(['worktree', 'add', linked, '-b', 'side']);
+  });
+
+  afterAll(() => {
+    rmSync(host, { recursive: true, force: true });
+    rmSync(linked, { recursive: true, force: true });
+  });
+
+  it('is the .git folder itself in a main checkout', () => {
+    expect(resolveGitDir(host)).toBe(join(host, '.git'));
+  });
+
+  it('follows the pointer file of a linked worktree into the main repository', () => {
+    const resolved = resolveGitDir(linked);
+    expect(resolved).not.toBeNull();
+    // The far end is the main repository's per-worktree directory, not the worktree's own folder.
+    expect(existsSync(resolved ?? '')).toBe(true);
+    expect((resolved ?? '').replace(/\\/g, '/')).toContain('/worktrees/');
+  });
+
+  it('answers null for a folder that is not a checkout at all', () => {
+    expect(resolveGitDir(join(host, 'src'))).toBeNull();
+  });
+
+  it('reports a sequencer state inside a linked worktree, where the markers are not under .git', () => {
+    const inLinked = (args: string[]): void => {
+      execFileSync('git', ['-C', linked, ...args], { windowsHide: true, stdio: 'pipe' });
+    };
+    const inHost = (args: string[]): void => {
+      execFileSync('git', ['-C', host, ...args], { windowsHide: true, stdio: 'pipe' });
+    };
+    expect(readSequencer(linked)).toBe('none');
+    // The two branches have to diverge, or the merge is a fast-forward that leaves no marker at all
+    // and the assertion below would pass for the wrong reason.
+    writeFileSync(join(host, 'ahead.ts'), 'const ahead = 1;', 'utf8');
+    inHost(['add', '.']);
+    inHost(['commit', '-m', 'chore: ahead on main']);
+    writeFileSync(join(linked, 'side.ts'), 'const side = 1;\n', 'utf8');
+    inLinked(['add', '.']);
+    inLinked(['commit', '-m', 'chore: side']);
+    inLinked(['merge', '--no-commit', '--no-ff', 'main']);
+    // A merge left uncommitted is exactly the half-finished state the tab has to name, and its
+    // marker lives in the main repository rather than under the worktree's own folder.
+    expect(readSequencer(linked)).toBe('merge');
+    inLinked(['merge', '--abort']);
+    expect(readSequencer(linked)).toBe('none');
+  });
+});
+
+describe('parseGitDirFile', () => {
+  it('reads the pointer git writes', () => {
+    expect(parseGitDirFile('gitdir: C:/repos/web-app/.git/worktrees/side\n', 'C:\\repos\\side')).toBe(
+      'C:/repos/web-app/.git/worktrees/side',
+    );
+  });
+
+  it('resolves a relative pointer against the checkout, not the process working directory', () => {
+    // The format permits it, and taken literally it would point somewhere else entirely and report
+    // "nothing in progress" forever.
+    expect(parseGitDirFile('gitdir: ../main/.git/worktrees/side', join('C:', 'repos', 'side'))).toBe(
+      join('C:', 'repos', 'main', '.git', 'worktrees', 'side'),
+    );
+  });
+
+  it('answers null on anything that is not a pointer', () => {
+    expect(parseGitDirFile('', 'C:/repos/side')).toBeNull();
+    expect(parseGitDirFile('gitdir:   \n', 'C:/repos/side')).toBeNull();
+    expect(parseGitDirFile('ref: refs/heads/main\n', 'C:/repos/side')).toBeNull();
   });
 });
 

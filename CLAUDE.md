@@ -1801,51 +1801,78 @@ worktree row. Triage lists sprints and Jira lists issues, so there is nothing to
   whose minimum width is the sum of its fixed columns. The truncation moved from `.worktree__project`
   onto `.worktree__project-label`, the cell now being the row rather than the text.
 
-## Performance: a process is not cheap here
+## Performance: a spawn is cheap nine times out of ten and catastrophic the tenth
 
-Measured on 2026-09-02 after the app grew visible micro-freezes, up to a second while typing in the
-terminal. The renderer was innocent (0.39 CPU seconds over a 30 s idle window, against **3.73 for the
-main process**, 12% of a core to poll and nothing else). Everything below is a number, not a theory.
+Measured on 2026-09-02 after visible micro-freezes while typing, and **re-measured on 2026-09-09
+because the first analysis was aimed at the wrong statistic and the freezes carried on**. Keep the
+correction in mind before optimising anything here: the renderer was innocent both times (0.39 CPU
+seconds over a 30 s idle window against 3.73 for the main process).
 
-- **Creating a process costs 31 ms on a managed Windows machine.** `cmd /c exit`, which does nothing
-  at all: 31 ms. `git --version`: 37 ms. `gh --version`: **79 ms**. Against 3 to 8 ms unmanaged. Two
-  real-time scanners hook process creation there and the exclusion list is locked by policy, so this
-  is not a setting anyone can turn off. **Design as if starting a process were expensive**, because
-  here it is.
-- **`uv_spawn` creates processes synchronously on the event loop thread**, so every spawn *blocks* the
-  main process rather than merely occupying it. And a keystroke's echo travels renderer to main to pty
-  to main to renderer: a blocked main loop is literally a frozen terminal. That is the whole mechanism,
-  and it is why the fix is about **counting spawns**, not about making git faster.
-- **Measured worst timer lateness during one poll**, on the real ten-project configuration:
+- **`uv_spawn` calls `CreateProcessW` synchronously on the event loop thread of whoever calls it.**
+  A spawn is therefore not work the loop has to get through, it is time the loop is not running. A
+  keystroke's echo travels renderer to main to pty to main to renderer, so a blocked main process is
+  literally a terminal that has stopped echoing. This part was right the first time and is the whole
+  mechanism.
+- **The cost is bimodal, and the median hides it.** The 2026-09-02 figures (31 ms for `cmd /c exit`,
+  37 ms for `git --version`, 79 ms for `gh --version`) are median wall times of the whole call, which
+  is neither the blocking part nor typical. Separating the synchronous part over 150 sequential
+  spawns:
 
-  | shape | spawns | loop blocked |
-  |---|---|---|
-  | four git calls per project, all at once (until 5.8.1) | 40 | 489 ms, 1390 ms cold |
-  | four git calls per project, pool of 4 | 40 | 208 ms |
-  | one git call per project, all at once | 10 | 48 ms |
-  | **one git call per project, pool of 4 (now)** | **10** | **10 ms** |
-  | two `gh` calls per project, all at once (until 5.8.1) | 20 | 1799 ms |
-  | two `gh` calls per project, pool of 4 | 20 | 392 ms |
+  | command | sync p50 | sync p90 | sync p99 | sync max | blocks >100 ms |
+  |---|---|---|---|---|---|
+  | `cmd /c exit` | 8 ms | 22 ms | 851 ms | 1653 ms | 9 % |
+  | `git status --porcelain=v2` | 8 ms | 11 ms | 833 ms | 846 ms | 6 % |
 
-- **`readGitState` makes ONE call**, `git status --porcelain=v2 --branch`, which answers the branch,
-  the upstream, the gap and every changed file at once. It made four, and 148 of those 170 ms per
-  project were the creation tax rather than git working. Do not split it back up for tidiness: the
-  parser is `parsePorcelainV2`, pure and tested, and the two traps it records (a **missing**
-  `branch.upstream` is what "no upstream" looks like; `branch.ab` prints **ahead first**, the opposite
-  order from `rev-list`) are the whole reason it is not three functions.
-- **Every poll goes through `mapWithLimit` with `POLL_CONCURRENCY`.** The pool does **not** reduce the
-  work, and that is the honest framing: it converts one long stall into several short ones. Cutting the
-  call count is the lever that reduces work and is applied first. The limit is 4 because that is where
-  the stall drops below one frame while the wall time stays within a few percent.
-- **The two GitHub columns are chained, not fired together.** They share the checks tick, and two
-  pooled refreshes started at the same instant put twice the pool in flight. `refreshAll` stays
-  parallel on purpose: it answers a click, and the user is waiting on it.
-- **A field nothing displays still costs a process.** `GitState.stashes` was read by a `git stash list`
-  per project per poll and had **no consumer at all**. Before adding a number to a polled shape, name
-  the thing that shows it.
-- **The portable build is not the cause and was suspected.** It unpacks to a fresh temporary folder on
-  each launch, which the scanner has never seen, so the launch and the first poll are slower (that is
-  the 1390 ms cold figure). Steady-state typing is identical.
+  Roughly **one spawn in thirteen holds the thread for over 100 ms**, and the distribution is
+  identical for a process that does nothing at all, which is what proves it is process creation being
+  hooked by two real-time scanners rather than git working. Their exclusion list is locked by policy.
+- **A concurrency limit cannot fix a tail.** The pool spreads the median and leaves every ticket in
+  the same lottery. The projects table's poll, already one call per project and already pooled at
+  four, still blocked the main process for **429 to 468 ms on four passes out of five**. That is what
+  5.9.0 shipped, and it is why "we already pooled it" was not an answer.
+- **Two levers work. Both are applied.**
+  1. **Spawn fewer times**, which scales the number of tickets. `readGitState` is one call, not four.
+     The Git tab's read is four, not seven (`readUpstream` was redundant with the `%(upstream:track)`
+     `readBranches` already asks for, and `readSequencer`'s `rev-parse` became a `readFileSync` of
+     `.git`). The table's `Checks` column is a **join** against the pull requests already read, not a
+     `gh pr view` per project, which is eleven `gh` processes a minute: same argument the Worktrees
+     tab's `PR checks` column was built on, finally applied to the column it was copied from.
+  2. **Do not spawn on the main thread.** `main/spawn/spawn-pool.ts` runs every `execFile` in the app
+     on one of four worker threads. Same eleven calls, same pool of four, worst **main**-loop lag:
+
+     | where the spawn happens | worst main-loop lag | mean wall |
+     |---|---|---|
+     | main thread | 529 ms | 496 ms |
+     | worker thread | **27 ms** | 1825 ms |
+
+     The wall time gets worse and that is the trade: this serves background polls and reads behind a
+     tab, never anything a user waits on, since everything interactive is a pty and ptys never came
+     through here. **Any new `execFile` in the main process is a bug**: go through the pool.
+- **`RowsChanged` is not a heartbeat**, and using it as one was the worst offender of the lot. It is
+  pushed by the git poll, the checks poll, the workflows poll, a reorder **and every server-output
+  patch**, so hanging the Worktrees tab's read off it meant a dev server printing `Building` fired
+  eighteen child processes. `GitPolled` exists for that and fires once per finished git poll. Two
+  supporting rules: `patchServer` compares before pushing (which is why `ServerState.lastSuccessAt`
+  was deleted, a fresh timestamp per success marker being the one field able to defeat the
+  comparison), and both git-backed reads go through `singleFlight`, which coalesces overlapping calls
+  but always runs one more pass afterwards so a gesture is never answered with pre-gesture state.
+- **A pool has to see every spawn of a read.** `readAllWorktrees` was a `Promise.all` over the
+  projects with a pool of four *inside* each one, which bounds nothing: eleven `worktree list`
+  processes in the same tick, then up to forty-four status reads, and **2343 ms** of blocked loop in
+  one go. It is now two passes through one pool, because the second pass's items are what the first
+  pass discovers.
+- **A field nothing displays still costs something.** `GitState.stashes` cost a `git stash list` per
+  project per poll with no consumer at all; `ServerState.lastSuccessAt` cost a full row push per
+  build marker, also with no consumer. Before adding a field to a polled shape, name what shows it.
+- **The pty scrollback is a ring of chunks** (`main/terminal/scrollback.ts`), not a string. The
+  obvious `buffer = (buffer + chunk).slice(-LIMIT)` recopies all 200 000 characters on every chunk a
+  pty emits: 3000 chunks of 400 bytes measured **168 ms and 9 MB of garbage against 0.4 ms and none**.
+  Never the cause of a freeze at 56 microseconds a chunk, and unbounded allocation churn on the one
+  thread that must not stop. Trimming drops whole chunks, so a replayed tab can never open on half an
+  ANSI escape.
+- **The portable build is not the cause and was suspected.** It unpacks to a fresh temporary folder
+  on each launch, which the scanner has never seen, so the launch and the first poll are slower.
+  Steady-state typing is identical.
 
 ## Verified traps
 

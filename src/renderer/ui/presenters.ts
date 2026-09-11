@@ -1,5 +1,4 @@
 import type {
-  ChecksState,
   GitBranch,
   GitChange,
   GitState,
@@ -147,7 +146,13 @@ export function presentInvolvement(pull: PullRequest): Pill | null {
 }
 
 /**
- * What a worktree can be told about its branch's pull request, without asking GitHub again.
+ * What a branch can be told about its pull request, without asking GitHub again.
+ *
+ * **Two columns, one function**: the Worktrees tab's `PR checks` and the projects table's `Checks`.
+ * The second had its own `presentChecks` until 2026-09-09, fed by exactly the `gh pr view` per
+ * project that the paragraph below refuses. The argument had been written for the tab that copied
+ * the column and never applied to the column it was copied from; applying it removed eleven `gh`
+ * processes a minute on a real configuration. The cost of that is stated at the end of this comment.
  *
  * The Worktrees tab wanted the projects table's `Checks` column, and the obvious way to build it was
  * `readChecksState(worktree.path, ...)`: that function runs `gh pr view` in a folder and reads the
@@ -181,10 +186,27 @@ export function presentInvolvement(pull: PullRequest): Pill | null {
  * Only OPEN pull requests are listed, so a merged branch whose worktree is still around reads `no PR`.
  * That is the correct answer to "is anything waiting on this branch" and it is worth knowing that it
  * is not the same sentence as "this was never reviewed".
+ *
+ * **What the projects table gave up to stop querying.** Its column now trails the pulls poll
+ * (`pullsPollSeconds`, 180 s by default) instead of the checks poll (60 s), and a project with
+ * `followPulls` off reads `not followed` where it used to carry a verdict. Both are visible and both
+ * are named on screen, which is the whole reason the five states below are five and not three: a
+ * column that says which question was not asked is worth more than a fresh column that costs a
+ * frozen terminal every few seconds.
  */
-export function presentWorktreeChecks(
+export function presentBranchChecks(
   branch: string,
-  hasUpstream: boolean,
+  /**
+   * Whether the branch has an upstream, or **null when git has not been read yet**.
+   *
+   * The third state is not decoration. In the Worktrees tab a row cannot exist before its git read,
+   * so a boolean was enough; in the projects table the rows arrive from the configuration and their
+   * git state lands on the first poll, so there is a moment where the answer is unknown. Collapsing
+   * that into `false` makes the column say `not pushed` about a branch nothing has looked at, which
+   * is the exact failure the five states below exist to avoid: stating an answer where the honest
+   * report is that the question has not been asked.
+   */
+  hasUpstream: boolean | null,
   repo: {
     readonly pulls: readonly PullRequest[];
     readonly checkedAt: string | null;
@@ -201,6 +223,9 @@ export function presentWorktreeChecks(
   }
   if (repo.error !== null) {
     return { label: '?', tone: 'neutral', title: repo.error };
+  }
+  if (hasUpstream === null) {
+    return { label: '…', tone: 'neutral', title: 'The working tree has not been read yet' };
   }
   if (!hasUpstream) {
     // Before the lookup rather than after: a branch with no upstream cannot have a pull request, so a
@@ -225,49 +250,6 @@ ${presentPullChecks(pull).title}`,
   };
 }
 
-/** Label and tone for the checks column. */
-export function presentChecks(checks: ChecksState | null, git: GitState | null): Pill {
-  if (git !== null && !git.hasUpstream) {
-    // Not an error: the branch was never pushed, so no pull request can exist.
-    return { label: 'not pushed', tone: 'neutral', title: 'The branch has no upstream' };
-  }
-  if (checks === null) {
-    return { label: '…', tone: 'neutral', title: 'Not queried yet' };
-  }
-
-  switch (checks.verdict) {
-    case 'no-pr':
-      return { label: 'no PR', tone: 'neutral', title: 'No PR for this branch' };
-    case 'no-checks':
-      // Deliberately distinct from `passing`: two real open PRs returned an empty rollup, and
-      // painting that green would be a lie.
-      return {
-        label: 'no checks',
-        tone: 'info',
-        title: 'PR open, but no check reported',
-      };
-    case 'pending':
-      return {
-        label: `running ${checks.pending}`,
-        tone: 'busy',
-        title: `${checks.pending} check(s) running`,
-      };
-    case 'passing':
-      return {
-        label: `OK ${checks.passed}`,
-        tone: 'ok',
-        title: `${checks.passed} check(s) green`,
-      };
-    case 'failing':
-      return {
-        label: `KO ${checks.failed}`,
-        tone: 'error',
-        title: `${checks.failed} check(s) failing`,
-      };
-    case 'unknown':
-      return { label: '?', tone: 'neutral', title: checks.error ?? 'Unknown state' };
-  }
-}
 
 /**
  * Label and tone for the workflows column.

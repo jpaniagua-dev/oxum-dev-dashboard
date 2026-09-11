@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawnOffThread } from '../spawn/spawn-pool.js';
 import type { WorkflowsState } from '@shared/contracts.js';
 
-const execFileAsync = promisify(execFile);
 
 const TIMEOUT_MS = 20_000;
 
@@ -44,11 +42,12 @@ export async function readWorkflowsState(slug: string | null): Promise<Workflows
   }
 
   try {
-    const { stdout } = await execFileAsync(
-      'gh',
-      ['run', 'list', '--repo', slug, '--limit', String(LIMIT), '--json', 'status'],
-      { timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-    );
+    const { stdout } = await spawnOffThread({
+      file: 'gh',
+      args: ['run', 'list', '--repo', slug, '--limit', String(LIMIT), '--json', 'status'],
+      timeout: TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
+    });
     return { ...parseRunsPayload(stdout), checkedAt: new Date().toISOString(), error: null };
   } catch (error) {
     return { ...NO_REPO, verdict: 'unknown', error: describeError(error) };

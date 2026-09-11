@@ -3,10 +3,11 @@ import { MAX_TAGS_PER_PROJECT, hasTag } from '@shared/project-tags.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, hitsInteractive } from './dom.js';
 import { buildTagChips } from './tags.js';
+import type { PullsByProject } from './worktree-list.js';
 import {
   canStop,
-  presentChecks,
   presentGit,
+  presentBranchChecks,
   presentServer,
   presentWorkflows,
   type Pill,
@@ -97,6 +98,15 @@ export function renderProjectTable(
   rows: readonly ProjectRow[],
   vocabulary: readonly string[],
   colors: TagColors,
+  /**
+   * The pull requests, keyed by project, for the `Checks` column to join against.
+   *
+   * The column reads its verdict out of this rather than out of the row, because the row no longer
+   * carries one: a `gh pr view` per project per poll was paid to answer a question `gh pr list` had
+   * already answered for the tab next door. Empty until the first pulls poll lands, which the column
+   * says in words rather than by looking green.
+   */
+  pulls: PullsByProject,
   actions: TableActions,
 ): void {
   clearChildren(tbody);
@@ -109,7 +119,9 @@ export function renderProjectTable(
   for (const [index, row] of rows.entries()) {
     // The row after this one names the drop position for "below this row", which is why the whole list
     // is handed down rather than the row alone.
-    tbody.append(buildRow(row, rows[index + 1]?.project.id ?? null, vocabulary, colors, actions));
+    tbody.append(
+      buildRow(row, rows[index + 1]?.project.id ?? null, vocabulary, colors, pulls, actions),
+    );
   }
 }
 
@@ -168,6 +180,7 @@ function buildRow(
   next: ProjectId | null,
   vocabulary: readonly string[],
   colors: TagColors,
+  pulls: PullsByProject,
   actions: TableActions,
 ): HTMLTableRowElement {
   const tr = createElement('tr');
@@ -278,9 +291,20 @@ function buildRow(
   }
   tr.append(branchCell);
 
-  // Checks
+  // Checks. A join against the pull requests this window already holds, not a query: see
+  // `presentBranchChecks`. Its freshness is therefore the pulls poll's, which is slower than the
+  // checks poll it replaces, and that is the accepted half of the trade.
   const checksCell = createElement('td');
-  checksCell.append(buildPill(presentChecks(row.checks, row.git)));
+  checksCell.append(
+    buildPill(
+      presentBranchChecks(
+        row.git?.branch ?? '',
+        // Null and not false before the first git poll lands: see the parameter's own note.
+        row.git === null ? null : row.git.error === null && row.git.hasUpstream,
+        pulls.get(row.project.id) ?? null,
+      ),
+    ),
+  );
   tr.append(checksCell);
 
   // Workflows. Repository-wide, unlike the Checks column beside it: a run started by a merge to the

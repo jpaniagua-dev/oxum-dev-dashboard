@@ -8,7 +8,7 @@ import type {
 import { clearChildren, createElement, createIconButton } from './dom.js';
 import { showContextMenu } from './context-menu.js';
 import { MORE_ICON } from './icons.js';
-import { presentGit, presentWorktreeChecks } from './presenters.js';
+import { presentGit, presentBranchChecks } from './presenters.js';
 import { buildPill } from './project-table.js';
 import { buildTagDots, type TagPalette } from './tags.js';
 
@@ -116,7 +116,7 @@ function buildHeaderRow(): HTMLElement {
  * What the `PR checks` column joins against, and it is deliberately the payload the pull request tab
  * already receives rather than anything new: `gh pr list` returns `headRefName` and
  * `statusCheckRollup` for each of them, so a worktree's branch finds its pull request with a `find`
- * and no second call to GitHub. See `presentWorktreeChecks` for why the per-worktree `gh pr view` was
+ * and no second call to GitHub. See `presentBranchChecks` for why the per-worktree `gh pr view` was
  * refused.
  *
  * A `Map` and not the array, because this is read once per row and the tab lists every worktree of
@@ -550,7 +550,7 @@ function buildWorktreeRow(
     const git = worktree.git;
     checks.append(
       buildPill(
-        presentWorktreeChecks(
+        presentBranchChecks(
           worktree.branch,
           // Unreadable git counts as "not pushed" rather than as pushed: it is the branch of a folder
           // this tab could not read, and claiming an upstream would send the join looking for a pull

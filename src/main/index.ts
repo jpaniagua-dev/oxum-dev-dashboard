@@ -147,6 +147,8 @@ async function bootstrap(): Promise<void> {
         // byte stream, and there is nothing per-window to decide about it.
         serversWindow.send(IpcChannel.RowsChanged, rows);
       },
+      // The dashboard only: the servers window has no tab that reads git on demand.
+      () => dashboardWindow.send(IpcChannel.GitPolled),
     );
 
   let projectMonitor = buildMonitor();

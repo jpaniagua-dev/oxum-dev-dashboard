@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAheadBehind, parsePorcelainV2 } from '../src/main/git/git-service.js';
+import { parsePorcelainV2 } from '../src/main/git/git-service.js';
 
 /**
  * The one call a project row is built from.
@@ -121,18 +121,3 @@ describe('parsePorcelainV2', () => {
   });
 });
 
-describe('parseAheadBehind', () => {
-  it('reads the tab-separated pair, behind first', () => {
-    expect(parseAheadBehind('3\t7\n')).toEqual({ behind: 3, ahead: 7 });
-  });
-
-  it('reads an in-sync branch', () => {
-    expect(parseAheadBehind('0\t0\n')).toEqual({ behind: 0, ahead: 0 });
-  });
-
-  it('falls back to zero on unexpected output rather than NaN', () => {
-    // NaN would flow into the UI and render as "NaN commits behind".
-    expect(parseAheadBehind('')).toEqual({ behind: 0, ahead: 0 });
-    expect(parseAheadBehind('oops')).toEqual({ behind: 0, ahead: 0 });
-  });
-});

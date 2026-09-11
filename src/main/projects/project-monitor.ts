@@ -1,6 +1,5 @@
 import type {
   AppSettings,
-  ChecksState,
   GitState,
   Project,
   ProjectId,
@@ -10,7 +9,6 @@ import type {
 } from '@shared/contracts.js';
 import { POLL_CONCURRENCY, mapWithLimit } from '../concurrency.js';
 import { readGitState, readRemoteSlug } from '../git/git-service.js';
-import { readChecksState } from '../github/checks-service.js';
 import { readWorkflowsState } from '../github/runs-service.js';
 import type { ParsedOutput } from './output-parser.js';
 
@@ -30,7 +28,6 @@ function idleServer(): ServerState {
     port: null,
     errorSummary: null,
     errorCount: 0,
-    lastSuccessAt: null,
     owned: false,
   };
 }
@@ -45,17 +42,26 @@ function idleServer(): ServerState {
 export class ProjectMonitor {
   private readonly servers = new Map<ProjectId, ServerState>();
   private readonly git = new Map<ProjectId, GitState>();
-  private readonly checks = new Map<ProjectId, ChecksState>();
   private readonly workflows = new Map<ProjectId, WorkflowsState>();
   /** Resolved once per project: a remote does not move while the app runs. */
   private readonly slugs = new Map<ProjectId, string | null>();
   private gitTimer: NodeJS.Timeout | null = null;
-  private checksTimer: NodeJS.Timeout | null = null;
+  private githubTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private projects: readonly Project[],
     private readonly settings: () => AppSettings,
     private readonly onChange: (rows: ProjectRow[]) => void,
+    /**
+     * Called once per finished git poll, and by nothing else.
+     *
+     * Separate from `onChange` because the two answer different questions. `onChange` means "a row
+     * looks different now", which is true five times as often and for reasons that say nothing about
+     * a working tree: a checks read, a workflows read, a reorder, a byte of server output. The Git
+     * and Worktrees tabs need "the working trees were just re-read", and using the first as a proxy
+     * for the second is what made a dev server's output fire the widest read in the app.
+     */
+    private readonly onGitPolled: () => void = () => undefined,
   ) {
     for (const project of projects) {
       this.servers.set(project.id, idleServer());
@@ -85,7 +91,6 @@ export class ProjectMonitor {
       project,
       server: this.servers.get(project.id) ?? idleServer(),
       git: this.git.get(project.id) ?? null,
-      checks: this.checks.get(project.id) ?? null,
       workflows: this.workflows.get(project.id) ?? null,
     }));
   }
@@ -93,23 +98,19 @@ export class ProjectMonitor {
   /** Starts the polling loops and performs a first refresh immediately. */
   start(): void {
     void this.refreshGit();
-    void this.refreshChecks();
     void this.refreshWorkflows();
 
     this.gitTimer = setInterval(() => {
       void this.refreshGit();
     }, this.settings().gitPollSeconds * 1000);
 
-    // Workflow runs ride the checks cadence rather than getting a timer of their own: same cost class
-    // (one `gh` call per project, over the network) and same thing being watched, so a second setting
-    // would only offer a way to make the two GitHub columns disagree about how stale they are.
-    //
-    // Chained rather than fired together, which is the other half of the concurrency limit: two pooled
-    // refreshes started at the same instant put twice the pool in flight, and `gh` is the most
-    // expensive process this app starts (79 ms of pure creation cost, measured). One after the other
-    // keeps the tick inside one pool's worth of spawns.
-    this.checksTimer = setInterval(() => {
-      void this.refreshGitHub();
+    // `checksPollSeconds` still names this timer's cadence, and it now drives one column instead of
+    // two. The projects table's `Checks` column stopped being a query on 2026-09-09: it is a join
+    // against the pull requests the renderer already holds, so nothing is polled for it here. The
+    // setting was not renamed, since it is what a user set to say how often this app should go and ask
+    // GitHub anything.
+    this.githubTimer = setInterval(() => {
+      void this.refreshWorkflows();
     }, this.settings().checksPollSeconds * 1000);
   }
 
@@ -118,28 +119,22 @@ export class ProjectMonitor {
       clearInterval(this.gitTimer);
       this.gitTimer = null;
     }
-    if (this.checksTimer !== null) {
-      clearInterval(this.checksTimer);
-      this.checksTimer = null;
+    if (this.githubTimer !== null) {
+      clearInterval(this.githubTimer);
+      this.githubTimer = null;
     }
   }
 
   /**
    * Forces a full refresh, for the manual refresh button.
    *
-   * Left parallel across the three sources, unlike the timer tick: this one answers a click, the user
-   * is waiting on it, and each source is pooled internally. A burst of three pools is 12 spawns at
-   * worst, on a gesture nobody makes twice a second.
+   * Left parallel across the two sources, unlike the timer tick: this one answers a click, the user is
+   * waiting on it, and each source is pooled internally. A burst of two pools is 8 spawns at worst, on
+   * a gesture nobody makes twice a second.
    */
   async refreshAll(): Promise<ProjectRow[]> {
-    await Promise.all([this.refreshGit(), this.refreshChecks(), this.refreshWorkflows()]);
+    await Promise.all([this.refreshGit(), this.refreshWorkflows()]);
     return this.rows();
-  }
-
-  /** The two GitHub columns, one after the other. See the note in `start`. */
-  private async refreshGitHub(): Promise<void> {
-    await this.refreshChecks();
-    await this.refreshWorkflows();
   }
 
   /* ------------------------------------------------------------ server side */
@@ -175,12 +170,17 @@ export class ProjectMonitor {
     if (parsed.errorCount !== null) {
       patch.errorCount = parsed.errorCount;
     }
-    // A successful build clears any previous error and stamps the success time, so a row does not
-    // stay red after the user fixed the problem.
+    // A successful build clears any previous error, so a row does not stay red after the user fixed
+    // the problem.
+    //
+    // It used to stamp a `lastSuccessAt` here as well. That field had **no consumer anywhere**, which
+    // is the failure `GitState.stashes` already recorded, and it was worse than merely unused: a fresh
+    // timestamp on every success marker made the patch differ from the current state by construction,
+    // so it was the one field able to defeat the identity check below and push a row set for a row
+    // that looked exactly the same.
     if (parsed.phase === 'serving' || parsed.phase === 'watching') {
       patch.errorSummary = null;
       patch.errorCount = 0;
-      patch.lastSuccessAt = new Date().toISOString();
     }
 
     if (Object.keys(patch).length > 0) {
@@ -199,9 +199,23 @@ export class ProjectMonitor {
     });
   }
 
+  /**
+   * Applies a patch, and pushes **only if it changed something**.
+   *
+   * The comparison is not a micro-optimisation. `applyParsed` runs on every chunk of a server's
+   * output, and the output parser answers a phase for any chunk containing `Building` or a
+   * `localhost:` banner, which a dev server reprints on every rebuild. Each of those used to push a
+   * full row set to the renderer, and the Git and Worktrees tabs used that push as their heartbeat,
+   * so re-stating a phase the row already had cost eighteen child processes. Every field of
+   * `ServerState` is a primitive, so identity is decided field by field.
+   */
   private patchServer(projectId: ProjectId, patch: ServerPatch): void {
     const current = this.servers.get(projectId) ?? idleServer();
-    this.servers.set(projectId, { ...current, ...patch });
+    const next = { ...current, ...patch };
+    if (sameServerState(current, next)) {
+      return;
+    }
+    this.servers.set(projectId, next);
     this.emit();
   }
 
@@ -216,22 +230,9 @@ export class ProjectMonitor {
       this.git.set(id, state);
     }
     this.emit();
-  }
-
-  /* ------------------------------------------------------------ checks side */
-
-  private async refreshChecks(): Promise<void> {
-    const results = await mapWithLimit(this.projects, POLL_CONCURRENCY, async (project) => {
-      // The git state decides whether a lookup is worth making at all: a branch with no upstream
-      // cannot have a pull request.
-      const git = this.git.get(project.id);
-      const hasUpstream = git?.hasUpstream ?? false;
-      return { id: project.id, state: await readChecksState(project.path, hasUpstream) };
-    });
-    for (const { id, state } of results) {
-      this.checks.set(id, state);
-    }
-    this.emit();
+    // After the rows, never before: the tabs woken by this signal read git themselves, and the row
+    // they are about should already be on screen when they start.
+    this.onGitPolled();
   }
 
   /* --------------------------------------------------------- workflows side */
@@ -267,4 +268,16 @@ export class ProjectMonitor {
   private emit(): void {
     this.onChange(this.rows());
   }
+}
+
+/** Field-by-field identity of two server states, all of whose fields are primitives. */
+function sameServerState(a: ServerState, b: ServerState): boolean {
+  return (
+    a.phase === b.phase &&
+    a.pid === b.pid &&
+    a.port === b.port &&
+    a.errorSummary === b.errorSummary &&
+    a.errorCount === b.errorCount &&
+    a.owned === b.owned
+  );
 }

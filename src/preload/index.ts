@@ -192,6 +192,12 @@ const api: RendererApi = {
     return () => ipcRenderer.off(IpcChannel.RowsChanged, handler);
   },
 
+  onGitPolled: (listener: () => void): (() => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on(IpcChannel.GitPolled, handler);
+    return () => ipcRenderer.off(IpcChannel.GitPolled, handler);
+  },
+
   runAction: (projectId: ProjectId, actionId: string): Promise<TerminalId> =>
     ipcRenderer.invoke(IpcChannel.PtyRun, projectId, actionId),
 
