@@ -2089,7 +2089,6 @@ body {
 /* ------------------------------------------------------- new tab control */
 
 .terminal__new {
-  position: relative;
   display: inline-flex;
   align-items: center;
   margin-left: 4px;
@@ -2122,38 +2121,6 @@ body {
 
 .terminal__new-button:hover,
 .terminal__new-caret:hover {
-  background: var(--surface-hover);
-  color: var(--primary);
-}
-
-.terminal__menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  min-width: 150px;
-  display: flex;
-  flex-direction: column;
-  padding: 3px;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow);
-}
-
-.terminal__menu-item {
-  padding: 5px 9px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--font-md);
-  text-align: left;
-  cursor: pointer;
-}
-
-.terminal__menu-item:hover {
   background: var(--surface-hover);
   color: var(--primary);
 }
