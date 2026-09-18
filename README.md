@@ -198,7 +198,9 @@ settings: site URL, account email, project keys, and an Atlassian API token.
 
 The fourth tab, and the one where the strip stops being a glance and becomes a place to work: pick a
 repository on the left, then `Changes`, `Branches` or `History` in the middle, and read the diff
-on the right. The boundary between the working column and the diff is draggable and remembered.
+on the right. The boundary between the working column and the diff is draggable and remembered. Every
+repository in the column carries its **count of uncommitted files**, from the poll that already reads
+them all, so finding where work is waiting takes no click at all.
 
 ```
 Changes 12  Branches 4  History                     ↻  ↓  ↑
@@ -215,6 +217,14 @@ Changes 12  Branches 4  History                     ↻  ↓  ↑
   one-line failure. The message travels through a file rather than a `-m` argument, so it can be
   multi-line and nothing in it can be read as an option — a subject starting with `-` is a real thing
   people type. The file is kept, so a rejected commit does not lose what you wrote.
+- **`Commit and push` is one click and two steps.** The commit runs in its tab as usual, and the push
+  only fires if that process exits cleanly, so a pre-commit hook that refuses stops the whole thing.
+  The outcome arrives minutes later, when the hooks are done, as a line beside the branch. It is
+  refused on an amend whose commit is already on the remote, the one case where a plain push cannot
+  work and the tab will not offer a `--force`.
+- **Fetch, pull and push say what they did**, beside the branch. They are the only writes here that
+  move nothing on screen: a push that worked and a push that was refused look identical otherwise. A
+  success clears itself after a few seconds, a failure stays until you click it.
 - **`Generate` writes the message from the staged diff**, with a headless Claude Code run. It starts
   **in the repository**, which is the point: Claude Code reads `CLAUDE.md` from the folder it is
   launched in, so it follows that repository's own commit convention without this app knowing what the

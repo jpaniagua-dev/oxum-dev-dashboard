@@ -858,6 +858,18 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * A repository with work waiting in it reads at full contrast, a clean one stays faint.
+ *
+ * The Git tab badges every row now, not only the open one, and a column of faint numbers all alike
+ * answers "how many here" without answering "where". The weight is the answer: the eye finds the
+ * repositories that have something in them without reading a single number.
+ */
+.pulls__repo-count--dirty {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
 .pulls__repo-error {
   color: var(--danger);
   font-weight: 700;
@@ -2342,6 +2354,23 @@ body {
 /* Pushes what follows to the right edge without a margin rule per button. */
 .git__spacer {
   flex: 1;
+}
+
+/*
+ * The fetch / pull / push line, at the end of the header row.
+ *
+ * A pill like the branch's own badges, so it sits in a shape the row already uses, but clickable:
+ * a failure has no timer and goes when it is dismissed. `max-width` with an ellipsis because git's
+ * refusals run long (`Updates were rejected because the remote contains work...`) and a header that
+ * grows with the message would push the branch name out of the row it belongs to. The whole text is
+ * in the tooltip.
+ */
+.git__notice {
+  max-width: 420px;
+  overflow: hidden;
+  cursor: pointer;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .git__branch {

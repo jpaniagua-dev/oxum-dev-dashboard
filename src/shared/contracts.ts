@@ -199,6 +199,17 @@ export interface GitState {
   readonly modified: number;
   readonly staged: number;
   readonly untracked: number;
+  /**
+   * Distinct files the working tree is not clean on: one per entry git reports.
+   *
+   * **Not** `modified + staged + untracked`, and that is the whole reason it is counted rather than
+   * added up by a reader. A file staged with further edits on top counts once on each of those two
+   * columns, by design, so their sum answers "how many changes" where the question the Git tab's
+   * repository column asks is "how many files are not committed". The sum reads one file as two, and
+   * the badge beside the selected repository would then disagree with the list of files right next to
+   * it.
+   */
+  readonly changed: number;
   /** Commits the branch is behind / ahead of its upstream. */
   readonly behind: number;
   readonly ahead: number;
@@ -398,6 +409,19 @@ export interface GitRepoState {
 export interface GitResult {
   readonly ok: boolean;
   readonly message: string;
+}
+
+/**
+ * What a write that moves nothing on screen has to say for itself.
+ *
+ * A `GitResult` with the repository it is about, so the Git tab can show it beside the branch rather
+ * than only stamping it in the window header. It exists because of one case the header stamp cannot
+ * cover: the push half of `Commit and push` lands **after** the invoke that started it has returned,
+ * the commit being a terminal tab whose exit is the signal. A pushed branch and a refused one look
+ * identical from the tab, so the outcome is pushed on its own channel instead of being lost.
+ */
+export interface GitNotice extends GitResult {
+  readonly projectId: ProjectId;
 }
 
 /** A network operation of the Git tab, all three sharing one channel and one budget. */
@@ -1445,10 +1469,16 @@ export const IpcChannel = {
    */
   GitDiscard: 'git:discard',
   /**
-   * invoke: (projectId, message, amend: boolean) => { terminalId, result }
+   * invoke: (projectId, message, amend: boolean, push: boolean) => { terminalId, result }
    *
    * Writes the message to a file and runs `git commit -F` (`--amend` when asked) in a terminal
    * tab, so hooks and their output are visible rather than swallowed by a silent `execFile`.
+   *
+   * With `push`, the commit's exit code decides: a clean exit is followed by a `git push` from the
+   * main process, anything else by nothing at all. That is not an invented completion signal, which
+   * the worktree helper deliberately refuses to guess at — this process spawned the commit and is
+   * handed its exit. The push lands after the invoke has answered, so it reports itself on
+   * `GitNotice`.
    */
   GitCommit: 'git:commit',
   /** invoke: (projectId, op: GitSyncOp) => GitResult, the three network operations */
@@ -1528,6 +1558,15 @@ export const IpcChannel = {
    * line from a worklist somebody has already dealt with.
    */
   TriageDismiss: 'triage:dismiss',
+  /**
+   * on: (notice: GitNotice) => void
+   *
+   * The outcome of a write the renderer could not wait for. One case today: the push half of
+   * `Commit and push`, which starts when the commit tab's process exits and therefore has no invoke
+   * left to answer. Pushed rather than polled, a push being invisible in `git status` once it has
+   * succeeded and indistinguishable from never having run once it has failed.
+   */
+  GitNotice: 'git:notice',
   /** invoke: (projectId, actionId) => TerminalId, runs one of a project's actions in its own tab */
   PtyRun: 'pty:run',
   /** invoke: (request: OpenShellRequest) => TerminalId */
@@ -1600,6 +1639,8 @@ export interface RendererApi {
   onRowsChanged(listener: (rows: ProjectRow[]) => void): () => void;
   /** Fires once per finished git poll. The heartbeat of the Git and Worktrees tabs. */
   onGitPolled(listener: () => void): () => void;
+  /** Fires when a write the renderer could not wait for lands: today, the push of `Commit and push`. */
+  onGitNotice(listener: (notice: GitNotice) => void): () => void;
 
   refreshPulls(): Promise<RepoPulls[]>;
   onPullsChanged(listener: (repos: RepoPulls[]) => void): () => void;
@@ -1727,11 +1768,16 @@ export interface RendererApi {
    *
    * `amend` swaps the command for `git commit --amend`: the staged changes (none is fine, that is
    * a reword) fold into the HEAD commit and the message replaces its message.
+   *
+   * `push` chains a `git push` behind a commit that exited cleanly. It resolves as soon as the tab is
+   * open, like the plain commit: the push happens minutes later, when the hooks are done, and says so
+   * on `onGitNotice`.
    */
   gitCommit(
     projectId: ProjectId,
     message: string,
     amend: boolean,
+    push: boolean,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   gitSync(projectId: ProjectId, op: GitSyncOp): Promise<GitResult>;
   /**

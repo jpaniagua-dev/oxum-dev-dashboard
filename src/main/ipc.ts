@@ -14,6 +14,7 @@ import {
   type GitDiffTarget,
   type GitRepoState,
   type GeneratedCommit,
+  type GitNotice,
   type GitResult,
   type GitSequencerOp,
   type GitStashOp,
@@ -143,6 +144,12 @@ export interface IpcDependencies {
   readonly setSettingsDirty: (dirty: boolean) => void;
   /** Pushes settings to every window, after a change that alters more than the caller's own state. */
   readonly broadcastSettings: (settings: AppSettings) => void;
+  /**
+   * Tells the dashboard how a write it could not wait for turned out.
+   *
+   * The dashboard only, like `GitPolled`: the servers window has no Git tab to show it in.
+   */
+  readonly notifyGit: (notice: GitNotice) => void;
 }
 
 /**
@@ -481,6 +488,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       projectId: unknown,
       message: unknown,
       amend: unknown,
+      push: unknown,
     ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
@@ -492,6 +500,38 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
       const file = await deps.writeCommitMessage(project.id, message);
       const terminalId = deps.terminals.runProjectCommand({
+        /*
+         * The push half, chained on the commit's own exit.
+         *
+         * Two things make this honest rather than a guess. The exit code is the **commit's**, handed
+         * over by the pty this process spawned, so a hook that refused the commit stops the push dead
+         * — which is the entire reason the two are one button instead of two clicks. And the outcome
+         * travels on `GitNotice`, because by then the invoke has long since answered with the tab.
+         *
+         * `sync` re-reads the branch and its upstream rather than taking them from the click: minutes
+         * pass in that tab, and a first push needs `-u origin <branch>` that a stale read would miss.
+         */
+        onExit:
+          push === true
+            ? (exitCode, stopped) => {
+                if (stopped) {
+                  return;
+                }
+                if (exitCode !== 0) {
+                  deps.notifyGit({
+                    projectId: project.id,
+                    ok: false,
+                    message: 'Commit failed, nothing pushed',
+                  });
+                  return;
+                }
+                void (async () => {
+                  const state = await readRepoState(project);
+                  const result = await sync(project.path, 'push', state.branch, state.hasUpstream);
+                  deps.notifyGit({ projectId: project.id, ...result });
+                })();
+              }
+            : undefined,
         project,
         actionId: GIT_COMMIT_ACTION_ID,
         title: `${project.label} · ${amend === true ? 'amend' : 'commit'}`,

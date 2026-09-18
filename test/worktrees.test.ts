@@ -144,6 +144,7 @@ const CLEAN: GitState = {
   modified: 0,
   staged: 0,
   untracked: 0,
+  changed: 0,
   behind: 0,
   ahead: 0,
   hasUpstream: true,

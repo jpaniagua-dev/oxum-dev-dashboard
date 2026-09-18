@@ -4,6 +4,7 @@ import type {
   GitCommit,
   GitDiff,
   GitDiffTarget,
+  GitNotice,
   GitRepoState,
   GitSequencer,
   GitSequencerOp,
@@ -78,6 +79,19 @@ export interface GitPanelState {
    * tag and one row cannot be told what a word is painted anywhere else.
    */
   readonly tagColors: TagColors;
+  /**
+   * Files not committed, per project, from the poll that already reads every repository.
+   *
+   * The column used to badge the **selected** repository only, on the argument that reading the
+   * others would mean a git call per row on every paint. That argument was about a read nobody makes:
+   * the project poll already runs `git status --porcelain=v2` on every project for the Projects tab,
+   * so the number was on the other side of the app the whole time, and finding out where work is
+   * waiting meant clicking each repository in turn or leaving the tab.
+   *
+   * `undefined` for a project the poll has not answered for yet, which is not the same as zero and
+   * must not be drawn as a clean repository.
+   */
+  readonly changedByProject: Readonly<Record<ProjectId, number | undefined>>;
   readonly selectedProject: ProjectId | null;
   /** Null while the first read of the selected repository is still in flight. */
   readonly repo: GitRepoState | null;
@@ -117,6 +131,18 @@ export interface GitPanelState {
    * run takes its minute.
    */
   readonly generating: boolean;
+  /**
+   * The outcome of the last write that had nothing to show for itself, or `null`.
+   *
+   * Fetch, pull and push all end in a one-line stamp at the top of the window, four seconds, far from
+   * the button that was pressed: the honest reading of "the push did nothing" is that nothing on
+   * screen said it did anything. This is that answer, next to the branch it is about.
+   *
+   * Only those three, and not every write in the tab. Staging, discarding and checking out all change
+   * something the panel is already showing, so the list repainting **is** the confirmation; a push
+   * moves nothing on screen, which is exactly why it needs a line of its own.
+   */
+  readonly notice: GitNotice | null;
 }
 
 export interface GitPanelActions {
@@ -135,7 +161,8 @@ export interface GitPanelActions {
   onDiscard: (paths: string[]) => void;
   onCheckout: (name: string) => void;
   onCreateBranch: (name: string) => void;
-  onCommit: () => void;
+  /** Commits in a terminal tab. With `push`, a `git push` follows a commit that exited cleanly. */
+  onCommit: (push: boolean) => void;
   onMessage: (value: string) => void;
   /**
    * Asks Claude Code for a commit message and puts it in the field.
@@ -162,6 +189,8 @@ export interface GitPanelActions {
   onCopy: (text: string) => void;
   /** Opens a new terminal tab in the repository, same gesture as everywhere else in the app. */
   onNewTerminal: (projectId: ProjectId) => void;
+  /** Clears the fetch/pull/push line, from a click on it. */
+  onDismissNotice: () => void;
   /** Opens the repository's action menu, from the `⋯` button or from a right-click on the header. */
   onMenu: (x: number, y: number) => void;
   /** Opens a commit's action menu, from a right-click on its row in the history. */
@@ -263,25 +292,60 @@ function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelA
     }
     row.append(createElement('span', { className: 'pulls__repo-name', text: project.label }));
 
-    // Only the selected repository has been read, so only it can show a count. Guessing one for the
-    // others would mean reading every repository on every paint.
-    if (active && state.repo !== null && state.repo.error === null) {
-      const count = state.repo.changes.length;
+    /*
+     * Every row carries its count, not only the selected one.
+     *
+     * The selected repository's comes from the on-demand read, the others' from the project poll, and
+     * the order matters: the badge beside the open repository has to agree with the list of files
+     * right next to it, and the poll can be a whole interval out of date. Everywhere else the poll is
+     * the only number there is, and it is the one the Projects tab has been showing all along, which
+     * is the trip this badge saves.
+     *
+     * A project the poll has not answered for yet gets no badge rather than an empty-value mark. That
+     * mark means "nothing to commit" here, and drawing it over an unread repository would report a
+     * clean tree for one that may be full of work.
+     */
+    const count = repoFileCount(project.id, active, state);
+    if (count !== null) {
       row.append(
         createElement('span', {
-          className: 'pulls__repo-count',
+          className: `pulls__repo-count${count > 0 ? ' pulls__repo-count--dirty' : ''}`,
           text: count === 0 ? '—' : String(count),
         }),
       );
-      row.title = `${state.repo.branch}\n${count} modified file(s)`;
-    } else {
-      row.title = project.path;
     }
+    row.title =
+      active && state.repo !== null && state.repo.error === null
+        ? `${state.repo.branch}
+${count ?? 0} uncommitted file(s)`
+        : count === null
+          ? project.path
+          : `${project.path}
+${count} uncommitted file(s)`;
 
     row.addEventListener('click', () => actions.onSelectProject(project.id));
     line.append(row, buildRepoTerminal(project, actions));
     host.append(line);
   }
+}
+
+/**
+ * The number on one repository row, or `null` when nothing has read it yet.
+ *
+ * The selected repository answers from `state.repo`, which the tab reads on demand and which the file
+ * list below is drawn from: two numbers side by side that disagree would make the reader trust
+ * neither. Every other row answers from the poll, whose count is a count of **files** and not the sum
+ * of the three per-state counts the Projects tab shows, a file being able to be staged and modified
+ * at once.
+ *
+ * A repository git could not read (`error`) falls through to the poll, which reports that failure as
+ * an absent count: no badge rather than a zero.
+ */
+function repoFileCount(projectId: ProjectId, active: boolean, state: GitPanelState): number | null {
+  if (active && state.repo !== null && state.repo.error === null) {
+    return state.repo.changes.length;
+  }
+  return state.changedByProject[projectId] ?? null;
 }
 
 /**
@@ -386,6 +450,32 @@ function buildHeader(
   }
 
   header.append(createElement('span', { className: 'git__spacer' }));
+
+  /*
+   * What the last fetch, pull or push actually did, beside the branch it did it to.
+   *
+   * Those three are the tab's invisible writes: everything else repaints the list that is already on
+   * screen, whereas a successful push moves nothing at all and a refused one moves nothing either.
+   * They were reported in the window header's stamp, four seconds, at the other end of the window
+   * from the button, which in use reads as a button that does nothing.
+   *
+   * On the right of the header rather than next to the button that started it, because the menu is
+   * gone by the time the answer arrives, and because `Commit and push` starts its push from a
+   * terminal tab minutes later: one place for the answer, whichever of the two asked the question.
+   */
+  if (state.notice !== null && state.notice.projectId === repo.projectId) {
+    const notice = buildPill({
+      label: state.notice.message,
+      tone: state.notice.ok ? 'ok' : 'error',
+      title: state.notice.ok ? 'Click to dismiss' : `${state.notice.message}
+Click to dismiss`,
+    });
+    notice.classList.add('git__notice');
+    // Dismissable, because a failure stays put: it is the one that must not be missed, and the one
+    // whose text is worth keeping on screen while you decide what to do about it.
+    notice.addEventListener('click', () => actions.onDismissNotice());
+    header.append(notice);
+  }
 
   const menu = createElement('button', {
     className: 'button button--quiet git__menu-button',
@@ -809,8 +899,37 @@ function renderCommitForm(
     : staged
       ? 'git commit -F, launched in a terminal tab so the hooks stay visible'
       : 'Nothing staged: tick at least one file';
-  button.addEventListener('click', () => actions.onCommit());
+  button.addEventListener('click', () => actions.onCommit(false));
 
+  /*
+   * `Commit and push`, the everyday gesture in one click.
+   *
+   * Secondary next to a primary `Commit`, and not the other way round: the primary is the one that
+   * touches the local repository only, and the one that publishes to a branch other people read is
+   * named in full rather than inherited by muscle memory. The push runs from the main process once
+   * the commit's own process exits, so a pre-commit hook that refuses stops it dead, and the outcome
+   * lands in the header line rather than in the tab, which by then shows a finished commit.
+   *
+   * Refused on an amend that is **already upstream**, the one case where a plain push cannot work:
+   * the branch has been rewritten under a remote that still has the old commit, and git will refuse
+   * without `--force`. A button whose only possible outcome is a refusal is a trap, and forcing from
+   * a one-click button is not something this tab is going to offer. The tooltip says which of the two
+   * it is, because "disabled" on its own is a dead end.
+   */
+  const amendPushed = state.amend && repo.hasUpstream && repo.ahead === 0;
+  const push = createElement('button', {
+    className: 'button',
+    text: state.amend ? 'Amend and push' : 'Commit and push',
+  });
+  push.type = 'button';
+  push.disabled = button.disabled || amendPushed;
+  push.title = amendPushed
+    ? 'The commit being amended is already on the remote: the push would need --force, which this button does not do'
+    : staged || state.amend
+      ? `${button.title}
+Then git push, from here, if and only if the commit exits cleanly`
+      : 'Nothing staged: tick at least one file';
+  push.addEventListener('click', () => actions.onCommit(true));
 
   const footer = createElement('div', { className: 'git__commit-actions' });
   footer.append(
@@ -825,6 +944,7 @@ function renderCommitForm(
     toggle,
     generate,
     button,
+    push,
   );
 
   host.append(area, footer);

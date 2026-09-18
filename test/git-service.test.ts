@@ -22,6 +22,7 @@ describe('parsePorcelainV2', () => {
       modified: 0,
       staged: 0,
       untracked: 0,
+      changed: 0,
       behind: 0,
       ahead: 0,
       hasUpstream: true,
@@ -81,6 +82,38 @@ describe('parsePorcelainV2', () => {
     expect(parsePorcelainV2(stdout)).toMatchObject({ modified: 1, staged: 1 });
   });
 
+  /*
+   * The count the Git tab's repository column is badged with.
+   *
+   * One per file and not the sum of the three above, which is the whole reason it is parsed rather
+   * than added up by the reader: the sum reads one file as two as soon as it is staged with further
+   * edits on top, and the badge would claim more uncommitted files than the repository holds.
+   */
+  describe('the distinct file count', () => {
+    it('counts a file staged AND modified once, where the sum counts it twice', () => {
+      const stdout = [CLEAN, '1 MM N... 100644 100644 100644 aaa bbb src/both.ts'].join('\n');
+      const state = parsePorcelainV2(stdout);
+      expect(state.changed).toBe(1);
+      expect(state.modified + state.staged + state.untracked).toBe(2);
+    });
+
+    it('counts every kind of record git prints, untracked and conflicts included', () => {
+      const stdout = [
+        CLEAN,
+        '1 M. N... 100644 100644 100644 aaa bbb src/staged.ts',
+        '2 R. N... 100644 100644 100644 aaa aaa R100 new.ts\told.ts',
+        'u UU N... 100644 100644 100644 100644 aaa bbb ccc conflicted.ts',
+        '? src/new.ts',
+      ].join('\n');
+      expect(parsePorcelainV2(stdout).changed).toBe(4);
+    });
+
+    it('leaves an ignored file out, git listing those only when asked', () => {
+      const stdout = [CLEAN, '! dist/bundle.js'].join('\n');
+      expect(parsePorcelainV2(stdout).changed).toBe(0);
+    });
+  });
+
   it('reads a rename, which is a `2` record and not a `1`', () => {
     const stdout = [
       CLEAN,
@@ -114,6 +147,7 @@ describe('parsePorcelainV2', () => {
       modified: 0,
       staged: 0,
       untracked: 0,
+      changed: 0,
       behind: 0,
       ahead: 0,
       hasUpstream: false,

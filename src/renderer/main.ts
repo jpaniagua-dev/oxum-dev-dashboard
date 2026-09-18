@@ -3,6 +3,7 @@ import type {
   GitDiff,
   GitDiffTarget,
   GitRepoState,
+  GitNotice,
   GitSyncOp,
   JiraIssue,
   JiraState,
@@ -165,6 +166,15 @@ class App {
    */
   private gitGenerating = false;
   private gitEditing = false;
+  /**
+   * The last fetch / pull / push result, shown beside the branch until it is dismissed or times out.
+   *
+   * Held here rather than in the panel because it outlives a repaint and because it can arrive from
+   * the main process: the push half of `Commit and push` lands minutes after the click that started
+   * it, when the commit's terminal has exited.
+   */
+  private gitNotice: GitNotice | null = null;
+  private gitNoticeTimer: number | null = null;
   /** Single-flight state for the Git tab's read. See {@link singleFlight}. */
   private readonly gitFlight: Flight = idleFlight();
   private strip: StripTabs | null = null;
@@ -290,6 +300,16 @@ class App {
     });
     // Pushed around a run: the button has to say "Analysing" the moment it starts, and the verdicts
     // have to land when it ends, which can be minutes later.
+    /*
+     * The push that started itself: `Commit and push` hands the commit to a terminal tab, and the
+     * push only happens when that process exits. There is no invoke left to answer by then, so the
+     * outcome arrives on its own channel.
+     */
+    window.api.onGitNotice((notice) => {
+      this.showGitNotice(notice);
+      void this.loadGit();
+    });
+
     window.api.onTriageChanged((state) => {
       this.triage = state;
       this.renderTriage();
@@ -811,6 +831,13 @@ class App {
       stashUntracked: this.gitStashUntracked,
       busy: this.gitBusy,
       generating: this.gitGenerating,
+      // Straight off the poll's rows, which already read every repository for the Projects tab. The
+      // Git tab used to badge the selected repository alone, so finding where work was waiting meant
+      // clicking each one in turn.
+      changedByProject: Object.fromEntries(
+        this.rows.map((row) => [row.project.id, row.git?.error === null ? row.git.changed : undefined]),
+      ),
+      notice: this.gitNotice,
     };
   }
 
@@ -866,7 +893,7 @@ class App {
             return result;
           });
         },
-        onCommit: () => void this.commitGit(),
+        onCommit: (push) => void this.commitGit(push),
         onMessage: (value) => {
           // Stored without a re-render: the textarea already shows it, and rebuilding the panel on
           // every keystroke would move the caret.
@@ -949,6 +976,14 @@ class App {
             y,
             buildChangeMenuItems(change, this.gitPanelState(), this.gitPanelActions()),
           );
+        },
+        onDismissNotice: () => {
+          this.gitNotice = null;
+          if (this.gitNoticeTimer !== null) {
+            window.clearTimeout(this.gitNoticeTimer);
+            this.gitNoticeTimer = null;
+          }
+          this.renderGit();
         },
         onEditing: (editing) => {
           this.gitEditing = editing;
@@ -1143,8 +1178,47 @@ class App {
     }
   }
 
+  /**
+   * Fetch, pull or push, and say what happened.
+   *
+   * The only three writes of the tab that show nothing for themselves: everything else repaints a
+   * list that is already on screen, whereas a push that worked and a push that was refused look
+   * exactly alike from here. The four-second stamp in the window header was the whole answer, at the
+   * other end of the window from the button, which in use reads as a button that does nothing.
+   */
   private async syncGit(op: GitSyncOp): Promise<void> {
-    await this.runGitWrite(() => window.api.gitSync(this.requireGitProject(), op));
+    const projectId = this.requireGitProject();
+    await this.runGitWrite(async () => {
+      const result = await window.api.gitSync(projectId, op);
+      this.showGitNotice({ projectId, ...result });
+      return result;
+    });
+  }
+
+  /**
+   * Puts one line beside the branch, and takes it away again.
+   *
+   * A success goes after a few seconds: it confirms something you just asked for and then has nothing
+   * left to say. A **failure stays**, because it is the one that must not be missed and the one whose
+   * text you want on screen while deciding what to do about it; both are dismissable by clicking.
+   *
+   * The timer is held so a second write cannot have its line cleared by the first one's countdown,
+   * which is exactly what happens when two pushes are a few seconds apart.
+   */
+  private showGitNotice(notice: GitNotice): void {
+    this.gitNotice = notice;
+    if (this.gitNoticeTimer !== null) {
+      window.clearTimeout(this.gitNoticeTimer);
+      this.gitNoticeTimer = null;
+    }
+    if (notice.ok) {
+      this.gitNoticeTimer = window.setTimeout(() => {
+        this.gitNotice = null;
+        this.gitNoticeTimer = null;
+        this.renderGit();
+      }, GIT_NOTICE_MS);
+    }
+    this.renderGit();
   }
 
   /**
@@ -1154,7 +1228,7 @@ class App {
    * hook output is watched, and a commit tab created behind the current one would be invisible until
    * it had already finished.
    */
-  private async commitGit(): Promise<void> {
+  private async commitGit(push: boolean): Promise<void> {
     const projectId = this.gitProject;
     if (projectId === null || this.gitBusy) {
       return;
@@ -1166,6 +1240,7 @@ class App {
         projectId,
         this.gitMessage,
         this.gitAmend,
+        push,
       );
       this.stampMessage(result.message);
       if (terminalId !== null) {
@@ -1829,6 +1904,15 @@ const THEME_ICONS: Record<ThemeMode, { path: string; paint: 'fill' | 'stroke' }>
  * matches the CSS fallback in `.git` so the two cannot disagree about the first paint.
  */
 const DEFAULT_GIT_LIST_WIDTH = 460;
+
+/**
+ * How long a successful fetch / pull / push stays beside the branch.
+ *
+ * Longer than the window header's four-second stamp, which is what this replaces: that line was
+ * competing with the refresh clock in a corner, whereas this one sits where the reader is already
+ * looking and can afford to be read rather than caught. A failure is not on this timer at all.
+ */
+const GIT_NOTICE_MS = 8000;
 
 /** Remembered height of one strip tab. */
 /**

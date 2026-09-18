@@ -378,6 +378,18 @@ export class TerminalManager {
      * honest and its `actionId` exempt from `reconcile`.
      */
     cwd?: string;
+    /**
+     * Called once the command's process is gone, with its exit code and whether it was killed by us.
+     *
+     * The one way a caller can chain anything onto a command that runs in a tab. It is a real signal
+     * and not an inferred one: this manager spawned the process and is handed its exit by node-pty,
+     * which is exactly the difference with the worktree helper, where the app refuses to decide when a
+     * command it did not run is done.
+     *
+     * `stopped` is true when the session was killed on purpose (a close, a restart), and a caller must
+     * treat that as "did not finish" however the exit code reads: a killed process can still exit 0.
+     */
+    onExit?: ((exitCode: number, stopped: boolean) => void) | undefined;
   }): TerminalId | null {
     const existing = this.findActionSession(options.project.id, options.actionId);
     if (existing !== undefined) {
@@ -401,6 +413,7 @@ export class TerminalManager {
       args: [...options.args],
       size: options.size,
       projectKind: null,
+      onExit: options.onExit ?? null,
     });
   }
 
@@ -653,6 +666,8 @@ export class TerminalManager {
     size: TerminalSize;
     projectKind: Project['kind'] | null;
     renamed: boolean;
+    /** See `runProjectCommand`. Null for every spawn that chains nothing. */
+    onExit?: ((exitCode: number, stopped: boolean) => void) | null;
   }): TerminalId | null {
     this.counter += 1;
     const id = `${options.kind}-${this.counter}`;
@@ -678,6 +693,9 @@ export class TerminalManager {
         scrollback: failedScrollback(options.file, message),
       });
       this.hooks.onSessionsChanged(this.sessions());
+      // A command that never launched has to reach a chained caller too, or `Commit and push` would
+      // simply never say anything when git could not be spawned at all.
+      options.onExit?.(-1, false);
       return id;
     }
 
@@ -716,6 +734,15 @@ export class TerminalManager {
 
     child.onExit(({ exitCode }) => {
       const stopped = this.stopping.delete(id);
+      /*
+       * The chained caller is told first, and whatever state the tab is in.
+       *
+       * Before the `current === undefined` guard on purpose: that guard is about not repainting a row
+       * from a process the manager no longer accounts for, which says nothing about whether the
+       * command ran. A commit whose tab was closed while its hooks were working still committed, and
+       * `stopped` is what separates that from a tab the user killed.
+       */
+      options.onExit?.(exitCode, stopped);
       const current = this.entries.get(id);
       if (current === undefined) {
         /*

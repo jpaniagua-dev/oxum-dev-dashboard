@@ -278,6 +278,8 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers({
     projects: () => projects,
+    // The dashboard only, like `GitPolled`: the servers window has no Git tab to put a notice in.
+    notifyGit: (notice) => dashboardWindow.send(IpcChannel.GitNotice, notice),
     monitor: () => projectMonitor,
     pulls: () => pullMonitor,
     jira: () => jiraMonitor,

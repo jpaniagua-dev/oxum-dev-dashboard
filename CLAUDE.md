@@ -637,6 +637,50 @@ exceptions:
 - **`push` becomes `-u origin <branch>` when there is no upstream**, re-read at click time and not from
   what the renderer had seen: this is the first push of every new branch, and a stale answer would turn
   it into an incomprehensible refusal.
+- **Fetch, pull and push say what they did, beside the branch.** They are the tab's only invisible
+  writes: every other one repaints a list that is already on screen, whereas a push that succeeded and
+  a push that was refused look exactly alike from the tab. The answer used to be the window header's
+  four-second stamp, at the other end of the window from the button, which in use reads as a button
+  that does nothing. `GitPanelState.notice` is that line, an `ok`/`error` pill at the end of the header
+  row. A success clears itself after 8 s; a **failure stays** until it is clicked, being the one that
+  must not be missed and the one whose text you want on screen while deciding what to do about it. The
+  clearing timer is held on the app so a second push cannot have its line wiped by the first one's
+  countdown. Deliberately **not** a confirmation dialog: that was offered and refused, a push being run
+  twenty times a day, and a modal in front of each is a modal nobody reads by the third.
+- **`Commit and push` is one button and two processes, chained on an exit code.** The commit runs in
+  its tab as it always has, and the push runs from the main process **only** if that process exits 0,
+  which is what makes a refusing pre-commit hook stop the whole thing. That is not the invented
+  completion signal the Worktrees tab refuses to guess at: this process spawned the commit and node-pty
+  hands it the exit, hence `runProjectCommand`'s `onExit`, which also fires when the command never
+  launched (`-1`) so a chained caller is never left waiting forever. `stopped` is separate from the code
+  because a killed process can still exit 0, and a tab the user closed did not finish.
+  - The push lands **after** the invoke has answered with the tab, so it reports itself on `GitNotice`,
+    a channel to the dashboard alone. A `GitResult` plus the project it is about, since by then the
+    reader may be looking at another repository.
+  - **Secondary next to a primary `Commit`.** The primary stays the one that touches the local
+    repository only; the one that publishes to a branch other people read is named in full rather than
+    inherited by muscle memory.
+  - **Refused on an amend already upstream**, the one case where a plain push cannot work: git will
+    refuse without `--force`, and a button whose only possible outcome is a refusal is a trap. The
+    condition is the one the amend tooltip already computes (`hasUpstream && ahead === 0`), and forcing
+    is not something a one-click button in this tab offers.
+  - No dialog in front of it, on request. The guard is the hook, not a question.
+- **Every repository row is badged with its uncommitted file count**, not only the selected one. The
+  column badged the open repository alone, on the argument that reading the others would cost a git
+  call per row per paint — a read nobody makes: the project poll already runs
+  `git status --porcelain=v2` on every project for the Projects tab, so the number was on the other
+  side of the app the whole time, and answering "where do I have work waiting" meant clicking each
+  repository in turn or leaving the tab.
+  - **The selected row answers from the on-demand read, the others from the poll.** The badge beside
+    the open repository has to agree with the list of files right next to it, and the poll can be a
+    whole interval out of date.
+  - **`GitState.changed` is counted, never `modified + staged + untracked`.** Those three are counted
+    per state and a file staged with further edits on top is deliberately counted twice among them, by
+    the very rule that keeps the two columns apart. The sum would badge one file as two, and the number
+    beside the open repository would disagree with the list under it. Tested on the `MM` case.
+  - **A project the poll has not answered for gets no badge**, not a dash. A dash means "nothing to
+    commit" in this column, and drawing one over an unread repository reports a clean tree for one that
+    may be full of work.
 - **Checkout stashes nothing and forces nothing**, and it is a **button**, not a click on the row:
   changing what is on disk must not be one stray click inside a list. A checkout blocked by local
   changes fails, and git itself says which files are in the way. An automatic stash would move work

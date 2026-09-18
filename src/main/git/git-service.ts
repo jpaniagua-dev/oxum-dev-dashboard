@@ -36,6 +36,7 @@ export async function readGitState(repoPath: string): Promise<GitState> {
       modified: 0,
       staged: 0,
       untracked: 0,
+      changed: 0,
       behind: 0,
       ahead: 0,
       hasUpstream: false,
@@ -121,6 +122,15 @@ export function parsePorcelainV2(stdout: string): Omit<GitState, 'error'> {
   let modified = 0;
   let staged = 0;
   let untracked = 0;
+  /*
+   * One per record git prints, where the three counts above are one per state a record carries.
+   *
+   * Counted here rather than added up by the reader, because `modified + staged + untracked` is not
+   * the number of files: a file staged with further edits on top is deliberately counted on both of
+   * those columns. The Git tab's repository badge asks how many files are not committed, and the sum
+   * would answer with more files than the repository holds.
+   */
+  let changed = 0;
 
   for (const line of stdout.split(/\r?\n/)) {
     if (line.startsWith('# branch.head ')) {
@@ -143,11 +153,13 @@ export function parsePorcelainV2(stdout: string): Omit<GitState, 'error'> {
     }
     if (line.startsWith('? ')) {
       untracked += 1;
+      changed += 1;
       continue;
     }
     if (line.startsWith('1 ') || line.startsWith('2 ')) {
       const index = line[2] ?? ' ';
       const worktree = line[3] ?? ' ';
+      changed += 1;
       if (index !== '.' && index !== ' ') {
         staged += 1;
       }
@@ -160,10 +172,20 @@ export function parsePorcelainV2(stdout: string): Omit<GitState, 'error'> {
       // A conflict is work in the tree. `u` reports both sides of the merge rather than an index and a
       // worktree state, so there is nothing to split between the two counts.
       modified += 1;
+      changed += 1;
     }
   }
 
-  return { branch: describeHead(head, oid), modified, staged, untracked, behind, ahead, hasUpstream };
+  return {
+    branch: describeHead(head, oid),
+    modified,
+    staged,
+    untracked,
+    changed,
+    behind,
+    ahead,
+    hasUpstream,
+  };
 }
 
 /**

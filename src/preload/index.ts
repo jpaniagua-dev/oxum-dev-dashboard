@@ -7,6 +7,7 @@ import {
   type GitDiff,
   type GitDiffTarget,
   type GitRepoState,
+  type GitNotice,
   type GitResult,
   type GitSequencerOp,
   type GitStashOp,
@@ -109,8 +110,9 @@ const api: RendererApi = {
     projectId: ProjectId,
     message: string,
     amend: boolean,
+    push: boolean,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
-    ipcRenderer.invoke(IpcChannel.GitCommit, projectId, message, amend),
+    ipcRenderer.invoke(IpcChannel.GitCommit, projectId, message, amend, push),
 
   gitSync: (projectId: ProjectId, op: GitSyncOp): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitSync, projectId, op),
@@ -197,6 +199,12 @@ const api: RendererApi = {
     const handler = (): void => listener();
     ipcRenderer.on(IpcChannel.GitPolled, handler);
     return () => ipcRenderer.off(IpcChannel.GitPolled, handler);
+  },
+
+  onGitNotice: (listener: (notice: GitNotice) => void): (() => void) => {
+    const handler = (_event: unknown, notice: GitNotice): void => listener(notice);
+    ipcRenderer.on(IpcChannel.GitNotice, handler);
+    return () => ipcRenderer.off(IpcChannel.GitNotice, handler);
   },
 
   runAction: (projectId: ProjectId, actionId: string): Promise<TerminalId> =>
