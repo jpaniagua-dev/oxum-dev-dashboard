@@ -27,6 +27,16 @@ export interface ParseInput {
     status: string;
     description: string;
   }[];
+  /**
+   * ISO instant of the run, stamped on every verdict it produces.
+   *
+   * Injected here with the Jira facts rather than set by the caller afterwards, and for the same
+   * reason they are: this is where a `TriagedTicket` is built, and a field added to the type without
+   * a value at its one construction site is a field that silently arrives empty. An incremental run
+   * merges these rows with older ones, and the stamp is what stops the merged list from claiming one
+   * age for all of them.
+   */
+  readonly analysedAt: string;
 }
 
 export function parseTriage(input: ParseInput): TriagedTicket[] {
@@ -59,6 +69,7 @@ export function parseTriage(input: ParseInput): TriagedTicket[] {
        * `triage.json`.
        */
       estimate: nearestStoryPoints(found?.estimate),
+      analysedAt: input.analysedAt,
     };
   });
 }

@@ -5,6 +5,7 @@ import {
   type TriagedTicket,
   type TriageProgress,
   type TriageResult,
+  type TriageMode,
   type TriageSkips,
   type TriageState,
   type TriageVerdict,
@@ -28,6 +29,20 @@ import { clearChildren, createElement, createIcon, createIconButton } from './do
 const ANALYSE_ICON = 'M5.6 3.9L12.6 8L5.6 12.1Z';
 
 /**
+ * The same play, smaller, with a plus beside it: "run this, on what was added".
+ *
+ * One glyph and not a second triangle, because two identical buttons on one row is a row where the
+ * reader has to hover to find out which is which. The plus is the shape that already means "the new
+ * ones" everywhere else, and it carries the whole difference between a run of several minutes and a
+ * run of one.
+ *
+ * Sized against the **rendered** 14px icon, like every other path here: the triangle loses a third of
+ * its span to make room, which is the smallest it can be before a 1.6 stroke closes it into a blob,
+ * and the plus is given 6 of the 16 units so its two bars stay apart at that size.
+ */
+const ANALYSE_NEW_ICON = 'M2.9 2.6L8.2 6.2L2.9 9.8Z M11.8 8.1V14.1 M8.8 11.1H14.8';
+
+/**
  * A filled dot for the sprint being worked right now.
  *
  * A state and not an action, so it is a marker and never a button: it is drawn filled, where every
@@ -46,10 +61,12 @@ export interface TriagePanelActions {
   /**
    * Runs the analysis on one sprint. Long, so the row says so while it runs.
    *
-   * The sprint travels with the click rather than being read anywhere else: it decides what the run is
-   * given, so the button and the run have to agree about it by construction.
+   * The sprint and the mode both travel with the click rather than being read anywhere else: together
+   * they decide what the run is given, so the button and the run have to agree about it by
+   * construction. That is the same reasoning the sprint id was given, and it is what a `mine` scope
+   * read off stored state failed at in 5.8.1.
    */
-  onAnalyse: (sprintId: number) => void;
+  onAnalyse: (sprintId: number, mode: TriageMode) => void;
   onSelect: (sprintId: number) => void;
   /** Opens a ticket in the browser: there is no local equivalent of a ticket. */
   onOpen: (key: string) => void;
@@ -220,26 +237,71 @@ export class TriagePanel {
     }
 
     const running = state.running === sprint.id;
+    const analysed = state.results[String(sprint.id)]?.tickets.length ?? 0;
+
+    /*
+     * Two buttons, and the incremental one comes first.
+     *
+     * Order is position, and position is muscle memory: `Analyse` keeps the end of the row it has
+     * always had, so the button that costs several minutes and replaces the stored answer is not the
+     * one that moves under a cursor already trained on it. The new one takes the slot to its left.
+     *
+     * Both are always drawn, including on a sprint nobody has analysed, where the two do exactly the
+     * same thing. A button that appeared once a result existed would shift the other one sideways
+     * between two states of the same row, which is the reason every verdict keeps its sub-tab at zero.
+     */
+    const actions = createElement('div', { className: 'triage__actions' });
+
+    const again = createIconButton(ANALYSE_NEW_ICON, {
+      label: running ? 'Analysing this sprint' : 'Analyse the tickets not yet analysed',
+      // The count is in the tooltip because it is the answer to "is this worth pressing": nine
+      // verdicts already stored is nine tickets this run will not pay for again.
+      title: running
+        ? 'Claude Code is reading the sprint'
+        : analysed === 0
+          ? 'Classify this sprint with Claude Code. Nothing is stored yet, so this reads all of it'
+          : `Classify only the tickets no verdict covers yet, and add them to the ${analysed} already stored`,
+      className: `triage__analyse${running ? ' triage__analyse--running' : ''}`,
+    });
+    this.bindAnalyse(again, sprint.id, 'new', state);
+    actions.append(again);
+
     const button = createIconButton(ANALYSE_ICON, {
       label: running ? 'Analysing this sprint' : 'Analyse this sprint',
       // What the run will read is stated where the run is started: it is the one thing about this
       // button that decides what it costs and what it comes back with.
       title: running
         ? 'Claude Code is reading the sprint'
-        : 'Classify this sprint with Claude Code, skipping what is in progress',
+        : 'Classify this sprint with Claude Code, skipping what is in progress. Replaces every stored verdict',
       className: `triage__analyse${running ? ' triage__analyse--running' : ''}`,
     });
-    // Disabled for every sprint while one runs: they share a single process and a single file.
-    button.disabled = state.running !== null;
-    button.addEventListener('click', () => {
-      // Selecting first, so the run you just started is the one you are watching. Without it,
-      // pressing Analyse on a sprint you are not looking at leaves the panel on another one.
-      this.actions.onSelect(sprint.id);
-      this.actions.onAnalyse(sprint.id);
-    });
-    row.append(button);
+    this.bindAnalyse(button, sprint.id, 'full', state);
+    actions.append(button);
+
+    row.append(actions);
 
     return row;
+  }
+
+  /**
+   * Wires one of the two run buttons.
+   *
+   * Shared because everything but the mode is shared, and because the two rules folded in here are
+   * the ones a third button would forget: **every** button is disabled while any run is going, the
+   * process and the file being single, and the sprint is selected before the run starts, so what you
+   * are watching is what you just launched.
+   */
+  private bindAnalyse(
+    button: HTMLButtonElement,
+    sprintId: number,
+    mode: TriageMode,
+    state: TriageState,
+  ): void {
+    button.disabled = state.running !== null;
+    button.addEventListener('click', () => {
+      this.actions.onSelect(sprintId);
+      this.actions.onAnalyse(sprintId, mode);
+    });
   }
 
   private renderBar(state: TriageState): void {
@@ -512,6 +574,8 @@ export class TriagePanel {
       ticket.status,
       ticket.assignee.length > 0 ? ticket.assignee : 'unassigned',
       ticket.estimate === null ? 'no estimate' : `${ticket.estimate} points`,
+      // Only when it disagrees with the age in the bar, which is the case an incremental run creates.
+      describeTicketAge(ticket, this.result(state)?.analysedAt ?? ''),
     ]
       .filter((fact) => fact.length > 0)
       .join(' · ');
@@ -791,6 +855,12 @@ export function describeCoverage(skipped: TriageSkips): string {
   if (skipped.inProgress > 0) {
     parts.push(`${skipped.inProgress} in progress skipped`);
   }
+  if (skipped.alreadyAnalysed > 0) {
+    // The clause that says the age above it covers the last run and not every row: an incremental run
+    // produces a list indistinguishable from a full one, and this is the only thing on screen stating
+    // that most of it was concluded earlier.
+    parts.push(`${skipped.alreadyAnalysed} kept from an earlier run`);
+  }
   return parts.join(' · ');
 }
 
@@ -809,6 +879,26 @@ export function describeEmptyResult(skipped: TriageSkips): string {
     return 'No ticket in this sprint.';
   }
   return `Nothing left to analyse: ${skipped.inProgress} already in progress.`;
+}
+
+/**
+ * How old one verdict is, when the list it sits in no longer has a single age.
+ *
+ * Empty for a result every row of which was produced by the same run, which is every full one: a line
+ * repeating the age already shown above the list is a line that teaches nothing. It earns its place
+ * only after an incremental run, where the bar says "just now" over rows a week old.
+ *
+ * Empty too for a row stored before 5.11.0, which carries no stamp. Saying nothing is the honest
+ * answer there; the alternative would be dating it from the result, which is the very claim this
+ * exists to stop.
+ *
+ * Pure and exported, because being wrong here is contradicting the bar.
+ */
+export function describeTicketAge(ticket: TriagedTicket, resultAnalysedAt: string, now: Date = new Date()): string {
+  if (ticket.analysedAt.length === 0 || ticket.analysedAt === resultAnalysedAt) {
+    return '';
+  }
+  return describeAge(ticket.analysedAt, now).toLowerCase();
 }
 
 /** Counts per verdict, for the sub-tab badges. Exported for testing. */

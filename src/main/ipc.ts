@@ -184,15 +184,20 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   /*
    * The sprint id arrives from the renderer and is coerced here rather than trusted: it ends up in a
    * Jira path, and the service also matches it against the sprint list before doing anything.
+   *
+   * The mode is narrowed the same way, and anything unrecognised becomes `full`. That default is the
+   * safe one of the two: a full run re-reads tickets that already had a verdict, which costs minutes,
+   * whereas an unintended `new` would silently leave tickets unclassified and look like a sprint that
+   * holds fewer than it does.
    */
   ipcMain.handle(
     IpcChannel.TriageAnalyse,
-    async (_event, sprintId: unknown): Promise<TriageState> => {
+    async (_event, sprintId: unknown, mode: unknown): Promise<TriageState> => {
       const id = Number(sprintId);
       if (!Number.isInteger(id)) {
         return deps.triage().state();
       }
-      return deps.triage().analyse(id);
+      return deps.triage().analyse(id, mode === 'new' ? 'new' : 'full');
     },
   );
 

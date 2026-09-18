@@ -2852,14 +2852,23 @@ body {
 /*
  * Pushed to the end of the row so the sprint names stay left-aligned and comparable.
  *
- * Deliberately NOT `.icon-button--row`, unlike the terminal icons of the pull request and Git
- * lists. Those are secondary affordances beside a row whose main gesture is elsewhere, so fading
- * them out until the row is hovered costs nothing. This one is the tab's primary action: an
- * `Analyse` button nobody can see until they hover the right row is a button nobody finds.
+ * The `margin-left: auto` sits on the pair and not on either button: with one on each they would
+ * split the free space between them and drift apart as the sprint names changed length.
  */
-.triage__analyse {
+.triage__actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
 }
+
+/*
+ * Neither button is `.icon-button--row`, unlike the terminal icons of the pull request and Git
+ * lists. Those are secondary affordances beside a row whose main gesture is elsewhere, so fading
+ * them out until the row is hovered costs nothing. These two are the tab's primary action: an
+ * `Analyse` button nobody can see until they hover the right row is a button nobody finds.
+ */
 
 /*
  * While a run is going, the icon breathes.

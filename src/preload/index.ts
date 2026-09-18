@@ -14,6 +14,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type TriageMode,
   type TriageState,
   type OpenShellRequest,
   type PaneDirection,
@@ -159,8 +160,8 @@ const api: RendererApi = {
   startInJira: (issueKeys: string[]): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.TriageStartInJira, issueKeys),
 
-  analyseSprint: (sprintId: number): Promise<TriageState> =>
-    ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId),
+  analyseSprint: (sprintId: number, mode: TriageMode): Promise<TriageState> =>
+    ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId, mode),
 
   dismissTriageTicket: (sprintId: number, issueKey: string): Promise<TriageState> =>
     ipcRenderer.invoke(IpcChannel.TriageDismiss, sprintId, issueKey),

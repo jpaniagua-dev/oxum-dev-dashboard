@@ -1,6 +1,8 @@
 import type {
   AppSettings,
   Sprint,
+  TriagedTicket,
+  TriageMode,
   TriageProgress,
   TriageResult,
   TriageState,
@@ -182,11 +184,13 @@ export class TriageService {
    * failure from erasing an answer that was still useful. A failed run therefore keeps the old
    * tickets and only carries the new error.
    *
-   * The scope comes from the click rather than from the settings, and it is stored with the result:
-   * it decides what the run is given, so a stored analysis that could not say whether it covered the
-   * whole sprint or only your own tickets would make every "Ready 0" ambiguous.
+   * The mode comes from the click rather than from the settings, for the reason the sprint id does:
+   * it decides what the run is given, so the button pressed and the run started have to agree by
+   * construction. It is not stored with the result, unlike the scope it might be mistaken for: what a
+   * reader needs afterwards is what the run left out, and that is in `skipped`, counted rather than
+   * inferred from a mode.
    */
-  async analyse(sprintId: number): Promise<TriageState> {
+  async analyse(sprintId: number, mode: TriageMode): Promise<TriageState> {
     if (this.running !== null) {
       // One at a time: the run is long and costs tokens, and two would race on the same file.
       return this.state();
@@ -210,7 +214,7 @@ export class TriageService {
     this.push();
 
     try {
-      const result = await this.run(sprint);
+      const result = await this.run(sprint, mode);
       await this.store.save(result);
     } catch (failure) {
       this.error = failure instanceof Error ? failure.message : String(failure);
@@ -221,7 +225,7 @@ export class TriageService {
     return this.push();
   }
 
-  private async run(sprint: Sprint): Promise<TriageResult> {
+  private async run(sprint: Sprint, mode: TriageMode): Promise<TriageResult> {
     const previous = this.store.get(sprint.id);
     const keep = (error: string): TriageResult => ({
       sprintId: sprint.id,
@@ -231,7 +235,7 @@ export class TriageService {
       error,
       // The counts of the answer being **kept**, not of the run that just failed: they describe the
       // tickets on screen, and those are the previous ones.
-      skipped: previous?.skipped ?? { inProgress: 0 },
+      skipped: previous?.skipped ?? { inProgress: 0, alreadyAnalysed: 0 },
     });
 
     const credentials = await this.credentials();
@@ -244,19 +248,57 @@ export class TriageService {
       return keep(error);
     }
 
-    const { analysed, skipped } = selectIssues(issues);
-    const empty = (error: string | null): TriageResult => ({
+    const { analysed, skipped } = selectIssues(
+      issues,
+      mode === 'new' ? this.store.analysedKeys(sprint.id) : new Set<string>(),
+    );
+
+    /*
+     * What an incremental run keeps from the previous answer.
+     *
+     * Empty for a full run, which replaces the stored result outright. For an incremental one it is
+     * every row whose ticket is **still in the sprint**, which is the one subtraction this mode makes:
+     * a ticket carried over to the next sprint would otherwise sit in this sprint's list for good,
+     * since only a full run ever drops a row, and the two modes would end up disagreeing about what
+     * the sprint contains. A row that is now in progress is kept, unlike in a full run: this mode adds
+     * verdicts and does not delete them, and the live-field refresh is already what keeps its status
+     * true.
+     */
+    const inSprint = new Set(issues.map((issue) => issue.key.toUpperCase()));
+    const carried =
+      mode === 'new'
+        ? (previous?.tickets ?? []).filter((ticket) => inSprint.has(ticket.key.toUpperCase()))
+        : [];
+
+    /*
+     * `at` is passed rather than taken here, and that is not a detail.
+     *
+     * The verdicts this run produces are stamped with it too, and `describeTicketAge` stays silent on
+     * a row whose stamp **equals** the result's, which is how a full run avoids dating every one of
+     * its own rows in the overview. Two calls to `now()` a few milliseconds apart would break that
+     * equality and put a redundant "analysed just now" under every ticket of every run.
+     */
+    const settle = (
+      tickets: readonly TriagedTicket[],
+      error: string | null,
+      at: string,
+    ): TriageResult => ({
       sprintId: sprint.id,
       sprintName: sprint.name,
-      analysedAt: now(),
-      tickets: [],
+      // When the sprint was last **read**, which after a merge is not when every verdict in it was
+      // made. That is why each ticket carries its own stamp, and why the coverage line states how
+      // many of these rows an earlier run produced.
+      analysedAt: at,
+      tickets,
       error,
       skipped,
     });
+
     if (analysed.length === 0) {
-      // A real answer, not a failure: the sprint was read and everything in it was skipped. The counts
-      // are what stop that from reading as an empty sprint, and they travel with the empty result.
-      return empty(null);
+      // A real answer, not a failure: the sprint was read and everything in it was skipped, either
+      // because it is in progress or because it was analysed before. The counts are what stop that
+      // from reading as an empty sprint, and they travel with the result.
+      return settle(carried, null, now());
     }
 
     this.advance({ phase: 'starting', detail: 'Starting Claude Code', tickets: analysed.length });
@@ -287,15 +329,17 @@ export class TriageService {
       return keep(answer.error ?? 'The analysis failed');
     }
 
-    const tickets = parseTriage({ answer: answer.answer, asked });
-    return {
-      sprintId: sprint.id,
-      sprintName: sprint.name,
-      analysedAt: now(),
-      tickets,
-      error: null,
-      skipped,
-    };
+    /*
+     * The new verdicts go **after** the carried ones.
+     *
+     * List order is what the sub-tabs and the batch button read, so it decides what gets worked first.
+     * Freshly analysed last rather than first on purpose: an incremental run is a top-up, and pushing
+     * three new tickets above nine that were waiting would reorder a worklist the reader has already
+     * been through, which is the kind of quiet reshuffle that costs a re-read every morning.
+     */
+    const at = now();
+    const tickets = [...carried, ...parseTriage({ answer: answer.answer, asked, analysedAt: at })];
+    return settle(tickets, null, at);
   }
 
   /**

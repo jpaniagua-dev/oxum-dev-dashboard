@@ -1589,8 +1589,8 @@ class App {
         overview: requireElement('triage-overview'),
       },
       {
-        onAnalyse: (sprintId) => {
-          void window.api.analyseSprint(sprintId).then((state) => {
+        onAnalyse: (sprintId, mode) => {
+          void window.api.analyseSprint(sprintId, mode).then((state) => {
             this.triage = state;
             this.renderTriage();
           });

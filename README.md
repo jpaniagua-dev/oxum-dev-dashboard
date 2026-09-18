@@ -280,6 +280,12 @@ Ready 4  Decision 3  Backend 2  Unclear 1  Blocked 0   Analysed 12 min ago   [Wo
   currently reading, the step count and the elapsed time. It is **indeterminate on purpose**: nothing here
   knows how long a run takes, and a bar filling at an invented pace would be a promise the tab cannot
   keep.
+- **Two run buttons: the whole sprint, or only what is new.** The second one classifies the tickets no
+  verdict covers yet and **adds** them to the stored answer, which is the everyday case: three tickets
+  dropped into a running sprint cost a run of three rather than of twelve. What counts as new comes
+  from the stored analysis and never from a creation date, "added today" and "not yet analysed" parting
+  ways the moment an older ticket is moved into the sprint. The bar says how many rows an earlier run
+  produced, and each verdict carries its own age.
 - **The last result stays** until the next run on that sprint. It is stored in its own `triage.json`
   beside the settings, not inside them, so any other tool on the machine can read the verdicts back.
   A failed run keeps the previous ones and only adds the error above them.

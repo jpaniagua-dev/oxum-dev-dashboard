@@ -16,10 +16,14 @@ import {
   describeCoverage,
   describeEmptyResult,
   describeRun,
+  describeTicketAge,
   describeWork,
   firstFilledVerdict,
   readyKeys,
 } from '../src/renderer/ui/triage-panel.js';
+
+/** One fixed instant, so a stamped verdict can be asserted rather than approximated. */
+const RUN_AT = '2026-09-18T08:00:00.000Z';
 
 const asked = [
   { key: 'PROJ-1', summary: 'Add a column', assignee: 'dev@example.com', status: 'To Do', description: 'Body' },
@@ -31,6 +35,7 @@ describe('parseTriage: the estimate', () => {
     parseTriage({
       answer: `[{"key":"PROJ-1","verdict":"ready","reason":"ok"${extra}}]`,
       asked: [asked[0] as (typeof asked)[number]],
+      analysedAt: RUN_AT,
     })[0];
 
   it('keeps a value the scale carries', () => {
@@ -53,7 +58,7 @@ describe('parseTriage: the estimate', () => {
   it('leaves a forgotten ticket without an estimate, as it leaves it unclear', () => {
     // Same rule as the verdict: a ticket the analysis skipped must not come back carrying values nobody
     // produced for it.
-    const tickets = parseTriage({ answer: '[{"key":"PROJ-1","verdict":"ready","estimate":3}]', asked });
+    const tickets = parseTriage({ answer: '[{"key":"PROJ-1","verdict":"ready","estimate":3}]', asked, analysedAt: RUN_AT });
     expect(tickets[1]?.verdict).toBe('unclear');
     expect(tickets[1]?.estimate).toBeNull();
   });
@@ -89,7 +94,8 @@ describe('parseTriage', () => {
       answer: '[{"key":"PROJ-1","verdict":"ready","reason":"The field exists","question":""},' +
         '{"key":"PROJ-2","verdict":"backend","reason":"No API for it","question":""}]',
       asked,
-    });
+      analysedAt: RUN_AT,
+      });
 
     expect(tickets.map((ticket) => ticket.verdict)).toEqual(['ready', 'backend']);
     expect(tickets[0]?.reason).toBe('The field exists');
@@ -101,7 +107,8 @@ describe('parseTriage', () => {
     const tickets = parseTriage({
       answer: 'Here is the triage:\n```json\n[{"key":"PROJ-1","verdict":"ready"}]\n```\nHope that helps.',
       asked: [asked[0]!],
-    });
+      analysedAt: RUN_AT,
+      });
 
     expect(tickets[0]?.verdict).toBe('ready');
   });
@@ -109,7 +116,7 @@ describe('parseTriage', () => {
   it('keeps a ticket the analysis forgot, and says so', () => {
     // The one failure nobody would notice: a ticket silently missing from the tab reads exactly like
     // a sprint that does not contain it.
-    const tickets = parseTriage({ answer: '[{"key":"PROJ-1","verdict":"ready"}]', asked });
+    const tickets = parseTriage({ answer: '[{"key":"PROJ-1","verdict":"ready"}]', asked, analysedAt: RUN_AT });
 
     expect(tickets).toHaveLength(2);
     expect(tickets[1]?.key).toBe('PROJ-2');
@@ -118,13 +125,13 @@ describe('parseTriage', () => {
   });
 
   it('falls back to unclear on a verdict nobody defined', () => {
-    const tickets = parseTriage({ answer: '[{"key":"PROJ-1","verdict":"probably-fine"}]', asked: [asked[0]!] });
+    const tickets = parseTriage({ answer: '[{"key":"PROJ-1","verdict":"probably-fine"}]', asked: [asked[0]!], analysedAt: RUN_AT });
 
     expect(tickets[0]?.verdict).toBe('unclear');
   });
 
   it('matches keys regardless of case and stray spaces', () => {
-    const tickets = parseTriage({ answer: '[{"key":" proj-1 ","verdict":"ready"}]', asked: [asked[0]!] });
+    const tickets = parseTriage({ answer: '[{"key":" proj-1 ","verdict":"ready"}]', asked: [asked[0]!], analysedAt: RUN_AT });
 
     expect(tickets[0]?.verdict).toBe('ready');
   });
@@ -135,7 +142,8 @@ describe('parseTriage', () => {
     const tickets = parseTriage({
       answer: '[{"key":"PROJ-1","verdict":"ready","summary":"Something else","description":"Invented"}]',
       asked: [asked[0]!],
-    });
+      analysedAt: RUN_AT,
+      });
 
     expect(tickets[0]?.summary).toBe('Add a column');
     expect(tickets[0]?.assignee).toBe('dev@example.com');
@@ -149,14 +157,15 @@ describe('parseTriage', () => {
       answer:
         '[{"key":"PROJ-1","verdict":"needs-decision","question":"One or two?","next":"A front-end change either way"}]',
       asked: [asked[0]!],
-    });
+      analysedAt: RUN_AT,
+      });
 
     expect(tickets[0]?.question).toBe('One or two?');
     expect(tickets[0]?.next).toBe('A front-end change either way');
   });
 
   it('survives an answer with no array at all', () => {
-    expect(parseTriage({ answer: 'I could not do that.', asked })).toHaveLength(2);
+    expect(parseTriage({ answer: 'I could not do that.', asked, analysedAt: RUN_AT })).toHaveLength(2);
     expect(isEmptyAnswer('I could not do that.')).toBe(true);
     expect(isEmptyAnswer('[{"key":"PROJ-1"}]')).toBe(false);
   });
@@ -215,6 +224,7 @@ const ticketWith = (verdict: TriagedTicket['verdict']): TriagedTicket => ({
   assignee: '',
   status: '',
   description: '',
+  analysedAt: RUN_AT,
 });
 
 describe('countVerdicts', () => {
@@ -284,6 +294,7 @@ describe('firstFilledVerdict', () => {
     assignee: '',
     status: '',
     description: '',
+    analysedAt: RUN_AT,
   });
 
   it('lands on what can be built before what is waiting on you', () => {
@@ -453,7 +464,7 @@ describe('selectIssues', () => {
     const { analysed, skipped } = selectIssues(sprint);
 
     expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-1', 'PROJ-3', 'PROJ-4']);
-    expect(skipped).toEqual({ inProgress: 1 });
+    expect(skipped).toEqual({ inProgress: 1, alreadyAnalysed: 0 });
   });
 
   it('reads the stage and not the status name, which is per-project and renamed at will', () => {
@@ -478,26 +489,94 @@ describe('selectIssues', () => {
     const { analysed } = selectIssues([issue('PROJ-8', 'done', 'me')]);
     expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-8']);
   });
+
+  it('skips what a stored verdict already covers, and counts it', () => {
+    // The whole point of the second button: three tickets dropped into a running sprint cost a run of
+    // three, not of twelve.
+    const { analysed, skipped } = selectIssues(sprint, new Set(['PROJ-1']));
+
+    expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-4']);
+    expect(skipped).toEqual({ inProgress: 1, alreadyAnalysed: 1 });
+  });
+
+  it('matches a stored key whatever its case, the file being hand-editable', () => {
+    const { skipped } = selectIssues([issue('proj-1', 'todo', 'me')], new Set(['PROJ-1']));
+    expect(skipped.alreadyAnalysed).toBe(1);
+  });
+
+  it('counts a ticket that is both under in progress alone', () => {
+    // The order between the two rules is the contract: counting it twice would put more skipped
+    // tickets on screen than the sprint holds, and counting it under the second would make the two
+    // modes report different `inProgress` numbers for the same sprint.
+    const { skipped } = selectIssues([issue('PROJ-2', 'in-progress', 'me')], new Set(['PROJ-2']));
+    expect(skipped).toEqual({ inProgress: 1, alreadyAnalysed: 0 });
+  });
+
+  it('is given everything when no key is passed, which is what a full run is', () => {
+    const { analysed, skipped } = selectIssues(sprint, new Set());
+    expect(analysed).toHaveLength(3);
+    expect(skipped.alreadyAnalysed).toBe(0);
+  });
 });
 
 describe('describeCoverage', () => {
   it('says nothing when the run left nothing out', () => {
     // A line reading "0 skipped" is a line the eye has to read every time to learn nothing.
-    expect(describeCoverage({ inProgress: 0 })).toBe('');
+    expect(describeCoverage({ inProgress: 0, alreadyAnalysed: 0 })).toBe('');
   });
 
   it('counts what was skipped', () => {
-    expect(describeCoverage({ inProgress: 2 })).toContain('2 in progress skipped');
+    expect(describeCoverage({ inProgress: 2, alreadyAnalysed: 0 })).toContain('2 in progress skipped');
+  });
+
+  it('says how much of the list an earlier run produced', () => {
+    // Without it, an incremental run reads as a full one: same list, same age line, and nothing
+    // saying that nine of those verdicts are a week old.
+    expect(describeCoverage({ inProgress: 0, alreadyAnalysed: 9 })).toContain(
+      '9 kept from an earlier run',
+    );
+  });
+
+  it('states both, an incremental run having two reasons to be short', () => {
+    const line = describeCoverage({ inProgress: 2, alreadyAnalysed: 9 });
+    expect(line).toContain('2 in progress skipped');
+    expect(line).toContain('9 kept from an earlier run');
+  });
+});
+
+/*
+ * The age of one verdict inside a list that no longer has a single one.
+ *
+ * It exists because an incremental run merges: the bar says when the sprint was last read, which
+ * after a merge is not when most of its rows were concluded.
+ */
+describe('describeTicketAge', () => {
+  const now = new Date('2026-09-18T12:00:00Z');
+  const at = (analysedAt: string): TriagedTicket => ({ ...ticketWith('ready'), analysedAt });
+
+  it('says nothing when the row is as old as the result, which is every full run', () => {
+    expect(describeTicketAge(at('2026-09-18T10:00:00Z'), '2026-09-18T10:00:00Z', now)).toBe('');
+  });
+
+  it('dates a row an earlier run produced', () => {
+    expect(describeTicketAge(at('2026-09-16T12:00:00Z'), '2026-09-18T12:00:00Z', now)).toBe(
+      'analysed 2 d ago',
+    );
+  });
+
+  it('says nothing for a row stored before the stamp existed', () => {
+    // Dating it from the result is the exact claim the stamp exists to stop.
+    expect(describeTicketAge(at(''), '2026-09-18T12:00:00Z', now)).toBe('');
   });
 });
 
 describe('describeEmptyResult', () => {
   it('says a sprint is empty when it really is', () => {
-    expect(describeEmptyResult({ inProgress: 0 })).toBe('No ticket in this sprint.');
+    expect(describeEmptyResult({ inProgress: 0, alreadyAnalysed: 0 })).toBe('No ticket in this sprint.');
   });
 
   it('says a sprint was filtered down to nothing, which looks identical on screen', () => {
-    const message = describeEmptyResult({ inProgress: 9 });
+    const message = describeEmptyResult({ inProgress: 9, alreadyAnalysed: 0 });
     expect(message).toContain('9 already in progress');
     expect(message).not.toContain('No ticket in this sprint');
   });

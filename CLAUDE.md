@@ -973,6 +973,42 @@ exceptions:
     read in the service, the scope parameter on the `TriageAnalyse` channel, and `.triage__scope`.
     `selectIssues` keeps its shape, returning a selection **and** its counts, which is what a
     narrowing rule needs: putting one back is a branch there rather than a change of contract.
+- **Two run buttons, and the second one only ever adds.** `Analyse the tickets not yet analysed`
+  (play + plus) sits to the LEFT of `Analyse`, so the full run keeps the end-of-row slot a cursor is
+  already trained on. It is the everyday gesture: the PO drops three tickets into a running sprint,
+  and re-reading the nine already classified costs minutes and tokens for verdicts nobody asked to
+  change. What it skips comes from `triage.json` and **never from a creation date**: "added today"
+  and "not yet analysed" only agree until a ticket created before a run is moved into the sprint
+  after it, and a date would silently miss exactly that one. The stored analysis is the only record
+  of what has actually been read.
+  - **It is not the `mine` scope coming back.** That one narrowed what the tab was about and left the
+    reader with a shorter list for an invisible reason. This one leaves the list a **superset** of
+    what it was: an incremental run adds rows, and its only subtraction is a ticket that has left the
+    sprint, which is a row about another sprint's ticket rather than an answer being deleted.
+  - **The epitaph's warning still applies and is answered by the counts.** Two subtractive rules
+    stacked on one list is what made `Mine` look broken, and `selectIssues` now has exactly that
+    shape. Hence `TriageSkips.alreadyAnalysed`, the order being fixed (in progress first, so a ticket
+    matching both is counted once and the two modes report the same `inProgress`), and the coverage
+    line stating `9 kept from an earlier run`.
+  - **A row that is now in progress is kept by a merge**, unlike by a full run which simply is not
+    given it. This mode adds verdicts and does not delete them, and the live-field refresh is already
+    what keeps such a row's status true.
+  - **The mode travels with the click**, like the sprint id, and is **not** stored with the result.
+    What a reader needs afterwards is what the run left out, and that is counted in `skipped` rather
+    than inferred from a mode. Anything unrecognised on the channel becomes `full`: re-reading a
+    ticket that already had a verdict costs minutes, while an unintended `new` would leave tickets
+    unclassified and look like a sprint that holds fewer than it does.
+  - **Both buttons are always drawn**, including on a sprint nobody has analysed, where they do the
+    same thing. A button appearing once a result existed would shift the other sideways between two
+    states of the same row, the reason every verdict keeps its sub-tab at zero.
+- **A verdict carries its own `analysedAt`, because a merged list has no single age.**
+  `TriageResult.analysedAt` is when the sprint was last **read**, which after an incremental run is
+  not when most of its rows were concluded; the bar's "Analysed just now" over ten week-old rows is
+  the lie the per-ticket stamp prevents. It is stamped in `parseTriage`, where a `TriagedTicket` is
+  built, so a field added to the type cannot arrive empty from its one construction site. Shown by
+  `describeTicketAge` in the overview and **only when it disagrees** with the bar: a line repeating
+  the age above the list teaches nothing. A row stored before 5.11.0 has no stamp and is left
+  undated rather than dated from the result, which is the exact claim the stamp exists to stop.
 - **What was skipped is counted, stored and shown.** `TriageResult` carries a `skipped` count and the
   bar states it next to the age. This is the same rule that adds a forgotten ticket back as
   `unclear`: a shortened list and a short sprint are the same picture, so "No ticket in this sprint"

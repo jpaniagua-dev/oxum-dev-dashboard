@@ -59,6 +59,23 @@ export class TriageStore {
     return best?.ticket;
   }
 
+  /**
+   * The keys one sprint's stored analysis already covers, upper-cased.
+   *
+   * What an incremental run subtracts. Scoped to the sprint rather than read across the file, and that
+   * is the load-bearing half: a ticket carried over from the last sprint has a verdict under the sprint
+   * it was analysed in, and a global lookup would leave it out of the new sprint's list for good, with
+   * nothing on screen to say why. Per sprint, it is analysed once there and then skipped, which is the
+   * behaviour the button promises.
+   *
+   * A dismissed row is **not** here, having been removed from the result: the next run brings it back,
+   * exactly as the dismissal says it will, and an incremental run is a run.
+   */
+  analysedKeys(sprintId: number): Set<string> {
+    const result = this.results.get(sprintId);
+    return new Set(result?.tickets.map((ticket) => ticket.key.toUpperCase()) ?? []);
+  }
+
   /** Plain object keyed by sprint id, the shape the renderer receives. */
   snapshot(): Record<string, TriageResult> {
     const entries: Record<string, TriageResult> = {};
@@ -184,6 +201,7 @@ function readResult(value: unknown): TriageResult | null {
     // analysis loses the two fields and keeps everything a reader acts on.
     skipped: {
       inProgress: readCount(skipped['inProgress']),
+      alreadyAnalysed: readCount(skipped['alreadyAnalysed']),
     },
     tickets: record['tickets'].flatMap((ticket) => {
       const entry = ticket as Record<string, unknown>;
@@ -204,6 +222,10 @@ function readResult(value: unknown): TriageResult | null {
           assignee: typeof entry['assignee'] === 'string' ? entry['assignee'] : '',
           status: typeof entry['status'] === 'string' ? entry['status'] : '',
           description: typeof entry['description'] === 'string' ? entry['description'] : '',
+          // Empty in every file written before 5.11.0, and read as "unknown" rather than backfilled
+          // from the result: stamping those rows with the run they were merged into would be inventing
+          // the very fact this field exists to keep honest.
+          analysedAt: typeof entry['analysedAt'] === 'string' ? entry['analysedAt'] : '',
         },
       ];
     }),

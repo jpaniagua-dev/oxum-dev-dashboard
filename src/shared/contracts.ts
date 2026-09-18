@@ -905,6 +905,16 @@ export interface TriagedTicket {
    * save.
    */
   readonly description: string;
+  /**
+   * ISO instant of the run that produced this verdict, or empty in a file written before 5.11.0.
+   *
+   * Per ticket and not only per result, because an incremental run merges what it just classified
+   * with what an earlier run concluded: `TriageResult.analysedAt` then says when the sprint was last
+   * read, which is not when this row's verdict was made. Without this field the bar's "Analysed just
+   * now" would cover ten rows a week old, and a stale verdict reading as a fresh one is the failure
+   * the whole coverage line exists to prevent.
+   */
+  readonly analysedAt: string;
 }
 
 /** The last analysis of one sprint, kept until that sprint is analysed again. */
@@ -930,7 +940,31 @@ export interface TriageResult {
 export interface TriageSkips {
   /** Already being worked on: `statusCategory` is `indeterminate`. */
   readonly inProgress: number;
+  /**
+   * Left out by an incremental run because a verdict was already stored for them.
+   *
+   * Always zero after a full run, which is given everything the first rule leaves. Counted and shown
+   * like the other one: an incremental run produces a list that looks exactly like a full one, and
+   * the only thing saying "this run read two tickets, not twelve" is this number.
+   */
+  readonly alreadyAnalysed: number;
 }
+
+/**
+ * How much of a sprint a run is asked to read.
+ *
+ * `full` classifies everything the sprint holds minus what is in progress, and replaces the stored
+ * answer. `new` classifies only the tickets no stored verdict covers and **merges** the outcome into
+ * the previous one, which is the everyday case: the PO drops three tickets into a running sprint and
+ * re-reading the nine already classified costs minutes and tokens for verdicts nobody asked to
+ * change.
+ *
+ * Defined by what is stored rather than by a creation date on purpose. "Added today" and "not yet
+ * analysed" only coincide until the first ticket is created before a run and moved into the sprint
+ * after it, and a date would silently skip exactly that one; the stored analysis is the only record
+ * of what has actually been read.
+ */
+export type TriageMode = 'full' | 'new';
 
 /**
  * Where a run has got to.
@@ -1474,14 +1508,16 @@ export const IpcChannel = {
   /** invoke: () => TriageState, re-reads the sprints from Jira and returns the stored results */
   TriageRefresh: 'triage:refresh',
   /**
-   * invoke: (sprintId) => TriageState
+   * invoke: (sprintId, mode: TriageMode) => TriageState
    *
    * Fetches the sprint's issues, hands them to a headless Claude Code run for classification, and
    * stores the verdicts. The previous result stays on screen for the whole run and is only replaced
    * when a new one lands, which is the point of storing it at all.
    *
    * A run reads the whole sprint, minus what is already in progress. It took a scope until 5.8.1;
-   * see the note in `CLAUDE.md` for why that went.
+   * see the note in `CLAUDE.md` for why that went. `mode` is not that scope coming back: `new` does
+   * not narrow what the tab is about, it skips the tickets whose verdict is already on disk and adds
+   * its own to them, so the list after the run is a superset of the list before it.
    */
   TriageAnalyse: 'triage:analyse',
   /**
@@ -1576,7 +1612,14 @@ export interface RendererApi {
     issueKeys: string[],
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   startInJira(issueKeys: string[]): Promise<GitResult>;
-  analyseSprint(sprintId: number): Promise<TriageState>;
+  /**
+   * Runs the analysis on one sprint.
+   *
+   * `full` re-reads everything and replaces the stored answer; `new` reads only what no stored verdict
+   * covers and merges. The mode travels with the click, like the sprint id: it decides what the run is
+   * given, so the button and the run have to agree about it by construction.
+   */
+  analyseSprint(sprintId: number, mode: TriageMode): Promise<TriageState>;
   /** Drops one row from a stored analysis. Touches `triage.json` and nothing in Jira. */
   dismissTriageTicket(sprintId: number, issueKey: string): Promise<TriageState>;
   onTriageChanged(listener: (state: TriageState) => void): () => void;
