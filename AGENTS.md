@@ -59,7 +59,7 @@ exceptions:
   2026-08-24: this app is meant to be handed to teammates, so "it works here" is not the bar. What
   that means concretely, and it is already how the existing code behaves:
   - **No path, alias or shell function that only exists in the author's dotfiles.** An external
-    command is fine when it is a documented prerequisite (`git`, `gh`, `Codex`) or shipped with the
+    command is fine when it is a documented prerequisite (`git`, `gh`, `claude`) or shipped with the
     repository. It is not fine when it lives in one `.bashrc`: the seeded `commit` action is exactly
     that mistake, kept as the example not to repeat.
   - **Defaults derive from `homedir()`** and every one of them is editable in the settings, the way
@@ -78,7 +78,7 @@ exceptions:
 - **Every row action ends up in a terminal tab.** No external terminal, no third-party window.
 - **The projects strip must show the projects without scrolling** at its default height. If rows grow,
   adjust `projectsHeight` accordingly.
-- The "Codex sessions" section was removed on purpose: launching the commands from the projects
+- The "Claude Code sessions" section was removed on purpose: launching the commands from the projects
   already gives the state. Do not reintroduce it without an explicit request.
 - **The version is on screen AND in the window title**, from `app.getVersion()` through the bootstrap.
   Not decoration: three builds of this app can sit side by side (installer, portable, unpacked zip),
@@ -224,7 +224,7 @@ exceptions:
   behaviour at 21376: `parseWindowsBuild` rejects a `0` build rather than guessing, a wrong number
   being worse than no number.
 - **`rescaleOverlappingGlyphs: true`.** A character of ambiguous width (`⎿`, `●`, the box-drawing
-  lines, the spinner of a Codex session) is one cell wide for the font but paints wider. Under
+  lines, the spinner of a Claude Code session) is one cell wide for the font but paints wider. Under
   WebGL only cells marked dirty are repainted, so pixels spilled into a cell nobody touched this frame
   stay on screen. A WebGL-only option, which is exactly our case.
 - **No `convertEol`.** It makes a lone `\n` also return the carriage: that is a fix for output piped
@@ -466,6 +466,133 @@ exceptions:
 - The polling cadences are not in the UI, like `gitPollSeconds` and `checksPollSeconds`: they are edited
   in `settings.json`.
 
+### Reviewing a pull request
+
+Added on 2026-09-18. The Triage tab's gesture applied to pull requests, with one difference of
+nature that shapes everything: the triage writes a local file, this writes on GitHub, under the
+user's own identity, on a colleague's work.
+
+- **This is the first write to GitHub in the app, and it goes through one door.** Every other `gh`
+  call here is a read, and that was true of the whole application until this shipped. `gh-write.ts`
+  is the only module allowed to run a mutating `gh`, for the reason `run-git.ts` is the only door to
+  git: "does this touch somebody else's repository?" has to be answerable by an import rather than by
+  reading function bodies.
+- **The run does not check the pull request out, and that is the shape of the feature.** A throwaway
+  `git worktree add --detach` was the obvious reading of the request and is refused: this app has
+  never created a worktree, on purpose. The life cycle rules live in the `wt` helper (unlink the
+  shared `node_modules` junction **before** removing, prune a stale registration rather than delete
+  it), `git-worktrees.ts` only ever reads `git worktree list --porcelain`, and a run killed by its
+  timeout, by Stop or by the app quitting would leave a registration nothing here may clean up, ten
+  times per run. What a review needs is the patch plus the conventions, and both are readable
+  without moving anything.
+- **The patch goes IN the prompt, the repository is read-only context.** The dividing line `Generate`
+  already draws: letting the run fetch its own diff means granting `Bash`, and a run that can call
+  git can call git for things nobody asked for. Accepted and **named in the prompt**: the files on
+  disk are at the default branch, not at the pull request's head, so the prompt says the patch is the
+  only authority on what changed and forbids contradicting it on the strength of a file read. If
+  reviews start being wrong about code already fixed, the fix is a fetch into `refs/oxum-review/<n>`
+  plus `git diff --unified=25`, which touches no working tree, and not a worktree.
+- **The run reads two trees, through `--add-dir`.** The standards live one level up in the workspace,
+  which is where `Work on this` starts; the repository's own conventions live in the repository,
+  which is where `Generate` starts. This is the first run needing both, so `runClaude` grew one
+  option whose absence adds no flag at all, exactly like `model`: neither existing caller's argv
+  changes by a byte, and `addDirArgs` is exported so a test can say so.
+- **Looking at the pull request is a separate gesture, and it goes through `wt pr`.** Part of what a
+  reviewer who guarantees consistency checks is not in a diff, it is on screen. `Open as a workspace`
+  runs the helper's new verb, waits for its exit code, then starts the project's own `server` action
+  in that folder on a **free port**, so it does not fight the dev server already running in the main
+  checkout. The port is **replaced** in the command and never appended, because two `--port` flags
+  make the result depend on which one the CLI keeps; and the port shown is the one the process
+  **announced**, since the probe can go stale between the bind and the launch.
+- **The one verdict that writes is the one a parse failure cannot reach.** Four verdicts: `approve`
+  posts nothing, `comment` posts nothing until clicked, `request-changes` posts, and `unclear`, the
+  fallback for an unreadable answer, posts nothing. Reversing that, so a garbled answer fell back to
+  the posting verdict, is the only way this feature could block a colleague's merge with nobody
+  having chosen it. `comment` was not asked for and earns its place: without a middle rung a model
+  told "post only blockers" inflates every nit into one.
+- **`Approve` is never automatic and `Request changes` always is, and that asymmetry is the design.**
+  The write that unblocks a merge stays a human click; the write that stops one is what the run
+  exists for. `Approve` carries no dialog either, on request and rightly: a box answered twenty
+  times a day is a reflex, not a decision. Its safety is preconditions a fast click cannot outrun,
+  all re-checked in the main process at the moment of the click, and a refusal that **names both
+  shas** when the head has moved.
+- **A draft and your own pull request are reviewed and never posted to.** Not taste for the second:
+  GitHub refuses both `--approve` and `--request-changes` on your own, so posting would surface as
+  an API error at the end of a run that cost minutes, and `decideAction` makes that 422 unreachable
+  rather than caught. Not taste for the first either: the bot already reviews drafts, and a second
+  one requesting changes on work in progress is how a review bot gets muted. Drafts are skipped by
+  the selection and **counted**; your own are reviewed, shown, and marked unpostable.
+- **Idempotency lives in two places because neither suffices alone.** `posted.headSha` in
+  `pull-reviews.json` is what a second run reads; `<!-- review-sha: … -->` at the foot of the posted
+  body is what survives that file being deleted, hand-edited or left on another machine. The pull
+  request is the only authority on what has actually been said out loud.
+- **The marker names a sha and nothing else.** No product name, no tool name, no workspace name: a
+  marker that identifies the tool identifies the private workspace it ran from.
+- **Nothing the model writes reaches GitHub unscrubbed.** The prompt forbids naming the workspace,
+  its paths and its files; `scrubBody` strips absolute paths, `~/…` forms and the workspace basename
+  anyway. The prompt is the belt, the pure function is the braces, and only the braces are testable.
+  `escapeComments` neutralises **both** halves of an HTML comment, and the opener is the one that
+  bites: escaping only `-->` leaves `<!--` free to open a comment nothing closes, so GitHub renders
+  the rest of the body, findings and marker included, as nothing at all. A review that posts, looks
+  empty to its reader, and still parses correctly here.
+- **A review is about one head sha, and one whose head has moved is not shown as current.**
+  `headRefOid` rides the `gh pr list` payload the tab already fetches, so the renderer compares
+  live-to-stored on every repaint with no round trip; `changedFiles` comes along for the 20-file
+  rule. Both cost nothing, the same join the Worktrees tab's `PR checks` column is built on. A stale
+  review **loses its `Approve` button entirely** rather than gaining a disabled one, and
+  `isReviewCurrent` is false when **either** sha is empty: an unknown sha is never current, and the
+  direction to be wrong in is the one that asks for another review.
+- **Posting is its own phase, after every verdict is in.** That is what gives Stop a meaning worth
+  having: stopping during the reviews posts nothing at all, stopping during the posting stops before
+  the next one. Posting each verdict as it landed would leave a cancelled run having already spoken.
+- **A timed-out write is `unknown`, not `failed`, and is never retried.** A killed call may have
+  reached GitHub; retrying it is how the same blocking review gets posted twice. The row says so in
+  words, and the next run resolves it for free by reading the marker back.
+- **`gh` writes use `--body-file`, never `--body`**, and the file is **kept** after the post. A
+  review body is multi-line by construction and free to contain backticks, quotes and `$(…)`; as
+  bytes on disk none of it can be read as an option. `reviewArgs` is exported for the one test that
+  asserts the body appears nowhere in the argument list, which is what makes that claim checkable
+  rather than a comment. Kept afterwards like a commit message, plus one reason: when a post is
+  refused, it is the only surviving copy of a run that cost minutes.
+- **`gh api POST /pulls/{n}/reviews`, not `gh pr review`.** Four reasons, all load-bearing: the
+  comment and the review state are **one call**, so the half-written state (text posted, merge
+  unblocked) cannot exist; `commit_id` pins the review to the sha that was read; the review id comes
+  back, and it is the only thing that makes a review dismissable afterwards; and `-F body=@file` puts
+  the body through a file.
+- **A submitted GitHub review cannot be deleted.** There is no API for it: the text stays in the
+  timeline and it is already in everyone's inbox. `dismissReview` does the two calls that are the
+  closest thing to an undo, dismissing the state and replacing the body, and they are one function
+  because they are useless apart.
+- **The Gemini severity is carried through verbatim, never mapped onto a scale of ours.** Only
+  `critical` and `medium` have ever been seen on this team's pull requests, and the levels around
+  them are not written down anywhere; the run judges the remarks on their merits and the badge is
+  shown as decoration. Both spellings of the bot login are matched, with and without `[bot]`:
+  matching one returns zero findings and looks **exactly** like a pull request the bot has not
+  reached yet. The remarks are read from `GET /pulls/{n}/comments` and **not** from
+  `gh pr view --json comments`, which returns issue comments only: reading the wrong collection is
+  the single most consequential mistake available here, since it turns a flagged pull request into
+  one that looks clean.
+- **Clicking a row now SELECTS it, where it used to open the browser.** A deliberate reversal, and
+  the reason is in the old rule itself: opening GitHub was right while nothing local could show a
+  pull request. The verdict and its findings are on this machine now, so reading them is the
+  everyday gesture and the browser is the deliberate one, behind a button. It is also what the
+  Triage tab does, and two neighbouring master-detail tabs disagreeing about what a click means
+  would be worse than either answer.
+- **The third column is `.pulls--detail`, not a change to `.pulls`.** That class paints the Jira
+  panel too, so widening the grid there would have moved a column nobody touched.
+- **`reviewWritesEnabled` is off by default**, which is what guarantees that installing an update
+  cannot post anything before its owner has said, once, that the feature may exist. Every write path
+  reads it and `review-gate.ts` refuses on it first. An empty `readViewerLogin()` disables the whole
+  feature for a second reason: an empty login makes every `isAuthor` comparison false, so every pull
+  request would look like somebody else's and everything would look postable.
+- **The run is bounded, and it names what it left out.** Ten pull requests per run, five per
+  repository, a patch cap past which a pull request is **skipped rather than truncated** (half a diff
+  produces a confident, specific, wrong remark about code nobody saw), six minutes each,
+  twenty-five for the run. Serial and not pooled: this is not a poll, and "which three of the ten
+  went out before I pressed Stop" has to have an answer. **Not `singleFlight`**, whose trailing
+  re-run would silently run the whole batch, and post, a second time.
+
+
 ## Jira tab
 
 - **The API token never goes into `settings.json`.** It lives encrypted by `safeStorage` (DPAPI on
@@ -637,6 +764,50 @@ exceptions:
 - **`push` becomes `-u origin <branch>` when there is no upstream**, re-read at click time and not from
   what the renderer had seen: this is the first push of every new branch, and a stale answer would turn
   it into an incomprehensible refusal.
+- **Fetch, pull and push say what they did, beside the branch.** They are the tab's only invisible
+  writes: every other one repaints a list that is already on screen, whereas a push that succeeded and
+  a push that was refused look exactly alike from the tab. The answer used to be the window header's
+  four-second stamp, at the other end of the window from the button, which in use reads as a button
+  that does nothing. `GitPanelState.notice` is that line, an `ok`/`error` pill at the end of the header
+  row. A success clears itself after 8 s; a **failure stays** until it is clicked, being the one that
+  must not be missed and the one whose text you want on screen while deciding what to do about it. The
+  clearing timer is held on the app so a second push cannot have its line wiped by the first one's
+  countdown. Deliberately **not** a confirmation dialog: that was offered and refused, a push being run
+  twenty times a day, and a modal in front of each is a modal nobody reads by the third.
+- **`Commit and push` is one button and two processes, chained on an exit code.** The commit runs in
+  its tab as it always has, and the push runs from the main process **only** if that process exits 0,
+  which is what makes a refusing pre-commit hook stop the whole thing. That is not the invented
+  completion signal the Worktrees tab refuses to guess at: this process spawned the commit and node-pty
+  hands it the exit, hence `runProjectCommand`'s `onExit`, which also fires when the command never
+  launched (`-1`) so a chained caller is never left waiting forever. `stopped` is separate from the code
+  because a killed process can still exit 0, and a tab the user closed did not finish.
+  - The push lands **after** the invoke has answered with the tab, so it reports itself on `GitNotice`,
+    a channel to the dashboard alone. A `GitResult` plus the project it is about, since by then the
+    reader may be looking at another repository.
+  - **Secondary next to a primary `Commit`.** The primary stays the one that touches the local
+    repository only; the one that publishes to a branch other people read is named in full rather than
+    inherited by muscle memory.
+  - **Refused on an amend already upstream**, the one case where a plain push cannot work: git will
+    refuse without `--force`, and a button whose only possible outcome is a refusal is a trap. The
+    condition is the one the amend tooltip already computes (`hasUpstream && ahead === 0`), and forcing
+    is not something a one-click button in this tab offers.
+  - No dialog in front of it, on request. The guard is the hook, not a question.
+- **Every repository row is badged with its uncommitted file count**, not only the selected one. The
+  column badged the open repository alone, on the argument that reading the others would cost a git
+  call per row per paint — a read nobody makes: the project poll already runs
+  `git status --porcelain=v2` on every project for the Projects tab, so the number was on the other
+  side of the app the whole time, and answering "where do I have work waiting" meant clicking each
+  repository in turn or leaving the tab.
+  - **The selected row answers from the on-demand read, the others from the poll.** The badge beside
+    the open repository has to agree with the list of files right next to it, and the poll can be a
+    whole interval out of date.
+  - **`GitState.changed` is counted, never `modified + staged + untracked`.** Those three are counted
+    per state and a file staged with further edits on top is deliberately counted twice among them, by
+    the very rule that keeps the two columns apart. The sum would badge one file as two, and the number
+    beside the open repository would disagree with the list under it. Tested on the `MM` case.
+  - **A project the poll has not answered for gets no badge**, not a dash. A dash means "nothing to
+    commit" in this column, and drawing one over an unread repository reports a clean tree for one that
+    may be full of work.
 - **Checkout stashes nothing and forces nothing**, and it is a **button**, not a click on the row:
   changing what is on disk must not be one stray click inside a list. A checkout blocked by local
   changes fails, and git itself says which files are in the way. An automatic stash would move work
@@ -909,7 +1080,7 @@ exceptions:
 
 ## Triage tab
 
-- **A headless Codex run, not a terminal tab.** This is the one deliberate exception to "every
+- **A headless Claude Code run, not a terminal tab.** This is the one deliberate exception to "every
   row action ends up in a terminal tab", and the dividing line is the same one the Git tab draws
   between a quick write and a commit: a tab is the right home for a command whose **output** is the
   point, whereas here the output is a payload the tab has to parse and group. It therefore sits with
@@ -973,6 +1144,42 @@ exceptions:
     read in the service, the scope parameter on the `TriageAnalyse` channel, and `.triage__scope`.
     `selectIssues` keeps its shape, returning a selection **and** its counts, which is what a
     narrowing rule needs: putting one back is a branch there rather than a change of contract.
+- **Two run buttons, and the second one only ever adds.** `Analyse the tickets not yet analysed`
+  (play + plus) sits to the LEFT of `Analyse`, so the full run keeps the end-of-row slot a cursor is
+  already trained on. It is the everyday gesture: the PO drops three tickets into a running sprint,
+  and re-reading the nine already classified costs minutes and tokens for verdicts nobody asked to
+  change. What it skips comes from `triage.json` and **never from a creation date**: "added today"
+  and "not yet analysed" only agree until a ticket created before a run is moved into the sprint
+  after it, and a date would silently miss exactly that one. The stored analysis is the only record
+  of what has actually been read.
+  - **It is not the `mine` scope coming back.** That one narrowed what the tab was about and left the
+    reader with a shorter list for an invisible reason. This one leaves the list a **superset** of
+    what it was: an incremental run adds rows, and its only subtraction is a ticket that has left the
+    sprint, which is a row about another sprint's ticket rather than an answer being deleted.
+  - **The epitaph's warning still applies and is answered by the counts.** Two subtractive rules
+    stacked on one list is what made `Mine` look broken, and `selectIssues` now has exactly that
+    shape. Hence `TriageSkips.alreadyAnalysed`, the order being fixed (in progress first, so a ticket
+    matching both is counted once and the two modes report the same `inProgress`), and the coverage
+    line stating `9 kept from an earlier run`.
+  - **A row that is now in progress is kept by a merge**, unlike by a full run which simply is not
+    given it. This mode adds verdicts and does not delete them, and the live-field refresh is already
+    what keeps such a row's status true.
+  - **The mode travels with the click**, like the sprint id, and is **not** stored with the result.
+    What a reader needs afterwards is what the run left out, and that is counted in `skipped` rather
+    than inferred from a mode. Anything unrecognised on the channel becomes `full`: re-reading a
+    ticket that already had a verdict costs minutes, while an unintended `new` would leave tickets
+    unclassified and look like a sprint that holds fewer than it does.
+  - **Both buttons are always drawn**, including on a sprint nobody has analysed, where they do the
+    same thing. A button appearing once a result existed would shift the other sideways between two
+    states of the same row, the reason every verdict keeps its sub-tab at zero.
+- **A verdict carries its own `analysedAt`, because a merged list has no single age.**
+  `TriageResult.analysedAt` is when the sprint was last **read**, which after an incremental run is
+  not when most of its rows were concluded; the bar's "Analysed just now" over ten week-old rows is
+  the lie the per-ticket stamp prevents. It is stamped in `parseTriage`, where a `TriagedTicket` is
+  built, so a field added to the type cannot arrive empty from its one construction site. Shown by
+  `describeTicketAge` in the overview and **only when it disagrees** with the bar: a line repeating
+  the age above the list teaches nothing. A row stored before 5.11.0 has no stamp and is left
+  undated rather than dated from the result, which is the exact claim the stamp exists to stop.
 - **What was skipped is counted, stored and shown.** `TriageResult` carries a `skipped` count and the
   bar states it next to the age. This is the same rule that adds a forgotten ticket back as
   `unclear`: a shortened list and a short sprint are the same picture, so "No ticket in this sprint"
@@ -1080,7 +1287,7 @@ exceptions:
   matches `:hover` on a disabled control, so without it a button that cannot be pressed still lights
   up under the cursor and invites the click it is about to swallow.
 
-### Handing a ticket to Codex
+### Handing a ticket to Claude Code
 
 - **The handoff passes the key and the repository name, nothing else.** `TriageWork` takes issue keys,
   filters them through `ISSUE_KEY_PATTERN` and builds `/ticket <KEY> in the <repo> repository`. The
@@ -1091,10 +1298,10 @@ exceptions:
   no longer starts inside the repository (see below); it goes through `safeRepoName`, which strips
   anything a shell could read as syntax, since the value lands inside a double-quoted argument where
   bash expands `$` and backticks.
-- **The session starts in the workspace, not in the repository, and that is the whole point.** Codex
+- **The session starts in the workspace, not in the repository, and that is the whole point.** Claude
   Code reads its instructions, skills and memory from the folder it is launched in and from that
   folder's ancestors, so a repository under a workspace starts with strictly **less** than the
-  workspace does: it sees its own `AGENTS.md` and nothing of the conventions, skills and knowledge
+  workspace does: it sees its own `CLAUDE.md` and nothing of the conventions, skills and knowledge
   several repositories share one level up. Launching at the workspace root and naming the repository
   in the prompt keeps both halves. The folder is `claudeContextRoot`, a `settings.json`-only key like
   `projectsRoot` and the poll cadences, and an **empty** value means "start in the repository", which
@@ -1109,7 +1316,7 @@ exceptions:
   which is what keeps its title honest and its reserved `actionId` exempt from `reconcile`.
 - **Permission prompts are off** (`--dangerously-skip-permissions`). The session is opened
   deliberately, on a ticket that was read, in a repository chosen from a menu, to do the one thing the
-  tab exists for. The flag has **no `--allow-` prefix**, and a wrong spelling is not harmless: `Codex`
+  tab exists for. The flag has **no `--allow-` prefix**, and a wrong spelling is not harmless: `claude`
   rejects an unknown option, so the tab would open, print a usage error and sit at a shell prompt,
   which reads exactly like a session that started and did nothing. Pinned by test for that reason.
 - **Two buttons, two different promises.** `Work on this` in the overview starts the ticket you are
@@ -1128,7 +1335,7 @@ exceptions:
   the time. Jira never says which of the four repositories an issue touches, and a guess would put a
   worktree in the wrong clone.
 - **It runs on the default profile, where the branch button needs interactive bash.** `dev` is a
-  shell alias, which only exists once `~/.bashrc` has been read; `Codex.exe` is a real executable on
+  shell alias, which only exists once `~/.bashrc` has been read; `claude.exe` is a real executable on
   `PATH`, so `resolveDefaultProfile` is enough and the tab starts in whatever shell the user actually
   works in.
 - **The batch button is pushed to the far end with `margin-left: auto`.** Not an `order` value: the
@@ -1303,24 +1510,83 @@ either. Killing a build meant a trip back to the dashboard for the row's own but
   columns of tiles is a normal arrangement here and `neos-rating-acquisition-front · run` a normal
   title, so this was reachable before the second control existed and simply less visible.
 
-## Codex runs: three of them, three models
+## Agent runs: four of them, four models, one profile
 
-- **Three settings and not one, and the reason is not configurability for its own sake.** These are
-  three different jobs: classifying a sprint is bulk reading where speed and cost dominate,
-  implementing a ticket wants the strongest model there is, and writing a commit message from a diff is
-  short and frequent. A single field would be right for one of them and wrong for the other two, and
-  the run that suffers most is the sprint analysis, which nobody can intervene in once it starts.
-- **Empty means "whatever Codex is set to", and it is spelled by the ABSENCE of the flag.** The
+### The app drives a CLI agent, not Claude Code
+
+Changed on 2026-09-19. Until then the binary, its flags, the way the prompt got in and the way the
+answer came out were constants, and they were Claude Code's. They are now a **profile**, because the
+app has to run whichever agent its user has.
+
+- **"Run the agent" is not an operation that exists.** What exists is "run this binary with these
+  flags, feed it this way, read its answer that way", and all four differ between agents. Three of
+  the four fail in **silence** when wrong, which is why they are settings rather than assumptions:
+  a missing "answer and exit" flag spawns an interactive UI into a pipe and the run sits there until
+  its timeout; a prompt sent the wrong way arrives truncated rather than refused, a sprint prompt
+  being tens of kilobytes; and a template without a read-only restriction runs a pull request review
+  with an agent that can write to the repository it is reviewing.
+- **A command template, not a field per flag.** This app cannot anticipate the options of a CLI it
+  has never seen, so the profile carries one line the user copies from their agent's documentation
+  rather than ten checkboxes each guessing at a spelling. `{model}` is the one substitution, and it
+  expands through the profile's **own** model flag because `--model X` and `-m X` are both common
+  and some agents take none.
+- **The template is not a shell.** `splitCommand` keeps quoted sections whole and does nothing else:
+  no expansion, no globbing, no substitution. A setting that went through a shell would be an
+  injection with extra steps, and `spawn` is still called with an argument array and `shell: false`.
+- **Claude Code is the only verified profile, and that is stated rather than hidden.** Every flag in
+  `CLAUDE_CODE_PROFILE` was exercised against the real CLI. Any other profile is the user's, written
+  against their own agent's documentation, which is why the settings section leads with `Test`
+  rather than with a dropdown of agents nobody here could try.
+- **`Test` is the only thing that proves a profile.** One run, a one-word prompt, thirty seconds, and
+  the answer carries the **command line** either way. It exists because a headless run has no
+  terminal tab by design: without it a wrong flag reads as thirty seconds of nothing, and at the
+  analysis budget it would read as a quarter of an hour of nothing. Same reasoning as `JiraTest`,
+  where one real query is the only proof the credentials are good.
+- **Every failure names the command.** `runAgent` appends it to each message it writes. This is the
+  single most useful line in the refactor, and it is a consequence of the design rather than a
+  decoration: the three headless runs are invisible on purpose, so the only way to diagnose them is
+  to say what was launched.
+- **`stream-json` is a capability, not a requirement.** An agent whose format the app can read gets
+  the live progress line, the file being opened and the step count; one whose format it cannot gets
+  an elapsed clock and nothing invented. Refusing the second would refuse most CLIs, and flattening
+  the first to match it would pay a daily cost on runs of several minutes for the benefit of an
+  agent that may not even be installed. There is a real second difference: the `stream-json` closing
+  event carries `is_error`, so a refusal that exits 0 is caught, while the plain path can only read
+  the exit code.
+- **An agent that cannot open a second directory is not refused.** Only the pull request review needs
+  it, to read the standards in the workspace and the conventions in the repository at once. Without
+  the flag the review runs **in the repository**, which of the two is the one a code review cannot do
+  without.
+- **The settings keys were renamed and the old ones are still read.** `claudeAnalysisModel` and its
+  three siblings became `agent*`, and `claudeContextRoot` became `workspaceRoot`. A settings file
+  written before the rename is the normal case, not an edge one: without the fallback, the update
+  that renamed them would silently empty four pinned models and move every session's starting folder.
+  Read once, rewritten under the new name on the next save. `workspaceRoot` cannot go through
+  `asString`, because an explicitly empty value is a real answer there meaning "start in the
+  repository", and only an **absent** key may take the default.
+- **`CLAUDE.md` keeps its name.** It is this repository's instructions file, read by the agent its
+  owner happens to use, and renaming it would touch ninety invariants for a symbolic gain. What
+  stopped naming an agent is the **application**, not the file that configures one.
+
+
+- **Four settings and not one, and the reason is not configurability for its own sake.** These are
+  four different jobs: classifying a sprint is bulk reading where speed and cost dominate,
+  implementing a ticket wants the strongest model there is, writing a commit message from a diff is
+  short and frequent, and reviewing a pull request is bulk reading against a written standard with a
+  consequence at the end. A single field would be right for one of them and wrong for the other
+  three, and the two that suffer most are the ones nobody can intervene in once they start: the
+  sprint analysis and the review.
+- **Empty means "whatever Claude Code is set to", and it is spelled by the ABSENCE of the flag.** The
   CLI rejects a blank model, so `--model ""` is a run that fails before it starts, not a default. That
   is why `modelArgs` returns `[]` and `modelFlag` returns `''` rather than either producing an empty
   option.
-- **One whitelist, in `shared/Codex-model.ts`, applied to all three.** Only the `Work on this` handoff
+- **One whitelist, in `shared/agent-model.ts`, applied to all four. It decides what a model NAME may look like; what the flag is CALLED lives in the profile.** Only the `Work on this` handoff
   actually reaches a shell (`bash -ic`), where brackets are glob characters and `$` expands; the two
   headless runs go through `spawn` with an argument array and would have been safe either way. The rule
-  is uniform because two rules eventually get applied to the wrong call site. `Codex-opus-5[1m]` is a
+  is uniform because two rules eventually get applied to the wrong call site. `claude-opus-5[1m]` is a
   legitimate pinned name, hence the brackets in the pattern and the double quotes in `modelFlag`.
 - **A well-formed model name is not an existing one, and the CLI does not help.** Verified rather than
-  assumed: `Codex --model does-not-exist-xyz` starts, and reports that name back in its own `init`
+  assumed: `claude --model does-not-exist-xyz` starts, and reports that name back in its own `init`
   event; it fails at the API call, or not visibly at all. So the form can mark `sonnet 4` and cannot
   mark `sonnett`, and saying otherwise would be a promise this app cannot keep. The same `init` event
   is where the resolved model could be read back, if it ever becomes worth showing which one ran.
@@ -1340,8 +1606,8 @@ either. Killing a build meant a trip back to the dashboard for the row's own but
   `Glob` and nothing else, because an analysis is not a change. Letting it call `git diff` itself would
   mean granting `Bash`, and a run that can call git can call git for things nobody asked for. Handing
   the diff over also makes the prompt a string a test can hold.
-- **The run starts in the repository, and that is the load-bearing part.** Codex reads
-  `AGENTS.md` from the folder it starts in and from its ancestors, so it follows **that repository's
+- **The run starts in the repository, and that is the load-bearing part.** Claude Code reads
+  `CLAUDE.md` from the folder it starts in and from its ancestors, so it follows **that repository's
   own** commit convention without this app ever having read one. That is the whole reason this beats a
   format string here. It is deliberately the opposite of `Work on this`, which starts one level up:
   that one needs what several repositories share, this one needs one repository's convention and would
@@ -1396,6 +1662,16 @@ either. Killing a build meant a trip back to the dashboard for the row's own but
   `environment: 'node'` with no jsdom, on purpose: renderer modules here stay importable without a DOM,
   and this file avoids import-time listeners for exactly that reason. So the menu's *contents* are pure
   and tested while its *opening* is not, and both times this shipped broken it was the opening.
+- **Every menu in the app goes through it, including the ones that do not look like context menus.**
+  The shell picker behind the tab strip's chevron was its own `position: absolute` list until
+  2026-09-11, and it was invisible: the strip is a grid cell of `.terminal__surface`, which is
+  `overflow: hidden`, so a menu opening upwards from there was drawn outside that box and clipped. It
+  read as "hidden behind the projects table". **No `z-index` can fix an overflow clip**, which is the
+  part worth remembering, and flipping it downwards would only have moved the trap to the next short
+  pane. `showContextMenu` is `position: fixed` on `document.body`, so no ancestor can clip it, it
+  folds back inside the window near an edge, and it already carries the dismissal rules that the
+  terminal pane had reimplemented on its own. A dropdown anchored to a control is
+  `showContextMenu(box.left, box.bottom + 4, items)`, not a new list.
 
 ## Mail and Teams: why they are not here
 
