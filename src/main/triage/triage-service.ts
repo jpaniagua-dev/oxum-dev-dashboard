@@ -14,9 +14,9 @@ import {
   type JiraCredentials,
 } from '../jira/jira-service.js';
 import type { SecretStore } from '../store/secret-store.js';
-import { runClaude } from './run-claude.js';
+import { runAgent } from '../agent/run-agent.js';
 import { parseTriage } from './triage-parse.js';
-import { readProgress } from './triage-progress.js';
+import { readProgress } from '../agent/agent-progress.js';
 import { buildTriagePrompt, trimDescription } from './triage-prompt.js';
 import { selectIssues } from './triage-select.js';
 import { TriageStore } from './triage-store.js';
@@ -301,7 +301,7 @@ export class TriageService {
       return settle(carried, null, now());
     }
 
-    this.advance({ phase: 'starting', detail: 'Starting Claude Code', tickets: analysed.length });
+    this.advance({ phase: 'starting', detail: `Starting ${this.settings().agentProfile.label}`, tickets: analysed.length });
 
     /*
      * Trimmed once, then used for both the prompt and the stored ticket.
@@ -312,10 +312,11 @@ export class TriageService {
      */
     const asked = analysed.map((issue) => ({ ...issue, description: trimDescription(issue.description) }));
 
-    const answer = await runClaude({
+    const answer = await runAgent({
+      profile: this.settings().agentProfile,
       cwd: this.settings().projectsRoot,
       prompt: buildTriagePrompt(sprint.name, asked),
-      model: this.settings().claudeAnalysisModel,
+      model: this.settings().agentAnalysisModel,
       label: 'The analysis',
       onEvent: (event) => {
         const step = readProgress(event);

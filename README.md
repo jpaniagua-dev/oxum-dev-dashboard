@@ -18,7 +18,7 @@ features that use it and says so where the command was going to run.
 | **git** on `PATH` | every column of the strip, the whole Git tab | rows read `?` and the Git tab reports the failure |
 | **Git Bash** | the shells that expand aliases, the `Commit` action | those actions print `command not found` in their tab |
 | **`gh`**, authenticated (`gh auth login`) | Checks, Workflows, the Pull requests tab | those columns read `?`, the tab stays empty |
-| **`claude`** on `PATH`, signed in | Triage, `Work on this`, `Generate` a commit message | the run fails in its own tab or line |
+| **A CLI coding agent** on `PATH`, signed in | Triage, `Work on this`, `Generate` a commit message, the pull request review | the run fails in its own tab or line |
 | **A Jira API token** | the Jira tab, the Triage tab | nothing is queried at all, no error |
 | **Node 20+** | only to build from source | irrelevant to a downloaded build |
 
@@ -164,7 +164,7 @@ the selected one on the right, one line each:
 
 ### Reviewing them
 
-A headless Claude Code run reads a pull request with your team's standards in hand, says what it
+A headless agent run reads a pull request with your team's standards in hand, says what it
 thinks, and, when it finds something that should not merge as it stands, posts it. Off by default:
 until `Let the review submit to GitHub` is ticked in the settings, the whole thing runs, shows its
 verdicts and writes nothing.
@@ -270,8 +270,8 @@ Changes 12  Branches 4  History                     ↻  ↓  ↑
 - **Fetch, pull and push say what they did**, beside the branch. They are the only writes here that
   move nothing on screen: a push that worked and a push that was refused look identical otherwise. A
   success clears itself after a few seconds, a failure stays until you click it.
-- **`Generate` writes the message from the staged diff**, with a headless Claude Code run. It starts
-  **in the repository**, which is the point: Claude Code reads `CLAUDE.md` from the folder it is
+- **`Generate` writes the message from the staged diff**, with a headless agent run. It starts
+  **in the repository**, which is the point: an agent reads its instructions file from the folder it is
   launched in, so it follows that repository's own commit convention without this app knowing what the
   convention is. Recent subjects go in as a fallback for a repository that documents nothing. The diff
   is passed in the prompt rather than fetched, the run being allowed to read files and nothing else.
@@ -318,7 +318,7 @@ rollup, and painting that green would be a lie.
 ## Triage
 
 The fifth tab, and the only one that spends minutes rather than milliseconds. Pick a sprint on the left, press the play button, and a **read-only
-Claude Code process** classifies every ticket in it; the verdicts land in sub-tabs so what you can start
+agent process** classifies every ticket in it; the verdicts land in sub-tabs so what you can start
 today is not buried under what nobody can move.
 
 ```
@@ -350,13 +350,13 @@ Ready 4  Decision 3  Backend 2  Unclear 1  Blocked 0   Analysed 12 min ago   [Wo
 - **Every ticket is estimated too**, in story points on a Fibonacci scale, by the same pass that read the
   description. The number shows next to the status, and an estimate the model did not give stays empty
   rather than being filled with a default: it gets written to the ticket and planned against.
-- **`Work on this` hands the ticket to Claude Code** in a terminal tab, after asking which repository it
+- **`Work on this` hands the ticket to the agent** in a terminal tab, after asking which repository it
   lives in. Only the key and that repository name are passed: the analysis is already on disk, so the
   session reads the verdict itself rather than receiving a copy that starts going stale immediately.
   `Work N ready` does the same for the whole `ready` group, and only for that group, because a ticket
   parked on a question is one whose answer decides what gets built.
 - **The session starts in the workspace above your repositories, not inside the one it will work on.**
-  Claude Code reads its instructions and skills from the folder it starts in and that folder's
+  An agent reads its instructions from the folder it starts in and that folder's
   ancestors, so a session launched inside a single repository never sees what several of them share one
   level up. It starts at `claudeContextRoot` and is told which repository the ticket is about. Set that
   key to an empty string in `settings.json` to go back to starting inside the repository.
@@ -422,7 +422,7 @@ where the command was going to run.
 
 The dev servers can live in a window of their own, so a second monitor answers "does one of them need
 me" without you cycling through tabs. The rack icon next to the settings gear moves them across; the
-dashboard keeps the shells and the Claude Code sessions.
+dashboard keeps the shells and the agent sessions.
 
 ```
 3 servers                                          [ Back to the dashboard ]
@@ -530,17 +530,33 @@ from orphaning a running terminal.
 to every tab) and, per profile, the binary path, arguments and starting directory. Editing a path marks the
 profile as custom and it then wins over detection.
 
-**Claude Code** pins the model of each run that starts Claude Code, and there are three of them
-because they are three different jobs: the **Triage analysis** reads a whole sprint, where speed and
-cost show most; **Work on this** implements a ticket, where you want the strongest model there is; the
-**commit message** reads a staged diff, short and frequent. One setting would be right for one of them
-and wrong for the other two.
+**Coding agent** is which CLI agent runs, and how it is called. The app ships with a profile for
+Claude Code, the one it was built against and the only one verified here; anything else is declared
+in the same four fields.
 
-Leave a field empty to use whatever Claude Code itself is set to. An alias (`opus`, `sonnet`, `haiku`,
-`fable`) always points at the latest version of that model; a full name (`claude-fable-5`) pins one.
-A value that is not a model name is outlined in red as you type and would be ignored if saved: one of
-these three ends up on a shell command line, so anything else is dropped rather than quoted and hoped
-for.
+The commands are **templates**: everything is passed through as written, `{model}` is replaced by the
+model flag and disappears when no model is pinned, and quoted sections are kept whole. It is not a
+shell, so nothing is expanded or globbed. Three of these decide whether anything runs at all, and
+they fail quietly when wrong: the flag that means *answer and exit* (without it the agent opens its
+interface into a pipe and never returns), how the prompt gets in (a sprint prompt is tens of
+kilobytes, past what a command line accepts), and the flags that keep the run read-only. That last
+one is yours: the pull request review trusts the template, so an agent given no restriction can
+write to the repository it is reviewing.
+
+**Press `Test` after any change.** It runs the agent once on a one-word prompt, thirty seconds, and
+reports what came back **with the command line it used**. It is the only thing that proves a profile,
+because the three runs that use it have no terminal tab by design: without it a wrong flag reads as
+silence until the timeout.
+
+Below the profile, the model of each run, and there are four of them because they are four different
+jobs: the **Triage analysis** reads a whole sprint, where speed and cost show most; **Work on this**
+implements a ticket, where you want the strongest model there is; the **commit message** reads a
+staged diff, short and frequent; the **pull request review** reads a patch against a written standard.
+One setting would be right for one of them and wrong for the other three.
+
+Leave a field empty to use whatever the agent itself is set to. A value that is not a model name is
+outlined in red as you type and would be ignored if saved: one of these ends up on a shell command
+line, so anything else is dropped rather than quoted and hoped for.
 
 Everything still lives in `settings.json`, so hand-editing remains possible; the dialog and the file
 go through the same validation.

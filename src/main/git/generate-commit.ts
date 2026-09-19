@@ -1,5 +1,6 @@
 import type { Project } from '@shared/contracts.js';
-import { runClaude } from '../triage/run-claude.js';
+import type { AgentProfile } from '@shared/agent-profile.js';
+import { runAgent } from '../agent/run-agent.js';
 import { buildCommitPrompt, readCommitMessage, RECENT_SUBJECTS } from './commit-prompt.js';
 import { describeGitError, git } from './run-git.js';
 
@@ -88,13 +89,13 @@ async function readRecentSubjects(repoPath: string, amend: boolean): Promise<str
  *
  * The run starts in the repository, which is the load-bearing part: Claude Code reads `CLAUDE.md` from
  * there and from its ancestors, so it follows that repository's commit convention without this app
- * ever having read one. `claudeContextRoot` is deliberately *not* used, unlike the `Work on this`
+ * ever having read one. `workspaceRoot` is deliberately *not* used, unlike the `Work on this`
  * handoff: the workspace above holds what several repositories share, and here a sibling's convention
  * is not context, it is a wrong answer.
  */
 export async function generateCommitMessage(
   project: Project,
-  options: { amend: boolean; branch: string; model: string },
+  options: { amend: boolean; branch: string; model: string; profile: AgentProfile },
 ): Promise<GeneratedCommit> {
   let diff: string;
   try {
@@ -120,7 +121,8 @@ export async function generateCommitMessage(
     amend: options.amend,
   });
 
-  const run = await runClaude({
+  const run = await runAgent({
+    profile: options.profile,
     cwd: project.path,
     prompt,
     model: options.model,
@@ -135,7 +137,7 @@ export async function generateCommitMessage(
   if (message === null) {
     // A clean run whose answer is not a message: empty, or long enough to be an essay about the diff.
     // Reported rather than pasted, because the textarea may already hold something worth keeping.
-    return { ok: false, message: '', error: 'Claude Code did not answer with a commit message' };
+    return { ok: false, message: '', error: `${options.profile.label} did not answer with a commit message` };
   }
   return { ok: true, message, error: null };
 }

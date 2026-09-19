@@ -229,9 +229,9 @@ export class TriagePanel {
       // The count is in the tooltip because it is the answer to "is this worth pressing": nine
       // verdicts already stored is nine tickets this run will not pay for again.
       title: running
-        ? 'Claude Code is reading the sprint'
+        ? 'The agent is reading the sprint'
         : analysed === 0
-          ? 'Classify this sprint with Claude Code. Nothing is stored yet, so this reads all of it'
+          ? 'Classify this sprint with the coding agent. Nothing is stored yet, so this reads all of it'
           : `Classify only the tickets no verdict covers yet, and add them to the ${analysed} already stored`,
       className: `triage__analyse${running ? ' triage__analyse--running' : ''}`,
     });
@@ -243,8 +243,8 @@ export class TriagePanel {
       // What the run will read is stated where the run is started: it is the one thing about this
       // button that decides what it costs and what it comes back with.
       title: running
-        ? 'Claude Code is reading the sprint'
-        : 'Classify this sprint with Claude Code, skipping what is in progress. Replaces every stored verdict',
+        ? 'The agent is reading the sprint'
+        : 'Classify this sprint with the coding agent, skipping what is in progress. Replaces every stored verdict',
       className: `triage__analyse${running ? ' triage__analyse--running' : ''}`,
     });
     this.bindAnalyse(button, sprint.id, 'full', state);

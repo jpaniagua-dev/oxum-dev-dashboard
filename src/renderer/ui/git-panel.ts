@@ -881,7 +881,7 @@ function renderCommitForm(
   generate.type = 'button';
   generate.disabled = state.busy || state.generating || (!staged && !state.amend);
   generate.title = state.generating
-    ? 'Claude Code is reading the diff'
+    ? 'The agent is reading the diff'
     : staged || state.amend
       ? "Write the message from the staged diff, following this repository's conventions"
       : 'Nothing staged: tick at least one file';

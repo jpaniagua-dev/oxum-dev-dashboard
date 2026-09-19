@@ -20,7 +20,7 @@ import { PullMonitor } from './github/pull-monitor.js';
 import { dismissReview, submitReview, writeReviewBody } from './github/gh-write.js';
 import { readViewerLogin } from './github/viewer.js';
 import { PullReviewService } from './review/review-service.js';
-import { runClaude } from './triage/run-claude.js';
+import { runAgent } from './agent/run-agent.js';
 import { registerIpcHandlers } from './ipc.js';
 import { JiraMonitor } from './jira/jira-monitor.js';
 import { TriageService } from './triage/triage-service.js';
@@ -209,7 +209,7 @@ async function bootstrap(): Promise<void> {
       readBotFindings,
       readReviews,
       patchPaths,
-      runClaude,
+      runAgent,
       viewerLogin: readViewerLogin,
       writeBody: writeReviewBody,
       submitReview,

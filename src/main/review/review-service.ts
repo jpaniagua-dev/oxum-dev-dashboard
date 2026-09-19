@@ -7,9 +7,10 @@ import type {
   PullReviewTarget,
   RepoPulls,
 } from '@shared/contracts.js';
+import type { AgentProfile } from '@shared/agent-profile.js';
 import { reviewKey } from '@shared/pull-review.js';
 import { PR_FILE_SOFT_LIMIT } from '@shared/pull-review.js';
-import { readProgress } from '../triage/triage-progress.js';
+import { readProgress } from '../agent/agent-progress.js';
 import { buildReviewBody, readMarkerSha } from './review-body.js';
 import { PER_PR_TIMEOUT_MS, RUN_TIMEOUT_MS } from './review-limits.js';
 import { parseReview } from './review-parse.js';
@@ -51,11 +52,12 @@ export interface ReviewPorts {
     number: number,
   ) => Promise<{ value: ExistingReview[] | null; error: string | null }>;
   readonly patchPaths: (patch: string) => string[];
-  readonly runClaude: (options: {
+  readonly runAgent: (options: {
+    profile: AgentProfile;
     cwd: string;
     prompt: string;
     model?: string;
-    addDirs?: readonly string[];
+    extraDirs?: readonly string[];
     timeoutMs?: number;
     label?: string;
     signal?: AbortSignal;
@@ -300,13 +302,22 @@ export class PullReviewService {
 
     this.advance({ phase: 'reviewing', detail: `${reviewKey(slug, pull.number)}: reviewing` });
 
-    const answer = await this.ports.runClaude({
-      // The workspace, so the run inherits the standards kept there; the repository comes in beside
-      // it through `--add-dir`, because a review needs the conventions AND the code.
-      cwd: this.settings().claudeContextRoot || repoPath,
-      addDirs: repoPath.length > 0 ? [repoPath] : [],
+    /*
+     * A review needs two trees: the standards, kept in the workspace, and the repository's own
+     * conventions. When the agent can open a second directory it starts in the workspace and the
+     * repository comes in beside it; when it cannot, it starts **in the repository** instead. That
+     * is the honest degradation rather than a refusal: of the two, the code under review is the one
+     * a code review cannot do without.
+     */
+    const profile = this.settings().agentProfile;
+    const canOpenTwo = profile.extraDirFlag.trim().length > 0;
+    const workspace = this.settings().workspaceRoot;
+    const answer = await this.ports.runAgent({
+      profile,
+      cwd: canOpenTwo && workspace.length > 0 ? workspace : repoPath || workspace,
+      extraDirs: canOpenTwo && workspace.length > 0 && repoPath.length > 0 ? [repoPath] : [],
       prompt,
-      model: this.settings().claudeReviewModel,
+      model: this.settings().agentReviewModel,
       timeoutMs: PER_PR_TIMEOUT_MS,
       label: 'The review',
       ...(this.controller === null ? {} : { signal: this.controller.signal }),
@@ -573,7 +584,7 @@ export class PullReviewService {
       summary: review.summary,
       findings: review.findings,
       headSha: review.headSha,
-      workspaceRoot: this.settings().claudeContextRoot,
+      workspaceRoot: this.settings().workspaceRoot,
       carriedOver: [],
     });
   }

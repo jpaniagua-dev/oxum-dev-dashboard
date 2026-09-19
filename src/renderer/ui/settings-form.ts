@@ -10,7 +10,8 @@ import {
   type ShellProfile,
   type TagColors,
 } from '@shared/contracts.js';
-import { isValidModel } from '@shared/claude-model.js';
+import { CLAUDE_CODE_PROFILE, type AgentProfile } from '@shared/agent-profile.js';
+import { isValidModel } from '@shared/agent-model.js';
 import { hasAnyTag, sortProjectsByTag } from '@shared/project-order.js';
 import {
   MAX_TAGS_PER_PROJECT,
@@ -105,10 +106,10 @@ function signatureOf(
 /**
  * The three model fields, as one object rather than three properties.
  *
- * Named so the render loop can be keyed (`keyof ClaudeModelDrafts`) instead of repeating the same
+ * Named so the render loop can be keyed (`keyof AgentModelDrafts`) instead of repeating the same
  * field three times with a different property each.
  */
-interface ClaudeModelDrafts {
+interface AgentModelDrafts {
   analysis: string;
   work: string;
   commit: string;
@@ -193,11 +194,16 @@ export class SettingsForm {
   /** Interface font size draft, separate from the terminal's: see `renderInterface`. */
   private uiFontSize: number = UI_FONT_SIZE.default;
   /** Empty means "the default folder", so it is never coerced to the resolved path. */
-  /** The three model drafts. Empty is a real value: it means "let Claude Code decide". */
-  private claudeModels: ClaudeModelDrafts = { analysis: '', work: '', commit: '', review: '' };
+  /** The four model drafts. Empty is a real value: it means "let the agent decide". */
+  private agentModels: AgentModelDrafts = { analysis: '', work: '', commit: '', review: '' };
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
   private botLogin = '';
+  /** The agent profile being edited. Its own copy: the form must not mutate what the app renders from. */
+  private agent: AgentProfile = CLAUDE_CODE_PROFILE;
+  /** Result of the last `Test`, or empty. Shown as a sentence, never as a colour alone. */
+  private agentStatus = '';
+  private agentTesting = false;
   private jira: JiraConfig = { siteUrl: '', email: '', projectKeys: [], hasToken: false };
   /** Typed token, held only until the save. Never read back from the main process. */
   private jiraToken = '';
@@ -238,14 +244,16 @@ export class SettingsForm {
     profiles: readonly ShellProfile[],
     jira: JiraConfig,
   ): Promise<void> {
-    this.claudeModels = {
-      analysis: settings.claudeAnalysisModel,
-      work: settings.claudeWorkModel,
-      commit: settings.claudeCommitModel,
-      review: settings.claudeReviewModel,
+    this.agentModels = {
+      analysis: settings.agentAnalysisModel,
+      work: settings.agentWorkModel,
+      commit: settings.agentCommitModel,
+      review: settings.agentReviewModel,
     };
     this.reviewWrites = settings.reviewWritesEnabled;
     this.botLogin = settings.geminiBotLogin;
+    this.agent = { ...settings.agentProfile };
+    this.agentStatus = '';
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
     this.jiraStatus = '';
@@ -291,7 +299,7 @@ export class SettingsForm {
     this.renderInterface();
     this.renderProjects();
     this.renderTerminal();
-    this.renderClaude();
+    this.renderAgent();
     this.renderReview();
     this.renderJira();
     this.renderFooter();
@@ -361,10 +369,10 @@ export class SettingsForm {
     ).length;
     const profile = this.profiles.find((entry) => entry.id === this.defaultProfileId);
     const models = [
-      this.claudeModels.analysis,
-      this.claudeModels.work,
-      this.claudeModels.commit,
-      this.claudeModels.review,
+      this.agentModels.analysis,
+      this.agentModels.work,
+      this.agentModels.commit,
+      this.agentModels.review,
     ];
     const invalid = models.filter((model) => !isValidModel(model)).length;
     const pinned = models.filter((model) => model.trim().length > 0).length;
@@ -397,13 +405,13 @@ export class SettingsForm {
       },
       {
         id: 'section-claude',
-        name: 'Claude Code',
+        name: 'Coding agent',
         state:
           invalid > 0
             ? count(invalid, 'invalid model')
             : pinned === 0
-              ? 'Claude Code default'
-              : `${pinned} of ${models.length} pinned`,
+              ? `${this.agent.label} default`
+              : `${this.agent.label} · ${pinned} of ${models.length} pinned`,
         tone: invalid > 0 ? 'error' : 'neutral',
       },
       {
@@ -480,10 +488,10 @@ export class SettingsForm {
    * a setting failing in complete silence, which is the failure `asPatch` already records. The mark is
    * on the field rather than a message beside it, since there is nothing to explain beyond "not this".
    */
-  private renderClaude(): void {
+  private renderAgent(): void {
     clearChildren(this.hosts.claude);
 
-    const fields: readonly { key: keyof ClaudeModelDrafts; label: string; hint: string }[] = [
+    const fields: readonly { key: keyof AgentModelDrafts; label: string; hint: string }[] = [
       {
         key: 'analysis',
         label: 'Triage analysis',
@@ -506,14 +514,136 @@ export class SettingsForm {
       },
     ];
 
+    /*
+     * The profile first, the models after.
+     *
+     * Order is an argument here: the command decides whether anything runs at all, and a model
+     * pinned on an agent that cannot start is a setting about nothing. `Test` sits with the command
+     * for the same reason, and its answer is a sentence rather than a tick, because what a reader
+     * needs after a failure is the line that was launched.
+     */
+    const agentGrid = createElement('div', { className: 'settings-entry__grid' });
+    agentGrid.append(
+      this.field('Agent name', this.agent.label, (value) => {
+        this.agent = { ...this.agent, label: value };
+        this.touch();
+      }),
+    );
+    const headless = this.field(
+      'Headless command',
+      this.agent.headless,
+      (value) => {
+        this.agent = { ...this.agent, headless: value };
+        this.touch();
+      },
+      'agent --print {model}',
+      true,
+    );
+    headless.title =
+      'Used by the triage, the commit message and the pull request review. It must make the agent ' +
+      'answer and exit, and it should restrict it to reading.';
+    agentGrid.append(headless);
+
+    const interactive = this.field(
+      'Interactive command',
+      this.agent.interactive,
+      (value) => {
+        this.agent = { ...this.agent, interactive: value };
+        this.touch();
+      },
+      'agent {model}',
+      true,
+    );
+    interactive.title =
+      'Used by Work on this, which opens a terminal tab. The prompt is appended as a quoted argument.';
+    agentGrid.append(interactive);
+
+    const modelFlagField = this.field(
+      'Model flag',
+      this.agent.modelFlag,
+      (value) => {
+        this.agent = { ...this.agent, modelFlag: value };
+        this.touch();
+      },
+      '--model {model}',
+      true,
+    );
+    modelFlagField.title =
+      'What {model} expands to. Empty if the agent takes no model flag: the four fields below are ' +
+      'then ignored.';
+    agentGrid.append(modelFlagField);
+
+    const dirFlagField = this.field(
+      'Extra directory flag',
+      this.agent.extraDirFlag,
+      (value) => {
+        this.agent = { ...this.agent, extraDirFlag: value };
+        this.touch();
+      },
+      '--add-dir',
+      true,
+    );
+    dirFlagField.title =
+      'Opens a second folder to a run. Only the pull request review uses it, to read the standards ' +
+      'and the repository at once. Empty is fine: the review then runs in the repository.';
+    agentGrid.append(dirFlagField);
+    this.hosts.claude.append(agentGrid);
+
+    const choices = createElement('div', { className: 'settings-entry__grid' });
+    choices.append(
+      this.select(
+        'Prompt goes in through',
+        [
+          { value: 'stdin', label: 'stdin' },
+          { value: 'argument', label: 'an argument' },
+          { value: 'file', label: 'a file' },
+        ],
+        this.agent.promptVia,
+        (value) => {
+          this.agent = { ...this.agent, promptVia: value as AgentProfile['promptVia'] };
+          this.touch();
+        },
+      ),
+    );
+    choices.append(
+      this.select(
+        'Answer comes out as',
+        [
+          { value: 'stream-json', label: 'stream-json (live progress)' },
+          { value: 'stdout', label: 'plain output' },
+        ],
+        this.agent.answerFormat,
+        (value) => {
+          this.agent = { ...this.agent, answerFormat: value as AgentProfile['answerFormat'] };
+          this.touch();
+        },
+      ),
+    );
+    this.hosts.claude.append(choices);
+
+    const testRow = createElement('div', { className: 'settings-entry__row' });
+    const test = createElement('button', {
+      className: 'button',
+      text: this.agentTesting ? 'Testing…' : 'Test',
+    });
+    test.type = 'button';
+    test.disabled = this.agentTesting;
+    test.title = 'Runs the agent once on a one-word prompt and reports what came back.';
+    test.addEventListener('click', () => void this.testAgent());
+    testRow.append(test);
+    if (this.agentStatus.length > 0) {
+      testRow.append(createElement('span', { className: 'settings-aside', text: this.agentStatus }));
+    }
+    this.hosts.claude.append(testRow);
+
     const grid = createElement('div', { className: 'settings-entry__grid' });
     for (const entry of fields) {
       // A model id is a string the machine has to match exactly, so it is set in the mono face.
       const field = this.field(
         entry.label,
-        this.claudeModels[entry.key],
+        this.agentModels[entry.key],
         (value) => {
-          this.claudeModels[entry.key] = value;
+          this.agentModels[entry.key] = value;
           this.markModelField(field, value);
           this.touch();
         },
@@ -523,7 +653,7 @@ export class SettingsForm {
       // The hint on hover rather than in the placeholder: a placeholder long enough to explain the run
       // is one that hides the value as soon as there is one.
       field.title = entry.hint;
-      this.markModelField(field, this.claudeModels[entry.key]);
+      this.markModelField(field, this.agentModels[entry.key]);
       grid.append(field);
     }
     this.hosts.claude.append(grid);
@@ -563,6 +693,24 @@ export class SettingsForm {
       'Whose existing remarks the review is given to weigh. Matched with and without the [bot] suffix, ' +
       'because GitHub reports it both ways and matching one spelling reads as "this bot said nothing".';
     this.hosts.review.append(login);
+  }
+
+  /**
+   * Runs the agent once, and says what happened in words.
+   *
+   * The profile tested is the one **on screen**, not the one saved: the whole point is to try a
+   * command before committing to it. Its answer carries the command line either way, which is the
+   * only thing that makes a wrong flag diagnosable on a run that has no terminal tab.
+   */
+  private async testAgent(): Promise<void> {
+    this.agentTesting = true;
+    this.agentStatus = '';
+    this.renderAgent();
+    const result = await window.api.testAgent(this.agent);
+    this.agentTesting = false;
+    this.agentStatus = result.message;
+    this.renderAgent();
+    this.renderRail();
   }
 
   /** Flags a model field whose value the store would drop, so the silence is broken before the save. */
@@ -1439,12 +1587,13 @@ export class SettingsForm {
     const saved = await window.api.updateSettings({
       terminalFontSize: this.fontSize,
       uiFontSize: this.uiFontSize,
-      claudeAnalysisModel: this.claudeModels.analysis,
-      claudeWorkModel: this.claudeModels.work,
-      claudeCommitModel: this.claudeModels.commit,
-      claudeReviewModel: this.claudeModels.review,
+      agentAnalysisModel: this.agentModels.analysis,
+      agentWorkModel: this.agentModels.work,
+      agentCommitModel: this.agentModels.commit,
+      agentReviewModel: this.agentModels.review,
       reviewWritesEnabled: this.reviewWrites,
       geminiBotLogin: this.botLogin,
+      agentProfile: this.agent,
       tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
@@ -1452,16 +1601,17 @@ export class SettingsForm {
     // Read back like the clamped sizes above, and for the same reason: the store normalises a value it
     // will not use to empty, so realigning the draft on what was actually stored is what makes the
     // field agree with the setting. Without it, a rejected value stays on screen looking saved.
-    this.claudeModels = {
-      analysis: saved.claudeAnalysisModel,
-      work: saved.claudeWorkModel,
-      commit: saved.claudeCommitModel,
-      review: saved.claudeReviewModel,
+    this.agentModels = {
+      analysis: saved.agentAnalysisModel,
+      work: saved.agentWorkModel,
+      commit: saved.agentCommitModel,
+      review: saved.agentReviewModel,
     };
     this.reviewWrites = saved.reviewWritesEnabled;
     // Read back like the models: the store falls back to the default login when the field is blanked,
     // so leaving the empty string on screen would show a setting that is not the one in force.
     this.botLogin = saved.geminiBotLogin;
+    this.agent = { ...saved.agentProfile };
     // Read back like the sizes and the models, and here it matters more than for either: the store
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would
     // otherwise stay short of what was stored and the signature would never match the echo.

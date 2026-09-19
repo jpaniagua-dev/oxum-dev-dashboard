@@ -101,7 +101,7 @@ describe('asPatch', () => {
   it('keeps an empty model name, which means "use the Claude Code default"', () => {
     // `asString`-style fallback-on-empty would be wrong here: empty is a meaningful value, and it is
     // the only way to unset a model that was pinned.
-    expect(asPatch({ claudeWorkModel: '' })).toEqual({ claudeWorkModel: '' });
+    expect(asPatch({ agentWorkModel: '' })).toEqual({ agentWorkModel: '' });
   });
 });
 
@@ -163,29 +163,29 @@ describe('LOCAL_ONLY_KEYS', () => {
     // silently discarded on the way to disk. Three fields is three chances to forget one.
     expect(
       asPatch({
-        claudeAnalysisModel: 'haiku',
-        claudeWorkModel: 'opus',
-        claudeCommitModel: 'sonnet',
+        agentAnalysisModel: 'haiku',
+        agentWorkModel: 'opus',
+        agentCommitModel: 'sonnet',
       }),
     ).toEqual({
-      claudeAnalysisModel: 'haiku',
-      claudeWorkModel: 'opus',
-      claudeCommitModel: 'sonnet',
+      agentAnalysisModel: 'haiku',
+      agentWorkModel: 'opus',
+      agentCommitModel: 'sonnet',
     });
   });
 
   it('lets an empty model through, empty being how the default is spelled', () => {
     // Not dropped as falsy: clearing a pinned model has to reach the store, or the field would be the
     // one setting in this app that can be set and never unset.
-    expect(asPatch({ claudeWorkModel: '' })).toEqual({ claudeWorkModel: '' });
+    expect(asPatch({ agentWorkModel: '' })).toEqual({ agentWorkModel: '' });
   });
 
   it('leaves the validation of a model name to the store, and passes the value on as typed', () => {
     // Two gates answering "is this a model name" would drift, and the one that silently dropped the
     // value would be this one, where nothing can report it. The store normalises; this only filters
     // by type.
-    expect(asPatch({ claudeCommitModel: 'sonnet 4' })).toEqual({ claudeCommitModel: 'sonnet 4' });
-    expect(asPatch({ claudeCommitModel: 4 })).toEqual({});
+    expect(asPatch({ agentCommitModel: 'sonnet 4' })).toEqual({ agentCommitModel: 'sonnet 4' });
+    expect(asPatch({ agentCommitModel: 4 })).toEqual({});
   });
 
   it('does not cover anything the settings window owns', () => {
@@ -196,9 +196,9 @@ describe('LOCAL_ONLY_KEYS', () => {
       'uiFontSize',
       'defaultShellProfileId',
       'projects',
-      'claudeAnalysisModel',
-      'claudeWorkModel',
-      'claudeCommitModel',
+      'agentAnalysisModel',
+      'agentWorkModel',
+      'agentCommitModel',
     ]) {
       expect(LOCAL_ONLY_KEYS.has(key)).toBe(false);
     }

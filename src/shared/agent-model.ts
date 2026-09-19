@@ -1,9 +1,13 @@
 /**
- * The model a Claude Code run is pinned to, and how that value reaches a command line.
+ * The model a run is pinned to, and how that value reaches a command line.
  *
- * Three gestures in this app start Claude Code, and they are three different jobs: classifying a
- * sprint, implementing a ticket, and writing a commit message. One default for all three is a setting
- * that is wrong for two of them, which is why each carries its own.
+ * Four gestures in this app start a coding agent, and they are four different jobs: classifying a
+ * sprint, implementing a ticket, writing a commit message, and reviewing a pull request. One default
+ * for all four is a setting that is wrong for three of them, which is why each carries its own.
+ *
+ * What the flag is **called** is not decided here: that lives in the agent profile, because
+ * `--model X` and `-m X` are both common and an agent may take none at all. This module only
+ * decides what a model NAME may look like.
  *
  * Shared rather than living beside any one of them, because the settings form validates the same value
  * the main process is about to pass on: two spellings of "is this a model name" is how a field goes on
@@ -23,7 +27,7 @@
  * an argument array and no shell, where it would have been safe anyway; the rule is uniform because
  * two rules would eventually be applied to the wrong call site.
  */
-export const CLAUDE_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
+export const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
 
 /**
  * Whether this is a **well-formed** model name, which is not the same as an existing one.
@@ -39,7 +43,7 @@ export const CLAUDE_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._[\]-]*$/;
  */
 export function isValidModel(value: string): boolean {
   const trimmed = value.trim();
-  return trimmed.length === 0 || CLAUDE_MODEL_PATTERN.test(trimmed);
+  return trimmed.length === 0 || MODEL_PATTERN.test(trimmed);
 }
 
 /**
@@ -51,7 +55,7 @@ export function isValidModel(value: string): boolean {
  */
 export function normalizeModel(value: string): string {
   const trimmed = value.trim();
-  return CLAUDE_MODEL_PATTERN.test(trimmed) ? trimmed : '';
+  return MODEL_PATTERN.test(trimmed) ? trimmed : '';
 }
 
 /**

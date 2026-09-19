@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { modelFlag } from '@shared/claude-model.js';
+import { CLAUDE_CODE_PROFILE, type AgentProfile } from '@shared/agent-profile.js';
+import { modelFlag } from '@shared/agent-model.js';
 
 /**
  * Builds the `Work on this` command and decides where it runs.
@@ -44,14 +45,14 @@ export function safeRepoName(folder: string): string | null {
  * The command line that hands tickets to an interactive Claude Code session.
  *
  * The repository is **named in the prompt** rather than implied by the working directory, and that is
- * the whole point of the pairing with `resolveClaudeContext`: the session starts one level up, in the
+ * the whole point of the pairing with `resolveWorkspaceRoot`: the session starts one level up, in the
  * workspace, so it inherits the instructions, skills and knowledge kept there, and it would otherwise
  * have no way to know which of the workspace's repositories the ticket is about. The ticket skill needs
  * that name anyway, a worktree being created per repository.
  *
  * One ticket goes straight to the skill; a batch names them in order and lets the skill run once per
  * ticket. Keys have already passed `ISSUE_KEY_PATTERN`, the folder name `safeRepoName` and the model
- * `CLAUDE_MODEL_PATTERN`, so nothing in here can be read as shell syntax.
+ * `MODEL_PATTERN`, so nothing in here can be read as shell syntax.
  *
  * The model is the one of the three Claude Code runs that reaches a **shell**, which is why it is
  * double-quoted and whitelisted rather than trusted: `claude-opus-5[1m]` is a legitimate pinned name
@@ -63,6 +64,7 @@ export function buildWorkCommand(
   keys: readonly string[],
   folder: string,
   model = '',
+  profile: AgentProfile = CLAUDE_CODE_PROFILE,
 ): string {
   const repo = safeRepoName(folder);
   const where = repo === null ? '' : ` in the ${repo} repository`;
@@ -70,22 +72,33 @@ export function buildWorkCommand(
     keys.length === 1
       ? `/ticket ${keys[0]}${where}`
       : `Work these tickets one after another${where}, using the ticket skill for each: ${keys.join(', ')}`;
-  return `claude${modelFlag(model)} ${SKIP_PERMISSIONS_FLAG} "${prompt}"`;
+
+  /*
+   * The interactive template, with the prompt appended as a quoted argument.
+   *
+   * Always an argument and never stdin, unlike the headless runs: this lands in a terminal tab whose
+   * stdin belongs to the user, who is the one about to type in it. The prompt is this app's own text
+   * (a ticket key that `ISSUE_KEY_PATTERN` has already vetted, plus a repository name through
+   * `safeRepoName`), so the double quotes here are enough; nothing a colleague wrote reaches this
+   * line.
+   */
+  const command = profile.interactive.replace('{model}', model.trim().length === 0 ? '' : modelFlag(model).trim());
+  return `${command.replace(/\s+/g, ' ').trim()} "${prompt}"`;
 }
 
 /**
  * Where a handed-over ticket's session starts.
  *
- * Claude Code reads its instructions, skills and memory from the folder it is launched in and from that
+ * A CLI coding agent reads its instructions from the folder it is launched in and from that
  * folder's ancestors. A repository under a workspace therefore starts with strictly less than the
- * workspace does: it sees its own `CLAUDE.md` and nothing of what several repositories share one level
+ * workspace does: it sees its own instructions file and nothing of what several repositories share one level
  * up. Launching at the workspace root and naming the repository in the prompt keeps both halves.
  *
  * A configured root that is not on disk falls back to the repository rather than being passed on. A pty
  * spawned on a missing directory fails, and the failure is a tab that closes on an error about a path
  * nobody typed today, whereas the fallback is the behaviour every version before this one had.
  */
-export function resolveClaudeContext(
+export function resolveWorkspaceRoot(
   configured: string,
   repositoryPath: string,
   exists: (path: string) => boolean = existsSync,

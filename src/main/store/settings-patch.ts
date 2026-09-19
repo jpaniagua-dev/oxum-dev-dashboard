@@ -1,3 +1,4 @@
+import { readProfile } from '@shared/agent-profile.js';
 import type { AppSettings } from '@shared/contracts.js';
 import { sanitizeTagColors } from '@shared/project-tags.js';
 
@@ -77,16 +78,22 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   // The three model names. Accepted as typed and normalised by the store, which is the single place
   // that decides what a model name is: rejecting here as well would mean two answers to that question,
   // and the one that silently dropped the value would be this one.
-  if (typeof input.claudeAnalysisModel === 'string') {
-    patch.claudeAnalysisModel = input.claudeAnalysisModel;
+  if (typeof input.agentAnalysisModel === 'string') {
+    patch.agentAnalysisModel = input.agentAnalysisModel;
   }
-  if (typeof input.claudeWorkModel === 'string') patch.claudeWorkModel = input.claudeWorkModel;
-  if (typeof input.claudeCommitModel === 'string') patch.claudeCommitModel = input.claudeCommitModel;
-  if (typeof input.claudeReviewModel === 'string') patch.claudeReviewModel = input.claudeReviewModel;
+  if (typeof input.agentWorkModel === 'string') patch.agentWorkModel = input.agentWorkModel;
+  if (typeof input.agentCommitModel === 'string') patch.agentCommitModel = input.agentCommitModel;
+  if (typeof input.agentReviewModel === 'string') patch.agentReviewModel = input.agentReviewModel;
   if (typeof input.reviewWritesEnabled === 'boolean') {
     patch.reviewWritesEnabled = input.reviewWritesEnabled;
   }
   if (typeof input.geminiBotLogin === 'string') patch.geminiBotLogin = input.geminiBotLogin;
+  // Validated by the store, which is the single place that decides what a profile is. Accepted here
+  // as typed, like the model names above and for the same reason: two answers to "is this valid" is
+  // how one of them silently drops a value the other accepted.
+  if (typeof input.agentProfile === 'object' && input.agentProfile !== null) {
+    patch.agentProfile = readProfile(input.agentProfile);
+  }
   /*
    * The tag palette, written by **both** renderers: the settings window on save, and the dashboard on
    * a right click on a chip. Broadcast, and therefore not in `LOCAL_ONLY_KEYS`, since recolouring a

@@ -57,23 +57,31 @@
         </section>
 
         <!--
-          Claude Code, after Terminal and before Jira: it is a preference about how the app works, like
+          The coding agent, after Terminal and before Jira: it is a preference about how the app works, like
           the sizes above it, whereas Jira is a connection to something outside.
         -->
         <section class="settings__section" id="section-claude">
-          <h2 class="settings__section-title">Claude Code</h2>
+          <h2 class="settings__section-title">Coding agent</h2>
           <p class="settings__note">
-            Which model each run is pinned to. Leave a field empty to use whatever Claude Code
-            itself is set to. An alias (<code>opus</code>, <code>sonnet</code>, <code>haiku</code>)
-            always points at the latest version of that model; a full name
-            (<code>claude-fable-5</code>) pins one. Four fields because these are four different
-            jobs, and one answer would be wrong for three of them.
+            Which CLI agent runs, and how it is called. The command is a template: everything is
+            passed through as written, <code>{model}</code> is replaced by the model flag and
+            disappears when no model is pinned, and quoted sections are kept whole. It is
+            <strong>not</strong> a shell, so nothing is expanded or globbed.
+          </p>
+          <p class="settings__note">
+            Three of these decide whether anything runs at all, and they fail quietly when wrong: the
+            flag that means <em>answer and exit</em> (without it the agent opens its interface into a
+            pipe and never returns), how the prompt gets in (a sprint prompt is tens of kilobytes,
+            past what a command line accepts), and the flags that keep the run read-only. That last
+            one is yours to get right: the pull request review trusts the template, so an agent given
+            no restriction can write to the repository it is reviewing. <strong>Press Test</strong>
+            after any change: it is the only thing that proves the command works.
           </p>
           <div id="settings-claude"></div>
         </section>
 
         <!--
-          After Claude Code and before Jira: like Jira it is about something outside this machine,
+          After the coding agent and before Jira: like Jira it is about something outside this machine,
           but unlike Jira it decides whether this app may WRITE there, so it sits where the reader
           meets it before the connection that makes it possible.
         -->

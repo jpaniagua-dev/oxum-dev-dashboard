@@ -1510,7 +1510,64 @@ either. Killing a build meant a trip back to the dashboard for the row's own but
   columns of tiles is a normal arrangement here and `neos-rating-acquisition-front · run` a normal
   title, so this was reachable before the second control existed and simply less visible.
 
-## Claude Code runs: four of them, four models
+## Agent runs: four of them, four models, one profile
+
+### The app drives a CLI agent, not Claude Code
+
+Changed on 2026-09-19. Until then the binary, its flags, the way the prompt got in and the way the
+answer came out were constants, and they were Claude Code's. They are now a **profile**, because the
+app has to run whichever agent its user has.
+
+- **"Run the agent" is not an operation that exists.** What exists is "run this binary with these
+  flags, feed it this way, read its answer that way", and all four differ between agents. Three of
+  the four fail in **silence** when wrong, which is why they are settings rather than assumptions:
+  a missing "answer and exit" flag spawns an interactive UI into a pipe and the run sits there until
+  its timeout; a prompt sent the wrong way arrives truncated rather than refused, a sprint prompt
+  being tens of kilobytes; and a template without a read-only restriction runs a pull request review
+  with an agent that can write to the repository it is reviewing.
+- **A command template, not a field per flag.** This app cannot anticipate the options of a CLI it
+  has never seen, so the profile carries one line the user copies from their agent's documentation
+  rather than ten checkboxes each guessing at a spelling. `{model}` is the one substitution, and it
+  expands through the profile's **own** model flag because `--model X` and `-m X` are both common
+  and some agents take none.
+- **The template is not a shell.** `splitCommand` keeps quoted sections whole and does nothing else:
+  no expansion, no globbing, no substitution. A setting that went through a shell would be an
+  injection with extra steps, and `spawn` is still called with an argument array and `shell: false`.
+- **Claude Code is the only verified profile, and that is stated rather than hidden.** Every flag in
+  `CLAUDE_CODE_PROFILE` was exercised against the real CLI. Any other profile is the user's, written
+  against their own agent's documentation, which is why the settings section leads with `Test`
+  rather than with a dropdown of agents nobody here could try.
+- **`Test` is the only thing that proves a profile.** One run, a one-word prompt, thirty seconds, and
+  the answer carries the **command line** either way. It exists because a headless run has no
+  terminal tab by design: without it a wrong flag reads as thirty seconds of nothing, and at the
+  analysis budget it would read as a quarter of an hour of nothing. Same reasoning as `JiraTest`,
+  where one real query is the only proof the credentials are good.
+- **Every failure names the command.** `runAgent` appends it to each message it writes. This is the
+  single most useful line in the refactor, and it is a consequence of the design rather than a
+  decoration: the three headless runs are invisible on purpose, so the only way to diagnose them is
+  to say what was launched.
+- **`stream-json` is a capability, not a requirement.** An agent whose format the app can read gets
+  the live progress line, the file being opened and the step count; one whose format it cannot gets
+  an elapsed clock and nothing invented. Refusing the second would refuse most CLIs, and flattening
+  the first to match it would pay a daily cost on runs of several minutes for the benefit of an
+  agent that may not even be installed. There is a real second difference: the `stream-json` closing
+  event carries `is_error`, so a refusal that exits 0 is caught, while the plain path can only read
+  the exit code.
+- **An agent that cannot open a second directory is not refused.** Only the pull request review needs
+  it, to read the standards in the workspace and the conventions in the repository at once. Without
+  the flag the review runs **in the repository**, which of the two is the one a code review cannot do
+  without.
+- **The settings keys were renamed and the old ones are still read.** `claudeAnalysisModel` and its
+  three siblings became `agent*`, and `claudeContextRoot` became `workspaceRoot`. A settings file
+  written before the rename is the normal case, not an edge one: without the fallback, the update
+  that renamed them would silently empty four pinned models and move every session's starting folder.
+  Read once, rewritten under the new name on the next save. `workspaceRoot` cannot go through
+  `asString`, because an explicitly empty value is a real answer there meaning "start in the
+  repository", and only an **absent** key may take the default.
+- **`CLAUDE.md` keeps its name.** It is this repository's instructions file, read by the agent its
+  owner happens to use, and renaming it would touch ninety invariants for a symbolic gain. What
+  stopped naming an agent is the **application**, not the file that configures one.
+
 
 - **Four settings and not one, and the reason is not configurability for its own sake.** These are
   four different jobs: classifying a sprint is bulk reading where speed and cost dominate,
@@ -1523,7 +1580,7 @@ either. Killing a build meant a trip back to the dashboard for the row's own but
   CLI rejects a blank model, so `--model ""` is a run that fails before it starts, not a default. That
   is why `modelArgs` returns `[]` and `modelFlag` returns `''` rather than either producing an empty
   option.
-- **One whitelist, in `shared/claude-model.ts`, applied to all four.** Only the `Work on this` handoff
+- **One whitelist, in `shared/agent-model.ts`, applied to all four. It decides what a model NAME may look like; what the flag is CALLED lives in the profile.** Only the `Work on this` handoff
   actually reaches a shell (`bash -ic`), where brackets are glob characters and `$` expands; the two
   headless runs go through `spawn` with an argument array and would have been safe either way. The rule
   is uniform because two rules eventually get applied to the wrong call site. `claude-opus-5[1m]` is a

@@ -9,6 +9,12 @@ import {
   readMarkerSha,
   scrubBody,
 } from '../src/main/review/review-body.js';
+import {
+  buildHeadlessCommand,
+  describeCommand,
+  readProfile,
+  CLAUDE_CODE_PROFILE,
+} from '../src/shared/agent-profile.js';
 import { reviewArgs } from '../src/main/github/gh-write.js';
 import { withPort } from '../src/main/projects/free-port.js';
 import { decideAction, decideManual, type GateInput } from '../src/main/review/review-gate.js';
@@ -577,5 +583,82 @@ describe('withPort', () => {
     expect(withPort('npm run start:dev -- --host 0.0.0.0 --port 4200', 5000)).toBe(
       'npm run start:dev -- --host 0.0.0.0 --port 5000',
     );
+  });
+});
+
+/*
+ * Which agent runs, and how it is called.
+ *
+ * Three of the four things a profile decides fail in silence when wrong, and none of them is
+ * visible on screen: a headless run has no terminal tab. These pin the ones a test can reach.
+ */
+describe('buildHeadlessCommand', () => {
+  it('builds the verified Claude Code command', () => {
+    const { file, args } = buildHeadlessCommand(CLAUDE_CODE_PROFILE, {});
+    expect(file).toBe('claude');
+    expect(args).toContain('--print');
+    expect(args.join(' ')).toContain('--allowedTools Read Grep Glob');
+  });
+
+  it('drops the model placeholder entirely when nothing is pinned', () => {
+    // An empty `--model ""` is a run that fails before it starts, not a default.
+    const { args } = buildHeadlessCommand(CLAUDE_CODE_PROFILE, { model: '' });
+    expect(args).not.toContain('--model');
+    expect(args.join(' ')).not.toContain('{model}');
+  });
+
+  it('expands the model through the profile\'s own flag, whatever its spelling', () => {
+    // `--model X` and `-m X` are both common, so the spelling is a setting and not an assumption.
+    const profile = { ...CLAUDE_CODE_PROFILE, modelFlag: '-m {model}' };
+    expect(buildHeadlessCommand(profile, { model: 'opus' }).args).toContain('-m');
+    expect(buildHeadlessCommand(profile, { model: 'opus' }).args).toContain('opus');
+  });
+
+  it('repeats the extra directory flag, and adds nothing when the agent has none', () => {
+    const withFlag = buildHeadlessCommand(CLAUDE_CODE_PROFILE, { extraDirs: ['C:/repo'] });
+    expect(withFlag.args.join(' ')).toContain('--add-dir C:/repo');
+
+    const without = buildHeadlessCommand(
+      { ...CLAUDE_CODE_PROFILE, extraDirFlag: '' },
+      { extraDirs: ['C:/repo'] },
+    );
+    expect(without.args.join(' ')).not.toContain('C:/repo');
+  });
+
+  it('keeps a quoted path whole', () => {
+    // The first thing a user writes, and the thing a naive split on spaces breaks.
+    const profile = { ...CLAUDE_CODE_PROFILE, headless: '"C:/Program Files/agent.exe" --print' };
+    expect(buildHeadlessCommand(profile, {}).file).toBe('C:/Program Files/agent.exe');
+  });
+
+  it('is not a shell', () => {
+    // No expansion, no globbing, no substitution: the template is a list of arguments written on one
+    // line, and treating it as a command line to interpret is how a setting becomes an injection.
+    const profile = { ...CLAUDE_CODE_PROFILE, headless: 'agent $HOME *.ts' };
+    expect(buildHeadlessCommand(profile, {}).args).toEqual(['$HOME', '*.ts']);
+  });
+});
+
+describe('describeCommand', () => {
+  it('quotes only what needs it, so the line can be pasted back into a shell', () => {
+    expect(describeCommand('claude', ['--print', 'C:/a b/c'])).toBe('claude --print "C:/a b/c"');
+  });
+});
+
+describe('readProfile', () => {
+  it('fills anything missing from the profile it is given', () => {
+    expect(readProfile({ label: 'Codex' }).headless).toBe(CLAUDE_CODE_PROFILE.headless);
+    expect(readProfile({ label: 'Codex' }).label).toBe('Codex');
+  });
+
+  it('reads an unknown answer format as plain output, never as stream-json', () => {
+    // Falling back the other way would parse an output that is not JSONL and report every run as
+    // empty. Plain output always works; it only costs the progress detail.
+    expect(readProfile({ answerFormat: 'whatever' }).answerFormat).toBe('stdout');
+  });
+
+  it('lets a flag be explicitly empty, which means "this agent has no such flag"', () => {
+    expect(readProfile({ extraDirFlag: '' }).extraDirFlag).toBe('');
+    expect(readProfile({ modelFlag: '' }).modelFlag).toBe('');
   });
 });

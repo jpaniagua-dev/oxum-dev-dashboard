@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { normalizeModel } from '@shared/claude-model.js';
+import { normalizeModel } from '@shared/agent-model.js';
 import {
   sanitizeTagColors,
   sanitizeTags,
@@ -17,6 +17,7 @@ import {
   type ThemeMode,
   type WindowBounds,
 } from '@shared/contracts.js';
+import { CLAUDE_CODE_PROFILE, readProfile } from '@shared/agent-profile.js';
 import {
   DEFAULT_CLAUDE_CONTEXT_ROOT,
   DEFAULT_PROJECTS_ROOT,
@@ -72,16 +73,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
   projectsRoot: DEFAULT_PROJECTS_ROOT,
   // The workspace above the repositories, so a `Work on this` session starts with the conventions and
   // skills that live there. Empty would mean "start in the repository", which is what it used to do.
-  claudeContextRoot: DEFAULT_CLAUDE_CONTEXT_ROOT,
+  workspaceRoot: DEFAULT_CLAUDE_CONTEXT_ROOT,
+  agentProfile: CLAUDE_CODE_PROFILE,
   // Empty means "whatever Claude Code itself is set to", for all three. A default named here would be
   // this app deciding which model a user's own CLI runs on, which is not its call to make.
   // Closed on a fresh install: a window nobody asked for, opening on first launch, is the wrong
   // first impression of a feature that is opt-in by nature.
   serversDetached: false,
-  claudeAnalysisModel: '',
-  claudeWorkModel: '',
-  claudeCommitModel: '',
-  claudeReviewModel: '',
+  agentAnalysisModel: '',
+  agentWorkModel: '',
+  agentCommitModel: '',
+  agentReviewModel: '',
   reviewWritesEnabled: false,
   geminiBotLogin: 'gemini-code-assist[bot]',
   // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
@@ -200,19 +202,25 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     projectsRoot: asString(input.projectsRoot, DEFAULT_SETTINGS.projectsRoot),
     // Not `asString`, which falls back on an empty value: an empty string is a real answer here, and it
     // means "start the session in the repository itself".
-    claudeContextRoot:
-      typeof input.claudeContextRoot === 'string'
-        ? input.claudeContextRoot.trim()
-        : DEFAULT_SETTINGS.claudeContextRoot,
+    workspaceRoot: readWorkspaceRoot(input),
     // Normalised and not merely trimmed: one of these three ends up on a shell command line, and a
     // value that is not a model name is stored as empty (the default) rather than passed on. The
     // settings form is where a typo is shown; this is the guard that holds when the file is edited by
     // hand.
     serversDetached: typeof input.serversDetached === 'boolean' ? input.serversDetached : false,
-    claudeAnalysisModel: asModel(input.claudeAnalysisModel),
-    claudeWorkModel: asModel(input.claudeWorkModel),
-    claudeCommitModel: asModel(input.claudeCommitModel),
-    claudeReviewModel: asModel(input.claudeReviewModel),
+    /*
+     * The four models, and the old `claude*` spelling read as a fallback.
+     *
+     * The keys were renamed when the app stopped being tied to one agent, and a settings file
+     * written before that rename is the normal case rather than the exception: the alternative is a
+     * user whose four pinned models silently become empty on the update that renamed them. Read
+     * once, written back under the new name on the next save, and the old key is then ignored.
+     */
+    agentAnalysisModel: asModel(input.agentAnalysisModel ?? input.claudeAnalysisModel),
+    agentWorkModel: asModel(input.agentWorkModel ?? input.claudeWorkModel),
+    agentCommitModel: asModel(input.agentCommitModel ?? input.claudeCommitModel),
+    agentReviewModel: asModel(input.agentReviewModel ?? input.claudeReviewModel),
+    agentProfile: readProfile(input.agentProfile),
     // Anything but an explicit `true` is off. A file hand-edited to `"yes"` must not turn on
     // the one setting that lets this app write to somebody else's pull request.
     reviewWritesEnabled: input.reviewWritesEnabled === true,
@@ -417,4 +425,21 @@ function asNumber(value: unknown, fallback: number): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * Where a session starts, under its current name or its old one.
+ *
+ * `claudeContextRoot` until the app stopped being tied to one agent. Empty is a **real** value here,
+ * meaning "start in the repository", so this cannot fall back through `asString`: only an absent key
+ * may take the default, and an explicitly empty one has to survive.
+ */
+function readWorkspaceRoot(input: Record<string, unknown>): string {
+  if (typeof input.workspaceRoot === 'string') {
+    return input.workspaceRoot.trim();
+  }
+  if (typeof input.claudeContextRoot === 'string') {
+    return input.claudeContextRoot.trim();
+  }
+  return DEFAULT_SETTINGS.workspaceRoot;
 }

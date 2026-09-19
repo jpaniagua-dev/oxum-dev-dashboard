@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CLAUDE_MODEL_PATTERN,
+  MODEL_PATTERN,
   isValidModel,
   modelArgs,
   modelFlag,
   normalizeModel,
-} from '../src/shared/claude-model.js';
+} from '../src/shared/agent-model.js';
 
 /**
  * One of the three Claude Code runs reaches a shell, so this is where a model name stops being a
@@ -13,16 +13,16 @@ import {
  * "use whatever Claude Code is set to", and is spelled by the **absence** of the flag.
  */
 
-describe('CLAUDE_MODEL_PATTERN', () => {
+describe('MODEL_PATTERN', () => {
   it('accepts an alias, a full name and a pinned one with brackets', () => {
     for (const value of ['opus', 'sonnet', 'haiku', 'fable', 'claude-fable-5', 'claude-opus-5[1m]']) {
-      expect(CLAUDE_MODEL_PATTERN.test(value)).toBe(true);
+      expect(MODEL_PATTERN.test(value)).toBe(true);
     }
   });
 
   it('refuses anything a shell would read as more than a word', () => {
     for (const value of ['sonnet 4', 'sonnet; id', 'sonnet && id', '$MODEL', '`id`', '-sonnet', '']) {
-      expect(CLAUDE_MODEL_PATTERN.test(value)).toBe(false);
+      expect(MODEL_PATTERN.test(value)).toBe(false);
     }
   });
 });

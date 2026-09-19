@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { flattenDocument } from '../src/main/jira/jira-service.js';
 import { isEmptyAnswer, parseTriage } from '../src/main/triage/triage-parse.js';
 import { DESCRIPTION_LIMIT, buildTriagePrompt, trimDescription } from '../src/main/triage/triage-prompt.js';
-import { readProgress, splitLines } from '../src/main/triage/triage-progress.js';
+import { readProgress, splitLines } from '../src/main/agent/agent-progress.js';
 import { selectIssues } from '../src/main/triage/triage-select.js';
 import {
   countVerdicts,

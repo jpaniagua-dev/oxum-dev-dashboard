@@ -1,3 +1,4 @@
+import type { AgentProfile } from './agent-profile.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
  *
@@ -1464,20 +1465,20 @@ export interface AppSettings {
   /**
    * Folder a `Work on this` session starts in, instead of the ticket's own repository.
    *
-   * Claude Code reads its instructions, its skills and its memory from the folder it is launched in
-   * and from that folder's ancestors. A repository sitting under a workspace therefore starts with
-   * strictly less context than the workspace itself: the session knows the repository's own
-   * `CLAUDE.md` and nothing of the conventions, the skills and the knowledge base kept one level up,
-   * which is exactly where they live when several repositories share them. Starting at the workspace
-   * root and naming the repository in the prompt is the way round that keeps both.
+   * A CLI coding agent reads its instructions from the folder it is launched in and from that
+   * folder's ancestors. A repository sitting under a workspace therefore starts with strictly less
+   * context than the workspace itself: the session knows the repository's own instructions file and
+   * nothing of the conventions and the knowledge base kept one level up, which is exactly where they
+   * live when several repositories share them. Starting at the workspace root and naming the
+   * repository in the prompt is the way round that keeps both.
    *
    * Empty means "start in the repository", which is what every version before 5.2.0 did. Not in the
    * settings window, like `projectsRoot` and the poll cadences: a path that is right on the first
    * launch and never touched again does not need a field competing with the ones that are.
    */
-  claudeContextRoot: string;
+  workspaceRoot: string;
   /**
-   * Model each Claude Code run is pinned to, or empty for whatever Claude Code itself is set to.
+   * Model each run is pinned to, or empty for whatever the agent itself is set to.
    *
    * Three fields and not one, because these are three different jobs. Classifying twenty tickets is
    * bulk reading where speed and cost dominate; implementing a ticket wants the strongest model there
@@ -1486,7 +1487,7 @@ export interface AppSettings {
    *
    * `--model` is *not* passed at all when the value is empty: the CLI rejects a blank model, so the
    * default has to be the absence of the flag rather than an empty one. Values are validated against
-   * `CLAUDE_MODEL_PATTERN`, since one of the three reaches a shell.
+   * `MODEL_PATTERN`, since one of the three reaches a shell.
    */
   /**
    * Whether the dev servers were in their own window when the app was last closed.
@@ -1496,11 +1497,11 @@ export interface AppSettings {
    * at startup **after** the terminals have been rebuilt, or there would be nothing to detach.
    */
   serversDetached: boolean;
-  claudeAnalysisModel: string;
+  agentAnalysisModel: string;
   /** Model for the `Work on this` handoff, the one run that is interactive. */
-  claudeWorkModel: string;
+  agentWorkModel: string;
   /** Model for `Generate` in the Git tab's commit form. */
-  claudeCommitModel: string;
+  agentCommitModel: string;
   /**
    * Model for the pull request review.
    *
@@ -1508,7 +1509,16 @@ export interface AppSettings {
    * standard is bulk reading like a triage, but with a consequence at the end, and it is the run
    * nobody can interrupt halfway through to correct.
    */
-  claudeReviewModel: string;
+  agentReviewModel: string;
+  /**
+   * Which CLI coding agent runs, and how it is called.
+   *
+   * A setting and not a constant, because this app drives whichever agent its user has: the binary,
+   * the flag that means "answer and exit", the way the prompt gets in and the way the answer comes
+   * out all differ between them, and three of those four fail in silence when wrong. See
+   * `shared/agent-profile.ts`.
+   */
+  agentProfile: AgentProfile;
   /**
    * Master switch for writing to GitHub, off by default.
    *
@@ -1732,6 +1742,16 @@ export const IpcChannel = {
   JiraSave: 'jira:save',
   /** invoke: () => { ok, message }, one live query to tell whether the credentials work */
   JiraTest: 'jira:test',
+  /**
+   * invoke: (profile: AgentProfile) => { ok, message }
+   *
+   * Runs the agent once, with a prompt small enough to answer in seconds, and reports what came
+   * back **with the command line that was used**. The only thing that proves a profile works: three
+   * of the four things a profile decides fail in silence, and a headless run has no terminal tab to
+   * show what it launched. Same reasoning as `JiraTest`, where one real query is the only proof the
+   * credentials are good.
+   */
+  AgentTest: 'agent:test',
   /** invoke: (key) => IssueTransition[], the moves this issue can make right now */
   JiraTransitions: 'jira:transitions',
   /** invoke: (key, transitionId) => { ok, message }, moves an issue */
@@ -1989,6 +2009,8 @@ export interface RendererApi {
   ): Promise<PullReviewState>;
   /** Dismisses a review this app posted and replaces its text. There is no delete on GitHub. */
   retractPullReview(slug: string, number: number): Promise<PullReviewState>;
+  /** Runs the agent once on a tiny prompt and reports what came back, command line included. */
+  testAgent(profile: AgentProfile): Promise<{ ok: boolean; message: string }>;
   /** The body a review would post, or posted. Empty when there is no review. */
   pullReviewBody(slug: string, number: number): Promise<string>;
   /** Moves a pull request between draft and ready for review. */

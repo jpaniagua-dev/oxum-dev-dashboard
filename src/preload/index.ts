@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { AgentProfile } from '@shared/agent-profile.js';
 import {
   IpcChannel,
   type AppSettings,
@@ -71,6 +72,9 @@ const api: RendererApi = {
 
   retractPullReview: (slug: string, number: number): Promise<PullReviewState> =>
     ipcRenderer.invoke(IpcChannel.PullReviewRetract, slug, number),
+
+  testAgent: (profile: AgentProfile): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.AgentTest, profile),
 
   pullReviewBody: (slug: string, number: number): Promise<string> =>
     ipcRenderer.invoke(IpcChannel.PullReviewBody, slug, number),

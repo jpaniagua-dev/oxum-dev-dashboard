@@ -91,10 +91,12 @@ import {
 import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
 import { setDraft } from './github/gh-write.js';
+import { buildHeadlessCommand, describeCommand, readProfile } from '@shared/agent-profile.js';
+import { AGENT_TEST_TIMEOUT_MS, runAgent } from './agent/run-agent.js';
 import { findFreePort, withPort } from './projects/free-port.js';
 import type { PullReviewService } from './review/review-service.js';
 import type { TriageService } from './triage/triage-service.js';
-import { buildWorkCommand, resolveClaudeContext } from './triage/work-command.js';
+import { buildWorkCommand, resolveWorkspaceRoot } from './triage/work-command.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -312,6 +314,47 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return deps.pullReview().state();
       }
       return deps.pullReview().retract(slug, id);
+    },
+  );
+
+  /*
+   * One real run, which is the only thing that proves a profile.
+   *
+   * The prompt is deliberately trivial, so what is being measured is the **plumbing**: does the
+   * binary exist, does the flag mean "answer and exit", does the prompt get in, does an answer come
+   * out in the shape the profile claims. A heavier prompt would measure the model instead, and take
+   * minutes doing it.
+   *
+   * The command line goes back in the message, success or failure. It is the whole point: a headless
+   * run has no terminal tab, so without it a wrong flag reads as thirty seconds of nothing.
+   */
+  ipcMain.handle(
+    IpcChannel.AgentTest,
+    async (_event, payload: unknown): Promise<{ ok: boolean; message: string }> => {
+      const profile = readProfile(payload, deps.settings.get().agentProfile);
+      const { file, args } = buildHeadlessCommand(profile, {});
+      const command = describeCommand(file, args);
+      if (file.length === 0) {
+        return { ok: false, message: 'No command configured' };
+      }
+
+      const run = await runAgent({
+        profile,
+        cwd: deps.settings.get().projectsRoot,
+        prompt: 'Reply with the single word READY and nothing else.',
+        timeoutMs: AGENT_TEST_TIMEOUT_MS,
+        label: profile.label,
+      });
+
+      if (!run.ok) {
+        // `runAgent` already appends the command to its own errors, so it is not repeated here.
+        return { ok: false, message: run.error ?? `${profile.label} did not answer` };
+      }
+      const answer = run.answer.trim().split(/\r?\n/)[0] ?? '';
+      return {
+        ok: true,
+        message: `${profile.label} answered "${answer.slice(0, 60)}"  ·  ${command}`,
+      };
     },
   );
 
@@ -577,7 +620,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       return generateCommitMessage(project, {
         amend: amend === true,
         branch: state.branch,
-        model: deps.settings.get().claudeCommitModel,
+        model: deps.settings.get().agentCommitModel,
+        profile: deps.settings.get().agentProfile,
       });
     },
   );
@@ -912,8 +956,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return { terminalId: null, result: { ok: false, message: 'No shell profile available' } };
       }
 
-      const cwd = resolveClaudeContext(settings.claudeContextRoot, project.path);
-      const command = buildWorkCommand(keys, basename(project.path), settings.claudeWorkModel);
+      const cwd = resolveWorkspaceRoot(settings.workspaceRoot, project.path);
+      const command = buildWorkCommand(keys, basename(project.path), settings.agentWorkModel, settings.agentProfile);
       const resolved = resolveShellCommand(profile, command);
 
       const terminalId = deps.terminals.runProjectCommand({
@@ -932,7 +976,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         result:
           terminalId === null
             ? { ok: false, message: 'Could not open the tab' }
-            : { ok: true, message: `${keys.join(', ')} handed to Claude Code in ${project.label}` },
+            : { ok: true, message: `${keys.join(', ')} handed to ${settings.agentProfile.label} in ${project.label}` },
       };
     },
   );
