@@ -135,6 +135,13 @@ export function parseWorktreeCommand(value: unknown): WorktreeCommand | null {
     return null;
   }
   const raw = value as Record<string, unknown>;
+
+  // Read before the label check below, being the one kind that carries a number instead of a name.
+  if (raw.kind === 'pull') {
+    const number = Number(raw.number);
+    return Number.isInteger(number) && number > 0 ? { kind: 'pull', number } : null;
+  }
+
   const label = typeof raw.label === 'string' ? raw.label.trim() : '';
   if (label.length === 0) {
     return null;
@@ -200,6 +207,18 @@ export function buildWorktreeCommand(command: WorktreeCommand, repoFolder: strin
       parts.push(shellQuote(description));
     }
     return { command: parts.join(' ') };
+  }
+
+  if (command.kind === 'pull') {
+    if (!SAFE_NAME.test(repoFolder)) {
+      return { error: `Repository folder "${repoFolder}" cannot be passed to ${WORKTREE_HELPER}` };
+    }
+    // A pull request number and nothing else. It is the only part of this line that is not a
+    // whitelisted name, so it is checked as a number rather than escaped as a string.
+    if (!Number.isInteger(command.number) || command.number <= 0) {
+      return { error: 'A pull request number is a positive whole number' };
+    }
+    return { command: `${WORKTREE_HELPER} pr ${repoFolder} ${command.number}` };
   }
 
   if (!SAFE_NAME.test(command.label)) {

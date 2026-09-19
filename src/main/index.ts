@@ -9,7 +9,18 @@ import {
   type TerminalSession,
 } from '@shared/contracts.js';
 import { writeCommitMessage } from './git/commit-message.js';
+import {
+  patchPaths,
+  readBotFindings,
+  readPatch,
+  readPullDetail,
+  readReviews,
+} from './github/gh-review-read.js';
 import { PullMonitor } from './github/pull-monitor.js';
+import { dismissReview, submitReview, writeReviewBody } from './github/gh-write.js';
+import { readViewerLogin } from './github/viewer.js';
+import { PullReviewService } from './review/review-service.js';
+import { runClaude } from './triage/run-claude.js';
 import { registerIpcHandlers } from './ipc.js';
 import { JiraMonitor } from './jira/jira-monitor.js';
 import { TriageService } from './triage/triage-service.js';
@@ -181,6 +192,33 @@ async function bootstrap(): Promise<void> {
   );
   await triageService.load();
 
+  /*
+   * The review agent, with its ports handed in rather than imported.
+   *
+   * It is the one service in this app that can write to GitHub, so the modules that reach the
+   * network are passed as arguments: "did this run post anything" has to be a question a test can
+   * ask without a network, and an imported `gh` cannot be asked.
+   */
+  const pullReviewService = new PullReviewService(
+    () => settingsStore.get(),
+    () => pullMonitor.rows(),
+    (projectId) => projects.find((project) => project.id === projectId)?.path ?? null,
+    {
+      readDetail: readPullDetail,
+      readPatch,
+      readBotFindings,
+      readReviews,
+      patchPaths,
+      runClaude,
+      viewerLogin: readViewerLogin,
+      writeBody: writeReviewBody,
+      submitReview,
+      retract: dismissReview,
+    },
+    (state) => dashboardWindow.send(IpcChannel.PullReviewChanged, state),
+  );
+  await pullReviewService.load();
+
   /** The connection as the renderer may see it: everything except the token. */
   const jiraConfig = (): JiraConfig => {
     const { siteUrl, email, projectKeys } = settingsStore.get().jira;
@@ -284,6 +322,7 @@ async function bootstrap(): Promise<void> {
     pulls: () => pullMonitor,
     jira: () => jiraMonitor,
     triage: () => triageService,
+    pullReview: () => pullReviewService,
     jiraConfig,
     saveJiraToken: async (token) => {
       const result = await secrets.write(token);

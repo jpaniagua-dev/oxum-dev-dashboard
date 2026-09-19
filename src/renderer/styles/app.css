@@ -752,6 +752,84 @@ body {
   display: none;
 }
 
+/*
+ * The pull request panel's third column, where the Jira panel has two.
+ *
+ * A modifier rather than a change to `.pulls`, because that class paints both panels: widening the
+ * grid there would have moved the Jira tab's columns for a feature it does not have. Same 340px as
+ * the Triage tab's overview, so the two master-detail tabs read at the same rhythm.
+ */
+.pulls--detail {
+  grid-template-columns: 190px minmax(0, 1fr) 340px;
+}
+
+.pulls__overview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+/*
+ * The run line, above the list and below the sub-tabs.
+ *
+ * It holds the coverage sentence when nothing runs and the progress bar when something does, and
+ * the two never sit side by side: the counts describe the PREVIOUS run, and putting them next to a
+ * live status invites reading them as the one being produced. Same rule as the Triage bar.
+ */
+.pulls__bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 22px;
+}
+
+/* A verdict about a head that has moved keeps its place and loses its colour. */
+.pull__verdict--stale {
+  opacity: 0.55;
+}
+
+.pulls__overview-title {
+  font-weight: 600;
+  font-size: var(--font-md);
+}
+
+.pulls__finding {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border);
+}
+
+/* Blocking findings carry the only accent in the column: they are what stops the merge. */
+.pulls__finding--blocking {
+  border-left-color: var(--danger);
+}
+
+.pulls__finding-where {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+.pulls__body {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  white-space: pre-wrap;
+}
+
 .pulls__repos,
 .pulls__list {
   min-height: 0;

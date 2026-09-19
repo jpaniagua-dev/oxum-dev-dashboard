@@ -11,36 +11,8 @@ import {
   type TriageVerdict,
 } from '@shared/contracts.js';
 import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
+import { RUN_ICON, RUN_NEW_ICON } from './icons.js';
 
-/**
- * A play triangle: the gesture is "start this run".
- *
- * A magnifier was tried first and read as "search", which is what the button is not: it launches a
- * job that takes minutes. Play is the one glyph nobody has to be taught, and it cannot be mistaken
- * for a filter or a search box.
- *
- * Stroked and not filled, unlike the marker below, because that is what separates an action from a
- * state everywhere in this app. Sized against the **rendered** 14px icon like the sync arrows: 7 by
- * 8.2 units of a 16-unit box, since a smaller triangle closes up into a blob at a 1.6 stroke.
- *
- * Kept here rather than in `icons.ts` because it has a single consumer, the rule that keeps those
- * sync arrows in `git-panel.ts`.
- */
-const ANALYSE_ICON = 'M5.6 3.9L12.6 8L5.6 12.1Z';
-
-/**
- * The same play, smaller, with a plus beside it: "run this, on what was added".
- *
- * One glyph and not a second triangle, because two identical buttons on one row is a row where the
- * reader has to hover to find out which is which. The plus is the shape that already means "the new
- * ones" everywhere else, and it carries the whole difference between a run of several minutes and a
- * run of one.
- *
- * Sized against the **rendered** 14px icon, like every other path here: the triangle loses a third of
- * its span to make room, which is the smallest it can be before a 1.6 stroke closes it into a blob,
- * and the plus is given 6 of the 16 units so its two bars stay apart at that size.
- */
-const ANALYSE_NEW_ICON = 'M2.9 2.6L8.2 6.2L2.9 9.8Z M11.8 8.1V14.1 M8.8 11.1H14.8';
 
 /**
  * A filled dot for the sprint being worked right now.
@@ -252,7 +224,7 @@ export class TriagePanel {
      */
     const actions = createElement('div', { className: 'triage__actions' });
 
-    const again = createIconButton(ANALYSE_NEW_ICON, {
+    const again = createIconButton(RUN_NEW_ICON, {
       label: running ? 'Analysing this sprint' : 'Analyse the tickets not yet analysed',
       // The count is in the tooltip because it is the answer to "is this worth pressing": nine
       // verdicts already stored is nine tickets this run will not pay for again.
@@ -266,7 +238,7 @@ export class TriagePanel {
     this.bindAnalyse(again, sprint.id, 'new', state);
     actions.append(again);
 
-    const button = createIconButton(ANALYSE_ICON, {
+    const button = createIconButton(RUN_ICON, {
       label: running ? 'Analysing this sprint' : 'Analyse this sprint',
       // What the run will read is stated where the run is started: it is the one thing about this
       // button that decides what it costs and what it comes back with.

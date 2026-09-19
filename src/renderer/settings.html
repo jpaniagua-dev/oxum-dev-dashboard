@@ -66,10 +66,26 @@
             Which model each run is pinned to. Leave a field empty to use whatever Claude Code
             itself is set to. An alias (<code>opus</code>, <code>sonnet</code>, <code>haiku</code>)
             always points at the latest version of that model; a full name
-            (<code>claude-fable-5</code>) pins one. Three fields because these are three different
-            jobs, and one answer would be wrong for two of them.
+            (<code>claude-fable-5</code>) pins one. Four fields because these are four different
+            jobs, and one answer would be wrong for three of them.
           </p>
           <div id="settings-claude"></div>
+        </section>
+
+        <!--
+          After Claude Code and before Jira: like Jira it is about something outside this machine,
+          but unlike Jira it decides whether this app may WRITE there, so it sits where the reader
+          meets it before the connection that makes it possible.
+        -->
+        <section class="settings__section" id="section-review">
+          <h2 class="settings__section-title">Pull request review</h2>
+          <p class="settings__note">
+            Off by default, and that is the point: with the switch off the review runs, shows its
+            verdicts and posts nothing. Turning it on lets the app submit reviews to GitHub
+            <strong>as you</strong>, on your colleagues' pull requests, through the <code>gh</code>
+            you are signed in with. A submitted review cannot be deleted, only dismissed.
+          </p>
+          <div id="settings-review"></div>
         </section>
 
         <section class="settings__section" id="section-jira">

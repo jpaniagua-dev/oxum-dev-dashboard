@@ -32,4 +32,20 @@ export const AppPaths = {
    * rewritten by a long-running analysis, and a settings save must never be able to drop it.
    */
   triage: (): string => join(app.getPath('userData'), 'triage.json'),
+  /**
+   * The last review of each pull request.
+   *
+   * Its own file for the reasons `triage.json` has one, plus a third: these rows describe things
+   * that happened on **GitHub**, so they are the record of what was said publicly and under whose
+   * name. A settings save must never be able to drop that.
+   */
+  pullReviews: (): string => join(app.getPath('userData'), 'pull-reviews.json'),
+  /**
+   * Bodies posted to pull requests, one file per review.
+   *
+   * Written before the post and **kept after it**, exactly like a commit message and for the same
+   * reason plus one: when a post is refused, by a token without the scope or by a pull request that
+   * closed in the meantime, this file is the only surviving copy of a run that cost minutes.
+   */
+  reviewBodies: (): string => join(app.getPath('userData'), 'review-bodies'),
 } as const;

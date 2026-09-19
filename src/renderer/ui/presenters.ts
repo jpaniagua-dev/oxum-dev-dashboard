@@ -4,6 +4,8 @@ import type {
   GitState,
   PrReview,
   PullRequest,
+  PullReviewRun,
+  PullVerdict,
   ServerState,
   WorkflowsState,
 } from '@shared/contracts.js';
@@ -98,6 +100,69 @@ export function presentReview(review: PrReview): Pill {
     case 'none':
       return { label: 'no review', tone: 'neutral', title: 'No review required' };
   }
+}
+
+/**
+ * Label and tone for what the review concluded.
+ *
+ * Only `request-changes` wears an error tone, because it is the only one that stops a merge, and the
+ * tone has to mean the same thing here as it does two pills to the left. `unclear` is `busy` rather
+ * than `error`: nothing is wrong with the pull request, the run simply could not answer, and
+ * colouring it red would send the reader looking for a problem in the wrong place.
+ */
+export function presentPullVerdict(verdict: PullVerdict, current: boolean): Pill {
+  const stale = current
+    ? ''
+    : '\nThe head has moved since: review it again before acting on this.';
+  switch (verdict) {
+    case 'approve':
+      return { label: 'clean', tone: current ? 'ok' : 'neutral', title: `The review found nothing${stale}` };
+    case 'comment':
+      return {
+        label: 'remarks',
+        tone: current ? 'info' : 'neutral',
+        title: `The review has remarks, none of them blocking${stale}`,
+      };
+    case 'request-changes':
+      return {
+        label: 'blocking',
+        tone: current ? 'error' : 'neutral',
+        title: `The review found something that should not merge as it stands${stale}`,
+      };
+    case 'unclear':
+      return {
+        label: 'unclear',
+        tone: 'busy',
+        title: `The review could not reach a verdict${stale}`,
+      };
+  }
+}
+
+/**
+ * What a run over one repository left out, in the fewest words that stay true.
+ *
+ * Empty when it left nothing out, because a line reading "0 skipped" is a line the eye reads every
+ * time to learn nothing. It is the only place the reader is told the list is partial, which is the
+ * same job `describeCoverage` does for the Triage tab and the same failure it guards against: a
+ * shortened list and a quiet week look identical.
+ */
+export function describeReviewCoverage(run: PullReviewRun | undefined): string {
+  if (run === undefined) {
+    return '';
+  }
+  const parts: string[] = [];
+  const add = (count: number, word: string): void => {
+    if (count > 0) {
+      parts.push(`${count} ${word}`);
+    }
+  };
+  add(run.skipped.alreadyReviewed, 'already reviewed');
+  add(run.skipped.draft, 'draft');
+  add(run.skipped.bot, 'from a bot');
+  add(run.skipped.blocked, 'already blocked');
+  add(run.skipped.tooLarge, 'too large');
+  add(run.skipped.overLimit, 'over the cap');
+  return parts.length === 0 ? '' : `${parts.join(' · ')} skipped`;
 }
 
 /**

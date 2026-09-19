@@ -500,6 +500,16 @@ export const WORK_BATCH_LIMIT = 8;
 export const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9_]*-\d+$/;
 
 /**
+ * Shape a GitHub `owner/repo` must have before it is put on a command line.
+ *
+ * Same reasoning as the key above, one layer out: a slug reaches `gh` as an argument, and it is
+ * resolved from a git remote rather than typed, so anything that does not look like a repository
+ * name is a sign something else went wrong. Anchored, one slash, and the character set GitHub
+ * itself allows.
+ */
+export const REPO_SLUG_PATTERN = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+/**
  * The only story point values this app will write.
  *
  * A Fibonacci-style scale, because that is what the estimate is asked for in and what a board is
@@ -595,6 +605,26 @@ export interface PullRequest {
   readonly isAuthor: boolean;
   readonly isReviewer: boolean;
   readonly updatedAt: string;
+  /**
+   * Sha of the head commit, as the poll last saw it.
+   *
+   * **For display and for comparison, never for a write.** It rides the `gh pr list` call the tab
+   * already makes, so it is up to one poll interval out of date: it is what lets the renderer mark a
+   * stored review stale on every repaint with no round trip, and it is exactly what a write path must
+   * not trust. Anything that posts re-reads the sha itself, immediately before posting, the same rule
+   * that makes `push` re-read its upstream at click time.
+   *
+   * Empty when the payload did not carry it, and an empty sha is never "current": the direction to be
+   * wrong in is the one that asks for another review.
+   */
+  readonly headSha: string;
+  /**
+   * Files the pull request touches, for the team's 20-file rule.
+   *
+   * Free: `changedFiles` is served by the same `gh pr list --json` call, verified against the CLI.
+   * The rule is a soft one nothing enforces, so the number is shown rather than acted on.
+   */
+  readonly changedFiles: number;
 }
 
 /**
@@ -617,6 +647,211 @@ export interface RepoPulls {
   readonly pulls: PullRequest[];
   readonly checkedAt: string | null;
   readonly error: string | null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Pull request review
+ * ------------------------------------------------------------------ */
+
+/**
+ * What the review concluded about one pull request.
+ *
+ * Four, and the split is about **what gets written**, not about shades of opinion. Only
+ * `request-changes` posts by itself; `approve` and `comment` wait for a click; and `unclear` is the
+ * fallback for an answer that could not be read, which is what keeps the one verdict that writes to
+ * somebody else's pull request unreachable by a parse failure. Reversing that, so an unreadable
+ * answer fell back to the posting verdict, is the only way this could write nonsense onto a
+ * colleague's work with nobody having chosen it.
+ *
+ * `comment` was not asked for and earns its place: without a middle rung, every nit is either
+ * inflated into a blocking review or dropped in silence, and a model told "post only blockers"
+ * inflates.
+ */
+export type PullVerdict = 'approve' | 'comment' | 'request-changes' | 'unclear';
+
+export const PULL_VERDICTS: readonly PullVerdict[] = [
+  'approve',
+  'comment',
+  'request-changes',
+  'unclear',
+];
+
+/**
+ * One point the review makes about one place in the diff.
+ *
+ * `blocking` is a boolean and not a scale, deliberately. A scale invites a threshold, a threshold
+ * invites arguing about where it sits, and the question this feature answers is binary: does this
+ * stop the merge or not.
+ */
+export interface PullFinding {
+  /**
+   * Stable id, derived from the file and the title rather than invented by the model.
+   *
+   * It is printed in the posted body, so the stored review, the tab, the GitHub thread and a human's
+   * reply all name the same thing. A model-generated id would change between two runs over the same
+   * unchanged finding, which is exactly what idempotency cannot tolerate.
+   */
+  readonly id: string;
+  /** Path as the diff spells it. A finding about the pull request as a whole carries an empty path. */
+  readonly path: string;
+  /** Line in the new file, or `null` for a finding about the change as a whole. */
+  readonly line: number | null;
+  readonly blocking: boolean;
+  readonly body: string;
+}
+
+/**
+ * One remark the review bot had already left on the pull request.
+ *
+ * Kept as **input to the run**, never as a gate. The team's own rule is to judge the bot on the
+ * merits, its suggestions having been seen to reintroduce what a pull request had just removed, and
+ * a correct remark can still be about behaviour that predates the branch.
+ */
+export interface BotFinding {
+  readonly path: string;
+  readonly line: number | null;
+  /**
+   * The badge exactly as the bot wrote it, lowercased and nothing more.
+   *
+   * **Never mapped onto a scale of ours.** Only `critical` and `medium` have ever been observed on
+   * this team's pull requests, and the levels above and below are not enumerated anywhere. A union
+   * type would have to invent a bucket for a badge nobody has verified, and a finding filed under a
+   * level the bot never used is worse than one filed under its own word.
+   */
+  readonly severity: string;
+  readonly body: string;
+}
+
+/** What was actually written to GitHub, and against which head. */
+export interface PostedReview {
+  readonly at: string;
+  /** The sha the review was posted about, which `commit_id` pinned it to on GitHub. */
+  readonly headSha: string;
+  readonly event: 'request-changes' | 'comment' | 'approve';
+  readonly url: string;
+  /** GitHub's own id. The only thing that makes a review dismissable or retractable afterwards. */
+  readonly reviewId: number;
+}
+
+export interface PullReview {
+  /** `owner/repo`. The pull request's identity, which survives a project being renamed or re-pathed. */
+  readonly slug: string;
+  readonly number: number;
+  /** From `gh`, never from the model: it is asked to judge, not to restate. */
+  readonly title: string;
+  readonly branch: string;
+  readonly authorLogin: string;
+  /** The head the review is about. Everything to do with staleness hangs off this one field. */
+  readonly headSha: string;
+  readonly verdict: PullVerdict;
+  readonly summary: string;
+  readonly findings: readonly PullFinding[];
+  readonly changedFiles: number;
+  /** `changedFiles > PR_FILE_SOFT_LIMIT`, computed here rather than asked of the model. */
+  readonly oversized: boolean;
+  /**
+   * Whether anything may be written to GitHub about this pull request.
+   *
+   * False on a draft and on your own, and the second one is not taste: GitHub refuses both
+   * `--approve` and `--request-changes` on your own pull request, so posting would surface as an
+   * API error at the end of a run that cost minutes. The verdict is still computed and still shown,
+   * which on your own draft is the useful half.
+   */
+  readonly postable: boolean;
+  readonly bot: readonly BotFinding[];
+  /**
+   * When this verdict was reached.
+   *
+   * Per review and not only per run, because an incremental run merges what it just concluded with
+   * what an earlier one did: `PullReviewRun.ranAt` then says when the repository was last read,
+   * which is not when this row was decided.
+   */
+  readonly reviewedAt: string;
+  readonly posted: PostedReview | null;
+  /** Set when this one pull request failed; the others in the run are unaffected. */
+  readonly error: string | null;
+}
+
+/** Why a pull request was left out of a run. Counted and shown, never dropped in silence. */
+export interface PullReviewSkips {
+  /** Not asking for review yet. The bot already reviews drafts; a second one is noise. */
+  readonly draft: number;
+  /** Opened by a bot (dependabot, renovate): nobody is waiting on a human opinion. */
+  readonly bot: number;
+  /** Somebody has already requested changes, so it is blocked; a second block says nothing. */
+  readonly blocked: number;
+  /** A verdict already exists for this exact head. Only ever non-zero in `new` mode. */
+  readonly alreadyReviewed: number;
+  /** A diff too large to be read honestly. Skipped rather than truncated. */
+  readonly tooLarge: number;
+  /** Past the run's cap. Named in `deferred`, never dropped in silence. */
+  readonly overLimit: number;
+}
+
+/** The last run over one repository. Kept even when its last review is dismissed. */
+export interface PullReviewRun {
+  readonly slug: string;
+  /** When the repository was last **read**, which after a merge is not when each row was concluded. */
+  readonly ranAt: string;
+  readonly skipped: PullReviewSkips;
+  /** Pull requests the cap deferred, named so the run never truncates in silence. */
+  readonly deferred: readonly string[];
+  readonly error: string | null;
+}
+
+/**
+ * How much a run is asked to read.
+ *
+ * `all` reviews every eligible open pull request; `new` reviews only those no stored verdict covers
+ * **at their current head**, so a pull request reviewed yesterday and pushed to since counts as new;
+ * `pull` is one pull request and always re-reviews it, which is what the row button means whether it
+ * reads `Review` or `Review again`.
+ *
+ * `projectId` narrows `all` and `new` to one repository, which is what the buttons on a repository
+ * row do; `null` is every followed repository, which is what the buttons in the bar do.
+ */
+export type PullReviewTarget =
+  | { readonly kind: 'all'; readonly projectId: ProjectId | null }
+  | { readonly kind: 'new'; readonly projectId: ProjectId | null }
+  | { readonly kind: 'pull'; readonly projectId: ProjectId; readonly number: number };
+
+/**
+ * Where a run has got to.
+ *
+ * `posting` is a phase of its own and it comes last, after every verdict is in. That is what makes
+ * the stop button mean something: stopping during the review posts nothing at all, stopping during
+ * the posting stops before the next one.
+ */
+export type PullReviewPhase = 'reading' | 'reviewing' | 'posting' | 'done';
+
+export interface PullReviewProgress {
+  readonly target: PullReviewTarget;
+  readonly phase: PullReviewPhase;
+  /** Human-facing line, such as `web-app#588: reading list.component.ts`. */
+  readonly detail: string;
+  readonly steps: number;
+  readonly startedAt: string;
+  /** How many pull requests this run will read, known once the selection is made. */
+  readonly pulls: number;
+  readonly done: number;
+}
+
+export interface PullReviewState {
+  /** Keyed `${slug}#${number}`. */
+  readonly reviews: Readonly<Record<string, PullReview>>;
+  /** Keyed by slug. */
+  readonly runs: Readonly<Record<string, PullReviewRun>>;
+  readonly running: boolean;
+  readonly progress: PullReviewProgress | null;
+  readonly error: string | null;
+  /**
+   * Why writing to GitHub is impossible right now, or `null` when it is possible.
+   *
+   * A sentence and not a boolean, because every reason has a different fix: the setting is off, or
+   * `gh` is not signed in. A disabled button whose reason is not on screen is a button that looks
+   * broken.
+   */
+  readonly writesBlocked: string | null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1140,6 +1375,19 @@ export type WorktreeCommand =
       /** Ticket key or slug. A ticket key makes the description mandatory. */
       readonly label: string;
       readonly description: string;
+    }
+  | {
+      /**
+       * Checks a pull request out to look at it, which `create` cannot do.
+       *
+       * `wt new` always makes a **branch from the default one**, because that is what starting a
+       * ticket means. Reviewing needs the opposite, an existing branch somebody else pushed, so the
+       * helper grew a verb rather than this app growing the ability to create a worktree: the life
+       * cycle rules (the shared `node_modules` junction to unlink before removal, a stale
+       * registration to prune) live in one place, and it is not here.
+       */
+      readonly kind: 'pull';
+      readonly number: number;
     };
 
 export interface AppSettings {
@@ -1254,6 +1502,30 @@ export interface AppSettings {
   /** Model for `Generate` in the Git tab's commit form. */
   claudeCommitModel: string;
   /**
+   * Model for the pull request review.
+   *
+   * Its own, like the other three, because it is its own job: reading a patch against a written
+   * standard is bulk reading like a triage, but with a consequence at the end, and it is the run
+   * nobody can interrupt halfway through to correct.
+   */
+  claudeReviewModel: string;
+  /**
+   * Master switch for writing to GitHub, off by default.
+   *
+   * Off is what guarantees that installing an update cannot post anything before its owner has said
+   * once that the feature may exist. Every write path reads it, and `review-gate.ts` refuses first
+   * on it.
+   */
+  reviewWritesEnabled: boolean;
+  /**
+   * Login of the automated reviewer whose remarks the run is given.
+   *
+   * A setting rather than a constant because a bot login changes, and a hardcoded one degrades to
+   * "this pull request has no automated review", which looks exactly like one the bot has not
+   * reached yet. Both spellings are matched, with and without the `[bot]` suffix.
+   */
+  geminiBotLogin: string;
+  /**
    * Watched projects.
    *
    * Empty on a fresh install, which triggers a one-time seeding from `projectsRoot` so the app is
@@ -1347,6 +1619,8 @@ export interface BootstrapState {
   readonly layout: TerminalLayout;
   /** Last known pull requests, so the tab is not empty on the first paint. */
   readonly pulls: RepoPulls[];
+  /** Stored reviews, for the same reason: a verdict from yesterday is on screen before any run. */
+  readonly pullReview: PullReviewState;
   readonly jira: JiraState;
   /** Jira connection as configured, token excluded. */
   readonly jiraConfig: JiraConfig;
@@ -1383,6 +1657,65 @@ export const IpcChannel = {
   RefreshNow: 'projects:refresh',
   /** on: (repos: RepoPulls[]) => void, pushed whenever pull requests are re-read */
   PullsChanged: 'pulls:changed',
+  /** on: (state: PullReviewState) => void, pushed as a review run moves */
+  PullReviewChanged: 'pull-review:changed',
+  /**
+   * invoke: (target: PullReviewTarget) => PullReviewState
+   *
+   * Reads the pull requests the target names, judges each with a headless Claude Code run, and
+   * stores the verdicts. One run at a time: they share a process, a file, and a GitHub identity.
+   */
+  PullReviewRun: 'pull-review:run',
+  /** invoke: () => PullReviewState, stops the run at the next step it can stop at */
+  PullReviewCancel: 'pull-review:cancel',
+  /**
+   * invoke: (projectId, number) => { terminalId, result }
+   *
+   * Checks a pull request out through the worktree helper and, once that exits cleanly, starts the
+   * project's dev server in it on a free port. Part of a review is not in the diff, it is on screen.
+   * The second half lands after this has answered, so it reports on `GitNotice`.
+   */
+  PullReviewWorkspace: 'pull-review:workspace',
+  /**
+   * invoke: (slug, number, event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT') => PullReviewState
+   *
+   * Submits one of the three review events by hand. The same gates as a run, minus the verdict, plus
+   * one for `APPROVE`: it is the write that unblocks a merge, so it refuses unless the stored review
+   * is about the head that is live at the moment of the click, and the refusal names both shas.
+   */
+  PullReviewSubmit: 'pull-review:submit',
+  /**
+   * invoke: (slug, number) => string
+   *
+   * The body a review would post, or posted. Asked for one pull request at a time rather than
+   * pushed with the state: it is kilobytes per review, and almost none of them are ever read. Built
+   * in the main process because that is where the scrubbing lives, and the scrubbing is what keeps a
+   * private workspace's paths off a public pull request.
+   */
+  PullReviewBody: 'pull-review:body',
+  /**
+   * invoke: (slug, number) => PullReviewState
+   *
+   * Retracts a review this app posted: dismisses it, then replaces its body with a line saying it
+   * was posted in error. The closest thing to an undo that exists, because **a submitted GitHub
+   * review cannot be deleted**. Dismissing alone leaves the wrong text in the thread; replacing
+   * alone leaves the merge blocked, so the two are one gesture.
+   */
+  PullReviewRetract: 'pull-review:retract',
+  /**
+   * invoke: (projectId, number, draft: boolean) => GitResult
+   *
+   * Moves a pull request between draft and ready for review. A state change with no body, and the
+   * only one of these writes that says nothing about the code.
+   */
+  PullReviewDraft: 'pull-review:draft',
+  /**
+   * invoke: (slug, number) => PullReviewState
+   *
+   * Drops one row from the stored reviews. Local to `pull-reviews.json`: the pull request is
+   * untouched and anything already posted stays posted, which is the honest half.
+   */
+  PullReviewDismiss: 'pull-review:dismiss',
   /** invoke: () => RepoPulls[], forces a pull request refresh */
   PullsRefresh: 'pulls:refresh',
   /** invoke: (url: string) => void, opens a pull request in the real browser */
@@ -1644,6 +1977,28 @@ export interface RendererApi {
 
   refreshPulls(): Promise<RepoPulls[]>;
   onPullsChanged(listener: (repos: RepoPulls[]) => void): () => void;
+  /** Reviews what the target names. Resolves when the whole run is over, which is minutes. */
+  runPullReview(target: PullReviewTarget): Promise<PullReviewState>;
+  cancelPullReview(): Promise<PullReviewState>;
+  dismissPullReview(slug: string, number: number): Promise<PullReviewState>;
+  /** Submits one of the three review events by hand, behind the same gates as a run. */
+  submitPullReview(
+    slug: string,
+    number: number,
+    event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT',
+  ): Promise<PullReviewState>;
+  /** Dismisses a review this app posted and replaces its text. There is no delete on GitHub. */
+  retractPullReview(slug: string, number: number): Promise<PullReviewState>;
+  /** The body a review would post, or posted. Empty when there is no review. */
+  pullReviewBody(slug: string, number: number): Promise<string>;
+  /** Moves a pull request between draft and ready for review. */
+  setPullDraft(projectId: ProjectId, number: number, draft: boolean): Promise<GitResult>;
+  /** Checks a pull request out and starts its dev server, so it can be looked at and not only read. */
+  openPullWorkspace(
+    projectId: ProjectId,
+    number: number,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
+  onPullReviewChanged(listener: (state: PullReviewState) => void): () => void;
 
   refreshJira(): Promise<JiraState>;
   onJiraChanged(listener: (state: JiraState) => void): () => void;

@@ -112,6 +112,7 @@ interface ClaudeModelDrafts {
   analysis: string;
   work: string;
   commit: string;
+  review: string;
 }
 
 export interface SettingsFormHosts {
@@ -120,6 +121,7 @@ export interface SettingsFormHosts {
   readonly projects: HTMLElement;
   readonly terminal: HTMLElement;
   readonly claude: HTMLElement;
+  readonly review: HTMLElement;
   readonly jira: HTMLElement;
   readonly footer: HTMLElement;
 }
@@ -192,7 +194,10 @@ export class SettingsForm {
   private uiFontSize: number = UI_FONT_SIZE.default;
   /** Empty means "the default folder", so it is never coerced to the resolved path. */
   /** The three model drafts. Empty is a real value: it means "let Claude Code decide". */
-  private claudeModels: ClaudeModelDrafts = { analysis: '', work: '', commit: '' };
+  private claudeModels: ClaudeModelDrafts = { analysis: '', work: '', commit: '', review: '' };
+  /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
+  private reviewWrites = false;
+  private botLogin = '';
   private jira: JiraConfig = { siteUrl: '', email: '', projectKeys: [], hasToken: false };
   /** Typed token, held only until the save. Never read back from the main process. */
   private jiraToken = '';
@@ -237,7 +242,10 @@ export class SettingsForm {
       analysis: settings.claudeAnalysisModel,
       work: settings.claudeWorkModel,
       commit: settings.claudeCommitModel,
+      review: settings.claudeReviewModel,
     };
+    this.reviewWrites = settings.reviewWritesEnabled;
+    this.botLogin = settings.geminiBotLogin;
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
     this.jiraStatus = '';
@@ -284,6 +292,7 @@ export class SettingsForm {
     this.renderProjects();
     this.renderTerminal();
     this.renderClaude();
+    this.renderReview();
     this.renderJira();
     this.renderFooter();
     this.renderRail();
@@ -351,7 +360,12 @@ export class SettingsForm {
       entry.issues.some((issue) => issue.level === 'error'),
     ).length;
     const profile = this.profiles.find((entry) => entry.id === this.defaultProfileId);
-    const models = [this.claudeModels.analysis, this.claudeModels.work, this.claudeModels.commit];
+    const models = [
+      this.claudeModels.analysis,
+      this.claudeModels.work,
+      this.claudeModels.commit,
+      this.claudeModels.review,
+    ];
     const invalid = models.filter((model) => !isValidModel(model)).length;
     const pinned = models.filter((model) => model.trim().length > 0).length;
     const host = jiraHost(this.jira.siteUrl);
@@ -389,8 +403,16 @@ export class SettingsForm {
             ? count(invalid, 'invalid model')
             : pinned === 0
               ? 'Claude Code default'
-              : `${pinned} of 3 pinned`,
+              : `${pinned} of ${models.length} pinned`,
         tone: invalid > 0 ? 'error' : 'neutral',
+      },
+      {
+        id: 'section-review',
+        name: 'Pull request review',
+        // The state names the consequence, not the value: "on" would be a word nobody weighs, while
+        // "posts as you" is the sentence that makes somebody think before leaving it on.
+        state: this.reviewWrites ? 'posts to GitHub as you' : 'reads only',
+        tone: this.reviewWrites ? 'warn' : 'neutral',
       },
       {
         id: 'section-jira',
@@ -477,6 +499,11 @@ export class SettingsForm {
         label: 'Commit message',
         hint: 'Reads a staged diff and writes the message: short and frequent',
       },
+      {
+        key: 'review',
+        label: 'Pull request review',
+        hint: 'Reads a patch against a written standard, and can end in a public comment',
+      },
     ];
 
     const grid = createElement('div', { className: 'settings-entry__grid' });
@@ -500,6 +527,42 @@ export class SettingsForm {
       grid.append(field);
     }
     this.hosts.claude.append(grid);
+  }
+
+  /**
+   * The two settings that decide whether a review leaves this machine.
+   *
+   * A section of its own rather than two more fields under Claude Code, because they answer a
+   * different question: that section is "which model runs this", this one is "may it speak for me".
+   * Grouping them would put a switch that posts publicly among four fields nobody re-reads.
+   */
+  private renderReview(): void {
+    clearChildren(this.hosts.review);
+
+    this.hosts.review.append(
+      this.checkbox('Let the review submit to GitHub', this.reviewWrites, (checked) => {
+        this.reviewWrites = checked;
+        this.touch();
+        // The rail says "posts to GitHub as you" the moment it is ticked, before the save, because
+        // the consequence is worth reading while the decision is still being made.
+        this.renderRail();
+      }),
+    );
+
+    const login = this.field(
+      'Automated reviewer login',
+      this.botLogin,
+      (value) => {
+        this.botLogin = value;
+        this.touch();
+      },
+      'gemini-code-assist[bot]',
+      true,
+    );
+    login.title =
+      'Whose existing remarks the review is given to weigh. Matched with and without the [bot] suffix, ' +
+      'because GitHub reports it both ways and matching one spelling reads as "this bot said nothing".';
+    this.hosts.review.append(login);
   }
 
   /** Flags a model field whose value the store would drop, so the silence is broken before the save. */
@@ -1379,6 +1442,9 @@ export class SettingsForm {
       claudeAnalysisModel: this.claudeModels.analysis,
       claudeWorkModel: this.claudeModels.work,
       claudeCommitModel: this.claudeModels.commit,
+      claudeReviewModel: this.claudeModels.review,
+      reviewWritesEnabled: this.reviewWrites,
+      geminiBotLogin: this.botLogin,
       tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
@@ -1390,7 +1456,12 @@ export class SettingsForm {
       analysis: saved.claudeAnalysisModel,
       work: saved.claudeWorkModel,
       commit: saved.claudeCommitModel,
+      review: saved.claudeReviewModel,
     };
+    this.reviewWrites = saved.reviewWritesEnabled;
+    // Read back like the models: the store falls back to the default login when the field is blanked,
+    // so leaving the empty string on screen would show a setting that is not the one in force.
+    this.botLogin = saved.geminiBotLogin;
     // Read back like the sizes and the models, and here it matters more than for either: the store
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would
     // otherwise stay short of what was stored and the signature would never match the echo.

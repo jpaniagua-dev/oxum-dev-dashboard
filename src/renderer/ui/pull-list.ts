@@ -1,8 +1,23 @@
-import type { ProjectId, PullRequest, PullScope, RepoPulls } from '@shared/contracts.js';
+import type {
+  ProjectId,
+  PullRequest,
+  PullReview,
+  PullReviewState,
+  PullReviewTarget,
+  PullScope,
+  RepoPulls,
+} from '@shared/contracts.js';
+import { isReviewCurrent, reviewKey, PR_FILE_SOFT_LIMIT } from '@shared/pull-review.js';
 import { clearChildren, createElement, createIconButton, hitsInteractive } from './dom.js';
-import { TERMINAL_ICON } from './icons.js';
+import { RUN_ICON, RUN_NEW_ICON, TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
-import { presentInvolvement, presentPullChecks, presentReview } from './presenters.js';
+import {
+  describeReviewCoverage,
+  presentInvolvement,
+  presentPullChecks,
+  presentPullVerdict,
+  presentReview,
+} from './presenters.js';
 import { buildTagDots, type TagPalette } from './tags.js';
 
 /** The two sub-tabs, in display order. Labelled here so the view and its counts stay together. */
@@ -35,6 +50,28 @@ export interface PullListActions {
   onSelect: (projectId: ProjectId) => void;
   /** Switches between "the ones that need me" and "everything open here". */
   onSelectScope: (scope: PullScope) => void;
+  /**
+   * Remembers which pull request the overview describes.
+   *
+   * New with the review column, and it is what changed the meaning of a click on a row. Until there
+   * was something local to show, going to GitHub was the only thing a click could usefully do; now
+   * the reason for a verdict is on this machine, so reading it is the everyday gesture and the
+   * browser is the deliberate one, behind a button. Same reversal the Triage tab made, for the same
+   * reason and with the same grammar.
+   */
+  onSelectPull: (number: number) => void;
+  /** Starts a review run. The target says which pull requests and how much of them. */
+  onReview: (target: PullReviewTarget) => void;
+  /** Stops the run at the next step it can stop at. */
+  onCancelReview: () => void;
+  /**
+   * Opens a pull request's own menu, from a right click on its row.
+   *
+   * Where the state changes live (ready, draft), for the reason the Git tab puts its destructive
+   * entries behind one: this list is clicked all day to read verdicts, and a control that changes
+   * what the team sees has no business under a cursor that is browsing.
+   */
+  onRowMenu: (pull: PullRequest, x: number, y: number) => void;
 }
 
 /**
@@ -67,15 +104,17 @@ export function scopedPulls(repo: RepoPulls, scope: PullScope): PullRequest[] {
  * that is only a few hundred pixels tall.
  */
 export function renderPullList(
-  hosts: { repos: HTMLElement; views: HTMLElement; list: HTMLElement },
+  hosts: { repos: HTMLElement; views: HTMLElement; bar: HTMLElement; list: HTMLElement },
   repos: readonly RepoPulls[],
   selected: ProjectId | null,
   scope: PullScope,
   tags: TagPalette,
+  review: PullReviewState,
   actions: PullListActions,
 ): void {
   clearChildren(hosts.repos);
   clearChildren(hosts.views);
+  clearChildren(hosts.bar);
   clearChildren(hosts.list);
 
   if (repos.length === 0) {
@@ -129,7 +168,39 @@ export function renderPullList(
     }
 
     row.addEventListener('click', () => actions.onSelect(repo.projectId));
-    hosts.repos.append(row);
+
+    /*
+     * The pair of run buttons, on the row, exactly as the Triage tab puts them on a sprint.
+     *
+     * Both are always drawn, including on a repository nobody has reviewed where they do the same
+     * thing: a button that appeared once a result existed would shift the other one sideways between
+     * two states of the same row. The everyday one is on the left and reads only what has moved,
+     * because re-reading nine unchanged pull requests costs minutes for verdicts nobody asked to
+     * change.
+     */
+    const line = createElement('div', { className: 'git__repo-line' });
+    line.append(row);
+    if (repo.slug !== null) {
+      const runs = createElement('div', { className: 'triage__actions' });
+      runs.append(
+        buildRunButton(RUN_NEW_ICON, {
+          label: `Review what is new in ${repo.label}`,
+          title: 'Reviews only the pull requests no verdict covers at their current head',
+          busy: review.running,
+          onRun: () => actions.onReview({ kind: 'new', projectId: repo.projectId }),
+        }),
+      );
+      runs.append(
+        buildRunButton(RUN_ICON, {
+          label: `Review every open pull request in ${repo.label}`,
+          title: 'Reviews every open pull request here, including the ones already reviewed',
+          busy: review.running,
+          onRun: () => actions.onReview({ kind: 'all', projectId: repo.projectId }),
+        }),
+      );
+      line.append(runs);
+    }
+    hosts.repos.append(line);
   }
 
   if (active === undefined) {
@@ -143,6 +214,8 @@ export function renderPullList(
     return;
   }
 
+  renderBar(hosts.bar, active, review, actions);
+
   const pulls = scopedPulls(active, scope);
   if (pulls.length === 0) {
     hosts.list.append(
@@ -155,8 +228,121 @@ export function renderPullList(
   }
 
   for (const pull of pulls) {
-    hosts.list.append(buildPullRow(pull, active.projectId, actions));
+    const stored = active.slug === null ? undefined : review.reviews[reviewKey(active.slug, pull.number)];
+    hosts.list.append(buildPullRow(pull, active.projectId, stored, review.running, actions));
   }
+}
+
+/**
+ * The line between the sub-tabs and the list: what a run is doing, or what the last one left out.
+ *
+ * Never both. The coverage counts describe the **previous** run, and putting them beside a live
+ * status invites reading them as the one being produced, which is the rule the Triage bar already
+ * states.
+ */
+function renderBar(
+  host: HTMLElement,
+  repo: RepoPulls,
+  review: PullReviewState,
+  actions: PullListActions,
+): void {
+  if (review.progress !== null) {
+    const track = createElement('div', { className: 'triage__progress' });
+    track.setAttribute('role', 'progressbar');
+    track.setAttribute('aria-label', 'Review in progress');
+    // No `aria-valuenow`: nothing here knows how long a review takes, and inventing a percentage
+    // would tell a screen reader something the sighted view is careful not to claim.
+    track.append(createElement('div', { className: 'triage__progress-bar' }));
+    host.append(track);
+    host.append(createElement('span', { className: 'triage__phase', text: review.progress.detail }));
+    host.append(
+      createElement('span', {
+        className: 'triage__meta',
+        text: `${review.progress.done} / ${review.progress.pulls}`,
+      }),
+    );
+    const stop = createElement('button', { className: 'button', text: 'Stop' });
+    stop.type = 'button';
+    stop.title = 'Stops before the next pull request. Nothing half written is left behind.';
+    stop.addEventListener('click', () => actions.onCancelReview());
+    host.append(stop);
+    return;
+  }
+
+  if (review.error !== null) {
+    host.append(createElement('span', { className: 'pulls__error', text: review.error }));
+  }
+
+  const run = repo.slug === null ? undefined : review.runs[repo.slug];
+  if (run !== undefined && run.ranAt.length > 0) {
+    host.append(
+      createElement('span', { className: 'triage__meta', text: describeReviewAge(run.ranAt) }),
+    );
+  }
+  const coverage = describeReviewCoverage(run);
+  if (coverage.length > 0) {
+    host.append(
+      createElement('span', {
+        className: 'triage__meta triage__coverage',
+        text: coverage,
+        title: 'Those pull requests were not sent to the review',
+      }),
+    );
+  }
+  if (run !== undefined && run.deferred.length > 0) {
+    // Named, never truncated in silence: a run that stopped at its cap has to say which ones it did
+    // not reach, or the list looks like the whole answer.
+    host.append(
+      createElement('span', {
+        className: 'triage__meta',
+        text: `Not reached: ${run.deferred.join(', ')}`,
+      }),
+    );
+  }
+  if (review.writesBlocked !== null) {
+    host.append(
+      createElement('span', {
+        className: 'triage__meta',
+        text: review.writesBlocked,
+        title: 'The review runs and shows its verdicts, but nothing is written to GitHub',
+      }),
+    );
+  }
+}
+
+/** How old a run is, in words. Relative, because the question is whether it can still be trusted. */
+function describeReviewAge(iso: string, now: Date = new Date()): string {
+  const ran = new Date(iso);
+  if (Number.isNaN(ran.getTime())) {
+    return '';
+  }
+  const minutes = Math.max(0, Math.round((now.getTime() - ran.getTime()) / 60_000));
+  if (minutes < 1) {
+    return 'Reviewed just now';
+  }
+  if (minutes < 60) {
+    return `Reviewed ${minutes} min ago`;
+  }
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `Reviewed ${hours} h ago` : `Reviewed ${Math.round(hours / 24)} d ago`;
+}
+
+/** One of the two run buttons, disabled while any run is going: they share a process and a file. */
+function buildRunButton(
+  icon: string,
+  options: { label: string; title: string; busy: boolean; onRun: () => void },
+): HTMLButtonElement {
+  const button = createIconButton(icon, {
+    label: options.busy ? 'A review is running' : options.label,
+    title: options.busy ? 'A review is already running' : options.title,
+    className: `triage__analyse${options.busy ? ' triage__analyse--running' : ''}`,
+  });
+  button.disabled = options.busy;
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    options.onRun();
+  });
+  return button;
 }
 
 /**
@@ -224,10 +410,12 @@ function emptyMessage(repo: RepoPulls, scope: PullScope): string {
 function buildPullRow(
   pull: PullRequest,
   projectId: ProjectId,
+  review: PullReview | undefined,
+  busyReview: boolean,
   actions: PullListActions,
 ): HTMLElement {
   const row = createElement('div', { className: 'pull' });
-  row.title = `${pull.title}\n${pull.branch}\n(click: open the PR on GitHub)`;
+  row.title = `${pull.title}\n${pull.branch}\n(click: read the review, right click: act)`;
 
   row.append(createElement('span', { className: 'pull__number', text: `#${pull.number}` }));
   // `textContent` everywhere: titles and branch names come from outside the app.
@@ -261,7 +449,62 @@ function buildPullRow(
   }
   row.append(buildPill(presentReview(pull.review)));
   row.append(buildPill(presentPullChecks(pull)));
+
+  /*
+   * What the review concluded, after the pills GitHub answers for.
+   *
+   * Placed last of the three on purpose: the first two are facts about the pull request, this one is
+   * an opinion about it, and an opinion reads better after the facts it was formed from. A verdict
+   * about a head that has moved keeps its place in the row and loses its colour, rather than
+   * disappearing: a row that dropped a pill between two paints would move every pill after it.
+   */
+  if (review !== undefined) {
+    const current = isReviewCurrent(review, pull);
+    const verdict = buildPill(presentPullVerdict(review.verdict, current));
+    if (!current) {
+      verdict.classList.add('pull__verdict--stale');
+    }
+    row.append(verdict);
+  }
+  if (review?.posted != null) {
+    row.append(
+      buildPill({
+        label: 'posted',
+        tone: 'info',
+        title: `A review was submitted on GitHub at ${review.posted.at}`,
+      }),
+    );
+  }
+  if (pull.changedFiles > PR_FILE_SOFT_LIMIT) {
+    row.append(
+      buildPill({
+        label: `${pull.changedFiles} files`,
+        tone: 'neutral',
+        title: `Past the ${PR_FILE_SOFT_LIMIT} file convention: read rather than skimmed`,
+      }),
+    );
+  }
+
   row.append(createElement('span', { className: 'pull__age', text: describeAge(pull.updatedAt) }));
+
+  /*
+   * Reviewing one pull request, from its own row.
+   *
+   * The label says which of the two things it does, because on a row that already carries a verdict
+   * the gesture is "do it again from scratch" and not "do it": the same button, whose meaning the
+   * word makes explicit rather than leaving to be discovered.
+   */
+  const run = createIconButton(RUN_ICON, {
+    label: review === undefined ? `Review #${pull.number}` : `Review #${pull.number} again`,
+    title:
+      review === undefined
+        ? 'Reads this pull request and judges it'
+        : 'Reads it again from scratch, whatever the stored verdict says',
+    className: 'icon-button--row',
+  });
+  run.disabled = busyReview;
+  run.addEventListener('click', () => actions.onReview({ kind: 'pull', projectId, number: pull.number }));
+  row.append(run);
 
   /*
    * An icon rather than the word `Terminal`.
@@ -280,12 +523,30 @@ function buildPullRow(
   terminal.addEventListener('click', () => actions.onNewTerminal(projectId));
   row.append(terminal);
 
+  /*
+   * Clicking a row SELECTS it, where it used to open the browser.
+   *
+   * The reversal is deliberate and its reason is in the old rule: opening GitHub was the right
+   * gesture while nothing local could show a pull request. Now the verdict and its findings are on
+   * this machine, so reading them is the everyday move and the browser is the deliberate one,
+   * behind a button in the overview. Exactly the grammar of the Triage tab, which made the same
+   * choice for the same reason, and having the two neighbouring master-detail tabs disagree about
+   * what a click means would be worse than either answer.
+   */
+  row.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    // Selected first, for the reason the Triage tab's row menu does it: a menu acting on a row the
+    // overview is not describing would act out of sight of the text that justifies it.
+    actions.onSelectPull(pull.number);
+    actions.onRowMenu(pull, event.clientX, event.clientY);
+  });
+
   row.addEventListener('click', (event) => {
-    // Without this the terminal button would open the browser on its way out of the row.
+    // Without this the row's own buttons would also select on their way out.
     if (hitsInteractive(event)) {
       return;
     }
-    actions.onOpenPull(pull.url);
+    actions.onSelectPull(pull.number);
   });
   return row;
 }

@@ -12,6 +12,8 @@ import type {
   Project,
   ProjectId,
   ProjectRow,
+  PullReviewState,
+  PullReviewTarget,
   PullScope,
   RepoPulls,
   RepoWorktrees,
@@ -56,6 +58,7 @@ import {
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
 import { renderPullList } from './ui/pull-list.js';
+import { renderReviewOverview } from './ui/review-overview.js';
 import { renderWorktreeList } from './ui/worktree-list.js';
 import type { TagPalette } from './ui/tags.js';
 import { TriagePanel } from './ui/triage-panel.js';
@@ -96,6 +99,27 @@ class App {
   private pulls: readonly RepoPulls[] = [];
   /** Repository selected in the pull request tab, so a refresh does not jump back to the first. */
   private selectedRepo: ProjectId | null = null;
+  /**
+   * The pull request the review column describes. Session-local, and reset when the repository
+   * changes: a row selected on one repository says nothing about the next.
+   */
+  private selectedPull: number | null = null;
+  private pullReview: PullReviewState = {
+    reviews: {},
+    runs: {},
+    running: false,
+    progress: null,
+    error: null,
+    writesBlocked: null,
+  };
+  /**
+   * The body each stored review would post, keyed like the reviews themselves.
+   *
+   * Built in the main process, where the scrubbing lives, and cached here so the column can show it
+   * without a round trip per repaint. Empty until a review is selected: it is a few kilobytes per
+   * pull request and almost none of them are ever looked at.
+   */
+  private reviewBodies: Record<string, string> = {};
   /** Which pull requests the tab lists. Mirrors `settings.pullScope`, so it survives a restart. */
   private pullScope: PullScope = 'mine';
   private jira: JiraState | null = null;
@@ -308,6 +332,15 @@ class App {
     window.api.onGitNotice((notice) => {
       this.showGitNotice(notice);
       void this.loadGit();
+    });
+
+    window.api.onPullReviewChanged((state) => {
+      this.pullReview = state;
+      // A run replaces verdicts, so every cached body is about a review that may no longer exist.
+      this.reviewBodies = {};
+      if (this.strip?.active === 'pulls') {
+        this.renderPulls();
+      }
     });
 
     window.api.onTriageChanged((state) => {
@@ -758,23 +791,108 @@ class App {
   }
 
   private renderPulls(): void {
+    const repo = this.pulls.find((entry) => entry.projectId === this.selectedRepo) ?? this.pulls[0];
+    const pull =
+      repo === undefined
+        ? undefined
+        : (repo.pulls.find((entry) => entry.number === this.selectedPull) ?? repo.pulls[0]);
+    const stored =
+      repo?.slug === undefined || repo.slug === null || pull === undefined
+        ? undefined
+        : this.pullReview.reviews[`${repo.slug}#${pull.number}`];
+
+    renderReviewOverview(
+      requireElement('pulls-overview'),
+      pull,
+      stored,
+      repo?.projectId ?? null,
+      stored === undefined ? '' : (this.reviewBodies[`${stored.slug}#${stored.number}`] ?? ''),
+      // `void`: the body is fetched once per review and the column repaints when it lands. Awaiting
+      // it here would make every repaint wait on an IPC round trip for text most rows never show.
+
+      {
+        onOpenPull: (url) => void window.api.openExternal(url),
+        onSubmit: (slug, number, event) => {
+          void window.api.submitPullReview(slug, number, event).then((state) => {
+            this.pullReview = state;
+            // The refusal, when there is one, is on the state's own error line rather than in a
+            // dialog: it is a sentence to read, not a question to answer.
+            this.renderPulls();
+          });
+        },
+        onReview: (projectId, number) => this.startReview({ kind: 'pull', projectId, number }),
+        onDismiss: (slug, number) => void this.dismissReview(slug, number),
+        onRetract: (slug, number) => {
+          void window.api.retractPullReview(slug, number).then((state) => {
+            this.pullReview = state;
+            this.reviewBodies = {};
+            this.renderPulls();
+          });
+        },
+        onOpenWorkspace: (projectId, number) => void this.openPullWorkspace(projectId, number),
+      },
+    );
+
+    if (stored !== undefined) {
+      void this.loadReviewBody(stored.slug, stored.number);
+    }
+
     renderPullList(
       {
         repos: requireElement('pulls-repos'),
         views: requireElement('pulls-views'),
+        bar: requireElement('pulls-bar'),
         list: requireElement('pulls-list'),
       },
       this.pulls,
       this.selectedRepo,
       this.pullScope,
       this.tagPalette(),
+      this.pullReview,
       {
+        onSelectPull: (number) => {
+          this.selectedPull = number;
+          this.renderPulls();
+        },
+        onReview: (target) => this.startReview(target),
+        onRowMenu: (pull, x, y) => {
+          const projectId = this.selectedRepo ?? this.pulls[0]?.projectId ?? null;
+          showContextMenu(x, y, [
+            {
+              label: pull.isDraft ? 'Mark ready for review' : 'Convert to draft',
+              hint: pull.isDraft
+                ? 'gh pr ready: takes it out of draft, which is what asks the team to look at it'
+                : 'gh pr ready --undo: puts it back to draft, so nobody is waiting on it',
+              disabled: projectId === null,
+              run: () => {
+                if (projectId !== null) {
+                  void this.setPullDraft(projectId, pull.number, !pull.isDraft);
+                }
+              },
+            },
+            {
+              label: `Open #${pull.number} on GitHub`,
+              hint: pull.url,
+              disabled: false,
+              run: () => void window.api.openExternal(pull.url),
+            },
+          ]);
+        },
+        onCancelReview: () => {
+          void window.api.cancelPullReview().then((state) => {
+            this.pullReview = state;
+            this.renderPulls();
+          });
+        },
         // Same gesture as a click on a project row, and it goes through the same reuse path: seeing a
         // pull request usually means going to work on it.
         onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
         onOpenPull: (url) => void window.api.openExternal(url),
         onSelect: (projectId) => {
           this.selectedRepo = projectId;
+          // The pull request selection belonged to the repository being left: keeping it would
+          // describe a row nobody can see.
+          this.selectedPull = null;
           this.renderPulls();
         },
         onSelectScope: (scope) => {
@@ -1021,6 +1139,74 @@ class App {
   private async dismissTriageTicket(sprintId: number, key: string): Promise<void> {
     this.triage = await window.api.dismissTriageTicket(sprintId, key);
     this.renderTriage();
+  }
+
+  /**
+   * Starts a review run and keeps the tab live while it works.
+   *
+   * The invoke resolves only when the whole run is over, which is minutes; everything the user reads
+   * in between arrives on `onPullReviewChanged`. Awaiting it is still what tells us the run ended,
+   * including when it ended because it was stopped.
+   */
+  private startReview(target: PullReviewTarget): void {
+    void window.api.runPullReview(target).then((state) => {
+      this.pullReview = state;
+      this.renderPulls();
+    });
+  }
+
+  /**
+   * Checks a pull request out and brings its tab forward.
+   *
+   * The tab is focused straight away, like the commit's: the worktree helper is the only thing that
+   * will say git refused, and silence after clicking reads as success. The server it chains into
+   * announces itself later, on the same notice line the Git tab's push uses.
+   */
+  private async openPullWorkspace(projectId: ProjectId, number: number): Promise<void> {
+    const { terminalId, result } = await window.api.openPullWorkspace(projectId, number);
+    this.stampMessage(result.message);
+    if (terminalId !== null) {
+      await this.focusTerminal(terminalId);
+    }
+  }
+
+  /**
+   * Fetches the body of one review, once.
+   *
+   * Cached by key and never refetched, because the body of a stored review does not change: a new
+   * run replaces the review, and the cache is keyed on the pull request, so the next paint asks
+   * again for a row whose review was replaced. Fetching it per repaint would put an IPC round trip
+   * behind every keystroke in the list.
+   */
+  private async loadReviewBody(slug: string, number: number): Promise<void> {
+    const key = `${slug}#${number}`;
+    if (this.reviewBodies[key] !== undefined) {
+      return;
+    }
+    // Marked as in flight before the await, or a burst of repaints would ask for the same body five
+    // times before the first answer came back.
+    this.reviewBodies[key] = '';
+    const body = await window.api.pullReviewBody(slug, number);
+    this.reviewBodies[key] = body;
+    this.renderPulls();
+  }
+
+  /**
+   * Moves a pull request between draft and ready.
+   *
+   * The poll is forced afterwards rather than waited for: it runs every three minutes, and a row
+   * that still said `draft` for that long after the click would read as a command that did nothing.
+   */
+  private async setPullDraft(projectId: ProjectId, number: number, draft: boolean): Promise<void> {
+    const result = await window.api.setPullDraft(projectId, number, draft);
+    this.stampMessage(result.message);
+    this.pulls = await window.api.refreshPulls();
+    this.renderPulls();
+  }
+
+  private async dismissReview(slug: string, number: number): Promise<void> {
+    this.pullReview = await window.api.dismissPullReview(slug, number);
+    this.renderPulls();
   }
 
   private async loadTriage(): Promise<void> {

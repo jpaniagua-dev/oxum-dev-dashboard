@@ -12,12 +12,19 @@ const LIMIT = 50;
  *
  * `reviewRequests` is what makes "waiting for me" answerable, and `statusCheckRollup` is the same shape
  * the project rows already parse, so the two views cannot disagree about what green means.
+ *
+ * `headRefOid` and `changedFiles` cost **nothing**: this call already happens once per followed
+ * repository, and asking for two more fields of the same payload is the rule the Worktrees tab's
+ * `PR checks` column was built on, a join rather than a query. They are what lets a stored review be
+ * marked stale, and the 20-file rule be shown, without a second `gh` process per pull request.
  */
 const FIELDS = [
   'number',
   'title',
   'url',
   'headRefName',
+  'headRefOid',
+  'changedFiles',
   'author',
   'isDraft',
   'reviewDecision',
@@ -108,6 +115,10 @@ export function parsePullPayload(stdout: string, login: string): PullRequest[] {
       title: typeof pr.title === 'string' ? pr.title : '',
       url: typeof pr.url === 'string' ? pr.url : '',
       branch: typeof pr.headRefName === 'string' ? pr.headRefName : '',
+      // Empty rather than invented when the field is missing, and `isReviewCurrent` reads an empty
+      // sha as "not current": a review is about a commit, so not knowing which commit is an answer.
+      headSha: typeof pr.headRefOid === 'string' ? pr.headRefOid : '',
+      changedFiles: typeof pr.changedFiles === 'number' ? pr.changedFiles : 0,
       authorLogin,
       isDraft: pr.isDraft === true,
       review: asReview(pr.reviewDecision),

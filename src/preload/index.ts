@@ -22,6 +22,8 @@ import {
   type ProjectCandidate,
   type ProjectConfig,
   type ProjectId,
+  type PullReviewState,
+  type PullReviewTarget,
   type ProjectRow,
   type ProjectValidation,
   type RendererApi,
@@ -51,6 +53,42 @@ const api: RendererApi = {
   refreshNow: (): Promise<ProjectRow[]> => ipcRenderer.invoke(IpcChannel.RefreshNow),
 
   refreshPulls: (): Promise<RepoPulls[]> => ipcRenderer.invoke(IpcChannel.PullsRefresh),
+
+  runPullReview: (target: PullReviewTarget): Promise<PullReviewState> =>
+    ipcRenderer.invoke(IpcChannel.PullReviewRun, target),
+
+  cancelPullReview: (): Promise<PullReviewState> => ipcRenderer.invoke(IpcChannel.PullReviewCancel),
+
+  dismissPullReview: (slug: string, number: number): Promise<PullReviewState> =>
+    ipcRenderer.invoke(IpcChannel.PullReviewDismiss, slug, number),
+
+  submitPullReview: (
+    slug: string,
+    number: number,
+    event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT',
+  ): Promise<PullReviewState> =>
+    ipcRenderer.invoke(IpcChannel.PullReviewSubmit, slug, number, event),
+
+  retractPullReview: (slug: string, number: number): Promise<PullReviewState> =>
+    ipcRenderer.invoke(IpcChannel.PullReviewRetract, slug, number),
+
+  pullReviewBody: (slug: string, number: number): Promise<string> =>
+    ipcRenderer.invoke(IpcChannel.PullReviewBody, slug, number),
+
+  setPullDraft: (projectId: ProjectId, number: number, draft: boolean): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.PullReviewDraft, projectId, number, draft),
+
+  openPullWorkspace: (
+    projectId: ProjectId,
+    number: number,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
+    ipcRenderer.invoke(IpcChannel.PullReviewWorkspace, projectId, number),
+
+  onPullReviewChanged: (listener: (state: PullReviewState) => void): (() => void) => {
+    const handler = (_event: unknown, state: PullReviewState): void => listener(state);
+    ipcRenderer.on(IpcChannel.PullReviewChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.PullReviewChanged, handler);
+  },
 
   onPullsChanged: (listener: (repos: RepoPulls[]) => void): (() => void) => {
     const handler = (_event: unknown, repos: RepoPulls[]): void => listener(repos);

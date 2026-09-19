@@ -175,12 +175,19 @@
           whichever repository is selected, not two more things to select. Same grammar as the Git
           tab's own sub-tabs, and the same `.subtab` rule paints both.
         -->
-        <div class="pulls" id="strip-panel-pulls" role="tabpanel" hidden>
+        <!--
+          `pulls--detail` and not a change to `.pulls`: the Jira panel below reuses that class for
+          the same master-detail grammar, so widening the grid there would move a column nobody
+          touched. The modifier is on this panel alone.
+        -->
+        <div class="pulls pulls--detail" id="strip-panel-pulls" role="tabpanel" hidden>
           <div class="pulls__repos" id="pulls-repos"></div>
           <div class="pulls__main">
             <div class="pulls__views" id="pulls-views" role="tablist"></div>
+            <div class="pulls__bar" id="pulls-bar"></div>
             <div class="pulls__list" id="pulls-list"></div>
           </div>
+          <div class="pulls__overview" id="pulls-overview"></div>
         </div>
 
         <!--

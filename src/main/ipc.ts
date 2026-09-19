@@ -5,6 +5,8 @@ import {
   GIT_COMMIT_ACTION_ID,
   IpcChannel,
   ISSUE_KEY_PATTERN,
+  RESERVED_ACTION_PREFIX,
+  REPO_SLUG_PATTERN,
   workActionId,
   WORK_BATCH_LIMIT,
   WORKTREE_ACTION_ID,
@@ -29,6 +31,8 @@ import {
   type JiraState,
   type TriageState,
   type ProjectValidation,
+  type PullReviewState,
+  type PullReviewTarget,
   type RepoPulls,
   type RepoWorktrees,
   type ShellProfile,
@@ -55,6 +59,7 @@ import {
 import { generateCommitMessage } from './git/generate-commit.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { readGitState } from './git/git-service.js';
+import { readRepoWorktrees } from './git/git-worktrees.js';
 import { GIT_PTY_FILE } from './git/run-git.js';
 import { readAllWorktrees } from './git/git-worktrees.js';
 import {
@@ -85,6 +90,9 @@ import {
 } from './jira/jira-start.js';
 import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
+import { setDraft } from './github/gh-write.js';
+import { findFreePort, withPort } from './projects/free-port.js';
+import type { PullReviewService } from './review/review-service.js';
 import type { TriageService } from './triage/triage-service.js';
 import { buildWorkCommand, resolveClaudeContext } from './triage/work-command.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
@@ -100,6 +108,7 @@ export interface IpcDependencies {
   readonly pulls: () => PullMonitor;
   readonly jira: () => JiraMonitor;
   readonly triage: () => TriageService;
+  readonly pullReview: () => PullReviewService;
   /** Writes the Jira token to the encrypted store. Never reads it back towards the renderer. */
   readonly saveJiraToken: (token: string) => Promise<{ ok: boolean; message: string }>;
   readonly jiraConfig: () => JiraConfig;
@@ -171,6 +180,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     terminals: deps.terminals.sessions(),
     layout: deps.terminals.layout(),
     pulls: deps.pulls().rows(),
+    pullReview: deps.pullReview().state(),
     jira: deps.jira().state(),
     jiraConfig: deps.jiraConfig(),
     terminalCompat: terminalCompat(process.platform, release()),
@@ -180,6 +190,180 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
   ipcMain.handle(IpcChannel.PullsRefresh, async (): Promise<RepoPulls[]> =>
     deps.pulls().refreshNow(),
+  );
+
+  /* -------------------------------------------------------- pull request review */
+
+  /*
+   * Checks a pull request out and starts its dev server on a free port.
+   *
+   * The gesture the whole review feature is built around for a reader who guarantees consistency:
+   * part of what they check is not in a diff, it is on screen, so a pull request has to be openable
+   * the way they would open their own branch.
+   *
+   * Two steps, chained on the first one's exit code, because they cannot be one:
+   *
+   * 1. `wt pr <repo> <n>` in a terminal tab. The helper owns the worktree life cycle (it junctions
+   *    `node_modules`, which is what makes step 2 take seconds rather than an `npm install`), and
+   *    this app deliberately never creates a worktree itself.
+   * 2. The project's own `server` action, in that folder, with the port replaced by a free one so it
+   *    does not fight the dev server already running in the main checkout.
+   *
+   * The folder is **read back from git** rather than assumed: `_WT_ROOT` lives in the helper, and
+   * guessing a path the helper decides would break the first time somebody moves their worktrees.
+   */
+  ipcMain.handle(
+    IpcChannel.PullReviewWorkspace,
+    async (
+      _event,
+      projectId: unknown,
+      number: unknown,
+    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const pullNumber = Number(number);
+      if (project === undefined || !Number.isInteger(pullNumber) || pullNumber <= 0) {
+        return { terminalId: null, result: { ok: false, message: 'Unknown pull request' } };
+      }
+
+      const profile = resolveBashProfile(deps.profiles(), deps.settings.get().defaultShellProfileId);
+      if (profile === undefined) {
+        return {
+          terminalId: null,
+          result: { ok: false, message: `No bash profile: "${WORKTREE_HELPER}" cannot be launched` },
+        };
+      }
+
+      const repoFolder = basename(project.path);
+      const built = buildWorktreeCommand({ kind: 'pull', number: pullNumber }, repoFolder);
+      if (built.command === undefined) {
+        return { terminalId: null, result: { ok: false, message: built.error } };
+      }
+
+      const folder = `pr-${pullNumber}-${repoFolder}`;
+      const resolved = resolveShellCommand(profile, built.command);
+      const terminalId = deps.terminals.runProjectCommand({
+        project,
+        actionId: WORKTREE_ACTION_ID,
+        title: `${project.label} · ${WORKTREE_HELPER} pr ${pullNumber}`,
+        file: resolved.file,
+        args: resolved.args,
+        size: deps.terminalSize(),
+        profileId: profile.id,
+        onExit: (exitCode, stopped) => {
+          if (stopped || exitCode !== 0) {
+            // The tab already shows why. Saying it again here would be a second voice on one failure.
+            return;
+          }
+          void startWorkspaceServer(deps, project, folder, pullNumber);
+        },
+      });
+
+      return {
+        terminalId,
+        result:
+          terminalId === null
+            ? { ok: false, message: 'Could not open the tab' }
+            : { ok: true, message: `${built.command} launched` },
+      };
+    },
+  );
+
+
+  /*
+   * The target is narrowed here rather than trusted, like every other payload that reaches this
+   * process. An unrecognised kind becomes `all`, which is the mode that reviews the most and posts
+   * under exactly the same rules: the safe default of the three is the one that cannot silently
+   * review fewer pull requests than the reader believes.
+   */
+  ipcMain.handle(
+    IpcChannel.PullReviewRun,
+    async (_event, target: unknown): Promise<PullReviewState> =>
+      deps.pullReview().run(asReviewTarget(target)),
+  );
+
+  ipcMain.handle(IpcChannel.PullReviewCancel, async (): Promise<PullReviewState> =>
+    deps.pullReview().cancel(),
+  );
+
+  /*
+   * The three review events, asked for by hand.
+   *
+   * The event is narrowed to the three GitHub accepts and anything else is refused outright rather
+   * than defaulted: there is no safe default among "approve", "block" and "say something", so a
+   * payload that does not name one is a bug and is treated as one.
+   */
+  ipcMain.handle(
+    IpcChannel.PullReviewSubmit,
+    async (_event, slug: unknown, number: unknown, event: unknown): Promise<PullReviewState> => {
+      const id = Number(number);
+      const known = event === 'APPROVE' || event === 'REQUEST_CHANGES' || event === 'COMMENT';
+      if (typeof slug !== 'string' || !REPO_SLUG_PATTERN.test(slug) || !Number.isInteger(id) || !known) {
+        return deps.pullReview().state();
+      }
+      return deps.pullReview().submitManual(slug, id, event);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.PullReviewRetract,
+    async (_event, slug: unknown, number: unknown): Promise<PullReviewState> => {
+      const id = Number(number);
+      if (typeof slug !== 'string' || !REPO_SLUG_PATTERN.test(slug) || !Number.isInteger(id)) {
+        return deps.pullReview().state();
+      }
+      return deps.pullReview().retract(slug, id);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.PullReviewBody,
+    async (_event, slug: unknown, number: unknown): Promise<string> => {
+      const id = Number(number);
+      if (typeof slug !== 'string' || !REPO_SLUG_PATTERN.test(slug) || !Number.isInteger(id)) {
+        return '';
+      }
+      return deps.pullReview().bodyOf(slug, id);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.PullReviewDraft,
+    async (_event, projectId: unknown, number: unknown, draft: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const id = Number(number);
+      if (project === undefined || !Number.isInteger(id)) {
+        return { ok: false, message: 'Unknown pull request' };
+      }
+      if (!deps.settings.get().reviewWritesEnabled) {
+        // The same master switch as every other write. A state change is smaller than a review and
+        // it is still this app speaking on GitHub under its owner's name.
+        return { ok: false, message: 'Writing to GitHub is turned off in the settings' };
+      }
+      // From the poll's rows rather than resolved again: the monitor already caches one slug per
+      // project for the whole session, and a second resolver would be a second answer to "which
+      // repository is this", which is the drift `verdictFor` and `isStaged` were merged to avoid.
+      const slug = deps.pulls().rows().find((row) => row.projectId === project.id)?.slug ?? null;
+      if (slug === null) {
+        return { ok: false, message: 'This repository has no GitHub remote' };
+      }
+      const outcome = await setDraft(slug, id, draft === true);
+      if (outcome.kind === 'posted') {
+        deps.pulls().refreshNow().catch(() => undefined);
+        return { ok: true, message: draft === true ? `#${id} is back to draft` : `#${id} is ready for review` };
+      }
+      return { ok: false, message: outcome.message };
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.PullReviewDismiss,
+    async (_event, slug: unknown, number: unknown): Promise<PullReviewState> => {
+      const id = Number(number);
+      if (typeof slug !== 'string' || !REPO_SLUG_PATTERN.test(slug) || !Number.isInteger(id)) {
+        return deps.pullReview().state();
+      }
+      return deps.pullReview().dismiss(slug, id);
+    },
   );
 
   ipcMain.handle(IpcChannel.JiraRefresh, async (): Promise<JiraState> => deps.jira().refreshNow());
@@ -1246,6 +1430,106 @@ function asDiffTarget(value: unknown): GitDiffTarget | null {
     return { kind: 'stash', sha: input.sha, ref: input.ref };
   }
   return null;
+}
+
+/**
+ * Starts the project's dev server inside a freshly created review worktree.
+ *
+ * Runs after `wt pr` has exited cleanly, so the folder exists; it is found by asking **git** for the
+ * worktree list rather than by rebuilding the path, because where worktrees live is the helper's
+ * decision and not this app's.
+ *
+ * The port is probed and **replaced** in the command rather than appended: most of these commands
+ * already carry one, and two `--port` flags make the result depend on which the CLI keeps. What ends
+ * up on screen is still the port the process announces, since the probe can go stale between the
+ * bind and the launch.
+ *
+ * Everything it has to say arrives on `GitNotice`, the channel built for an outcome that lands after
+ * the invoke that started it has already answered.
+ */
+async function startWorkspaceServer(
+  deps: IpcDependencies,
+  project: Project,
+  folder: string,
+  pullNumber: number,
+): Promise<void> {
+  const entries = await readRepoWorktrees(project);
+  const worktree = entries.worktrees.find((entry) => entry.name === folder);
+  if (worktree === undefined) {
+    deps.notifyGit({
+      projectId: project.id,
+      ok: false,
+      message: `The worktree ${folder} was not created`,
+    });
+    return;
+  }
+
+  const action = project.actions.find((entry) => entry.role === 'server');
+  if (action === undefined) {
+    // Not a failure: the checkout is there and usable, this project simply has no server to start.
+    deps.notifyGit({
+      projectId: project.id,
+      ok: true,
+      message: `#${pullNumber} checked out in ${folder}, no server action to start`,
+    });
+    return;
+  }
+
+  const profile = deps.profiles().find((entry) => entry.id === deps.settings.get().defaultShellProfileId)
+    ?? deps.profiles()[0];
+  if (profile === undefined) {
+    deps.notifyGit({ projectId: project.id, ok: false, message: 'No shell profile to start the server' });
+    return;
+  }
+
+  const port = await findFreePort();
+  const command = port === null ? action.command : withPort(action.command, port);
+  const resolved = resolveShellCommand(profile, command);
+  const terminalId = deps.terminals.runProjectCommand({
+    project,
+    // Its own reserved id, so this tab is neither the worktree helper's nor the project's own server:
+    // starting the review server must not stop the one running in the main checkout.
+    actionId: `${RESERVED_ACTION_PREFIX}review-server:${pullNumber}`,
+    title: `${project.label} · #${pullNumber}`,
+    file: resolved.file,
+    args: resolved.args,
+    size: deps.terminalSize(),
+    profileId: profile.id,
+    cwd: worktree.path,
+  });
+
+  deps.notifyGit({
+    projectId: project.id,
+    ok: terminalId !== null,
+    message:
+      terminalId === null
+        ? `#${pullNumber} is checked out, but its server tab could not open`
+        : `#${pullNumber} checked out, server starting${port === null ? '' : ` on :${port}`}`,
+  });
+}
+
+/**
+ * Narrows a review target coming from the renderer.
+ *
+ * An unrecognised kind becomes `all` over every followed repository, which is the mode that reads
+ * the **most**: the three post under identical rules, so the one default that cannot mislead is the
+ * one that never silently reviews fewer pull requests than the reader believes it did. A `pull`
+ * target missing its project or its number degrades to `all` for the same reason.
+ */
+function asReviewTarget(value: unknown): PullReviewTarget {
+  if (typeof value !== 'object' || value === null) {
+    return { kind: 'all', projectId: null };
+  }
+  const target = value as { kind?: unknown; projectId?: unknown; number?: unknown };
+  const projectId = typeof target.projectId === 'string' ? target.projectId : null;
+  const number = Number(target.number);
+  if (target.kind === 'pull' && projectId !== null && Number.isInteger(number)) {
+    return { kind: 'pull', projectId, number };
+  }
+  if (target.kind === 'new') {
+    return { kind: 'new', projectId };
+  }
+  return { kind: 'all', projectId };
 }
 
 function asThemeMode(value: unknown): ThemeMode {

@@ -29,6 +29,8 @@ const pull = (branch: string, over: Partial<PullRequest> = {}): PullRequest => (
   isAuthor: true,
   isReviewer: false,
   updatedAt: '2026-09-04T08:00:00Z',
+  headSha: 'deb104347bbcfa913d118192314e71a346bb97aa',
+  changedFiles: 4,
   ...over,
 });
 

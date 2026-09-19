@@ -11,6 +11,7 @@ import type {
   Worktree,
 } from '../src/shared/contracts.js';
 import { basename, parseWorktreeList, readRepoWorktrees } from '../src/main/git/git-worktrees.js';
+import { buildWorktreeCommand, parseWorktreeCommand } from '../src/main/git/worktree-command.js';
 import {
   flattenWorktrees,
   summarizeWorktrees,
@@ -325,7 +326,9 @@ describe('worktreeMenuEntries', () => {
 
   it('addresses every worktree by its folder name, which is the only identity the helper takes', () => {
     for (const entry of worktreeMenuEntries(worktree('PROJ-1-web-app'))) {
-      if (entry.command !== null) {
+      // `pull` is the one kind addressed by a number instead of a name, and this menu never emits
+      // it: it is raised from a pull request row, not from a worktree that already exists.
+      if (entry.command !== null && entry.command.kind !== 'pull') {
         expect(entry.command.label).toBe('PROJ-1-web-app');
       }
     }
@@ -425,5 +428,42 @@ describe('readRepoWorktrees, against a real repository', () => {
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  });
+});
+
+/*
+ * The verb that checks a pull request out to review it.
+ *
+ * Distinct from `create` because `wt new` always makes a branch from the default one, which is what
+ * starting a ticket means; reviewing needs an existing branch somebody else pushed.
+ */
+describe('buildWorktreeCommand: pull', () => {
+  it('addresses a pull request by its number', () => {
+    expect(buildWorktreeCommand({ kind: 'pull', number: 588 }, 'web-app').command).toBe(
+      'wt pr web-app 588',
+    );
+  });
+
+  it('refuses anything that is not a positive whole number', () => {
+    // The one part of this line that is not a whitelisted name, so it is checked as a number rather
+    // than escaped as a string.
+    expect(buildWorktreeCommand({ kind: 'pull', number: 0 }, 'web-app').error).toBeDefined();
+    expect(buildWorktreeCommand({ kind: 'pull', number: -1 }, 'web-app').error).toBeDefined();
+    expect(buildWorktreeCommand({ kind: 'pull', number: 1.5 }, 'web-app').error).toBeDefined();
+  });
+
+  it('refuses a repository folder the whitelist does not accept', () => {
+    expect(buildWorktreeCommand({ kind: 'pull', number: 1 }, 'web app; rm -rf /').error).toBeDefined();
+  });
+});
+
+describe('parseWorktreeCommand: pull', () => {
+  it('reads a pull payload, which carries a number instead of a label', () => {
+    expect(parseWorktreeCommand({ kind: 'pull', number: 588 })).toEqual({ kind: 'pull', number: 588 });
+  });
+
+  it('refuses a pull payload with no usable number', () => {
+    expect(parseWorktreeCommand({ kind: 'pull' })).toBeNull();
+    expect(parseWorktreeCommand({ kind: 'pull', number: 'many' })).toBeNull();
   });
 });

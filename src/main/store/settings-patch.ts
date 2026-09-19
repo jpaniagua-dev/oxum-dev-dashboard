@@ -82,6 +82,11 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   }
   if (typeof input.claudeWorkModel === 'string') patch.claudeWorkModel = input.claudeWorkModel;
   if (typeof input.claudeCommitModel === 'string') patch.claudeCommitModel = input.claudeCommitModel;
+  if (typeof input.claudeReviewModel === 'string') patch.claudeReviewModel = input.claudeReviewModel;
+  if (typeof input.reviewWritesEnabled === 'boolean') {
+    patch.reviewWritesEnabled = input.reviewWritesEnabled;
+  }
+  if (typeof input.geminiBotLogin === 'string') patch.geminiBotLogin = input.geminiBotLogin;
   /*
    * The tag palette, written by **both** renderers: the settings window on save, and the dashboard on
    * a right click on a chip. Broadcast, and therefore not in `LOCAL_ONLY_KEYS`, since recolouring a

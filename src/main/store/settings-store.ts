@@ -81,6 +81,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeAnalysisModel: '',
   claudeWorkModel: '',
   claudeCommitModel: '',
+  claudeReviewModel: '',
+  reviewWritesEnabled: false,
+  geminiBotLogin: 'gemini-code-assist[bot]',
   // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
   // default here would come back every time the user deleted a project.
   projects: [],
@@ -209,6 +212,14 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     claudeAnalysisModel: asModel(input.claudeAnalysisModel),
     claudeWorkModel: asModel(input.claudeWorkModel),
     claudeCommitModel: asModel(input.claudeCommitModel),
+    claudeReviewModel: asModel(input.claudeReviewModel),
+    // Anything but an explicit `true` is off. A file hand-edited to `"yes"` must not turn on
+    // the one setting that lets this app write to somebody else's pull request.
+    reviewWritesEnabled: input.reviewWritesEnabled === true,
+    geminiBotLogin:
+      typeof input.geminiBotLogin === 'string' && input.geminiBotLogin.trim().length > 0
+        ? input.geminiBotLogin.trim()
+        : DEFAULT_SETTINGS.geminiBotLogin,
     projects: projects,
     /*
      * Completed here rather than at each call site, and this is the choke point every write passes

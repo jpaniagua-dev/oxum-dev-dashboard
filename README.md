@@ -152,13 +152,58 @@ the selected one on the right, one line each:
   `gh pr list` call per repository brings everything, and the filter is applied locally.
 - **`no review` is not an approval.** `gh` reports an empty `reviewDecision` when the repository
   requires no review at all, and painting that green would claim something GitHub never said.
-- Clicking a line opens the pull request in your browser. The **terminal icon** at the end of the row
+- Clicking a line **selects** it, and the third column then says what the review concluded about it.
+  It opened the browser until the review existed, which was the right gesture while nothing local
+  could show a pull request; the browser is now a button. The **terminal icon** at the end of the row
   opens a new tab in that repository's folder instead — the same glyph the Git tab's repository column
   uses, because it is the same gesture. It said `Terminal` in words until the icon existed, which was
   the widest thing on the row after the title, spent on saying what every gesture in this app implies.
   Both are quiet until the row is hovered, and both keep their name in `aria-label`.
 - The poll runs every 180 s by default (`pullsPollSeconds`), one call per followed repository, which is
   far below any rate limit.
+
+### Reviewing them
+
+A headless Claude Code run reads a pull request with your team's standards in hand, says what it
+thinks, and, when it finds something that should not merge as it stands, posts it. Off by default:
+until `Let the review submit to GitHub` is ticked in the settings, the whole thing runs, shows its
+verdicts and writes nothing.
+
+- **Four ways to start it.** The pair of buttons on a repository row reviews everything open there,
+  or only what no verdict covers at its current head; the button on a pull request row reviews that
+  one, and reads `Review again` once it has a verdict, which is the same gesture meaning "from
+  scratch". What counts as new is read from the stored reviews and never from a date: a pull request
+  reviewed yesterday and pushed to since is new again, which is exactly the case the button is for.
+- **Four verdicts, and only one of them writes.** `clean` lights up an `Approve` button, `remarks`
+  waits for a click, `blocking` posts a comment and requests changes, and `unclear`, the fallback
+  for an answer that could not be read, posts nothing. That last one is the point of the split:
+  a garbled answer can never reach the verdict that blocks a colleague's merge.
+- **`Approve` is never automatic.** The write that unblocks a merge stays a click. It carries no
+  confirmation dialog either, and its safety is elsewhere: it is refused unless the review on screen
+  is about the commit that is live at the moment you press it, and the refusal names both shas.
+- **Drafts and your own pull requests are never posted to.** GitHub refuses to review your own, so
+  posting would fail after minutes of work; a draft is not asking for review yet. Your own are still
+  reviewed and shown, which is the useful half.
+- **It weighs what the automated reviewer already said**, and judges it on the merits rather than on
+  its severity badge, which is reproduced but never ranked. A bot can propose a fix that reintroduces
+  what the pull request just removed, and it can be right about something that predates the branch.
+- **It does not check anything out**, and it says so in its own prompt: the patch is the authority on
+  what changed, and the repository on disk is read-only context for conventions. Checking out is a
+  separate gesture, below.
+- **The same review is never posted twice.** Each body carries an invisible marker naming the commit
+  it was written about, so a second run recognises what the first said even if the local file is
+  gone. A call that timed out is reported as "may have posted" and is never retried.
+- **Bounded on purpose**: ten pull requests per run, five per repository, and one too large to read
+  honestly is skipped rather than read in part. Whatever the cap left out is named, never dropped in
+  silence.
+
+### Opening one to look at it
+
+Part of a review is not in the diff. `Open as a workspace` checks the pull request out through the
+worktree helper, junctions `node_modules` so nothing has to be installed, and starts that project's
+dev server **on a free port**, so it runs beside the one already serving your own branch. Then the
+page is one click away, which is the only way to check that two applications still look like each
+other.
 
 ## Jira
 
