@@ -1396,6 +1396,16 @@ either. Killing a build meant a trip back to the dashboard for the row's own but
   `environment: 'node'` with no jsdom, on purpose: renderer modules here stay importable without a DOM,
   and this file avoids import-time listeners for exactly that reason. So the menu's *contents* are pure
   and tested while its *opening* is not, and both times this shipped broken it was the opening.
+- **Every menu in the app goes through it, including the ones that do not look like context menus.**
+  The shell picker behind the tab strip's chevron was its own `position: absolute` list until
+  2026-09-11, and it was invisible: the strip is a grid cell of `.terminal__surface`, which is
+  `overflow: hidden`, so a menu opening upwards from there was drawn outside that box and clipped. It
+  read as "hidden behind the projects table". **No `z-index` can fix an overflow clip**, which is the
+  part worth remembering, and flipping it downwards would only have moved the trap to the next short
+  pane. `showContextMenu` is `position: fixed` on `document.body`, so no ancestor can clip it, it
+  folds back inside the window near an edge, and it already carries the dismissal rules that the
+  terminal pane had reimplemented on its own. A dropdown anchored to a control is
+  `showContextMenu(box.left, box.bottom + 4, items)`, not a new list.
 
 ## Mail and Teams: why they are not here
 

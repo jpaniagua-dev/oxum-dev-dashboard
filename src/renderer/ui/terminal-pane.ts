@@ -126,8 +126,6 @@ export class TerminalPane {
   private theme: ResolvedTheme = 'light';
   /** Overwritten from the settings as soon as the bootstrap lands; this is only the pre-bootstrap value. */
   private fontSize: number = TERMINAL_FONT_SIZE.default;
-  /** Index of the group whose profile menu is open, if any. */
-  private menuOpen: number | null = null;
   /** Id of the tab currently being renamed in place, if any. */
   private renaming: TerminalId | null = null;
   /**
@@ -173,14 +171,6 @@ export class TerminalPane {
     private readonly compat: TerminalCompat | null = null,
   ) {
     window.addEventListener('resize', () => this.fitVisible());
-    // Any click outside closes the profile menu, which is what every menu in every app does. The context
-    // menu dismisses itself, in the shared module.
-    document.addEventListener('click', () => {
-      if (this.menuOpen !== null) {
-        this.menuOpen = null;
-        this.renderStrips();
-      }
-    });
     this.bindShortcuts();
   }
 
@@ -1192,6 +1182,16 @@ export class TerminalPane {
    * Same split as Windows Terminal, because that is the gesture already in the user's hands. One per
    * pane, and it opens the tab **in that pane**: with each pane carrying its own strip, a single
    * global `+` would leave the user guessing where the tab went.
+   *
+   * The caret's list goes through `showContextMenu` and is **not** a menu of its own, which it was
+   * until 2026-09-11. As a `position: absolute` element it lived inside the strip, and the strip is a
+   * grid cell of `.terminal__surface`, which is `overflow: hidden`. Opening upwards put it outside
+   * that box, so it was clipped and read as "hidden behind the projects table". No `z-index` could
+   * have fixed that: overflow clipping is not something stacking escapes. Flipping it downwards would
+   * have fixed this instance and left the same trap for the next short pane. The shared menu is
+   * `position: fixed` on `document.body`, so no ancestor can clip it, it folds back inside the window
+   * near an edge, and it brings the dismissal rules this file had already reimplemented once,
+   * including the opening-click trap that shipped broken twice.
    */
   private buildNewTabButton(groupIndex: number): HTMLElement {
     const group = createElement('span', { className: 'terminal__new' });
@@ -1219,37 +1219,24 @@ export class TerminalPane {
       caret.setAttribute('aria-label', 'Choose a shell');
       caret.addEventListener('click', (event) => {
         event.stopPropagation();
-        this.menuOpen = this.menuOpen === groupIndex ? null : groupIndex;
-        this.renderStrips();
+        const box = caret.getBoundingClientRect();
+        showContextMenu(
+          box.left,
+          box.bottom + 4,
+          this.profiles.map((profile) => ({
+            label: profile.label,
+            hint: profile.file,
+            run: () => {
+              this.focused = groupIndex;
+              this.actions.onNewShell(profile.id);
+            },
+          })),
+        );
       });
       group.append(caret);
     }
 
-    if (this.menuOpen === groupIndex) {
-      group.append(this.buildProfileMenu(groupIndex));
-    }
-
     return group;
-  }
-
-  private buildProfileMenu(groupIndex: number): HTMLElement {
-    const menu = createElement('div', { className: 'terminal__menu' });
-    for (const profile of this.profiles) {
-      const item = createElement('button', {
-        className: 'terminal__menu-item',
-        text: profile.label,
-        title: profile.file,
-      });
-      item.type = 'button';
-      item.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.menuOpen = null;
-        this.focused = groupIndex;
-        this.actions.onNewShell(profile.id);
-      });
-      menu.append(item);
-    }
-    return menu;
   }
 }
 
