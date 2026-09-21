@@ -1275,6 +1275,15 @@ export interface TriageSkips {
   /** Already being worked on: `statusCategory` is `indeterminate`. */
   readonly inProgress: number;
   /**
+   * Finished: `statusCategory` is `done`.
+   *
+   * Counted rather than silently dropped, like the other two. The sprint search is the Agile API's
+   * `/sprint/{id}/issue`, which takes no status filter and hands back a closed sprint entire, so
+   * without this rule a run paid a model to decide what could be started on tickets that were
+   * already finished.
+   */
+  readonly done: number;
+  /**
    * Left out by an incremental run because a verdict was already stored for them.
    *
    * Always zero after a full run, which is given everything the first rule leaves. Counted and shown

@@ -142,7 +142,7 @@ export class TriageService {
   }
 
   /**
-   * Re-reads `status` and `assignee` for every ticket held on disk.
+   * Re-reads `status`, `assignee` and the stage of every ticket held on disk, and drops the finished.
    *
    * Queried by key rather than by sprint, because a stored analysis outlives the sprint it was made in:
    * tickets get carried over, and a query scoped to open sprints would silently stop refreshing exactly
@@ -151,7 +151,9 @@ export class TriageService {
    * Capped, because the keys go into a JQL string and that string goes into a URL. The cap is stated in
    * the code rather than left to the server's own limit, whose failure mode is a request refused for a
    * reason that has nothing to do with triage. Beyond it the newest analyses win, being the ones the
-   * tab is showing.
+   * tab is showing. ⚠️ A ticket past the cap is never refreshed and therefore never dropped once it is
+   * finished: the same staleness the status column has always had, now with a row that outstays its
+   * usefulness rather than only a word that is out of date.
    */
   private async refreshLiveFields(credentials: JiraCredentials): Promise<void> {
     const keys = this.store.keys().slice(0, LIVE_REFRESH_KEY_CAP);
@@ -168,7 +170,7 @@ export class TriageService {
     const live = new Map(
       issues.map((issue) => [
         issue.key.toUpperCase(),
-        { status: issue.status, assignee: issue.assignee },
+        { status: issue.status, assignee: issue.assignee, stage: issue.stage },
       ]),
     );
     if (this.store.applyLiveFields(live)) {
@@ -235,7 +237,7 @@ export class TriageService {
       error,
       // The counts of the answer being **kept**, not of the run that just failed: they describe the
       // tickets on screen, and those are the previous ones.
-      skipped: previous?.skipped ?? { inProgress: 0, alreadyAnalysed: 0 },
+      skipped: previous?.skipped ?? { done: 0, inProgress: 0, alreadyAnalysed: 0 },
     });
 
     const credentials = await this.credentials();

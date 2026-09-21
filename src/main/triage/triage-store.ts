@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import type { TriagedTicket, TriageResult } from '@shared/contracts.js';
+import type { IssueStage, TriagedTicket, TriageResult } from '@shared/contracts.js';
 import { nearestStoryPoints } from '../jira/jira-start.js';
 import { toAutonomous, toDomain, toVerdict } from './triage-parse.js';
 import { atomicWriteFile } from '../store/atomic-write.js';
@@ -143,26 +143,24 @@ export class TriageStore {
    * honest, silently editing the verdict would not be.
    *
    * A key absent from the answer keeps what it had rather than being blanked: a ticket that left the
-   * search is not a ticket whose status is now empty.
+   * search is not a ticket whose status is now empty. That asymmetry is deliberate and it is what
+   * keeps the removal below safe: only an explicit `done` drops a row, never a key the search failed
+   * to return, which can be a capped query or a permissions blip.
+   *
+   * **A finished ticket is removed, not updated.** It is the one live change that makes the row
+   * meaningless rather than stale: the tab answers "what can I start", and a closed ticket has no
+   * answer left to give, so leaving it in with a fresh status would keep it in the counts, in
+   * `readyKeys` and inside an unattended batch. The verdict rule is not broken by this, since nothing
+   * is rewritten: the row leaves. If the ticket is reopened it comes back through the next analysis,
+   * the sprint search returning it and no stored verdict covering it any more.
    *
    * Returns whether anything moved, so a refresh that changed nothing does not rewrite the file.
    */
-  applyLiveFields(live: ReadonlyMap<string, { status: string; assignee: string }>): boolean {
+  applyLiveFields(live: ReadonlyMap<string, LiveFields>): boolean {
     let changed = false;
     for (const [sprintId, result] of this.results) {
-      let touched = false;
-      const tickets = result.tickets.map((ticket) => {
-        const fresh = live.get(ticket.key.toUpperCase());
-        if (
-          fresh === undefined ||
-          (fresh.status === ticket.status && fresh.assignee === ticket.assignee)
-        ) {
-          return ticket;
-        }
-        touched = true;
-        return { ...ticket, status: fresh.status, assignee: fresh.assignee };
-      });
-      if (touched) {
+      const tickets = applyLiveToTickets(result.tickets, live);
+      if (tickets !== null) {
         changed = true;
         this.results.set(sprintId, { ...result, tickets });
       }
@@ -174,6 +172,49 @@ export class TriageStore {
   async write(): Promise<void> {
     await atomicWriteFile(AppPaths.triage(), `${JSON.stringify(this.snapshot(), null, 2)}\n`);
   }
+}
+
+/** What a live refresh knows about a ticket: two fields to update, and one that can remove the row. */
+export interface LiveFields {
+  readonly status: string;
+  readonly assignee: string;
+  readonly stage: IssueStage;
+}
+
+/**
+ * One sprint's rows after a live refresh, or `null` when nothing moved.
+ *
+ * Pure and exported for the reason `selectIssues` lives in its own file: the store cannot be imported
+ * into a test without Electron behind it, and this is where a mistake is silent. A row wrongly kept
+ * is a finished ticket sitting in the batch button; a row wrongly dropped is a paid verdict gone.
+ *
+ * `null` rather than an unchanged array so the caller can tell "nothing moved" from "everything was
+ * rewritten to the same thing", which is what stops a refresh rewriting the file every time the tab
+ * is shown.
+ */
+export function applyLiveToTickets(
+  tickets: readonly TriagedTicket[],
+  live: ReadonlyMap<string, LiveFields>,
+): TriagedTicket[] | null {
+  let touched = false;
+  const kept: TriagedTicket[] = [];
+  for (const ticket of tickets) {
+    const fresh = live.get(ticket.key.toUpperCase());
+    if (fresh?.stage === 'done') {
+      touched = true;
+      continue;
+    }
+    if (
+      fresh === undefined ||
+      (fresh.status === ticket.status && fresh.assignee === ticket.assignee)
+    ) {
+      kept.push(ticket);
+      continue;
+    }
+    touched = true;
+    kept.push({ ...ticket, status: fresh.status, assignee: fresh.assignee });
+  }
+  return touched ? kept : null;
 }
 
 /**
@@ -205,6 +246,10 @@ export function readResult(value: unknown): TriageResult | null {
     // removed. They are simply not read: an unknown key is dropped here like anywhere else, so an old
     // analysis loses the two fields and keeps everything a reader acts on.
     skipped: {
+      // Absent from every file written before the rule existed, and read as zero: a run that never
+      // counted its finished tickets did not skip none of them, it skipped an unknown number, and
+      // zero is what the sentence then leaves unsaid rather than what it claims.
+      done: readCount(skipped['done']),
       inProgress: readCount(skipped['inProgress']),
       alreadyAnalysed: readCount(skipped['alreadyAnalysed']),
     },

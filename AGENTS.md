@@ -1139,6 +1139,33 @@ user's own identity, on a colleague's work.
 - **A row with no verdict is no longer dropped.** Only a missing `key` still removes it, a row with
   no key being one that cannot be worked, dismissed or refreshed. The verdict half of that guard was
   the same silent deletion the paragraph above forbids.
+- **A finished ticket is never analysed, and never stays on screen.** Two halves of one rule, and
+  both were missing. The selection skipped `done` nowhere, on the written grounds that "the sprint
+  search already excludes it", and that was simply false: `readSprintIssues` calls the Agile API's
+  `/sprint/{id}/issue`, which takes no status filter and hands back a sprint entire. Every run was
+  paying a model to decide what could be started on tickets that were already closed. And a ticket
+  finished **after** its analysis kept its row for good, since the live refresh updated its status
+  and nothing else, so a `Ready` verdict sat in the counts and inside the batch button long after
+  the work had shipped. Now `selectIssues` skips `done` with a count of its own, and
+  `applyLiveToTickets` removes a row the refresh finds finished.
+- **Removing beats greying out, and it is the only live change that removes.** The tab answers "what
+  can I start"; a closed ticket has no answer left to give, so a row kept with a fresh status would
+  still be counted, still be in `readyKeys` and still be inside an unattended batch. The verdict rule
+  survives untouched, because nothing is rewritten: the row leaves. A reopened ticket comes back
+  through the next analysis, the sprint search returning it and no stored verdict covering it any
+  more.
+- **Only an explicit `done` drops a row, never a key the search failed to return.** Absence is not a
+  stage: a capped query, a permissions blip or a ticket moved out of the project all look the same
+  from here, and the existing rule already says a missing key keeps what it had rather than being
+  blanked. Deleting on absence would throw away a paid verdict for a network hiccup.
+- **`applyLiveToTickets` is pure and exported, like `selectIssues`.** The store cannot be imported
+  into a test without Electron behind it, and this is the second place where a mistake is silent: a
+  row wrongly kept is a finished ticket in the batch button, a row wrongly dropped is an analysis
+  gone. It returns `null` for "nothing moved" rather than an equal array, which is what stops the
+  refresh rewriting `triage.json` every time the tab is shown.
+- ⚠️ **A ticket past `LIVE_REFRESH_KEY_CAP` is never refreshed, so it is never dropped either.** The
+  same staleness the status column has always had, except the consequence grew: it used to be one
+  word out of date, it is now a row that outstays its usefulness.
 - **A ticket already in progress is never analysed.** The tab answers "what can I start", and a
   ticket somebody is on has had that question answered by the fact of being started: paying a model
   to classify it buys a verdict nobody will act on, and it pushes what matters down a list capped by

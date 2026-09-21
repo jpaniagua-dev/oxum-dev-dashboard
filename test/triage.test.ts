@@ -4,10 +4,11 @@ import {
   RESERVED_ACTION_PREFIX,
   WORK_BATCH_LIMIT,
   workActionId,
+  type IssueStage,
   type TriagedTicket,
 } from '../src/shared/contracts.js';
 import { autonomyBlock, canRunUnattended } from '../src/shared/triage-autonomy.js';
-import { readResult } from '../src/main/triage/triage-store.js';
+import { applyLiveToTickets, readResult } from '../src/main/triage/triage-store.js';
 import { describe, expect, it } from 'vitest';
 import { flattenDocument } from '../src/main/jira/jira-service.js';
 import { isEmptyAnswer, parseTriage } from '../src/main/triage/triage-parse.js';
@@ -516,7 +517,7 @@ describe('readResult', () => {
     sprintName: 'Sprint 7',
     analysedAt: RUN_AT,
     tickets: [ticket],
-    skipped: { inProgress: 0, alreadyAnalysed: 0 },
+    skipped: { done: 0, inProgress: 0, alreadyAnalysed: 0 },
   });
 
   it('turns a stored backend verdict into unclear, the verdict nobody defines', () => {
@@ -715,7 +716,7 @@ describe('selectIssues', () => {
     const { analysed, skipped } = selectIssues(sprint);
 
     expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-1', 'PROJ-3', 'PROJ-4']);
-    expect(skipped).toEqual({ inProgress: 1, alreadyAnalysed: 0 });
+    expect(skipped).toEqual({ done: 0, inProgress: 1, alreadyAnalysed: 0 });
   });
 
   it('reads the stage and not the status name, which is per-project and renamed at will', () => {
@@ -735,10 +736,24 @@ describe('selectIssues', () => {
     expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-4']);
   });
 
-  it('leaves `done` alone, the sprint search having already excluded it', () => {
-    // Two authorities on the same exclusion is how the two would drift.
-    const { analysed } = selectIssues([issue('PROJ-8', 'done', 'me')]);
-    expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-8']);
+  it('skips a finished ticket, and counts it', () => {
+    // This test used to assert the opposite, on the stated grounds that the sprint search already
+    // excluded `done`. It does not: `readSprintIssues` calls the Agile API's `/sprint/{id}/issue`,
+    // which takes no status filter, so every run was paying a model to classify closed tickets and
+    // the verdicts it produced then stayed in the tab.
+    const { analysed, skipped } = selectIssues([issue('PROJ-8', 'done', 'me')]);
+
+    expect(analysed).toEqual([]);
+    expect(skipped.done).toBe(1);
+  });
+
+  it('counts a finished ticket under done rather than under already analysed', () => {
+    // Same ordering contract the other two rules have: a ticket matching several is counted once,
+    // under the first that catches it, or the two modes stop being comparable.
+    const { skipped } = selectIssues([issue('PROJ-8', 'done', 'me')], new Set(['PROJ-8']));
+
+    expect(skipped.done).toBe(1);
+    expect(skipped.alreadyAnalysed).toBe(0);
   });
 
   it('skips what a stored verdict already covers, and counts it', () => {
@@ -747,7 +762,7 @@ describe('selectIssues', () => {
     const { analysed, skipped } = selectIssues(sprint, new Set(['PROJ-1']));
 
     expect(analysed.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-4']);
-    expect(skipped).toEqual({ inProgress: 1, alreadyAnalysed: 1 });
+    expect(skipped).toEqual({ done: 0, inProgress: 1, alreadyAnalysed: 1 });
   });
 
   it('matches a stored key whatever its case, the file being hand-editable', () => {
@@ -760,7 +775,7 @@ describe('selectIssues', () => {
     // tickets on screen than the sprint holds, and counting it under the second would make the two
     // modes report different `inProgress` numbers for the same sprint.
     const { skipped } = selectIssues([issue('PROJ-2', 'in-progress', 'me')], new Set(['PROJ-2']));
-    expect(skipped).toEqual({ inProgress: 1, alreadyAnalysed: 0 });
+    expect(skipped).toEqual({ done: 0, inProgress: 1, alreadyAnalysed: 0 });
   });
 
   it('is given everything when no key is passed, which is what a full run is', () => {
@@ -770,26 +785,85 @@ describe('selectIssues', () => {
   });
 });
 
+describe('applyLiveToTickets', () => {
+  const live = (
+    entries: Record<string, { status: string; assignee?: string; stage: IssueStage }>,
+  ): Map<string, { status: string; assignee: string; stage: IssueStage }> =>
+    new Map(
+      Object.entries(entries).map(([key, value]) => [
+        key,
+        { status: value.status, assignee: value.assignee ?? '', stage: value.stage },
+      ]),
+    );
+
+  it('drops a ticket Jira now reports as done', () => {
+    // The whole point: the tab answers "what can I start", and a finished ticket has no answer left.
+    // Left in, it would keep its verdict, its place in the counts and its place in a batch.
+    const tickets = applyLiveToTickets(
+      [ticketWith('ready', { key: 'PROJ-1' }), ticketWith('ready', { key: 'PROJ-2' })],
+      live({ 'PROJ-1': { status: 'Done', stage: 'done' } }),
+    );
+
+    expect(tickets?.map((ticket) => ticket.key)).toEqual(['PROJ-2']);
+  });
+
+  it('keeps a ticket the search did not return', () => {
+    // Absence is not a stage. A capped query or a permissions blip must never delete a paid verdict,
+    // so only an explicit `done` removes a row.
+    expect(applyLiveToTickets([ticketWith('ready')], live({}))).toBeNull();
+  });
+
+  it('updates the status and the assignee without touching the verdict', () => {
+    const tickets = applyLiveToTickets(
+      [ticketWith('ready', { key: 'PROJ-1', status: 'To Do' })],
+      live({ 'PROJ-1': { status: 'In Progress', assignee: 'Julio', stage: 'in-progress' } }),
+    );
+
+    expect(tickets?.[0]?.status).toBe('In Progress');
+    expect(tickets?.[0]?.assignee).toBe('Julio');
+    expect(tickets?.[0]?.verdict).toBe('ready');
+  });
+
+  it('reports nothing when nothing moved, so the file is not rewritten', () => {
+    const ticket = ticketWith('ready', { key: 'PROJ-1', status: 'To Do' });
+
+    expect(applyLiveToTickets([ticket], live({ 'PROJ-1': { status: 'To Do', stage: 'todo' } }))).toBeNull();
+  });
+
+  it('matches the key whatever its case', () => {
+    const tickets = applyLiveToTickets(
+      [ticketWith('ready', { key: 'proj-1' })],
+      live({ 'PROJ-1': { status: 'Done', stage: 'done' } }),
+    );
+
+    expect(tickets).toEqual([]);
+  });
+});
+
 describe('describeCoverage', () => {
+  it('names the finished tickets it left out', () => {
+    expect(describeCoverage({ done: 3, inProgress: 0, alreadyAnalysed: 0 })).toBe('3 done skipped');
+  });
+
   it('says nothing when the run left nothing out', () => {
     // A line reading "0 skipped" is a line the eye has to read every time to learn nothing.
-    expect(describeCoverage({ inProgress: 0, alreadyAnalysed: 0 })).toBe('');
+    expect(describeCoverage({ done: 0, inProgress: 0, alreadyAnalysed: 0 })).toBe('');
   });
 
   it('counts what was skipped', () => {
-    expect(describeCoverage({ inProgress: 2, alreadyAnalysed: 0 })).toContain('2 in progress skipped');
+    expect(describeCoverage({ done: 0, inProgress: 2, alreadyAnalysed: 0 })).toContain('2 in progress skipped');
   });
 
   it('says how much of the list an earlier run produced', () => {
     // Without it, an incremental run reads as a full one: same list, same age line, and nothing
     // saying that nine of those verdicts are a week old.
-    expect(describeCoverage({ inProgress: 0, alreadyAnalysed: 9 })).toContain(
+    expect(describeCoverage({ done: 0, inProgress: 0, alreadyAnalysed: 9 })).toContain(
       '9 kept from an earlier run',
     );
   });
 
   it('states both, an incremental run having two reasons to be short', () => {
-    const line = describeCoverage({ inProgress: 2, alreadyAnalysed: 9 });
+    const line = describeCoverage({ done: 0, inProgress: 2, alreadyAnalysed: 9 });
     expect(line).toContain('2 in progress skipped');
     expect(line).toContain('9 kept from an earlier run');
   });
@@ -823,11 +897,11 @@ describe('describeTicketAge', () => {
 
 describe('describeEmptyResult', () => {
   it('says a sprint is empty when it really is', () => {
-    expect(describeEmptyResult({ inProgress: 0, alreadyAnalysed: 0 })).toBe('No ticket in this sprint.');
+    expect(describeEmptyResult({ done: 0, inProgress: 0, alreadyAnalysed: 0 })).toBe('No ticket in this sprint.');
   });
 
   it('says a sprint was filtered down to nothing, which looks identical on screen', () => {
-    const message = describeEmptyResult({ inProgress: 9, alreadyAnalysed: 0 });
+    const message = describeEmptyResult({ done: 0, inProgress: 9, alreadyAnalysed: 0 });
     expect(message).toContain('9 already in progress');
     expect(message).not.toContain('No ticket in this sprint');
   });

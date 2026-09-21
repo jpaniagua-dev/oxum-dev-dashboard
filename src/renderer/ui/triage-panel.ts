@@ -967,6 +967,9 @@ export function describeWork(keys: readonly string[], estimate: number | null): 
  */
 export function describeCoverage(skipped: TriageSkips): string {
   const parts: string[] = [];
+  if (skipped.done > 0) {
+    parts.push(`${skipped.done} done skipped`);
+  }
   if (skipped.inProgress > 0) {
     parts.push(`${skipped.inProgress} in progress skipped`);
   }
