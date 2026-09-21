@@ -1,6 +1,7 @@
 import type { BotFinding } from '@shared/contracts.js';
 import { spawnOffThread } from '../spawn/spawn-pool.js';
 import { parseBotComments } from './bot-findings.js';
+import { parseReviewComments, type ReviewComment } from './review-comments.js';
 
 /**
  * Everything a review needs to read off a pull request, and nothing that writes.
@@ -161,6 +162,36 @@ export async function readBotFindings(
       env: GH_ENV,
     });
     return { value: parseBotComments(JSON.parse(stdout), botLogin), error: null };
+  } catch (error) {
+    return { value: null, error: describeError(error) };
+  }
+}
+
+/**
+ * Every inline comment on the pull request, the bot's and the humans' alike.
+ *
+ * The **same endpoint** `readBotFindings` reads, and that is the point: the feedback watcher wants the
+ * whole collection and gets the bot's subset by filtering, so a poll costs one call and not two. Never
+ * call both in the same tick.
+ *
+ * ⚠️ Named blind spot, and it is deliberate: a reviewer who submits `CHANGES_REQUESTED` with a body and
+ * no inline comment produces **zero rows here**, and that is the strongest feedback there is. Reading
+ * `/pulls/{n}/reviews` as well would double the cost per pull request and add a second watermark axis,
+ * so it is out of scope; it is written down because the miss is silent and reads as a broken watcher.
+ */
+export async function readReviewComments(
+  slug: string,
+  number: number,
+): Promise<ReadResult<ReviewComment[]>> {
+  try {
+    const { stdout } = await spawnOffThread({
+      file: 'gh',
+      args: ['api', '--paginate', `repos/${slug}/pulls/${number}/comments`],
+      timeout: TIMEOUT_MS,
+      maxBuffer: 8 * 1024 * 1024,
+      env: GH_ENV,
+    });
+    return { value: parseReviewComments(JSON.parse(stdout)), error: null };
   } catch (error) {
     return { value: null, error: describeError(error) };
   }

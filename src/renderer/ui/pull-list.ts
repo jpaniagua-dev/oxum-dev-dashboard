@@ -1,4 +1,5 @@
 import type {
+  AutoRunRecord,
   ProjectId,
   PullRequest,
   PullReview,
@@ -110,6 +111,7 @@ export function renderPullList(
   scope: PullScope,
   tags: TagPalette,
   review: PullReviewState,
+  autoRuns: readonly AutoRunRecord[],
   actions: PullListActions,
 ): void {
   clearChildren(hosts.repos);
@@ -229,7 +231,10 @@ export function renderPullList(
 
   for (const pull of pulls) {
     const stored = active.slug === null ? undefined : review.reviews[reviewKey(active.slug, pull.number)];
-    hosts.list.append(buildPullRow(pull, active.projectId, stored, review.running, actions));
+    const autoRun = findRun(autoRuns, active.slug, pull.number);
+    hosts.list.append(
+      buildPullRow(pull, active.projectId, stored, autoRun, review.running, actions),
+    );
   }
 }
 
@@ -407,10 +412,45 @@ function emptyMessage(repo: RepoPulls, scope: PullScope): string {
  * HTML that browsers silently rearrange. The row-level click is guarded the same way the project table
  * guards its own, so the terminal button does not also open the browser.
  */
+/**
+ * The unattended run this pull request came from, if it came from one.
+ *
+ * Matched on the pair the record itself was filed under. A pull request nobody ran unattended has no
+ * record, which is the normal case and draws nothing: this tab is mostly other people's work.
+ */
+export function findRun(
+  records: readonly AutoRunRecord[],
+  slug: string | null,
+  number: number,
+): AutoRunRecord | undefined {
+  if (slug === null) {
+    return undefined;
+  }
+  return records.find((record) => record.slug === slug && record.prNumber === number);
+}
+
+/**
+ * What the feedback watcher has to say about a row, in one short phrase.
+ *
+ * The notice comes first because it is about what happened; the refusal only when there is no notice,
+ * being about what did not. A row that showed both would be asking its reader to work out which of the
+ * two is the current fact.
+ */
+export function describeRun(record: AutoRunRecord | undefined): string | null {
+  if (record === undefined) {
+    return null;
+  }
+  if (record.feedbackPhase === 'passing') {
+    return 'treating feedback';
+  }
+  return record.notice ?? record.lastRefusal;
+}
+
 function buildPullRow(
   pull: PullRequest,
   projectId: ProjectId,
   review: PullReview | undefined,
+  autoRun: AutoRunRecord | undefined,
   busyReview: boolean,
   actions: PullListActions,
 ): HTMLElement {
@@ -441,6 +481,26 @@ function buildPullRow(
 
   if (pull.isDraft) {
     row.append(createElement('span', { className: 'badge-warn', text: 'brouillon' }));
+  }
+
+  /*
+   * What the feedback watcher decided, before the pills.
+   *
+   * Recorded facts are useless on disk: every refusal this feature can produce is a way for a row to
+   * sit there doing nothing, and a reader who cannot see which rule fired has to go and read the
+   * source. Muted rather than coloured, the pills after it being the ones that claim something.
+   */
+  const note = describeRun(autoRun);
+  if (note !== null) {
+    row.append(
+      createElement('span', {
+        className: 'pull__run-note',
+        text: note,
+        title: autoRun?.pendingCount
+          ? `${autoRun.pendingCount} comment(s) nobody has looked at`
+          : note,
+      }),
+    );
   }
 
   const involvement = presentInvolvement(pull);

@@ -67,6 +67,21 @@ describe('asPatch', () => {
     });
   });
 
+  it('lets the two GitHub switches through, each on its own', () => {
+    // Two switches and not one, deliberately: `reviewWritesEnabled` lets the app write as you,
+    // `feedbackPassEnabled` lets an agent start with nobody clicking. A patch that carried one for
+    // the other would grant the wrong thing, so both directions are pinned.
+    expect(asPatch({ reviewWritesEnabled: true })).toEqual({ reviewWritesEnabled: true });
+    expect(asPatch({ feedbackPassEnabled: true })).toEqual({ feedbackPassEnabled: true });
+    expect(asPatch({ feedbackPassEnabled: false })).toEqual({ feedbackPassEnabled: false });
+  });
+
+  it('drops a feedback switch that is not a boolean', () => {
+    // The key exists in `sanitizeSettings` too, and the two lists have to agree: a value accepted
+    // here and refused there reverts on every save, which is this repo's documented silent bug.
+    expect(asPatch({ feedbackPassEnabled: 'yes' })).toEqual({});
+  });
+
   it('refuses the collections that have their own sanitising handlers', () => {
     // `projects` and `shellProfiles` go through ProjectsSave / ProfilesSave, which rebuild dependent
     // state. Slipping them in here would change the list without rebuilding the monitors.

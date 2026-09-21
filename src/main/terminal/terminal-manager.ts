@@ -776,6 +776,21 @@ export class TerminalManager {
     return id;
   }
 
+  /**
+   * Whether a tab of this action is open **and its process is still alive**.
+   *
+   * Public where `findActionSession` is private, because the answer and not the session is what a
+   * caller outside this class can act on. The feedback gate asks it about the ticket handoff's own tab:
+   * that tab holds the worktree, and a second agent on one worktree is the outcome `workActionId`
+   * already calls worse than being blocked.
+   *
+   * `running` and not merely "a tab exists": a finished handoff leaves its scrollback on screen, and
+   * refusing on a tab nobody is using any more would be refusing for ever.
+   */
+  isActionRunning(projectId: ProjectId, actionId: string): boolean {
+    return this.findActionSession(projectId, actionId)?.session.running === true;
+  }
+
   private findActionSession(projectId: ProjectId, actionId: string): Entry | undefined {
     return [...this.entries.values()].find(
       (entry) => entry.session.projectId === projectId && entry.session.actionId === actionId,

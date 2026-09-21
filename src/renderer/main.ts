@@ -9,6 +9,7 @@ import type {
   JiraState,
   TriageHandoff,
   TriageState,
+  AutoRunRecord,
   JiraViewId,
   Project,
   ProjectId,
@@ -58,7 +59,7 @@ import {
 } from './ui/jira-list.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
-import { renderPullList } from './ui/pull-list.js';
+import { findRun, renderPullList } from './ui/pull-list.js';
 import { renderReviewOverview } from './ui/review-overview.js';
 import { renderWorktreeList } from './ui/worktree-list.js';
 import type { TagPalette } from './ui/tags.js';
@@ -144,6 +145,8 @@ class App {
   /** Single-flight state for the worktree read. See {@link singleFlight}. */
   private readonly worktreesFlight: Flight = idleFlight();
   private triage: TriageState | null = null;
+  /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
+  private autoRuns: AutoRunRecord[] = [];
   private triagePanel: TriagePanel | null = null;
   private selectedJiraView: JiraViewId = 'mine';
   /*
@@ -318,6 +321,16 @@ class App {
       // the two things that can change what that column says. Before the column stopped being its own
       // `gh pr view` per project, this push only concerned the Pull requests tab.
       this.renderTable();
+    });
+    window.api.onAutoRunsChanged((records) => {
+      this.autoRuns = records;
+      this.renderPulls();
+    });
+    void window.api.refreshAutoRuns().then((records) => {
+      // Read once at start-up rather than waited for: the first pull request poll is up to three
+      // minutes away, and a row that says nothing for three minutes reads as a feature that is off.
+      this.autoRuns = records;
+      this.renderPulls();
     });
     window.api.onJiraChanged((state) => {
       this.jira = state;
@@ -752,6 +765,28 @@ class App {
     }
   }
 
+  /** The unattended run a pull request came from, matched the way the row's note is. */
+  private runFor(number: number): AutoRunRecord | undefined {
+    const slug = this.pulls.find((repo) => repo.projectId === this.selectedRepo)?.slug ?? null;
+    return findRun(this.autoRuns, slug, number);
+  }
+
+  /**
+   * Starts a feedback pass by hand, and focuses it.
+   *
+   * Focused like every other handoff: the session prints what it is doing and can stop on a question,
+   * and a tab created behind the current one is one nobody reads.
+   */
+  private async startFeedbackPass(ticketKey: string): Promise<void> {
+    const { terminalId, result } = await window.api.runFeedbackPass(ticketKey);
+    this.stampMessage(result.message);
+    if (terminalId === null) {
+      console.warn('[feedback]', result.message);
+      return;
+    }
+    await this.focusTerminal(terminalId);
+  }
+
   /**
    * Runs the ticket's `dev` alias in a terminal tab and brings it forward.
    *
@@ -863,6 +898,7 @@ class App {
       this.pullScope,
       this.tagPalette(),
       this.pullReview,
+      this.autoRuns,
       {
         onSelectPull: (number) => {
           this.selectedPull = number;
@@ -881,6 +917,28 @@ class App {
               run: () => {
                 if (projectId !== null) {
                   void this.setPullDraft(projectId, pull.number, !pull.isDraft);
+                }
+              },
+            },
+            /*
+             * The way back from a pass that died with its tab.
+             *
+             * A gesture and never a rule: the phase is what stops the watcher looping, so nothing may
+             * clear it automatically, but a tab closed by mistake would otherwise burn the pull
+             * request for good and the first failure would be indistinguishable from a feature that
+             * does not work. Same judgement that made `Run` a restart rather than a no-op.
+             */
+            {
+              label: 'Run the feedback pass',
+              hint:
+                this.runFor(pull.number) === undefined
+                  ? 'Only for a pull request an unattended run opened'
+                  : 'Opens a session that treats the review comments, replies, and announces it once',
+              disabled: this.runFor(pull.number) === undefined,
+              run: () => {
+                const record = this.runFor(pull.number);
+                if (record !== undefined) {
+                  void this.startFeedbackPass(record.ticketKey);
                 }
               },
             },

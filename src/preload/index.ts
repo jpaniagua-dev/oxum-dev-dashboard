@@ -16,6 +16,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type AutoRunRecord,
   type TriageHandoff,
   type TriageMode,
   type TriageState,
@@ -205,6 +206,19 @@ const api: RendererApi = {
 
   startInJira: (issueKeys: string[]): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.TriageStartInJira, issueKeys),
+
+  runFeedbackPass: (
+    ticketKey: string,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
+    ipcRenderer.invoke(IpcChannel.FeedbackPass, ticketKey),
+
+  refreshAutoRuns: (): Promise<AutoRunRecord[]> => ipcRenderer.invoke(IpcChannel.AutoRunsRefresh),
+
+  onAutoRunsChanged: (listener: (records: AutoRunRecord[]) => void): (() => void) => {
+    const handler = (_event: unknown, records: AutoRunRecord[]): void => listener(records);
+    ipcRenderer.on(IpcChannel.AutoRunsChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.AutoRunsChanged, handler);
+  },
 
   analyseSprint: (sprintId: number, mode: TriageMode): Promise<TriageState> =>
     ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId, mode),

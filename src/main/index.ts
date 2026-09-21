@@ -14,8 +14,14 @@ import {
   readBotFindings,
   readPatch,
   readPullDetail,
+  readReviewComments,
   readReviews,
 } from './github/gh-review-read.js';
+import { AutoRunStore } from './autorun/auto-run-store.js';
+import { FeedbackWatcher, type FeedbackPorts } from './feedback/feedback-watcher.js';
+import { buildFeedbackCommand } from './feedback/feedback-command.js';
+import { feedbackActionId } from '@shared/contracts.js';
+import { resolveWorkspaceRoot } from './triage/work-command.js';
 import { PullMonitor } from './github/pull-monitor.js';
 import { dismissReview, submitReview, writeReviewBody } from './github/gh-write.js';
 import { readViewerLogin } from './github/viewer.js';
@@ -34,8 +40,9 @@ import { SettingsWindow, SETTINGS_WINDOW_BOUNDS } from './settings-window.js';
 import { AppPaths } from './store/paths.js';
 import { SettingsStore } from './store/settings-store.js';
 import { WindowStateStore } from './store/window-state.js';
-import { detectProfiles, mergeProfiles } from './terminal/shell-profiles.js';
-import { TerminalManager } from './terminal/terminal-manager.js';
+import { basename } from 'node:path';
+import { detectProfiles, mergeProfiles, resolveDefaultProfile } from './terminal/shell-profiles.js';
+import { TerminalManager, resolveShellCommand } from './terminal/terminal-manager.js';
 import { ThemeController } from './theme.js';
 import { DashboardWindow, loadRendererPage, preloadPath } from './window.js';
 
@@ -167,11 +174,50 @@ async function bootstrap(): Promise<void> {
 
   // Its own loop, on its own cadence: one `gh` call per watched repository is minutes-slow work next to
   // a local git read.
+  /*
+   * What the app remembers about each unattended run, and the watcher that rides the pull request poll.
+   *
+   * On that poll and with no timer of its own, deliberately: the payload is the authority on whether a
+   * pull request is still open, so a second cadence would be free to disagree with the state it depends
+   * on.
+   */
+  const autoRuns = new AutoRunStore();
+  await autoRuns.load();
+
+  /**
+   * Opens the tab a feedback pass runs in.
+   *
+   * Assigned once the terminal manager exists, because it is the one thing here that cannot be built
+   * before it. Null until then, and the watcher simply launches nothing, which is the correct state
+   * during start-up: there is no window to bring a session forward into yet.
+   */
+  let spawnFeedbackTab: FeedbackPorts['spawn'] = () => null;
+
+  const feedbackWatcher = new FeedbackWatcher(
+    autoRuns,
+    () => settingsStore.get(),
+    () => projects,
+    {
+      readComments: readReviewComments,
+      viewerLogin: readViewerLogin,
+      isActionRunning: (projectId, actionId) => terminals?.isActionRunning(projectId, actionId) === true,
+      spawn: (input) => spawnFeedbackTab(input),
+      now: () => new Date(),
+    },
+  );
+
   const buildPullMonitor = (): PullMonitor =>
     new PullMonitor(
       projects,
       () => settingsStore.get(),
-      (repos) => dashboardWindow.send(IpcChannel.PullsChanged, repos),
+      (repos) => {
+        dashboardWindow.send(IpcChannel.PullsChanged, repos);
+        // After the broadcast, never before: the list must fill in whatever the watcher then decides,
+        // and the records follow on their own channel once the tick has had its say.
+        void feedbackWatcher
+          .tick(pullMonitor.rows().flatMap((repo) => repo.pulls))
+          .then(() => dashboardWindow.send(IpcChannel.AutoRunsChanged, autoRuns.all()));
+      },
     );
 
   let pullMonitor = buildPullMonitor();
@@ -266,6 +312,28 @@ async function bootstrap(): Promise<void> {
   });
   terminals = terminalManager;
 
+  spawnFeedbackTab = (input) => {
+    const profile = resolveDefaultProfile(
+      mergeProfiles(detectProfiles(), settingsStore.get().shellProfiles),
+      settingsStore.get().defaultShellProfileId,
+    );
+    if (profile === undefined) {
+      return null;
+    }
+    const resolved = resolveShellCommand(profile, input.command);
+    return terminalManager.runProjectCommand({
+      project: input.project,
+      actionId: input.actionId,
+      title: input.title,
+      file: resolved.file,
+      args: resolved.args,
+      size: terminalSize,
+      profileId: profile.id,
+      cwd: input.cwd,
+      onExit: () => input.onExit(),
+    });
+  };
+
   /**
    * Rebuilds everything derived from the project list after a settings change.
    *
@@ -323,6 +391,65 @@ async function bootstrap(): Promise<void> {
     jira: () => jiraMonitor,
     triage: () => triageService,
     pullReview: () => pullReviewService,
+    autoRuns: () => autoRuns,
+    /**
+     * The manual entry point, going through the watcher's own gate.
+     *
+     * It resolves the pull request from the record rather than from the poll, so it still works on a
+     * repository whose poll has not come round yet, and it clears a spent phase: a pass that died with
+     * its tab would otherwise burn the pull request for good, and the first failure would be
+     * indistinguishable from a feature that does not work. The phase is what stops the loop, so only a
+     * gesture may clear it, never a rule.
+     */
+    runFeedbackPass: async (ticketKey) => {
+      const record = autoRuns.get(ticketKey);
+      if (record === undefined || record.prNumber === null) {
+        return { terminalId: null, result: { ok: false, message: 'No pull request known for that ticket' } };
+      }
+      const project = projects.find((entry) => entry.id === record.projectId);
+      if (project === undefined) {
+        return { terminalId: null, result: { ok: false, message: 'That run\'s repository is no longer configured' } };
+      }
+      const settings = settingsStore.get();
+      const command = buildFeedbackCommand(
+        record.prNumber,
+        basename(project.path),
+        settings.agentWorkModel,
+        settings.agentProfile,
+      );
+      if (command.length === 0) {
+        return { terminalId: null, result: { ok: false, message: 'That pull request number is not one' } };
+      }
+      autoRuns.set({ ...record, feedbackPhase: 'passing', feedbackStartedAt: new Date().toISOString() });
+      await autoRuns.write();
+      const terminalId = spawnFeedbackTab({
+        project,
+        actionId: feedbackActionId(record.slug, record.prNumber),
+        title: `${project.label} · PR #${record.prNumber} feedback`,
+        command,
+        cwd: resolveWorkspaceRoot(settings.workspaceRoot, project.path),
+        onExit: () => {
+          const latest = autoRuns.get(ticketKey);
+          if (latest !== undefined && latest.feedbackPhase === 'passing') {
+            autoRuns.set({
+              ...latest,
+              feedbackPhase: 'done',
+              feedbackFinishedAt: new Date().toISOString(),
+              notice: 'Feedback pass finished',
+            });
+            void autoRuns.write();
+          }
+        },
+      });
+      dashboardWindow.send(IpcChannel.AutoRunsChanged, autoRuns.all());
+      return {
+        terminalId,
+        result:
+          terminalId === null
+            ? { ok: false, message: 'Could not open the tab' }
+            : { ok: true, message: `Treating the feedback on #${record.prNumber}` },
+      };
+    },
     jiraConfig,
     saveJiraToken: async (token) => {
       const result = await secrets.write(token);

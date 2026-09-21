@@ -198,6 +198,7 @@ export class SettingsForm {
   private agentModels: AgentModelDrafts = { analysis: '', work: '', commit: '', review: '' };
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
+  private feedbackPass = false;
   private botLogin = '';
   /** The agent profile being edited. Its own copy: the form must not mutate what the app renders from. */
   private agent: AgentProfile = CLAUDE_CODE_PROFILE;
@@ -251,6 +252,7 @@ export class SettingsForm {
       review: settings.agentReviewModel,
     };
     this.reviewWrites = settings.reviewWritesEnabled;
+    this.feedbackPass = settings.feedbackPassEnabled;
     this.botLogin = settings.geminiBotLogin;
     this.agent = { ...settings.agentProfile };
     this.agentStatus = '';
@@ -419,8 +421,14 @@ export class SettingsForm {
         name: 'Pull request review',
         // The state names the consequence, not the value: "on" would be a word nobody weighs, while
         // "posts as you" is the sentence that makes somebody think before leaving it on.
-        state: this.reviewWrites ? 'posts to GitHub as you' : 'reads only',
-        tone: this.reviewWrites ? 'warn' : 'neutral',
+        // The louder of the two wins the line: an agent that starts on its own is the bigger claim,
+        // and a rail reading "reads only" beside it would be false.
+        state: this.feedbackPass
+          ? 'starts agents on its own'
+          : this.reviewWrites
+            ? 'posts to GitHub as you'
+            : 'reads only',
+        tone: this.feedbackPass || this.reviewWrites ? 'warn' : 'neutral',
       },
       {
         id: 'section-jira',
@@ -678,6 +686,29 @@ export class SettingsForm {
         this.renderRail();
       }),
     );
+
+    /*
+     * A second switch, and not a line under the first.
+     *
+     * They grant different things, and the difference is the whole reason there are two. The one above
+     * lets this app write as you, on a click you made. This one lets an agent start **by itself**, on
+     * a poll, with nobody at the keyboard, push to a branch and speak in a team channel. Folding them
+     * into one would grant the second to everyone who wanted the first.
+     */
+    const pass = this.checkbox(
+      'Let an agent treat pull request feedback on its own',
+      this.feedbackPass,
+      (checked) => {
+        this.feedbackPass = checked;
+        this.touch();
+        this.renderRail();
+      },
+    );
+    pass.title =
+      'When a pull request an unattended run opened receives review comments, open a session that ' +
+      'fixes them, replies in the threads and announces it once. One pass per pull request, and ' +
+      'nothing starts on what arrives after it.';
+    this.hosts.review.append(pass);
 
     const login = this.field(
       'Automated reviewer login',
@@ -1592,6 +1623,7 @@ export class SettingsForm {
       agentCommitModel: this.agentModels.commit,
       agentReviewModel: this.agentModels.review,
       reviewWritesEnabled: this.reviewWrites,
+      feedbackPassEnabled: this.feedbackPass,
       geminiBotLogin: this.botLogin,
       agentProfile: this.agent,
       tagColors: this.tagColors,
@@ -1608,6 +1640,7 @@ export class SettingsForm {
       review: saved.agentReviewModel,
     };
     this.reviewWrites = saved.reviewWritesEnabled;
+    this.feedbackPass = saved.feedbackPassEnabled;
     // Read back like the models: the store falls back to the default login when the field is blanked,
     // so leaving the empty string on screen would show a setting that is not the one in force.
     this.botLogin = saved.geminiBotLogin;

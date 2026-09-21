@@ -1015,6 +1015,24 @@ body {
   font-size: var(--font-sm);
 }
 
+/*
+ * What the feedback watcher has to say about a row.
+ *
+ * Faint and uncoloured, unlike every pill after it: those claim something about the pull request,
+ * this one reports what this app did or refused to do, which is a smaller voice. Wider than the
+ * author beside it because a refusal is a sentence rather than a name, and truncated for the same
+ * reason the author is: a row that grows with its text pushes the pills off the end.
+ */
+.pull__run-note {
+  flex: none;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+}
+
 /* Sits under the view list, separated from it so it does not read as a third view. */
 .jira__board {
   margin-top: 8px;

@@ -1574,6 +1574,115 @@ user's own identity, on a colleague's work.
   on the call site** (see the context menu section below): the `stopPropagation` here is kept because
   it also stops the click travelling past the row, not because the menu needs it.
 
+## Watching an unattended run's pull request
+
+- **The app watches and launches; the agent reads, fixes, replies and announces.** The same dividing
+  line the unattended handoff draws, applied one step later. `gh-write.ts` holds no comment write and
+  will not grow one, because the judgement each remark needs, apply it or say in the thread why it was
+  not applied, is not a judgement a watcher can make. What the app contributes is a pull request
+  number, a skill name, and the promise that it will not do it twice.
+- **The pull request is found by a JOIN, never by a call.** Nothing here observes the agent running
+  `gh pr create`, but `gh pr list` already returns `headRefName` and `authorLogin` for every open pull
+  request of every followed repository, so the match is arithmetic on a payload the poll just produced.
+  Same trick the Worktrees tab's `PR checks` column is built on: no call, no channel, no cost.
+- **Matched on the ticket key plus its separator, not on the branch.** The app never learns the branch,
+  the skill invents the kebab half of it, so the key is the only part of the name this side knows. The
+  trailing dash is what makes the prefix safe, `TEC-12-` not being a prefix of `TEC-123-`. The branch is
+  then **learned** from the match and stored, which is what the merge watcher will need. ⚠️ This is the
+  weakest link in the chain and knowingly so: the convention is the skill's, so a renamed branch breaks
+  the match in silence. That is why "not matched yet" is a stored state (`prMatchedAt`) and not an
+  absent field.
+- **One pass per pull request, and the PHASE holds that, never the head sha and never the comment
+  ids.** Every fix the agent pushes mints a new head and every reply it posts mints a higher comment
+  id, so both of the obvious keys degenerate into relaunching an agent on its own output. The phase
+  leaves `watching` exactly once, and the gate refuses on `passing` and `done` alike, so the loop is
+  closed at spawn time and never depends on the pty's exit arriving.
+- **The phase is flushed to disk BEFORE the tab is spawned, and the write is awaited.** Recording
+  afterwards leaves a window in which the file says `watching` while an agent runs, and the next poll
+  is three minutes away: two agents on one worktree, which `workActionId`'s own note already calls the
+  outcome worse than being blocked.
+- **The watermark is a single max id, and it matters after the pass as much as before.** Comment ids
+  are globally increasing, so "greater than what I have seen" is a total order that says exactly what a
+  set of treated ids would say, in eight bytes rather than an unbounded list that would need pruning.
+  Without it the row would report the same three comments at every poll for the rest of its life. The
+  one case it misses, a pending review whose comment id predates the mark, costs a **notification** and
+  never a fix, because nothing can start once the phase is `done`.
+- **The agent's own replies are excluded by the viewer login, so an empty login blocks the feature.**
+  The token is Julio's, so everything the agent posts comes back authored by the viewer, and one
+  comparison is the entire exclusion: no marker, no HTML comment, no convention to keep in step.
+  With an empty login that comparison is false for every row, the pass reads its own replies as
+  feedback, and the loop the phase exists to prevent returns through the other door. Refused in the
+  gate **and** in `newFeedback`, belt and braces, because a future caller that forgets the gate must
+  still not be able to start it. Accepted corollary, stated rather than discovered: a comment **you**
+  type on your own pull request is indistinguishable from one the agent posted, and starts nothing.
+- **`readViewerLogin` caches a success and no longer caches a failure.** An empty login held for the
+  life of the process used to be a refusal you noticed on a click; it is now a silent refusal every
+  poll, so one slow `gh` at start-up would have turned the feature off until the app was restarted.
+- **Inline comments only, and `/issues/{n}/comments` is still never called.** One endpoint, one call
+  per tracked pull request per poll, with the bot's subset obtained by filtering rather than by asking
+  twice. ⚠️ **The named blind spot**: a reviewer who submits `CHANGES_REQUESTED` with a body and no
+  inline comment produces zero rows here, and that is the strongest feedback there is. Out of scope
+  deliberately, reading the reviews as well would double the cost and add a second watermark axis, and
+  written down because the miss is silent and reads as a broken watcher.
+- **`ReviewComment` is a sibling of `BotFinding`, not a widening of it.** `BotFinding` is persisted in
+  `pull-reviews.json` and parsed back with the rule that an incomplete row is dropped rather than
+  repaired, so four new required fields would quietly empty the bot findings of every review ever
+  stored. The deeper reason is that they are about different things: a finding is input to a prompt and
+  anonymous on purpose, a comment is an identity to watermark against. `sameLogin` is shared, though,
+  and `isBotLogin` now calls it: two copies of the `[bot]`-folding rule would drift, and the drift would
+  be a watcher reading its own replies as somebody else's.
+- **A comment with no numeric id is skipped, and an absent `in_reply_to_id` reads `null` and never
+  `0`.** The first because a comment that cannot be watermarked is one the watcher rediscovers as new
+  for ever; the second because 0 is a legal watermark, so a thread root reported as 0 would read as a
+  reply to whatever was seen first.
+- **An unknown phase on disk reads `done`, which is the opposite of the house fallback.** An unknown
+  verdict reads `unclear` because a verdict only describes; a phase **authorises**, so its safe reading
+  is the one that authorises least. Dropping the row instead would be worse twice over: the merge
+  watcher loses its port and branch, and the pull request goes untracked until the join re-creates it
+  in `watching`, which is a corrupt byte re-arming a pass.
+- **`feedbackPassEnabled` gates this, and `reviewWritesEnabled` deliberately does not.** That switch
+  means "may this app write to GitHub as you", and on this path the app writes nothing at all. What is
+  granted here is larger and of another kind: an agent starting **by itself**, on a poll, with no click
+  anywhere. Every other agent run in this app begins with a button; this is the one that does not,
+  which is the whole argument for its own line. Off by default, and the settings rail says "starts
+  agents on its own" the moment it is ticked.
+- **The watcher rides the pull request poll and has no timer.** The payload is the authority on whether
+  a pull request is still open, so one that has left it must stop being watched; a second cadence would
+  be free to disagree with the state it depends on. A plain `busy` flag rather than `singleFlight`,
+  whose trailing re-run would start a second agent, the same reason `PullReviewService` keeps a bare
+  `running` boolean. It never throws either: it rides another feature's poll, and a throw here would
+  take the pull request list down with it.
+- **`advanceRun` returns `null` for "nothing moved"**, the rule `applyLiveToTickets` set, so a spent
+  pull request does not rewrite `auto-runs.json` every three minutes. It also refuses to advance the
+  watermark while a pass is in flight: a pass that has not finished has accounted for nothing, and
+  moving the mark under it would lose the very comments it was started for.
+- **Two refusals from `review-gate.ts` are deliberately absent, and both will tempt the next reader.**
+  `postable` is **inverted** here: the review refuses your own pull request because GitHub rejects the
+  write, whereas this feature exists precisely for the pull requests an unattended run opened under
+  your name. And `headMoved` has no meaning: a fix push is the expected outcome of a pass, not a race.
+  Both are pinned by test, the first by name.
+- **A pass that failed is re-runnable by a gesture and never by a rule.** The phase is what stops the
+  loop, so nothing may clear it automatically; but a tab closed by mistake, or a profile without the
+  skill, would otherwise burn the pull request for good, and the first failure would be
+  indistinguishable from a feature that does not work. `runFeedbackPass` is that gesture, and it goes
+  through the same gate the watcher uses, so a click cannot do what a poll is refused.
+- **Thread resolution is the skill's business if it is anybody's**, and the skill is told not to.
+  Resolving asserts the matter is settled, which is the same class of act as approving, and it is
+  exactly the assertion the escalation rule forbids for the remarks the agent must not decide alone. It
+  would also be the first GraphQL in this codebase, the REST payload carrying a comment's node id and
+  not a thread's. The recap says how many threads were left open on purpose, which is the information
+  resolution would have carried, for nothing.
+- **The row says what the watcher decided, faintly and before the pills.** Every refusal this feature
+  can produce is a way for a row to sit there doing nothing, and a fact recorded on disk that nobody
+  can read is the failure this whole section argues against. `describeRun` puts the notice first and
+  the refusal only in its absence: a row showing both would ask its reader to work out which of the
+  two is current. Uncoloured, unlike the pills after it, because those claim something about the pull
+  request while this one reports what this app did.
+- **The records travel on their own channel, and are read once at start-up.** `AutoRunsChanged` fires
+  after the watcher's tick, never before, so the list paints the poll and then what the tick made of
+  it. `AutoRunsRefresh` exists because the first poll is up to three minutes away, and a row that says
+  nothing for three minutes reads as a feature that is off.
+
 ## Servers window: terminals in a second window
 
 - **Ownership is a fact of the LAYOUT, decided in `TerminalManager`.** `setLayout` and `syncLayout`

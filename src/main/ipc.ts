@@ -29,6 +29,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type AutoRunRecord,
   type TriageHandoff,
   type TriageState,
   type ProjectValidation,
@@ -59,7 +60,7 @@ import {
 } from './git/git-commands.js';
 import { generateCommitMessage } from './git/generate-commit.js';
 import { branchNameFor } from '@shared/branch-name.js';
-import { readGitState } from './git/git-service.js';
+import { readGitState, readRemoteSlug } from './git/git-service.js';
 import { readRepoWorktrees } from './git/git-worktrees.js';
 import { GIT_PTY_FILE } from './git/run-git.js';
 import { readAllWorktrees } from './git/git-worktrees.js';
@@ -96,6 +97,7 @@ import { buildHeadlessCommand, describeCommand, readProfile } from '@shared/agen
 import { AGENT_TEST_TIMEOUT_MS, runAgent } from './agent/run-agent.js';
 import { findFreePort, withPort } from './projects/free-port.js';
 import type { PullReviewService } from './review/review-service.js';
+import type { AutoRunRecords } from './autorun/auto-run-store.js';
 import type { TriageService } from './triage/triage-service.js';
 import { buildWorkCommand, resolveWorkspaceRoot } from './triage/work-command.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
@@ -112,6 +114,11 @@ export interface IpcDependencies {
   readonly jira: () => JiraMonitor;
   readonly triage: () => TriageService;
   readonly pullReview: () => PullReviewService;
+  readonly autoRuns: () => AutoRunRecords;
+  /** Starts a feedback pass by hand, through the same gate the watcher uses. */
+  readonly runFeedbackPass: (
+    ticketKey: string,
+  ) => Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   /** Writes the Jira token to the encrypted store. Never reads it back towards the renderer. */
   readonly saveJiraToken: (token: string) => Promise<{ ok: boolean; message: string }>;
   readonly jiraConfig: () => JiraConfig;
@@ -983,6 +990,45 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         profileId: profile.id,
         cwd,
       });
+
+      /*
+       * An unattended run is remembered, an asking one is not.
+       *
+       * Only the first opens a pull request nobody will be watching, which is the thing the record
+       * exists to follow. The branch and the number are deliberately absent here: the skill invents
+       * the branch and GitHub mints the number, so both are learned later from the pull request poll
+       * rather than guessed now. An existing record is left alone, a second handoff on one ticket
+       * being a retry rather than a new run.
+       */
+      if (mode === 'auto' && terminalId !== null) {
+        const slug = await readRemoteSlug(project.path);
+        let added = false;
+        for (const key of keys) {
+          if (deps.autoRuns().get(key) === undefined) {
+            deps.autoRuns().set({
+              ticketKey: key,
+              projectId: project.id,
+              slug: slug ?? '',
+              branch: '',
+              port: null,
+              prNumber: null,
+              prMatchedAt: null,
+              feedbackPhase: 'watching',
+              lastSeenCommentId: 0,
+              feedbackStartedAt: null,
+              feedbackFinishedAt: null,
+              pendingCount: 0,
+              notice: null,
+              lastRefusal: null,
+            });
+            added = true;
+          }
+        }
+        if (added) {
+          await deps.autoRuns().write();
+        }
+      }
+
       return {
         terminalId,
         result:
@@ -1014,6 +1060,29 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
    * what keeps this carrying nothing but issue keys while still writing a number somebody will plan
    * against: the value was produced by the pass that read the description, not invented at click time.
    */
+  /**
+   * Starts a feedback pass by hand.
+   *
+   * Through the same service method the watcher uses, and therefore through the same gate: a pass
+   * started by a click must not be able to do what a watched one is refused, or the gate stops being
+   * the answer to "may this run" and becomes one of two answers.
+   */
+  ipcMain.handle(
+    IpcChannel.FeedbackPass,
+    async (
+      _event,
+      ticketKey: unknown,
+    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      const key = typeof ticketKey === 'string' ? ticketKey.trim().toUpperCase() : '';
+      if (!ISSUE_KEY_PATTERN.test(key)) {
+        return { terminalId: null, result: { ok: false, message: 'No valid issue key' } };
+      }
+      return deps.runFeedbackPass(key);
+    },
+  );
+
+  ipcMain.handle(IpcChannel.AutoRunsRefresh, (): AutoRunRecord[] => deps.autoRuns().all());
+
   ipcMain.handle(
     IpcChannel.TriageStartInJira,
     async (_event, issueKeys: unknown): Promise<GitResult> => {

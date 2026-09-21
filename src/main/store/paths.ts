@@ -41,6 +41,14 @@ export const AppPaths = {
    */
   pullReviews: (): string => join(app.getPath('userData'), 'pull-reviews.json'),
   /**
+   * What the app remembers about each ticket handed to an unattended run.
+   *
+   * Its own file for the reasons the two above have one, plus the one that makes it load bearing: it
+   * holds the phase that stops a feedback pass running twice. Losing it would not lose a preference,
+   * it would re-arm an agent on a pull request that has already had its pass.
+   */
+  autoRuns: (): string => join(app.getPath('userData'), 'auto-runs.json'),
+  /**
    * Bodies posted to pull requests, one file per review.
    *
    * Written before the post and **kept after it**, exactly like a commit message and for the same

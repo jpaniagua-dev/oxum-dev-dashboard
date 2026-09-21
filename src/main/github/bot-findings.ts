@@ -11,16 +11,27 @@ import type { BotFinding } from '@shared/contracts.js';
  */
 
 /**
- * Both spellings of the bot's login.
+ * Two logins naming the same account, whichever way GitHub spelled them.
  *
- * GitHub reports an App author with the `[bot]` suffix in some payloads and without it in others.
- * Matching one of the two returns zero findings, which looks **exactly** like a pull request the bot
- * has not reached yet: a silent failure with a plausible explanation, which is the worst kind.
+ * GitHub reports an App author with the `[bot]` suffix in some payloads and without it in others, so
+ * the comparison folds the suffix and the case. An empty login never matches anything, which is not
+ * a detail: an empty one means "we do not know who we are", and answering `true` there would make
+ * everything look like us.
+ *
+ * One implementation and two readings. `isBotLogin` asks "is this the review bot"; the feedback
+ * watcher asks "is this comment one of our own replies", which is the same question about a different
+ * account. Two copies of the folding rule would drift, and the drift would be a watcher reading its
+ * own replies as somebody else's feedback.
  */
+export function sameLogin(a: string, b: string): boolean {
+  const left = a.replace(/\[bot\]$/i, '').toLowerCase();
+  const right = b.replace(/\[bot\]$/i, '').toLowerCase();
+  return left.length > 0 && left === right;
+}
+
+/** Whether a comment's author is the configured review bot. Reads as its own question at call sites. */
 export function isBotLogin(login: string, configured: string): boolean {
-  const bare = configured.replace(/\[bot\]$/i, '').toLowerCase();
-  const seen = login.replace(/\[bot\]$/i, '').toLowerCase();
-  return bare.length > 0 && bare === seen;
+  return sameLogin(login, configured);
 }
 
 /**

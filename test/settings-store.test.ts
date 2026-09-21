@@ -72,6 +72,32 @@ describe('sanitizeSettings: terminal font size', () => {
   });
 });
 
+describe('sanitizeSettings: the two GitHub switches', () => {
+  it('leaves both off when nothing says otherwise', () => {
+    // Off is what guarantees that installing an update cannot post anything, or start an agent, before
+    // its owner has said once that the feature may exist.
+    const settings = sanitizeSettings({});
+
+    expect(settings.reviewWritesEnabled).toBe(false);
+    expect(settings.feedbackPassEnabled).toBe(false);
+  });
+
+  it('turns the feedback pass on only from an explicit true', () => {
+    expect(sanitizeSettings({ feedbackPassEnabled: true }).feedbackPassEnabled).toBe(true);
+    // A hand-edited file saying "yes" must not start an agent on a poll.
+    expect(sanitizeSettings({ feedbackPassEnabled: 'yes' }).feedbackPassEnabled).toBe(false);
+    expect(sanitizeSettings({ feedbackPassEnabled: 1 }).feedbackPassEnabled).toBe(false);
+  });
+
+  it('keeps the two switches independent', () => {
+    // One says the app may write as you, the other says an agent may start by itself. Neither implies
+    // the other, and a reader who assumed it would grant twice what was turned on.
+    const settings = sanitizeSettings({ reviewWritesEnabled: true });
+
+    expect(settings.feedbackPassEnabled).toBe(false);
+  });
+});
+
 describe('sanitizeSettings', () => {
   it('migrates a whole stored project list to actions', () => {
     const settings = sanitizeSettings({

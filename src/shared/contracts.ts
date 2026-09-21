@@ -473,6 +473,22 @@ export function workActionId(issueKeys: readonly string[]): string {
 }
 
 /**
+ * Action id **prefix** of the tabs where a pull request's review feedback is treated.
+ *
+ * Its own prefix and deliberately never `workActionId`'s. `runProjectCommand` hands back a tab of the
+ * same id instead of spawning a second one, which is right for two clicks on one ticket and wrong
+ * here: a feedback pass sharing the ticket's id would land silently inside a live ticket session, the
+ * prompt never running and the only symptom being a session that ignored you. The property that keeps
+ * two agents off one worktree is held by the gate, not by the id.
+ */
+export const FEEDBACK_ACTION_ID = `${RESERVED_ACTION_PREFIX}pr-feedback`;
+
+/** The tab a feedback pass belongs to: one per pull request, reused rather than doubled. */
+export function feedbackActionId(slug: string, number: number): string {
+  return `${FEEDBACK_ACTION_ID}:${slug}#${number}`;
+}
+
+/**
  * Action id of the tab that runs the worktree helper from the Worktrees tab.
  *
  * Reserved like the three above, so a settings save cannot close a removal mid-run. One id for the
@@ -1351,6 +1367,67 @@ export interface TriageState {
 }
 
 /* ------------------------------------------------------------------ *
+ * Unattended runs
+ * ------------------------------------------------------------------ */
+
+/**
+ * How far the one feedback pass a pull request gets has come.
+ *
+ * The loop is closed here and nowhere else. Every fix the agent pushes mints a new head and every
+ * reply it posts mints a higher comment id, so a rule keyed on either degenerates into relaunching an
+ * agent on its own output. The phase leaves `watching` exactly once, and the gate refuses on `passing`
+ * and `done` alike, so safety never depends on the pty's exit event arriving.
+ */
+export type FeedbackPhase = 'watching' | 'passing' | 'done';
+
+export const FEEDBACK_PHASES: readonly FeedbackPhase[] = ['watching', 'passing', 'done'];
+
+/**
+ * What the app remembers about one ticket handed to an unattended run.
+ *
+ * Keyed by ticket key and not by `owner/repo#12`, because the record exists **before** the pull
+ * request does: the run is started from a ticket, and the number arrives later through a join on the
+ * pull request poll. Keying on the pull request would leave the window that matters most unnamed.
+ */
+export interface AutoRunRecord {
+  /** The ticket the run was started on. The record's identity. */
+  readonly ticketKey: string;
+  readonly projectId: ProjectId;
+  /** `owner/repo`, kept on the record so it survives the project leaving the configuration. */
+  readonly slug: string;
+  readonly branch: string;
+  /** The dev server the run started, so the merge watcher can stop it. `null` when it started none. */
+  readonly port: number | null;
+  /**
+   * `null` until the branch join finds the pull request.
+   *
+   * A real state rather than a missing field: nothing in this app observes the agent running
+   * `gh pr create`, so "not opened yet" and "the join never matched" are different problems and the
+   * pair with `prMatchedAt` is what tells them apart.
+   */
+  readonly prNumber: number | null;
+  readonly prMatchedAt: string | null;
+  readonly feedbackPhase: FeedbackPhase;
+  /**
+   * The highest review-comment id accounted for.
+   *
+   * A watermark and not a set of treated ids: GitHub's comment ids are a globally increasing counter,
+   * so `id > watermark` is a total order that says exactly what a set says, in eight bytes rather than
+   * an unbounded list that would then need pruning. It matters **after** the pass as much as before,
+   * since without it the row reports the same three comments at every poll for the rest of its life.
+   */
+  readonly lastSeenCommentId: number;
+  readonly feedbackStartedAt: string | null;
+  readonly feedbackFinishedAt: string | null;
+  /** Comments that arrived once the pass was spent. The number the row shows, and nothing starts on it. */
+  readonly pendingCount: number;
+  /** The sentence the row shows. A stored fact rather than a toast, this app having no toast to lose. */
+  readonly notice: string | null;
+  /** The gate's own sentence. A row saying only "nothing started" sends its reader to the source. */
+  readonly lastRefusal: string | null;
+}
+
+/* ------------------------------------------------------------------ *
  * Worktrees
  * ------------------------------------------------------------------ */
 
@@ -1618,6 +1695,17 @@ export interface AppSettings {
    * reached yet. Both spellings are matched, with and without the `[bot]` suffix.
    */
   geminiBotLogin: string;
+  /**
+   * Whether the app may start a feedback pass on its own, off by default.
+   *
+   * A switch of its own and deliberately not `reviewWritesEnabled`, which means "may this app write
+   * to GitHub as you": on this path the app writes nothing at all, the agent it spawns does. What is
+   * granted here is larger and of another kind, an agent starting **by itself**, on a poll, with no
+   * click anywhere, pushing to a branch and speaking in a team channel. Every other agent run in this
+   * app begins with a button; this is the one that does not, which is the whole argument for its own
+   * line.
+   */
+  feedbackPassEnabled: boolean;
   /**
    * Watched projects.
    *
@@ -1969,6 +2057,28 @@ export const IpcChannel = {
    * process rather than travelling, so it is always the current one.
    */
   TriageStartInJira: 'triage:start-in-jira',
+  /**
+   * invoke: (ticketKey) => { terminalId, result }
+   *
+   * Opens a session that treats the review feedback on the pull request an unattended run produced.
+   * The **manual** entry point, the watcher calling the same service method directly; both go through
+   * one gate so a hand-started pass cannot do what a watched one is refused.
+   *
+   * It carries the record key and nothing else. The slug, the number, the project and the repository
+   * name are resolved from `auto-runs.json` in the main process, the rule `TriageStartInJira` already
+   * follows: a copy pushed through a channel is stale from the moment it is made.
+   */
+  FeedbackPass: 'feedback:pass',
+  /**
+   * on: (records: AutoRunRecord[]) => void
+   *
+   * Pushed after every poll that moved one. The rows carry what the watcher decided, and a decision
+   * nobody can read is indistinguishable from a bug: that is the whole reason this channel exists
+   * rather than the records living only on disk.
+   */
+  AutoRunsChanged: 'auto-runs:changed',
+  /** invoke: () => AutoRunRecord[], for the first paint, before any poll has come round */
+  AutoRunsRefresh: 'auto-runs:refresh',
   /** on: (state: TriageState) => void, pushed when the sprint list, a result or the running flag moves */
   TriageChanged: 'triage:changed',
   /** invoke: () => TriageState, re-reads the sprints from Jira and returns the stored results */
@@ -2114,6 +2224,10 @@ export interface RendererApi {
     handoff: TriageHandoff,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   startInJira(issueKeys: string[]): Promise<GitResult>;
+  /** Treats the review feedback on the pull request an unattended run opened, by hand. */
+  runFeedbackPass(ticketKey: string): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
+  refreshAutoRuns(): Promise<AutoRunRecord[]>;
+  onAutoRunsChanged(listener: (records: AutoRunRecord[]) => void): () => void;
   /**
    * Runs the analysis on one sprint.
    *

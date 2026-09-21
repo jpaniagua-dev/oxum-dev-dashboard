@@ -87,6 +87,9 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.reviewWritesEnabled === 'boolean') {
     patch.reviewWritesEnabled = input.reviewWritesEnabled;
   }
+  if (typeof input.feedbackPassEnabled === 'boolean') {
+    patch.feedbackPassEnabled = input.feedbackPassEnabled;
+  }
   if (typeof input.geminiBotLogin === 'string') patch.geminiBotLogin = input.geminiBotLogin;
   // Validated by the store, which is the single place that decides what a profile is. Accepted here
   // as typed, like the model names above and for the same reason: two answers to "is this valid" is

@@ -86,6 +86,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentReviewModel: '',
   reviewWritesEnabled: false,
   geminiBotLogin: 'gemini-code-assist[bot]',
+  feedbackPassEnabled: false,
   // Empty on purpose: an empty list triggers the one-time seeding in `index.ts`, whereas a hardcoded
   // default here would come back every time the user deleted a project.
   projects: [],
@@ -224,6 +225,9 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     // Anything but an explicit `true` is off. A file hand-edited to `"yes"` must not turn on
     // the one setting that lets this app write to somebody else's pull request.
     reviewWritesEnabled: input.reviewWritesEnabled === true,
+    // Only an explicit `true`, like the switch above it and for a stronger reason: this one lets an
+    // agent start with nobody clicking anything, so a hand-edited "yes" must not turn it on.
+    feedbackPassEnabled: input.feedbackPassEnabled === true,
     geminiBotLogin:
       typeof input.geminiBotLogin === 'string' && input.geminiBotLogin.trim().length > 0
         ? input.geminiBotLogin.trim()
