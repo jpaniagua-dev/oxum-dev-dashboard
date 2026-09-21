@@ -1120,6 +1120,25 @@ user's own identity, on a colleague's work.
   from a triage reads exactly like a sprint that does not contain it, which is the one failure
   nobody would notice. Same reasoning for an unknown verdict: it falls back to `unclear`, the honest
   statement being "this was not classified".
+- **`readResult` normalises through the same functions a fresh answer goes through, and the cast is
+  gone.** The verdict read off disk was `entry['verdict'] as TriageVerdict` with nothing but a
+  `typeof` behind it, so the file could put any string into an exhaustive lookup and render
+  `undefined` under a heading nobody computed. Disk and model answer are the same untrusted string,
+  and validating them differently is how one of the two starts lying, which is the rule
+  `nearestStoryPoints` had already recorded one line below. `readResult` is exported and tested for
+  that reason, and it is the **only door** a stale shape comes through: `carried`, in an incremental
+  run, reads a store nothing else fills.
+- **A stored `"backend"` migrates itself, and writing a mapping for it would be the mistake.** After
+  the split it is a verdict nobody defines, so it lands on `unclear` by the rule above, and its
+  `reason` survives untouched, which is where the information actually was. `ready` plus a backend
+  domain would claim a judgement no run ever made, and would drop those rows straight into the batch
+  button; `blocked` would be right for the half of the population that was a blocker and invented for
+  the half that was server work, and nothing on disk tells the two apart. The accepted cost is that
+  those rows sit under `Unclear` until the sprint is analysed again, which is this tab's remedy for
+  everything.
+- **A row with no verdict is no longer dropped.** Only a missing `key` still removes it, a row with
+  no key being one that cannot be worked, dismissed or refreshed. The verdict half of that guard was
+  the same silent deletion the paragraph above forbids.
 - **A ticket already in progress is never analysed.** The tab answers "what can I start", and a
   ticket somebody is on has had that question answered by the fact of being started: paying a model
   to classify it buys a verdict nobody will act on, and it pushes what matters down a list capped by
@@ -1204,9 +1223,63 @@ user's own identity, on a colleague's work.
   single process and a single file.
 - **`/browse/<KEY>` comes from `boardUrl`, shared with the Jira tab.** Two builders of the same URL
   would drift, and that form is the only one Jira Cloud resolves for every project style.
-- **Five verdicts, not three.** The three that were asked for, plus `unclear` and `blocked`: a
-  ticket whose description is too thin to act on is a different problem from one waiting on an API,
-  and merging them hides the one a single sentence would fix.
+- **Four verdicts and a domain, where there used to be five verdicts.** `unclear` and `blocked` earn
+  their place for the original reason: a ticket whose description is too thin to act on is a
+  different problem from one nobody can move today, and merging them hides the one a single sentence
+  would fix. `backend` did not. It was two facts wearing one label, "the front-end cannot build this
+  because the endpoint does not exist" and "this work belongs to a server", and they pull in opposite
+  directions: the first stops being true the day somebody ships an endpoint, the second never stops
+  being true. A reader sorting on one of them was always sorting on the other by accident. The
+  blocker is now `blocked`, with the missing field named in `reason`; the side of the stack is
+  `TicketDomain`, on its own axis, and a specified server ticket is `ready` like any other. The
+  sub-tabs stay the verdicts, because they answer "what can I act on today" and a domain never has.
+- **The domain axis also stopped the tab saying "not for you".** `backend` was written when the
+  reader only worked on the front. Both sides are in scope now, so what the domain decides is not
+  whether the work is his but which workflow an unattended run would follow: a front-end ticket gets
+  a dev server and a team announcement, a backend one gets neither. That is also why `unknown` blocks
+  an unattended run rather than merely looking untidy.
+- **`domain` has an `unknown` member and it draws nothing.** The same answer `unclear` already is for
+  a verdict: "this was not classified" is a statement, not a hole. A member rather than `null`,
+  because every lookup here is an exhaustive `Record` and that exhaustiveness is what turned removing
+  a verdict into a compile error instead of a hunt; `null` would buy a conditional at every site and
+  give it up. The chip is simply absent, one reading "unknown" being a word read to learn nothing.
+- **The `100% agent` flag has two authors, and only one of them is stored.** The analysis answers
+  `autonomous` against criteria spelled out in the prompt; the app then re-judges it against
+  `canRunUnattended`, whose rules are ours. `claimsAutonomy` on disk is the **claim**, never the
+  conclusion: storing the conclusion would leave a `true` asserting a rule set that no longer exists
+  the moment a guardrail is tightened, with nothing on screen able to say so. Kept apart, a tightened
+  rule takes effect on the next paint rather than on the next analysis. The verdict rule is untouched
+  by this, the claim being what a paid run concluded and nothing editing it; what is derived is the
+  app's own veto.
+- **Four guardrails, and each one is a fact nobody has to interpret.** The verdict is `ready`, the
+  rule `readyKeys` already records, that a batch of parked tickets asks an agent to decide for you
+  and an unattended run is that batch with the human removed. The domain is known. The estimate is on
+  the scale and at or under `AUTONOMY_MAX_POINTS`, **`null` included as a refusal**, because "end to
+  end with nobody watching" plus "no idea how big" is a claim with nothing behind it. And the
+  description was not truncated.
+- **The truncation guardrail is the only one about our own prompt, and it is the cheapest.**
+  `trimDescription` cuts at `DESCRIPTION_LIMIT` and says so, and a consolidated story's tail is where
+  the acceptance criteria live. The model sees the marker and cannot know what is behind it, so this
+  is the one rule it could never apply to itself. `DESCRIPTION_TRUNCATED_MARK` lives in
+  `contracts.ts` and not beside the prompt: two copies is a guardrail that stops firing the day
+  somebody rewords the prompt, with no error anywhere.
+- **"The ticket has a resolvable repository" is not a guardrail, and it is the one that sounds like
+  one.** This tab asks which repository and never guesses, so there is no ticket-to-repository
+  mapping here to resolve against. The real precondition is "is any project configured", which the
+  handoff menu has always answered. In the pure function it would have forced an argument every
+  caller had to invent.
+- **`AUTONOMY_MAX_POINTS` is quoted verbatim in the prompt**, and a test reads it back out of the
+  built prompt. The model has to be judged by the rule it was given, or the app vetoes answers to a
+  question it never asked and the reader watches a flag disappear with nothing saying why. Prompt and
+  guardrail drifting apart is the one failure mode of the whole two-author design.
+- **`autonomyBlock` returns the reason, not a boolean**, and the row says it. Every guardrail is one
+  more silent way the flag vanishes; a chip reading `agent blocked` whose tooltip says "the analysis
+  said yes, its description was cut short" is the difference between a rule and a mystery. The order
+  of the rules is fixed and tested, being the order the reader is told about.
+- **`triage-autonomy.ts` is in `shared/`, like `pull-review.ts`.** The renderer paints the chip and
+  builds the batch today, and the unattended runner caps the same batch tomorrow: two answers to "may
+  this run with nobody watching" would drift, and the drift would be an agent started on a ticket the
+  tab had refused.
 - **`Analyse` is a play triangle, and deliberately not `.icon-button--row`.** A magnifier was tried
   first and read as "search", which is what the button is not: it launches a job that takes minutes,
   and play is the one glyph nobody has to be taught. The terminal icons of the pull request and Git
@@ -1289,6 +1362,25 @@ user's own identity, on a colleague's work.
 
 ### Handing a ticket to Claude Code
 
+- **Two handoffs, and the only difference is which skill is named.** `ask` builds `/ticket <KEY>`,
+  the session that stops whenever the work needs a decision; `auto` builds `/ticket-auto <KEY>`,
+  which runs to an open pull request without stopping. `TriageHandoff` travels **on the channel**
+  rather than being re-derived in the main process from the stored verdict: the guardrails are
+  evaluated where the button is drawn, and a second evaluation behind the click would be free to
+  disagree with the label the reader just pressed. Anything that is not literally `auto` is read as
+  `ask`, the unattended run being opted into by an exact word and never by a value that merely failed
+  to be something else.
+- **The app names the unattended run, it does not perform it.** It cannot: there is no `gh pr create`
+  anywhere in this codebase, `gh-write.ts` being the single door to GitHub and holding none, and Mail
+  and Teams were measured and dropped in V3 for reasons recorded in their own section. The last two
+  steps of the workflow therefore belong to a session that carries the skills and the M365 connector.
+  ⚠️ **The cost is real and is stated here rather than discovered**: the rest of this app is
+  agent-agnostic by design, and the unattended run is not. A profile without those loses the pull
+  request and the announcement in silence.
+- **One `workActionId` for both handoffs, so the same ticket cannot run twice.** The id is keyed on
+  the tickets, and two clicks on the same ticket land in the session already working it: that rule
+  matters more with an unattended run, not less, a second agent on the same worktree being the one
+  outcome worse than being blocked.
 - **The handoff passes the key and the repository name, nothing else.** `TriageWork` takes issue keys,
   filters them through `ISSUE_KEY_PATTERN` and builds `/ticket <KEY> in the <repo> repository`. The
   verdict, the reason and the question stay in `triage.json`, where the session that picks the ticket
@@ -1319,6 +1411,42 @@ user's own identity, on a colleague's work.
   tab exists for. The flag has **no `--allow-` prefix**, and a wrong spelling is not harmless: `claude`
   rejects an unknown option, so the tab would open, print a usage error and sit at a shell prompt,
   which reads exactly like a session that started and did nothing. Pinned by test for that reason.
+- **The chips reuse `.tag`'s drawing and none of the project-tag plumbing.** The pill, the 7px dot
+  and `--tag-colour` are this app's one way of saying "a word describing this row", and a second
+  idiom would be one more to learn. What must **not** travel is `tagColorOf` and
+  `AppSettings.tagColors`: those colours are assigned by the user per workspace, while a domain's has
+  to be the same on every machine, and the two vocabularies share the literal word `backend`, so a
+  user recolouring their project tag would repaint verdicts they never configured. The domain
+  modifiers therefore reach the palette **tokens**, never the `tag--<colour>` classes, which is the
+  weaker coupling and the one that survives a palette rename. `buildTicketChips` stays in
+  `triage-panel.ts` for the reason the `Analyse` triangle does: one consumer.
+- **The `100% agent` chip is painted in the `Ready` colour, and that is an argument rather than a
+  choice.** The first guardrail is that the verdict is `ready`, so the chip can only ever appear on a
+  row already in that group: sharing the colour says what it is, ready and more so, instead of
+  opening a seventh vocabulary.
+- **The chips sit before the summary, and the summary is what gives way.** The rule the dots on the
+  other tabs already record: coloured marks starting on one edge are what makes a column of them
+  scannable, and the cost, tagged and untagged rows no longer starting their text on the same pixel,
+  is the same accepted cost with the same refusal to reserve a gutter. They also need
+  `align-self: center`: both heads are `align-items: baseline` so the key and the summary share a
+  line of text, and a `.tag` is an `inline-flex` whose first child is an empty dot, so a
+  baseline-aligned chip hangs low. Centring the strip fixes it without moving what the baseline was
+  for.
+- **A chip carries its word as text, so it is not an icon-only span.** `role="img"` belongs to the
+  sprint marker and the tag dots, where a `title` on a span with no text is announced by nothing;
+  here it would replace readable text with a label. A future dot-only domain marker on a dense row
+  *would* need it, and nothing else in the file would say so.
+- **Two batch buttons, and the second one is not the primary.** The unattended set is a **subset** of
+  the ready set, so the bar shows two counts that overlap and both tooltips say so, or the reader
+  adds them. `Run N autonomously` takes the slot to the **left**, the rule the two `Analyse` buttons
+  already set: the end-of-row slot belongs to the cursor trained on it. Plain `.button` beside the
+  primary, for the reason `Commit and push` is: the heavier consequence does not inherit the muscle
+  memory of the lighter one. The `margin-left: auto` moved onto `.triage__work-group` because either
+  button can be absent, and on a button a sprint with no unattended ticket would push the other one
+  against the tabs.
+- **`countVerdicts` keeps a hand-built record literal.** Rebuilding it from `TRIAGE_VERDICTS` needs a
+  cast, and a cast is exactly what stops the compiler from finding every site the day a verdict is
+  added or removed, which is the only reason removing one was a morning's work.
 - **Two buttons, two different promises.** `Work on this` in the overview starts the ticket you are
   reading, whatever its verdict; `Work N ready` beside the counts starts the `ready` group. Only the
   batch is limited to `ready` (`readyKeys`, pure and tested): a ticket parked on a question is one
@@ -2025,7 +2153,11 @@ Added on 2026-09-04, the tab having had five columns and no way to know what any
 
 Added on 2026-09-03. Three surfaces name a project outside the projects table, and all three now show
 its tags: the pull request tab's repository column, the Git tab's, and the project cell of every
-worktree row. Triage lists sprints and Jira lists issues, so there is nothing to tag there.
+worktree row. Jira lists issues, so there is nothing to tag there. Triage is no longer in that list, and what it
+shows is not this vocabulary: a ticket's domain and its `100% agent` flag are chips a run produced,
+closed and fixed, reaching the same palette **tokens** through their own modifiers. They borrow the
+drawing and share none of the plumbing, deliberately, `AppSettings.tagColors` being the user's, keyed
+by word, and the word `backend` existing in both.
 
 - **The chip does not travel; the dot does.** All three surfaces are fixed-width and read down their
   length: 190px for the pull request repositories, 170px for the Git ones, a 104px grid track for a

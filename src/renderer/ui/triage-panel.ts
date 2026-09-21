@@ -2,6 +2,7 @@ import {
   TRIAGE_VERDICTS,
   WORK_BATCH_LIMIT,
   type Sprint,
+  type TicketDomain,
   type TriagedTicket,
   type TriageProgress,
   type TriageResult,
@@ -10,6 +11,7 @@ import {
   type TriageState,
   type TriageVerdict,
 } from '@shared/contracts.js';
+import { autonomyBlock, canRunUnattended, describeAutonomyBlock } from '@shared/triage-autonomy.js';
 import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
 import { RUN_ICON, RUN_NEW_ICON } from './icons.js';
 
@@ -65,6 +67,14 @@ export interface TriagePanelActions {
    * would be both fragile and a copy that starts going stale the moment it is made.
    */
   onWork: (keys: readonly string[], x: number, y: number) => void;
+  /**
+   * Starts the tickets the analysis and the guardrails both cleared, unattended.
+   *
+   * A separate callback and not a flag on `onWork`, because the two hand over different prompts: one
+   * opens a session that will ask, the other opens one that will not. Same repository question at the
+   * cursor, for the same reason.
+   */
+  onRunAutonomously: (keys: readonly string[], x: number, y: number) => void;
 }
 
 /**
@@ -77,7 +87,6 @@ export interface TriagePanelActions {
 const VERDICT_LABEL: Record<TriageVerdict, string> = {
   ready: 'Ready to build',
   'needs-decision': 'Waiting on a decision',
-  backend: 'Blocked by the API',
   unclear: 'Specification too thin',
   blocked: 'Blocked',
 };
@@ -92,10 +101,78 @@ const VERDICT_LABEL: Record<TriageVerdict, string> = {
 const VERDICT_TAB: Record<TriageVerdict, string> = {
   ready: 'Ready',
   'needs-decision': 'Decision',
-  backend: 'Backend',
   unclear: 'Unclear',
   blocked: 'Blocked',
 };
+
+/**
+ * What each side of the stack is called on a chip.
+ *
+ * `unknown` is deliberately empty and draws nothing: a chip reading "unknown" is a word the reader has
+ * to read to learn nothing, and a row with no chip already says the analysis could not tell.
+ */
+const DOMAIN_LABEL: Record<TicketDomain, string> = {
+  'front-end': 'Front-end',
+  backend: 'Backend',
+  'full-stack': 'Full-stack',
+  unknown: '',
+};
+
+/** What the `100% agent` chip promises, spelled out where a two-word label cannot. */
+const AGENT_CHIP_TITLE =
+  'An agent can take this from the board to an open pull request with nobody looking in between. ' +
+  'A reviewer still reads the pull request.';
+
+/**
+ * The chips on a ticket: its side of the stack, and whether it can run unattended.
+ *
+ * They borrow `.tag`'s drawing, the pill and the 7px dot, because that is already how this app says
+ * "a word describing this row" and a second idiom would be one more to learn. What deliberately does
+ * NOT travel is `tagColorOf` and `AppSettings.tagColors`: those colours are assigned per workspace by
+ * the user, while a domain has to be the same colour on every machine, and the two vocabularies share
+ * the literal word `backend`, so a user recolouring their project tag would repaint verdicts they
+ * never configured. The modifiers therefore reach the palette **tokens** rather than the
+ * `tag--<colour>` classes, which is the weaker coupling and the one that survives a palette rename.
+ *
+ * Local to this file for the reason the `Analyse` triangle is not in `icons.ts`: one consumer.
+ *
+ * A chip carries its word as text, so it gets neither `role="img"` nor an `aria-label`. Those belong
+ * to the icon-only spans, the sprint marker and the tag dots, where a `title` on a span with no text
+ * is announced by nothing; putting one here would replace readable text with a label.
+ */
+function buildTicketChips(ticket: TriagedTicket): HTMLElement | null {
+  const chips: HTMLElement[] = [];
+  if (ticket.domain !== 'unknown') {
+    const label = DOMAIN_LABEL[ticket.domain];
+    chips.push(buildChip(label, ticket.domain, `${label} work`));
+  }
+  if (canRunUnattended(ticket)) {
+    chips.push(buildChip('100% agent', 'agent', AGENT_CHIP_TITLE));
+  } else if (ticket.claimsAutonomy) {
+    // The analysis said yes and a guardrail said no. Said out loud on the row that would otherwise
+    // simply lack a chip, because a rule nobody can see is indistinguishable from a bug.
+    const block = autonomyBlock(ticket);
+    if (block !== null) {
+      chips.push(buildChip('agent blocked', 'blocked', describeAutonomyBlock(block)));
+    }
+  }
+  if (chips.length === 0) {
+    return null;
+  }
+  const strip = createElement('div', { className: 'triage__chips' });
+  strip.append(...chips);
+  return strip;
+}
+
+function buildChip(label: string, modifier: string, title: string): HTMLElement {
+  const chip = createElement('span', {
+    className: `tag triage__chip triage__chip--${modifier}`,
+    title,
+  });
+  chip.append(createElement('span', { className: 'tag__dot' }));
+  chip.append(createElement('span', { text: label }));
+  return chip;
+}
 
 export class TriagePanel {
   private selected: number | null = null;
@@ -371,16 +448,36 @@ export class TriagePanel {
      *
      * It is the answer to the question the tab raises once the analysis lands, "so what can I start
      * now", and that question is about the sprint, not about whichever row happens to be selected.
-     * It shows on every sub-tab for the same reason the counts do: sitting on `Backend` you should
-     * still be able to start the four that are not blocked.
+     * It shows on every sub-tab for the same reason the counts do: sitting on `Blocked` you should
+     * still be able to start the four that are not.
      *
      * Only `ready` gets one. A ticket the analysis parked on a question is one whose answer decides
      * what gets built, so handing a batch of those to an agent would be asking it to pick for you.
+     *
+     * Two buttons since the split, and the unattended set is a **subset** of the ready set: the bar
+     * shows two counts that overlap, which is why both tooltips say so rather than leaving the reader
+     * to add them. The wrapper carries the `margin-left: auto` because either button can be absent.
      */
+    const group = createElement('div', { className: 'triage__work-group' });
+    const unattended = autonomousKeys(result.tickets);
+    if (unattended.length > 0) {
+      const run = createElement('button', {
+        className: 'button',
+        text: `Run ${unattended.length} autonomously`,
+        title: describeAutonomousRun(unattended),
+      });
+      run.type = 'button';
+      run.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.actions.onRunAutonomously(unattended, event.clientX, event.clientY);
+      });
+      group.append(run);
+    }
+
     const ready = readyKeys(result.tickets);
     if (ready.length > 0) {
       const work = createElement('button', {
-        className: 'button button--primary triage__work',
+        className: 'button button--primary',
         text: `Work ${ready.length} ready`,
         // The cap is named in the tooltip when it bites, so the label's number and the truth agree; the
         // Jira half comes from the same builder as the single-ticket button, per-ticket estimates being
@@ -393,7 +490,11 @@ export class TriagePanel {
       });
       work.type = 'button';
       this.bindWork(work, ready);
-      this.hosts.bar.append(work);
+      group.append(work);
+    }
+
+    if (group.childElementCount > 0) {
+      this.hosts.bar.append(group);
     }
   }
 
@@ -529,6 +630,10 @@ export class TriagePanel {
         text: VERDICT_LABEL[ticket.verdict],
       }),
     );
+    const overviewChips = buildTicketChips(ticket);
+    if (overviewChips !== null) {
+      head.append(overviewChips);
+    }
     head.append(
       createElement('span', { className: 'triage__overview-summary', text: ticket.summary }),
     );
@@ -715,6 +820,14 @@ export class TriagePanel {
 
     const head = createElement('div', { className: 'triage__ticket-head' });
     head.append(createElement('span', { className: 'triage__key', text: ticket.key }));
+    // Before the summary, so the coloured marks of a whole column start on one edge, which is what
+    // makes a column of them scannable. Same rule and same accepted cost as the dots on the other
+    // tabs: a tagged row no longer starts its text on the pixel an untagged one does, and no gutter
+    // is reserved to fix that.
+    const chips = buildTicketChips(ticket);
+    if (chips !== null) {
+      head.append(chips);
+    }
     head.append(createElement('span', { className: 'triage__summary', text: ticket.summary }));
     if (ticket.assignee.length > 0) {
       head.append(createElement('span', { className: 'triage__assignee', text: ticket.assignee }));
@@ -780,6 +893,36 @@ export function readyKeys(tickets: readonly TriagedTicket[]): string[] {
     .filter((ticket) => ticket.verdict === 'ready')
     .slice(0, WORK_BATCH_LIMIT)
     .map((ticket) => ticket.key);
+}
+
+/**
+ * The keys the unattended batch hands over: a subset of `readyKeys`, cleared by every guardrail.
+ *
+ * Capped at both ends like its sibling, and for the same reason. Pure and exported, because this is
+ * the list that decides what runs with nobody watching, and a quiet extra key in it is the one bug
+ * that costs an afternoon.
+ */
+export function autonomousKeys(tickets: readonly TriagedTicket[]): string[] {
+  return tickets
+    .filter(canRunUnattended)
+    .slice(0, WORK_BATCH_LIMIT)
+    .map((ticket) => ticket.key);
+}
+
+/**
+ * What a `Run N autonomously` click promises, in one sentence.
+ *
+ * A separate function rather than a flag on `describeWork`, because the two sentences differ in what
+ * they say about the human, which is the only thing either is read for. It also has to state the
+ * overlap: the same tickets are inside the `Work N ready` count next to it.
+ */
+export function describeAutonomousRun(keys: readonly string[]): string {
+  const count = keys.length === 1 ? 'This ticket goes' : `These ${keys.length} tickets go`;
+  return (
+    `${count} from the board to an open pull request without stopping to ask: worktree, code, the ` +
+    'checks, commit, push, pull request and its reviewers. They are also counted in the ready ' +
+    'button beside this one. A reviewer still reads what comes out.'
+  );
 }
 
 /**
@@ -878,7 +1021,6 @@ export function countVerdicts(tickets: readonly TriagedTicket[]): Record<TriageV
   const counts: Record<TriageVerdict, number> = {
     ready: 0,
     'needs-decision': 0,
-    backend: 0,
     unclear: 0,
     blocked: 0,
   };

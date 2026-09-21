@@ -7,6 +7,7 @@ import type {
   GitSyncOp,
   JiraIssue,
   JiraState,
+  TriageHandoff,
   TriageState,
   JiraViewId,
   Project,
@@ -688,7 +689,12 @@ class App {
    * the four repositories an issue touches. Guessing would put a worktree in the wrong clone, so the
    * choice stays with the reader, one click away.
    */
-  private openWorkProjectMenu(keys: readonly string[], x: number, y: number): void {
+  private openWorkProjectMenu(
+    keys: readonly string[],
+    x: number,
+    y: number,
+    handoff: TriageHandoff = 'ask',
+  ): void {
     const ordered = this.projectsByLastBranch();
     if (ordered.length === 0) {
       showContextMenu(x, y, [{ label: 'No project configured', disabled: true, run: () => {} }]);
@@ -696,13 +702,17 @@ class App {
     }
 
     const what = keys.length === 1 ? (keys[0] ?? '') : `${keys.length} tickets`;
+    // The hint names the handoff, because the two menus look identical and only one of them opens a
+    // session that publishes without asking. The repository question is the last moment the reader
+    // still sees which button they pressed.
+    const how = handoff === 'auto' ? 'unattended, ' : '';
     showContextMenu(
       x,
       y,
       ordered.map((project) => ({
         label: project.id === this.lastBranchProject ? `${project.label} (last)` : project.label,
-        hint: `claude on ${what} in ${project.path}`,
-        run: () => void this.workOnTickets(project.id, keys),
+        hint: `${how}claude on ${what} in ${project.path}`,
+        run: () => void this.workOnTickets(project.id, keys, handoff),
       })),
     );
   }
@@ -719,8 +729,12 @@ class App {
    * touching the session, so a failed sprint move stamps a message and nothing else, and the tab is
    * never left unfocused because a board refused something.
    */
-  private async workOnTickets(projectId: ProjectId, keys: readonly string[]): Promise<void> {
-    const { terminalId, result } = await window.api.workOnTickets(projectId, [...keys]);
+  private async workOnTickets(
+    projectId: ProjectId,
+    keys: readonly string[],
+    handoff: TriageHandoff = 'ask',
+  ): Promise<void> {
+    const { terminalId, result } = await window.api.workOnTickets(projectId, [...keys], handoff);
     this.stampMessage(result.message);
     if (terminalId === null) {
       console.warn('[triage]', result.message);
@@ -1883,7 +1897,8 @@ class App {
         // is the one Jira Cloud resolves for every project style.
         onOpen: (key) =>
           void window.api.openExternal(boardUrl(this.settings?.jira.siteUrl ?? '', key)),
-        onWork: (keys, x, y) => this.openWorkProjectMenu(keys, x, y),
+        onWork: (keys, x, y) => this.openWorkProjectMenu(keys, x, y, 'ask'),
+        onRunAutonomously: (keys, x, y) => this.openWorkProjectMenu(keys, x, y, 'auto'),
       },
     );
 

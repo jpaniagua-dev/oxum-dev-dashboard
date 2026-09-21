@@ -1,4 +1,10 @@
-import { TRIAGE_VERDICTS, type TriagedTicket, type TriageVerdict } from '@shared/contracts.js';
+import {
+  TICKET_DOMAINS,
+  TRIAGE_VERDICTS,
+  type TicketDomain,
+  type TriagedTicket,
+  type TriageVerdict,
+} from '@shared/contracts.js';
 import { nearestStoryPoints } from '../jira/jira-start.js';
 
 /**
@@ -56,6 +62,8 @@ export function parseTriage(input: ParseInput): TriagedTicket[] {
       status: ticket.status,
       description: ticket.description,
       verdict: toVerdict(found?.verdict),
+      domain: toDomain(found?.domain),
+      claimsAutonomy: toAutonomous(found?.autonomous),
       reason: toText(found?.reason, found === undefined ? 'The analysis did not mention it.' : ''),
       question: toText(found?.question, ''),
       next: toText(found?.next, ''),
@@ -77,6 +85,8 @@ export function parseTriage(input: ParseInput): TriagedTicket[] {
 interface RawVerdict {
   key?: unknown;
   verdict?: unknown;
+  domain?: unknown;
+  autonomous?: unknown;
   reason?: unknown;
   question?: unknown;
   next?: unknown;
@@ -109,14 +119,78 @@ function isObject(value: unknown): boolean {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** An unrecognised verdict becomes `unclear`: the honest answer is "this was not classified". */
-function toVerdict(value: unknown): TriageVerdict {
+/**
+ * An unrecognised verdict becomes `unclear`: the honest answer is "this was not classified".
+ *
+ * Exported for `triage-store.ts`, which reads the same three values back off disk. A value loaded from
+ * `triage.json` and a value read off a model are the same untrusted string, and validating them
+ * differently is how one of the two starts lying: the store used to cast, so a file written by an
+ * older version could put any word into an exhaustive lookup.
+ */
+export function toVerdict(value: unknown): TriageVerdict {
   if (typeof value !== 'string') {
     return 'unclear';
   }
   const normalised = value.trim().toLowerCase();
   const match = TRIAGE_VERDICTS.find((verdict) => verdict === normalised);
   return match ?? 'unclear';
+}
+
+/**
+ * The spellings of a side of the stack, folded onto the four the app knows.
+ *
+ * `toVerdict` gets away with exact matching because its words are single tokens nobody writes two
+ * ways. "front-end" has three current spellings, and folding them is not pedantry here: an unknown
+ * domain CANCELS the `100% agent` flag, so a model answering `frontend` would silently kill a run for
+ * a hyphen. Anything genuinely unrecognised still lands on `unknown`, which is an answer.
+ */
+export function toDomain(value: unknown): TicketDomain {
+  if (typeof value !== 'string') {
+    return 'unknown';
+  }
+  const normalised = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
+  const exact = TICKET_DOMAINS.find((domain) => domain === normalised);
+  if (exact !== undefined) {
+    return exact;
+  }
+  return DOMAIN_ALIASES[normalised] ?? 'unknown';
+}
+
+const DOMAIN_ALIASES: Readonly<Record<string, TicketDomain>> = {
+  frontend: 'front-end',
+  front: 'front-end',
+  fe: 'front-end',
+  client: 'front-end',
+  ui: 'front-end',
+  'back-end': 'backend',
+  be: 'backend',
+  server: 'backend',
+  api: 'backend',
+  fullstack: 'full-stack',
+  full: 'full-stack',
+  both: 'full-stack',
+};
+
+/**
+ * The model's autonomy claim, and only from something that says yes without ambiguity.
+ *
+ * Absent, null, a number, a sentence: all false. The asymmetry is the point rather than laziness, this
+ * being the one field that takes the human out of the loop, so nothing is inferred from a value that
+ * could have meant something else. The two quoted spellings are there because a model asked for JSON
+ * quotes its booleans often enough to matter.
+ */
+export function toAutonomous(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const normalised = value.trim().toLowerCase();
+  return normalised === 'true' || normalised === 'yes';
 }
 
 function toText(value: unknown, fallback: string): string {

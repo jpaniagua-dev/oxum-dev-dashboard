@@ -29,6 +29,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type TriageHandoff,
   type TriageState,
   type ProjectValidation,
   type PullReviewState,
@@ -936,6 +937,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       _event,
       projectId: unknown,
       issueKeys: unknown,
+      handoff: unknown,
     ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
       const project = resolveProject(deps.projects(), projectId);
       if (project === undefined) {
@@ -957,7 +959,17 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       }
 
       const cwd = resolveWorkspaceRoot(settings.workspaceRoot, project.path);
-      const command = buildWorkCommand(keys, basename(project.path), settings.agentWorkModel, settings.agentProfile);
+      // Anything that is not literally `auto` is the asking handoff. The unattended run is the one that
+      // publishes without a human, so it is opted into by an exact word and never by a value that
+      // merely failed to be something else.
+      const mode: TriageHandoff = handoff === 'auto' ? 'auto' : 'ask';
+      const command = buildWorkCommand(
+        keys,
+        basename(project.path),
+        settings.agentWorkModel,
+        settings.agentProfile,
+        mode,
+      );
       const resolved = resolveShellCommand(profile, command);
 
       const terminalId = deps.terminals.runProjectCommand({
@@ -976,7 +988,12 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         result:
           terminalId === null
             ? { ok: false, message: 'Could not open the tab' }
-            : { ok: true, message: `${keys.join(', ')} handed to ${settings.agentProfile.label} in ${project.label}` },
+            : {
+                ok: true,
+                message: `${keys.join(', ')} handed to ${settings.agentProfile.label} in ${
+                  project.label
+                }${mode === 'auto' ? ', unattended' : ''}`,
+              },
       };
     },
   );

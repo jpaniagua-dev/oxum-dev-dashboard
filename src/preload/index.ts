@@ -16,6 +16,7 @@ import {
   type IssueTransition,
   type JiraConfig,
   type JiraState,
+  type TriageHandoff,
   type TriageMode,
   type TriageState,
   type OpenShellRequest,
@@ -198,8 +199,9 @@ const api: RendererApi = {
   workOnTickets: (
     projectId: ProjectId,
     issueKeys: string[],
+    handoff: TriageHandoff,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
-    ipcRenderer.invoke(IpcChannel.TriageWork, projectId, issueKeys),
+    ipcRenderer.invoke(IpcChannel.TriageWork, projectId, issueKeys, handoff),
 
   startInJira: (issueKeys: string[]): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.TriageStartInJira, issueKeys),

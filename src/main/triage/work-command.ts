@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import { CLAUDE_CODE_PROFILE, type AgentProfile } from '@shared/agent-profile.js';
+import type { TriageHandoff } from '@shared/contracts.js';
 import { modelFlag } from '@shared/agent-model.js';
 
 /**
@@ -54,6 +55,15 @@ export function safeRepoName(folder: string): string | null {
  * ticket. Keys have already passed `ISSUE_KEY_PATTERN`, the folder name `safeRepoName` and the model
  * `MODEL_PATTERN`, so nothing in here can be read as shell syntax.
  *
+ * Which skill is named is the whole of the difference between the two handoffs. `ask` opens `ticket`,
+ * the session that stops whenever the work needs a decision; `auto` opens `ticket-auto`, which runs to
+ * an open pull request without stopping. The app deliberately does no more than name it: it cannot
+ * open a pull request itself, `gh-write.ts` holding no `gh pr create`, and Mail and Teams were
+ * measured and dropped in V3, so both of the last two steps belong to a session that has the skills
+ * and the M365 connector. The cost is stated rather than hidden: the unattended run is not
+ * agent-agnostic the way the rest of this app is, and a profile without those loses the last two
+ * steps in silence.
+ *
  * The model is the one of the three Claude Code runs that reaches a **shell**, which is why it is
  * double-quoted and whitelisted rather than trusted: `claude-opus-5[1m]` is a legitimate pinned name
  * and its brackets are glob characters. Empty omits the flag entirely, the CLI rejecting a blank
@@ -65,13 +75,15 @@ export function buildWorkCommand(
   folder: string,
   model = '',
   profile: AgentProfile = CLAUDE_CODE_PROFILE,
+  handoff: TriageHandoff = 'ask',
 ): string {
   const repo = safeRepoName(folder);
   const where = repo === null ? '' : ` in the ${repo} repository`;
+  const skill = handoff === 'auto' ? 'ticket-auto' : 'ticket';
   const prompt =
     keys.length === 1
-      ? `/ticket ${keys[0]}${where}`
-      : `Work these tickets one after another${where}, using the ticket skill for each: ${keys.join(', ')}`;
+      ? `/${skill} ${keys[0]}${where}`
+      : `Work these tickets one after another${where}, using the ${skill} skill for each: ${keys.join(', ')}`;
 
   /*
    * The interactive template, with the prompt appended as a quoted argument.

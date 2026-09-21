@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { TriagedTicket, TriageResult } from '@shared/contracts.js';
 import { nearestStoryPoints } from '../jira/jira-start.js';
+import { toAutonomous, toDomain, toVerdict } from './triage-parse.js';
 import { atomicWriteFile } from '../store/atomic-write.js';
 import { AppPaths } from '../store/paths.js';
 
@@ -181,8 +182,12 @@ export class TriageStore {
  * Read defensively because this file survives version changes: a result whose shape no longer
  * matches is dropped rather than rendered, since a half-read verdict would show a ticket under a
  * heading nobody computed.
+ *
+ * Exported for its test. It is a pure function of `unknown` and the only door a stale shape comes
+ * through, `carried` in an incremental run reading a store that nothing else fills, so the claim in
+ * the paragraph above is worth holding by test rather than by eye.
  */
-function readResult(value: unknown): TriageResult | null {
+export function readResult(value: unknown): TriageResult | null {
   if (typeof value !== 'object' || value === null) {
     return null;
   }
@@ -205,14 +210,32 @@ function readResult(value: unknown): TriageResult | null {
     },
     tickets: record['tickets'].flatMap((ticket) => {
       const entry = ticket as Record<string, unknown>;
-      if (typeof entry['key'] !== 'string' || typeof entry['verdict'] !== 'string') {
+      // Only a missing key still drops the row. A row with no verdict used to go with it, which meant
+      // a hand-edited file lost tickets in silence; it now reads `unclear`, the same answer the parse
+      // gives a ticket the model forgot, and for the same reason.
+      if (typeof entry['key'] !== 'string') {
         return [];
       }
       return [
         {
           key: entry['key'],
           summary: typeof entry['summary'] === 'string' ? entry['summary'] : '',
-          verdict: entry['verdict'] as TriageResult['tickets'][number]['verdict'],
+          // Through the same three normalisers a fresh answer goes through, the rule `nearestStoryPoints`
+          // had already set a few lines down: disk and model answer are the same untrusted string, and
+          // validating them differently is how one of the two starts lying. This is also the whole
+          // migration of the `backend` verdict, which 5.12.0 split into a verdict and a domain: it is
+          // now a verdict nobody defines, so it lands on `unclear` by the rule that already catches
+          // one, with its `reason` ("No API for the field X") surviving intact, which is where the
+          // information actually was. Mapping it to `ready` would claim a judgement no run ever made
+          // and drop those rows straight into the batch button; mapping it to `blocked` would be right
+          // for the half of the population that was a blocker and invented for the half that was
+          // server work, and nothing on disk tells the two apart.
+          verdict: toVerdict(entry['verdict']),
+          domain: toDomain(entry['domain']),
+          // `claimsAutonomy` and not `autonomous`: the model answers the second, the store round-trips
+          // a `TriagedTicket`, which carries the first. Reading the model's spelling here would have
+          // read `undefined` off every file this app itself wrote.
+          claimsAutonomy: toAutonomous(entry['claimsAutonomy']),
           reason: typeof entry['reason'] === 'string' ? entry['reason'] : '',
           question: typeof entry['question'] === 'string' ? entry['question'] : '',
           next: typeof entry['next'] === 'string' ? entry['next'] : '',

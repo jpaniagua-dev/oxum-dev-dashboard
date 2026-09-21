@@ -3018,8 +3018,14 @@ body {
  * `margin-left: auto` rather than an order value: the tabs are what the bar is for, and a button
  * that starts a run of agents has no business sitting against them where a mis-aimed click on
  * "Ready" would land on it instead.
+ *
+ * The margin sits on the group and not on either button, because there are two of them since 5.12.0
+ * and either can be absent: on the button, a sprint with no unattended ticket would push the other one
+ * against the tabs. They are spaced by the shared `.button + .button` rule rather than by a `gap`, both
+ * applying otherwise and summing to a spacing nobody chose.
  */
-.triage__work {
+.triage__work-group {
+  display: flex;
   margin-left: auto;
 }
 
@@ -3164,6 +3170,60 @@ body {
   align-items: baseline;
   gap: 8px;
   min-width: 0;
+}
+
+/*
+ * The domain and autonomy chips, on a row and in the overview.
+ *
+ * `align-self: center` is not cosmetic. Both heads are `align-items: baseline`, deliberately, so the
+ * key and the summary sit on one line of text; a `.tag` is an `inline-flex` whose first child is an
+ * empty dot, and its baseline is its bottom edge, so a baseline-aligned chip hangs low. Centring the
+ * strip fixes it without moving the two things the baseline was for.
+ *
+ * `flex: none` so the summary is what gives way, its ellipsis being the one that should fire.
+ */
+.triage__chips {
+  display: flex;
+  flex: none;
+  align-self: center;
+  gap: 4px;
+}
+
+/*
+ * The palette, reaching the tokens rather than the `tag--<colour>` classes.
+ *
+ * The weaker coupling on purpose: those classes belong to the project tags, whose colours the user
+ * assigns per workspace, and the two vocabularies share the literal word `backend`. Bound to a class,
+ * recolouring a project tag would repaint verdicts nobody configured.
+ */
+.triage__chip--front-end {
+  --tag-colour: var(--tag-blue);
+}
+
+.triage__chip--backend {
+  --tag-colour: var(--tag-green);
+}
+
+.triage__chip--full-stack {
+  --tag-colour: var(--tag-yellow);
+}
+
+/*
+ * The `100% agent` chip wears the colour the `Ready` count already wears.
+ *
+ * An argument rather than a preference: the first guardrail is that the verdict is `ready`, so this
+ * chip can only ever appear on a row that is already in that group. Sharing the colour says what it
+ * is, ready and more so, instead of opening a seventh vocabulary.
+ */
+.triage__chip--agent {
+  --tag-colour: var(--success);
+  color: var(--text);
+}
+
+/* The analysis claimed autonomy and a guardrail refused: stated, because an invisible rule reads as
+   a bug. Muted rather than alarming, nothing is wrong with the ticket. */
+.triage__chip--blocked {
+  --tag-colour: var(--border);
 }
 
 .triage__key {

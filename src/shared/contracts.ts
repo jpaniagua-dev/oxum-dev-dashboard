@@ -524,6 +524,40 @@ export const REPO_SLUG_PATTERN = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  */
 export const STORY_POINT_SCALE: readonly number[] = [1, 2, 3, 5, 8, 13, 21];
 
+/**
+ * The largest estimate a ticket may carry and still be offered as an unattended run.
+ *
+ * On `STORY_POINT_SCALE`, and quoted verbatim in the triage prompt: the model has to be judged by the
+ * rule it was given, or the app vetoes answers to a question it never asked and the reader watches a
+ * flag disappear with nothing saying why. 3 is the prompt's own "a day of work with no unknown"; 5 is
+ * where a ticket starts being a feature, and a feature run unattended is a pull request nobody can
+ * review in one sitting.
+ */
+export const AUTONOMY_MAX_POINTS = 3;
+
+/**
+ * What `trimDescription` appends when a ticket's text did not fit the prompt's budget.
+ *
+ * Here rather than beside the prompt because two modules need it and they are on opposite sides of
+ * the main/renderer line: the prompt writes it, and the autonomy guardrail reads it back off the
+ * stored ticket to refuse a run judged from an extract. Two copies of the string is a guardrail that
+ * stops firing the day somebody rewords the prompt, with no error anywhere.
+ */
+export const DESCRIPTION_TRUNCATED_MARK = '[description truncated]';
+
+/**
+ * Which of the two handoffs a set of tickets is being sent through.
+ *
+ * `ask` is the original gesture: an interactive session on the ticket, which stops and asks whenever
+ * the work needs a decision. `auto` runs the whole thing to an open pull request without stopping,
+ * and it is offered only for tickets `canRunUnattended` cleared.
+ *
+ * On the channel rather than derived in the main process from the stored verdict, deliberately. The
+ * guardrails are evaluated where the button is drawn, and re-deriving them behind the click would be
+ * a second answer to the same question, free to disagree with the label the reader just pressed.
+ */
+export type TriageHandoff = 'ask' | 'auto';
+
 /* ------------------------------------------------------------------ *
  * GitHub checks
  * ------------------------------------------------------------------ */
@@ -1115,26 +1149,66 @@ export interface Sprint {
 }
 
 /**
- * What the triage says about one ticket.
+ * What the triage says about one ticket: can it be acted on today.
  *
- * The three the user asked for, plus two that kept turning up in practice: a ticket whose
- * description is too thin to act on is not the same problem as one waiting on an API, and lumping
- * them together hides the one a single sentence would fix.
+ * Four, where there were five. `backend` was two facts wearing one label, "the front-end cannot build
+ * this because the endpoint does not exist" and "this work belongs to a server", and they pull in
+ * opposite directions: the first stops being true the day somebody ships an endpoint, the second never
+ * stops being true. A reader sorting on one of them was always sorting on the other by accident. The
+ * blocker is now `blocked` with the missing field named in `reason`; the side of the stack moved to
+ * `TicketDomain`, its own axis, and a specified server ticket is `ready` like any other.
+ *
+ * The order is load bearing: it is the sub-tab order, and `firstFilledVerdict` reads it to open on
+ * what can be built before what is waiting on somebody.
  */
-export type TriageVerdict = 'ready' | 'needs-decision' | 'backend' | 'unclear' | 'blocked';
+export type TriageVerdict = 'ready' | 'needs-decision' | 'unclear' | 'blocked';
 
 export const TRIAGE_VERDICTS: readonly TriageVerdict[] = [
   'ready',
   'needs-decision',
-  'backend',
   'unclear',
   'blocked',
+];
+
+/**
+ * Which side of the stack a ticket is on.
+ *
+ * A second axis and not a fifth verdict, because a verdict answers "can this be acted on today" and a
+ * domain never changes with the answer. It also stopped being a way of saying "not for you": the work
+ * on both sides is in scope, and what the domain decides now is which workflow an unattended run would
+ * follow, front-end getting a dev server and a team announcement where backend gets neither.
+ *
+ * `unknown` is a member rather than `domain: TicketDomain | null` on purpose. Every lookup here is an
+ * exhaustive `Record`, and that exhaustiveness is what turns removing a verdict into a compile error
+ * instead of a hunt; `null` would buy a conditional at every site and give it up. It is also the same
+ * answer `unclear` already is for a verdict: "this was not classified" is a statement, not a hole.
+ * It draws no chip, a chip reading "unknown" being a word read to learn nothing.
+ */
+export type TicketDomain = 'front-end' | 'backend' | 'full-stack' | 'unknown';
+
+export const TICKET_DOMAINS: readonly TicketDomain[] = [
+  'front-end',
+  'backend',
+  'full-stack',
+  'unknown',
 ];
 
 export interface TriagedTicket {
   readonly key: string;
   readonly summary: string;
   readonly verdict: TriageVerdict;
+  /** Which side of the stack the work is on. `unknown` when the analysis could not tell. */
+  readonly domain: TicketDomain;
+  /**
+   * What the analysis CLAIMED about running this end to end with nobody watching.
+   *
+   * The claim and not the conclusion. The app re-judges it against `canRunUnattended`, whose rules are
+   * ours and change with a version: storing the conclusion would leave a `true` on disk asserting a
+   * rule set that no longer exists, with nothing on screen able to say so. Kept apart, a tightened
+   * guardrail takes effect on the next paint rather than on the next analysis, and the tab can say
+   * which of the two authors refused.
+   */
+  readonly claimsAutonomy: boolean;
   /** One sentence on why it landed there. Empty when the model gave none. */
   readonly reason: string;
   /** The closed question to answer, for `needs-decision`. Empty otherwise. */
@@ -2028,6 +2102,7 @@ export interface RendererApi {
   workOnTickets(
     projectId: ProjectId,
     issueKeys: string[],
+    handoff: TriageHandoff,
   ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   startInJira(issueKeys: string[]): Promise<GitResult>;
   /**

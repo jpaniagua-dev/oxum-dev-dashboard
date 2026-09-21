@@ -1,9 +1,13 @@
 import {
+  AUTONOMY_MAX_POINTS,
+  DESCRIPTION_TRUNCATED_MARK,
   RESERVED_ACTION_PREFIX,
   WORK_BATCH_LIMIT,
   workActionId,
   type TriagedTicket,
 } from '../src/shared/contracts.js';
+import { autonomyBlock, canRunUnattended } from '../src/shared/triage-autonomy.js';
+import { readResult } from '../src/main/triage/triage-store.js';
 import { describe, expect, it } from 'vitest';
 import { flattenDocument } from '../src/main/jira/jira-service.js';
 import { isEmptyAnswer, parseTriage } from '../src/main/triage/triage-parse.js';
@@ -11,8 +15,10 @@ import { DESCRIPTION_LIMIT, buildTriagePrompt, trimDescription } from '../src/ma
 import { readProgress, splitLines } from '../src/main/agent/agent-progress.js';
 import { selectIssues } from '../src/main/triage/triage-select.js';
 import {
+  autonomousKeys,
   countVerdicts,
   describeAge,
+  describeAutonomousRun,
   describeCoverage,
   describeEmptyResult,
   describeRun,
@@ -91,13 +97,14 @@ describe('describeWork', () => {
 describe('parseTriage', () => {
   it('reads a plain JSON array', () => {
     const tickets = parseTriage({
-      answer: '[{"key":"PROJ-1","verdict":"ready","reason":"The field exists","question":""},' +
-        '{"key":"PROJ-2","verdict":"backend","reason":"No API for it","question":""}]',
+      answer: '[{"key":"PROJ-1","verdict":"ready","domain":"front-end","reason":"The field exists","question":""},' +
+        '{"key":"PROJ-2","verdict":"blocked","domain":"backend","reason":"No API for it","question":""}]',
       asked,
       analysedAt: RUN_AT,
       });
 
-    expect(tickets.map((ticket) => ticket.verdict)).toEqual(['ready', 'backend']);
+    expect(tickets.map((ticket) => ticket.verdict)).toEqual(['ready', 'blocked']);
+    expect(tickets.map((ticket) => ticket.domain)).toEqual(['front-end', 'backend']);
     expect(tickets[0]?.reason).toBe('The field exists');
   });
 
@@ -187,8 +194,41 @@ describe('buildTriagePrompt', () => {
     // verdict about our prompt rather than about the ticket.
     const trimmed = trimDescription('x'.repeat(DESCRIPTION_LIMIT + 50));
 
-    expect(trimmed).toContain('[description truncated]');
+    expect(trimmed).toContain(DESCRIPTION_TRUNCATED_MARK);
     expect(trimDescription('short')).toBe('short');
+  });
+
+  it('names the four verdicts and not the one that became a domain', () => {
+    const prompt = buildTriagePrompt('Sprint 7', []);
+
+    expect(prompt).toContain('"needs-decision"');
+    expect(prompt).toContain('"full-stack"');
+    expect(prompt).not.toContain('- "backend": the front-end cannot do it');
+  });
+
+  it('states the point cap the app enforces', () => {
+    // The test that stops the prompt and the guardrail from drifting apart, which is the failure mode
+    // of the whole hybrid: the model has to be judged by the rule it was given.
+    expect(buildTriagePrompt('Sprint 7', [])).toContain(
+      `${AUTONOMY_MAX_POINTS} story points or fewer`,
+    );
+  });
+
+  it('answers its own example', () => {
+    // The example line IS the contract with the model. Feeding it back through the parser pins the two
+    // together for good, including the shape an older answer still parses into.
+    const prompt = buildTriagePrompt('Sprint 7', []);
+    const line = prompt.split('\n').find((text) => text.startsWith('[{"key":"PROJ-123"'));
+    const tickets = parseTriage({
+      answer: (line ?? '').replace('PROJ-123', 'PROJ-1'),
+      asked: [asked[0]!],
+      analysedAt: RUN_AT,
+    });
+
+    expect(tickets[0]?.verdict).toBe('ready');
+    expect(tickets[0]?.domain).toBe('front-end');
+    expect(tickets[0]?.claimsAutonomy).toBe(true);
+    expect(tickets[0]?.estimate).toBe(3);
   });
 });
 
@@ -212,11 +252,21 @@ describe('flattenDocument', () => {
   });
 });
 
-/** A triaged ticket with only its verdict set, for the counting and ordering tests. */
-const ticketWith = (verdict: TriagedTicket['verdict']): TriagedTicket => ({
+/**
+ * A triaged ticket with only its verdict set, for the counting, ordering and guardrail tests.
+ *
+ * One builder and not two. There used to be a second copy inside the `firstFilledVerdict` block, and
+ * the duplicate is exactly how one of them ends up missing a field the day the type grows one.
+ */
+const ticketWith = (
+  verdict: TriagedTicket['verdict'],
+  overrides: Partial<TriagedTicket> = {},
+): TriagedTicket => ({
   key: 'PROJ-1',
   summary: '',
   verdict,
+  domain: 'unknown',
+  claimsAutonomy: false,
   reason: '',
   question: '',
   next: '',
@@ -225,19 +275,24 @@ const ticketWith = (verdict: TriagedTicket['verdict']): TriagedTicket => ({
   status: '',
   description: '',
   analysedAt: RUN_AT,
+  ...overrides,
 });
+
+/** A ticket every guardrail clears, so each test below can spoil exactly one thing. */
+const autonomous = (overrides: Partial<TriagedTicket> = {}): TriagedTicket =>
+  ticketWith('ready', { domain: 'front-end', claimsAutonomy: true, estimate: 1, ...overrides });
 
 describe('countVerdicts', () => {
   it('counts every verdict, including the ones at zero', () => {
     const counts = countVerdicts([
       ticketWith('ready'),
       ticketWith('ready'),
-      ticketWith('backend'),
+      ticketWith('blocked'),
     ]);
 
     expect(counts.ready).toBe(2);
-    expect(counts.backend).toBe(1);
-    expect(counts.blocked).toBe(0);
+    expect(counts.blocked).toBe(1);
+    expect(counts.unclear).toBe(0);
   });
 });
 
@@ -255,7 +310,7 @@ describe('readyKeys', () => {
         keyed('PROJ-1', 'ready'),
         keyed('PROJ-2', 'needs-decision'),
         keyed('PROJ-3', 'ready'),
-        keyed('PROJ-4', 'backend'),
+        keyed('PROJ-4', 'blocked'),
       ]),
     ).toEqual(['PROJ-1', 'PROJ-3']);
   });
@@ -283,24 +338,12 @@ describe('readyKeys', () => {
 });
 
 describe('firstFilledVerdict', () => {
-  const ticket = (verdict: TriagedTicket['verdict']): TriagedTicket => ({
-    key: 'PROJ-1',
-    summary: '',
-    verdict,
-    reason: '',
-    question: '',
-    next: '',
-    estimate: null,
-    assignee: '',
-    status: '',
-    description: '',
-    analysedAt: RUN_AT,
-  });
+  const ticket = (verdict: TriagedTicket['verdict']): TriagedTicket => ticketWith(verdict);
 
   it('lands on what can be built before what is waiting on you', () => {
     // The sub-tab order is the order of what the reader can act on, and the default follows it.
     expect(firstFilledVerdict([ticket('blocked'), ticket('ready')])).toBe('ready');
-    expect(firstFilledVerdict([ticket('backend'), ticket('needs-decision')])).toBe('needs-decision');
+    expect(firstFilledVerdict([ticket('unclear'), ticket('needs-decision')])).toBe('needs-decision');
   });
 
   it('skips the empty verdicts', () => {
@@ -310,6 +353,214 @@ describe('firstFilledVerdict', () => {
 
   it('falls back to ready when there is nothing at all', () => {
     expect(firstFilledVerdict([])).toBe('ready');
+  });
+});
+
+describe('toDomain, through parseTriage', () => {
+  const domainOf = (raw: string): string => {
+    const tickets = parseTriage({
+      answer: `[{"key":"PROJ-1","verdict":"ready","domain":${raw}}]`,
+      asked: [asked[0]!],
+      analysedAt: RUN_AT,
+    });
+    return tickets[0]!.domain;
+  };
+
+  it('folds the spellings a model actually writes', () => {
+    // Not pedantry: an unknown domain cancels the 100% agent flag, so a missing hyphen would kill a
+    // run in silence.
+    expect(domainOf('"frontend"')).toBe('front-end');
+    expect(domainOf('"Front End"')).toBe('front-end');
+    expect(domainOf('"front_end"')).toBe('front-end');
+    expect(domainOf('"fullstack"')).toBe('full-stack');
+    expect(domainOf('"server"')).toBe('backend');
+  });
+
+  it('falls back to unknown on a domain nobody defined', () => {
+    expect(domainOf('"middleware"')).toBe('unknown');
+    expect(domainOf('7')).toBe('unknown');
+  });
+
+  it('reads an absent domain as unknown, never as front-end', () => {
+    // The default side used to be the only side. Defaulting here would make every answer written by
+    // an older version claim a stack nobody judged.
+    const tickets = parseTriage({
+      answer: '[{"key":"PROJ-1","verdict":"ready"}]',
+      asked: [asked[0]!],
+      analysedAt: RUN_AT,
+    });
+
+    expect(tickets[0]?.domain).toBe('unknown');
+  });
+});
+
+describe('toAutonomous, through parseTriage', () => {
+  const claimOf = (raw: string): boolean => {
+    const tickets = parseTriage({
+      answer: `[{"key":"PROJ-1","verdict":"ready","autonomous":${raw}}]`,
+      asked: [asked[0]!],
+      analysedAt: RUN_AT,
+    });
+    return tickets[0]!.claimsAutonomy;
+  };
+
+  it('takes a real boolean and the spellings a model quotes', () => {
+    expect(claimOf('true')).toBe(true);
+    expect(claimOf('"true"')).toBe(true);
+    expect(claimOf('"Yes"')).toBe(true);
+  });
+
+  it('reads everything else as false, false being the safe direction', () => {
+    // This is the one field that removes the human, so nothing is inferred from a value that could
+    // have meant something else.
+    expect(claimOf('false')).toBe(false);
+    expect(claimOf('1')).toBe(false);
+    expect(claimOf('"probably"')).toBe(false);
+    expect(claimOf('null')).toBe(false);
+  });
+
+  it('reads an absent claim as false', () => {
+    const tickets = parseTriage({
+      answer: '[{"key":"PROJ-1","verdict":"ready"}]',
+      asked: [asked[0]!],
+      analysedAt: RUN_AT,
+    });
+
+    expect(tickets[0]?.claimsAutonomy).toBe(false);
+  });
+});
+
+describe('canRunUnattended', () => {
+  it('clears a ready, sized, whole ticket the analysis vouched for', () => {
+    expect(canRunUnattended(autonomous())).toBe(true);
+    expect(autonomyBlock(autonomous())).toBeNull();
+  });
+
+  it('refuses what the analysis did not claim', () => {
+    expect(autonomyBlock(autonomous({ claimsAutonomy: false }))).toBe('not-claimed');
+  });
+
+  it('refuses anything that is not ready', () => {
+    // The rule readyKeys already records: a batch of parked tickets asks an agent to decide for you,
+    // and an unattended run is that batch with the human removed.
+    expect(autonomyBlock({ ...autonomous(), verdict: 'needs-decision' })).toBe('not-ready');
+  });
+
+  it('refuses an unknown domain, the run differing by side', () => {
+    expect(autonomyBlock(autonomous({ domain: 'unknown' }))).toBe('unknown-domain');
+  });
+
+  it('refuses a ticket with no estimate', () => {
+    expect(autonomyBlock(autonomous({ estimate: null }))).toBe('no-estimate');
+  });
+
+  it('refuses one above the cap and accepts one exactly at it', () => {
+    expect(autonomyBlock(autonomous({ estimate: AUTONOMY_MAX_POINTS }))).toBeNull();
+    expect(autonomyBlock(autonomous({ estimate: 5 }))).toBe('too-large');
+  });
+
+  it('refuses a ticket whose description was cut short for the prompt', () => {
+    // The only guardrail about our own prompt, and the only one the model could not apply to itself:
+    // it sees the marker but not what is behind it, and a story tail is where the criteria live.
+    const cut = autonomous({ description: `Body\n${DESCRIPTION_TRUNCATED_MARK}` });
+
+    expect(autonomyBlock(cut)).toBe('truncated');
+  });
+
+  it('names the first rule that stopped it, in the order the reader is told about', () => {
+    // Everything wrong at once still answers the claim, because that is the first thing said.
+    expect(autonomyBlock(ticketWith('blocked', { claimsAutonomy: false, estimate: 21 }))).toBe(
+      'not-claimed',
+    );
+  });
+});
+
+describe('autonomousKeys', () => {
+  it('is a subset of the ready keys, in list order', () => {
+    const tickets = [
+      autonomous({ key: 'PROJ-1' }),
+      ticketWith('ready', { key: 'PROJ-2' }),
+      autonomous({ key: 'PROJ-3' }),
+    ];
+
+    expect(autonomousKeys(tickets)).toEqual(['PROJ-1', 'PROJ-3']);
+    expect(readyKeys(tickets)).toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3']);
+  });
+
+  it('caps at the same limit the main process applies', () => {
+    const many = Array.from({ length: WORK_BATCH_LIMIT + 3 }, (_unused, index) =>
+      autonomous({ key: `PROJ-${index}` }),
+    );
+
+    expect(autonomousKeys(many)).toHaveLength(WORK_BATCH_LIMIT);
+  });
+
+  it('returns nothing when no ticket clears, so the button never appears', () => {
+    expect(autonomousKeys([ticketWith('ready')])).toEqual([]);
+  });
+});
+
+describe('describeAutonomousRun', () => {
+  it('names the count, the overlap and the review that still happens', () => {
+    const sentence = describeAutonomousRun(['PROJ-1', 'PROJ-2']);
+
+    expect(sentence).toContain('2 tickets');
+    expect(sentence).toContain('ready button');
+    expect(sentence).toContain('reviewer');
+  });
+});
+
+describe('readResult', () => {
+  const stored = (ticket: Record<string, unknown>): unknown => ({
+    sprintId: 7,
+    sprintName: 'Sprint 7',
+    analysedAt: RUN_AT,
+    tickets: [ticket],
+    skipped: { inProgress: 0, alreadyAnalysed: 0 },
+  });
+
+  it('turns a stored backend verdict into unclear, the verdict nobody defines', () => {
+    // The whole migration of the split, and it invents nothing: the reason survives, which is where
+    // the information actually was, and no run ever judged that row ready or blocked.
+    const result = readResult(stored({ key: 'PROJ-1', verdict: 'backend', reason: 'No API for it' }));
+
+    expect(result?.tickets[0]?.verdict).toBe('unclear');
+    expect(result?.tickets[0]?.reason).toBe('No API for it');
+  });
+
+  it('normalises a hand-edited verdict rather than letting it reach an exhaustive lookup', () => {
+    expect(readResult(stored({ key: 'PROJ-1', verdict: 'whatever' }))?.tickets[0]?.verdict).toBe(
+      'unclear',
+    );
+  });
+
+  it('reads a file written before the domain existed as unknown and unclaimed', () => {
+    const ticket = readResult(stored({ key: 'PROJ-1', verdict: 'ready' }))?.tickets[0];
+
+    expect(ticket?.domain).toBe('unknown');
+    expect(ticket?.claimsAutonomy).toBe(false);
+  });
+
+  it('round-trips the claim under the name the store writes, not the one the model answers', () => {
+    const ticket = readResult(
+      stored({ key: 'PROJ-1', verdict: 'ready', domain: 'backend', claimsAutonomy: true }),
+    )?.tickets[0];
+
+    expect(ticket?.domain).toBe('backend');
+    expect(ticket?.claimsAutonomy).toBe(true);
+  });
+
+  it('drops a row with no key, and keeps one with no verdict', () => {
+    // A row losing its verdict used to vanish, which is the failure nobody notices; only a row that
+    // cannot be worked, dismissed or refreshed still goes.
+    expect(readResult(stored({ verdict: 'ready' }))?.tickets).toHaveLength(0);
+    expect(readResult(stored({ key: 'PROJ-1' }))?.tickets[0]?.verdict).toBe('unclear');
+  });
+
+  it('snaps a stored estimate back onto the scale', () => {
+    const ticket = readResult(stored({ key: 'PROJ-1', verdict: 'ready', estimate: 4 }))?.tickets[0];
+
+    expect(ticket?.estimate).toBe(5);
   });
 });
 
