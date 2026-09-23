@@ -1417,6 +1417,13 @@ export interface AutoRunRecord {
    * since without it the row reports the same three comments at every poll for the rest of its life.
    */
   readonly lastSeenCommentId: number;
+  /**
+   * When the pull request was seen merged, or `null` while it is still open.
+   *
+   * What retires a record. Without it the watcher would run its closing errand at every poll for the
+   * rest of the app's life, and the first of those errands writes to a board the whole team reads.
+   */
+  readonly mergedAt: string | null;
   readonly feedbackStartedAt: string | null;
   readonly feedbackFinishedAt: string | null;
   /** Comments that arrived once the pass was spent. The number the row shows, and nothing starts on it. */

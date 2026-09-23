@@ -1,11 +1,18 @@
 import { basename } from 'node:path';
-import type { AppSettings, AutoRunRecord, Project, PullRequest, TerminalId } from '@shared/contracts.js';
+import type {
+  AppSettings,
+  AutoRunRecord,
+  Project,
+  PullRequest,
+  RepoPulls,
+  TerminalId,
+} from '@shared/contracts.js';
 import { feedbackActionId, workActionId } from '@shared/contracts.js';
 import type { ReviewComment } from '../github/review-comments.js';
 import type { AutoRunRecords } from '../autorun/auto-run-store.js';
 import { resolveWorkspaceRoot } from '../triage/work-command.js';
 import { buildFeedbackCommand } from './feedback-command.js';
-import { advanceRun, matchRunPull } from './feedback-rules.js';
+import { advanceRun, looksGone, matchRunPull, pullsFor } from './feedback-rules.js';
 
 /**
  * Watches the pull requests unattended runs opened, and hands one to an agent when feedback lands.
@@ -24,6 +31,12 @@ export interface FeedbackPorts {
     number: number,
   ) => Promise<{ value: ReviewComment[] | null; error: string | null }>;
   readonly viewerLogin: () => Promise<string>;
+  /** Confirms what became of a pull request the open list no longer carries. */
+  readonly readState: (slug: string, number: number) => Promise<string | null>;
+  /** Moves the ticket to whatever the workflow calls done. Best effort, never blocking. */
+  readonly closeTicket: (ticketKey: string) => Promise<{ ok: boolean; message: string }>;
+  /** Stops a dev server this app started. `false` when there was none to stop. */
+  readonly stopServer: (projectId: string) => boolean;
   /** Whether a tab of that action is open and its process alive. */
   readonly isActionRunning: (projectId: string, actionId: string) => boolean;
   readonly spawn: (input: {
@@ -54,13 +67,13 @@ export class FeedbackWatcher {
   ) {}
 
   /** Called on every pull request poll. Never throws: a watcher that can break the poll is worse than none. */
-  async tick(pulls: readonly PullRequest[]): Promise<void> {
+  async tick(repos: readonly RepoPulls[]): Promise<void> {
     if (this.busy || this.store.all().length === 0) {
       return;
     }
     this.busy = true;
     try {
-      await this.run(pulls);
+      await this.run(repos);
     } catch {
       // Swallowed on purpose, the rule `refreshLiveFields` already follows: this rides another
       // feature's poll, and a throw here would take the pull request list down with it.
@@ -69,20 +82,26 @@ export class FeedbackWatcher {
     }
   }
 
-  private async run(pulls: readonly PullRequest[]): Promise<void> {
+  private async run(repos: readonly RepoPulls[]): Promise<void> {
     const viewerLogin = await this.ports.viewerLogin();
     let dirty = false;
 
     for (const stored of this.store.all()) {
+      const pulls = pullsFor(stored, repos);
       const record = this.join(stored, pulls, viewerLogin);
       if (record !== stored) {
         this.store.set(record);
         dirty = true;
       }
+
+      if (looksGone(record, repos)) {
+        dirty = (await this.close(record)) || dirty;
+        continue;
+      }
+
       const pull = pulls.find((entry) => entry.number === record.prNumber);
-      if (record.prNumber === null || pull === undefined) {
-        // Not opened yet, or gone from the open list, which means merged or closed and is the merge
-        // watcher's business rather than this one's.
+      if (record.prNumber === null || pull === undefined || record.mergedAt !== null) {
+        // Not opened yet, its repository's poll did not land, or the record is already retired.
         continue;
       }
       dirty = (await this.consider(record, pull, viewerLogin)) || dirty;
@@ -91,6 +110,48 @@ export class FeedbackWatcher {
     if (dirty) {
       await this.store.write();
     }
+  }
+
+  /**
+   * Finishes a ticket whose pull request has left the open list.
+   *
+   * The poll cannot tell a merge from a close, and the difference decides whether a ticket is marked
+   * done on a board the whole team reads, so GitHub is asked once before anything is written anywhere.
+   * A read that fails changes nothing and is simply retried at the next poll: the cost of waiting three
+   * minutes is nothing next to closing a ticket somebody abandoned on purpose.
+   *
+   * The order is the one the `finish` skill already records, and it is not arrangement: **the server is
+   * stopped before the worktree is anybody's business**, because a running dev server holds file locks
+   * that make `git worktree remove` fail on Windows.
+   *
+   * The worktree itself is deliberately left alone. It is the one irreversible act in this chain, a
+   * directory that can still hold uncommitted work, and the Worktrees tab already owns that gesture and
+   * already shows whether the checkout is clean. A second judgement about it here would be a second
+   * answer to "is this safe to delete", free to disagree with the one on screen.
+   */
+  private async close(record: AutoRunRecord): Promise<boolean> {
+    const state = await this.ports.readState(record.slug, record.prNumber ?? 0);
+    if (state === null) {
+      return false;
+    }
+    if (state !== 'MERGED') {
+      this.store.set({
+        ...record,
+        mergedAt: this.ports.now().toISOString(),
+        notice: `Pull request ${state.toLowerCase()}, nothing was changed on the board`,
+      });
+      return true;
+    }
+
+    const jira = await this.ports.closeTicket(record.ticketKey);
+    const stopped = this.ports.stopServer(record.projectId);
+    const worktree = record.branch.length > 0 ? `, worktree ${record.branch} left to remove` : '';
+    this.store.set({
+      ...record,
+      mergedAt: this.ports.now().toISOString(),
+      notice: `Merged: ${jira.message}${stopped ? ', server stopped' : ''}${worktree}`,
+    });
+    return true;
   }
 
   /** Fills in the pull request number the first time the poll shows it, and never overwrites one. */

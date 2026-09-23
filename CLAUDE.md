@@ -1678,6 +1678,32 @@ user's own identity, on a colleague's work.
   the refusal only in its absence: a row showing both would ask its reader to work out which of the
   two is current. Uncoloured, unlike the pills after it, because those claim something about the pull
   request while this one reports what this app did.
+- **A merge is detected by absence, and confirmed by one call.** `gh pr list --state open` fills the
+  payload, so a pull request that was in it and is not any more has been merged or closed. The poll
+  cannot say which, and the difference decides whether a ticket is marked done on a board the whole
+  team reads, so GitHub is asked once before anything is written anywhere. A read that fails changes
+  nothing and is retried at the next poll: waiting three minutes costs nothing next to closing a
+  ticket somebody abandoned on purpose.
+- **The guard is the REPOSITORY, not the pull request, and this is the one to get right.** A poll that
+  failed for one repository hands back an empty list with an `error`, which looks **exactly** like
+  every pull request of that repository having been merged at once. Reading that as gone would close a
+  sprint's worth of tickets on a network blip, so `looksGone` answers `false` for a repository that is
+  absent or errored, and the watcher takes whole `RepoPulls` rows rather than the flattened pulls for
+  that reason alone.
+- **`mergedAt` is what retires a record.** Without it the closing errand would run at every poll for
+  the rest of the app's life, and the first thing that errand does is write to the board.
+- **Jira is closed by `statusCategory`, never by name**, the rule `pickStartTransition` already
+  records, and it matters more at this end: a missed start leaves a ticket in To Do while somebody
+  works on it, which the next standup catches, while a missed close leaves a merged ticket open for
+  ever because nothing downstream looks at it again. Best effort throughout: the merge happened
+  whatever Jira answers, so an unreachable board is a sentence on the row and never a failure.
+- **The server is stopped and the worktree is NOT removed.** The order is the `finish` skill's, and
+  the first half is not arrangement: a running dev server holds file locks that make
+  `git worktree remove` fail on Windows. The second half is a refusal. Removing a worktree is the one
+  irreversible act in this chain, on a directory that can still hold uncommitted work, and the
+  Worktrees tab already owns that gesture and already shows whether the checkout is clean. A second
+  judgement here would be a second answer to "is this safe to delete", free to disagree with the one
+  on screen. The row says the worktree is still there instead.
 - **The records travel on their own channel, and are read once at start-up.** `AutoRunsChanged` fires
   after the watcher's tick, never before, so the list paints the poll and then what the tick made of
   it. `AutoRunsRefresh` exists because the first poll is up to three minutes away, and a row that says

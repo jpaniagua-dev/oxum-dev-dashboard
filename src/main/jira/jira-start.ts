@@ -95,6 +95,37 @@ export function pickStartTransition(
 const START_WORDS: readonly string[] = ['progress', 'cours', 'develop', 'wip'];
 
 /**
+ * The transition that closes a ticket, chosen by category and never by name.
+ *
+ * The twin of `pickStartTransition`, and it inherits the whole of its reasoning: `stage === 'done'`
+ * comes from `statusCategory`, because a board that calls the column "Terminé", "Closed" or "Shipped"
+ * is a board on which matching the string "done" finds nothing.
+ *
+ * It matters more here than it does at the other end. A missed start transition leaves a ticket in To
+ * Do while somebody works on it, which the next standup catches; a missed close leaves a merged ticket
+ * open for ever, because nothing downstream looks at it again.
+ *
+ * Returns `null` when the workflow offers no done move from where the ticket stands, which is a real
+ * answer and not a failure: a board that needs review before done has none from in progress. Reported
+ * rather than forced, exactly like its twin.
+ */
+export function pickDoneTransition(
+  transitions: readonly IssueTransition[],
+): IssueTransition | null {
+  const candidates = transitions.filter((transition) => transition.stage === 'done');
+  if (candidates.length === 0) {
+    return null;
+  }
+  const preferred = candidates.find((transition) =>
+    DONE_WORDS.some((word) => transition.label.toLowerCase().includes(word)),
+  );
+  return preferred ?? candidates[0] ?? null;
+}
+
+/** Tiebreak words only, like `START_WORDS`, and allowed to help rather than to decide. */
+const DONE_WORDS: readonly string[] = ['done', 'termin', 'closed', 'ferm', 'resolved', 'complete'];
+
+/**
  * Snaps an estimate onto `STORY_POINT_SCALE`.
  *
  * A model handed a numeric field answers 4, 6 or 7.5 often enough that the value has to be rounded to

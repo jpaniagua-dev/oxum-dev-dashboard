@@ -4,7 +4,9 @@ import {
   feedbackActionId,
   workActionId,
   type AutoRunRecord,
+  type IssueTransition,
   type PullRequest,
+  type RepoPulls,
 } from '../src/shared/contracts.js';
 import { sameLogin } from '../src/main/github/bot-findings.js';
 import {
@@ -12,7 +14,14 @@ import {
   parseReviewComments,
   type ReviewComment,
 } from '../src/main/github/review-comments.js';
-import { advanceRun, matchRunPull, newFeedback } from '../src/main/feedback/feedback-rules.js';
+import {
+  advanceRun,
+  looksGone,
+  matchRunPull,
+  newFeedback,
+  pullsFor,
+} from '../src/main/feedback/feedback-rules.js';
+import { pickDoneTransition } from '../src/main/jira/jira-start.js';
 import { feedbackRefusal, type FeedbackGateInput } from '../src/main/feedback/feedback-gate.js';
 import { buildFeedbackCommand } from '../src/main/feedback/feedback-command.js';
 import type { AutoRunRecords } from '../src/main/autorun/auto-run-store.js';
@@ -48,6 +57,7 @@ const record = (over: Partial<AutoRunRecord> = {}): AutoRunRecord => ({
   prMatchedAt: '2026-09-21T09:00:00.000Z',
   feedbackPhase: 'watching',
   lastSeenCommentId: 0,
+  mergedAt: null,
   feedbackStartedAt: null,
   feedbackFinishedAt: null,
   pendingCount: 0,
@@ -432,6 +442,18 @@ describe('FeedbackWatcher', () => {
 
   const project = { id: 'neos', label: 'Neos', path: 'C:/repos/neos-shared-front' } as Project;
 
+  /** The poll payload shape, since the watcher needs to tell a failed poll from an empty one. */
+  const repos = (pulls: PullRequest[], error: string | null = null): RepoPulls[] => [
+    {
+      projectId: 'neos',
+      label: 'Neos',
+      slug: 'Ethos-Services-SA/neos-shared-front',
+      pulls,
+      checkedAt: '2026-09-21T10:00:00.000Z',
+      error,
+    },
+  ];
+
   const settings = (over: Partial<AppSettings> = {}): AppSettings =>
     ({
       feedbackPassEnabled: true,
@@ -452,6 +474,9 @@ describe('FeedbackWatcher', () => {
         spawned.push(input.command);
         return 't1' as never;
       },
+      readState: async () => 'MERGED',
+      closeTicket: async () => ({ ok: true, message: 'TEC-1801 moved to Done' }),
+      stopServer: () => true,
       now: () => NOW,
       ...over,
     };
@@ -460,7 +485,7 @@ describe('FeedbackWatcher', () => {
   it('launches one pass when feedback lands on a watched pull request', async () => {
     const store = records([record()]);
     const port = ports();
-    await new FeedbackWatcher(store, settings, () => [project], port).tick([pull()]);
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(repos([pull()]));
 
     expect(port.spawned).toHaveLength(1);
     expect(port.spawned[0]).toContain('/pr-feedback 42');
@@ -477,7 +502,7 @@ describe('FeedbackWatcher', () => {
         return 't1' as never;
       },
     });
-    await new FeedbackWatcher(wrapped, settings, () => [project], port).tick([pull()]);
+    await new FeedbackWatcher(wrapped, settings, () => [project], port).tick(repos([pull()]));
 
     expect(order).toEqual(['write', 'spawn']);
   });
@@ -485,7 +510,7 @@ describe('FeedbackWatcher', () => {
   it('launches nothing on a pull request whose pass is spent, however much arrives', async () => {
     const store = records([record({ feedbackPhase: 'done' })]);
     const port = ports();
-    await new FeedbackWatcher(store, settings, () => [project], port).tick([pull()]);
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(repos([pull()]));
 
     expect(port.spawned).toEqual([]);
     expect(store.get('TEC-1801')?.pendingCount).toBe(1);
@@ -498,28 +523,28 @@ describe('FeedbackWatcher', () => {
       () => settings({ feedbackPassEnabled: false }),
       () => [project],
       port,
-    ).tick([pull()]);
+    ).tick(repos([pull()]));
 
     expect(port.spawned).toEqual([]);
   });
 
   it('launches nothing when the only comments are our own replies', async () => {
     const port = ports({ readComments: async () => ({ value: [comment(9, 'julphi127')], error: null }) });
-    await new FeedbackWatcher(records([record()]), settings, () => [project], port).tick([pull()]);
+    await new FeedbackWatcher(records([record()]), settings, () => [project], port).tick(repos([pull()]));
 
     expect(port.spawned).toEqual([]);
   });
 
   it('launches nothing while the run that opened the pull request is still going', async () => {
     const port = ports({ isActionRunning: () => true });
-    await new FeedbackWatcher(records([record()]), settings, () => [project], port).tick([pull()]);
+    await new FeedbackWatcher(records([record()]), settings, () => [project], port).tick(repos([pull()]));
 
     expect(port.spawned).toEqual([]);
   });
 
   it('fills in the pull request number from the poll, once', async () => {
     const store = records([record({ prNumber: null, prMatchedAt: null })]);
-    await new FeedbackWatcher(store, settings, () => [project], ports()).tick([pull()]);
+    await new FeedbackWatcher(store, settings, () => [project], ports()).tick(repos([pull()]));
 
     expect(store.get('TEC-1801')?.prNumber).toBe(42);
     expect(store.get('TEC-1801')?.branch).toBe('TEC-1801-add-a-column');
@@ -533,10 +558,10 @@ describe('FeedbackWatcher', () => {
     const port = ports();
     const watcher = new FeedbackWatcher(store, settings, () => [project], port);
 
-    await watcher.tick([pull()]);
+    await watcher.tick(repos([pull()]));
     const afterFirst = store.writes;
-    await watcher.tick([pull()]);
-    await watcher.tick([pull()]);
+    await watcher.tick(repos([pull()]));
+    await watcher.tick(repos([pull()]));
 
     expect(afterFirst).toBe(1);
     expect(store.writes).toBe(1);
@@ -546,7 +571,7 @@ describe('FeedbackWatcher', () => {
   it('treats a failed read as unknown rather than as an empty pull request', async () => {
     const store = records([record()]);
     const port = ports({ readComments: async () => ({ value: null, error: 'gh exploded' }) });
-    await new FeedbackWatcher(store, settings, () => [project], port).tick([pull()]);
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(repos([pull()]));
 
     expect(port.spawned).toEqual([]);
     expect(store.get('TEC-1801')?.lastRefusal).toBeNull();
@@ -555,7 +580,7 @@ describe('FeedbackWatcher', () => {
   it('does nothing for a pull request that has left the open list', async () => {
     const store = records([record()]);
     const port = ports();
-    await new FeedbackWatcher(store, settings, () => [project], port).tick([]);
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(repos([]));
 
     expect(port.spawned).toEqual([]);
     expect(store.get('TEC-1801')?.feedbackPhase).toBe('watching');
@@ -597,5 +622,199 @@ describe('describeRun', () => {
       'gh is not signed in',
     );
     expect(describeRun(record())).toBeNull();
+  });
+});
+
+describe('pickDoneTransition', () => {
+  const move = (id: string, label: string, stage: IssueTransition['stage']): IssueTransition =>
+    ({ id, label, stage }) as IssueTransition;
+
+  it('chooses by category, whatever the column is called', () => {
+    // A board that calls it "Terminé" is one on which matching the word "done" finds nothing, which is
+    // the whole reason the category decides.
+    expect(pickDoneTransition([move('1', 'En cours', 'in-progress'), move('2', 'Terminé', 'done')])?.id).toBe('2');
+  });
+
+  it('uses the name only to break a tie between two done moves', () => {
+    const picked = pickDoneTransition([move('1', 'Rejected', 'done'), move('2', 'Done', 'done')]);
+
+    expect(picked?.id).toBe('2');
+  });
+
+  it('falls back to the first done move when no word helps', () => {
+    expect(pickDoneTransition([move('7', 'Shipped', 'done'), move('8', 'Archived', 'done')])?.id).toBe('7');
+  });
+
+  it('returns null when the workflow offers no done move from here', () => {
+    // A real answer and not a failure: a board that needs review before done has none from in progress.
+    expect(pickDoneTransition([move('1', 'In review', 'in-progress')])).toBeNull();
+    expect(pickDoneTransition([])).toBeNull();
+  });
+});
+
+describe('looksGone', () => {
+  const repo = (pulls: PullRequest[], error: string | null = null): RepoPulls[] => [
+    {
+      projectId: 'neos',
+      label: 'Neos',
+      slug: 'Ethos-Services-SA/neos-shared-front',
+      pulls,
+      checkedAt: '',
+      error,
+    },
+  ];
+
+  it('says a tracked pull request has left the open list', () => {
+    expect(looksGone(record(), repo([]))).toBe(true);
+  });
+
+  it('says nothing about one still listed', () => {
+    expect(looksGone(record(), repo([pull()]))).toBe(false);
+  });
+
+  it('refuses to read a FAILED poll as a merge', () => {
+    // The guard that matters most here. A repository whose poll failed hands back an empty list with
+    // an error, which looks exactly like every one of its pull requests being merged at once: reading
+    // that as gone would close a sprint's worth of tickets on a network blip.
+    expect(looksGone(record(), repo([], 'gh: network unreachable'))).toBe(false);
+  });
+
+  it('refuses to conclude anything from a repository the poll did not cover', () => {
+    expect(looksGone(record(), [])).toBe(false);
+  });
+
+  it('leaves a record with no pull request, and a retired one, alone', () => {
+    expect(looksGone(record({ prNumber: null }), repo([]))).toBe(false);
+    expect(looksGone(record({ mergedAt: '2026-09-21T09:00:00.000Z' }), repo([]))).toBe(false);
+  });
+});
+
+describe('pullsFor', () => {
+  it('hands back nothing when that repository errored, rather than an empty truth', () => {
+    const errored: RepoPulls[] = [
+      { projectId: 'neos', label: 'Neos', slug: 'a/b', pulls: [pull()], checkedAt: '', error: 'boom' },
+    ];
+
+    expect(pullsFor(record(), errored)).toEqual([]);
+  });
+});
+
+describe('FeedbackWatcher: closing a merged ticket', () => {
+  const records = (seed: AutoRunRecord[]): AutoRunRecords & { writes: number } => {
+    const map = new Map(seed.map((entry) => [entry.ticketKey.toUpperCase(), entry]));
+    return {
+      writes: 0,
+      get: (key) => map.get(key.toUpperCase()),
+      byPull: (slug, number) =>
+        [...map.values()].find((entry) => entry.slug === slug && entry.prNumber === number),
+      all: () => [...map.values()],
+      set(entry) {
+        map.set(entry.ticketKey.toUpperCase(), entry);
+      },
+      remove: (key) => map.delete(key.toUpperCase()),
+      async write() {
+        this.writes += 1;
+      },
+    };
+  };
+
+  const project = { id: 'neos', label: 'Neos', path: 'C:/repos/neos-shared-front' } as Project;
+  const settings = (): AppSettings =>
+    ({
+      feedbackPassEnabled: true,
+      agentWorkModel: '',
+      workspaceRoot: '',
+      agentProfile: { interactive: 'claude {model} --dangerously-skip-permissions' },
+    }) as AppSettings;
+
+  const empty = (error: string | null = null): RepoPulls[] => [
+    { projectId: 'neos', label: 'Neos', slug: 'Ethos-Services-SA/neos-shared-front', pulls: [], checkedAt: '', error },
+  ];
+
+  const ports = (over: Partial<FeedbackPorts> = {}): FeedbackPorts & { closed: string[]; stopped: string[] } => {
+    const closed: string[] = [];
+    const stopped: string[] = [];
+    return {
+      closed,
+      stopped,
+      readComments: async () => ({ value: [], error: null }),
+      viewerLogin: async () => 'julphi127',
+      isActionRunning: () => false,
+      spawn: () => 't1' as never,
+      readState: async () => 'MERGED',
+      closeTicket: async (key) => {
+        closed.push(key);
+        return { ok: true, message: `${key} moved to Done` };
+      },
+      stopServer: (projectId) => {
+        stopped.push(projectId);
+        return true;
+      },
+      now: () => NOW,
+      ...over,
+    };
+  };
+
+  it('closes the ticket and stops the server when the pull request was merged', () => {
+    const store = records([record()]);
+    const port = ports();
+
+    return new FeedbackWatcher(store, settings, () => [project], port).tick(empty()).then(() => {
+      expect(port.closed).toEqual(['TEC-1801']);
+      expect(port.stopped).toEqual(['neos']);
+      expect(store.get('TEC-1801')?.mergedAt).toBe(NOW.toISOString());
+      expect(store.get('TEC-1801')?.notice).toContain('Merged');
+    });
+  });
+
+  it('leaves the board alone when the pull request was closed rather than merged', async () => {
+    const store = records([record()]);
+    const port = ports({ readState: async () => 'CLOSED' });
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(empty());
+
+    expect(port.closed).toEqual([]);
+    expect(store.get('TEC-1801')?.mergedAt).toBe(NOW.toISOString());
+    expect(store.get('TEC-1801')?.notice).toContain('closed');
+  });
+
+  it('does nothing at all when GitHub could not be asked', async () => {
+    // Waiting three minutes costs nothing next to closing a ticket somebody abandoned on purpose.
+    const store = records([record()]);
+    const port = ports({ readState: async () => null });
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(empty());
+
+    expect(port.closed).toEqual([]);
+    expect(store.get('TEC-1801')?.mergedAt).toBeNull();
+    expect(store.writes).toBe(0);
+  });
+
+  it('does nothing when the repository poll failed', async () => {
+    const store = records([record()]);
+    const port = ports();
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(empty('gh exploded'));
+
+    expect(port.closed).toEqual([]);
+    expect(store.get('TEC-1801')?.mergedAt).toBeNull();
+  });
+
+  it('closes a ticket once and never again', async () => {
+    const store = records([record()]);
+    const port = ports();
+    const watcher = new FeedbackWatcher(store, settings, () => [project], port);
+
+    await watcher.tick(empty());
+    await watcher.tick(empty());
+    await watcher.tick(empty());
+
+    expect(port.closed).toEqual(['TEC-1801']);
+  });
+
+  it('says the worktree is still there, rather than removing it', async () => {
+    // The one irreversible act in the chain, on a directory that can still hold uncommitted work. The
+    // Worktrees tab owns that gesture and already shows whether the checkout is clean.
+    const store = records([record()]);
+    await new FeedbackWatcher(store, settings, () => [project], ports()).tick(empty());
+
+    expect(store.get('TEC-1801')?.notice).toContain('worktree TEC-1801-add-a-column left to remove');
   });
 });

@@ -17,6 +17,8 @@ import {
   readReviewComments,
   readReviews,
 } from './github/gh-review-read.js';
+import { applyTransition, readTransitions } from './jira/jira-service.js';
+import { pickDoneTransition } from './jira/jira-start.js';
 import { AutoRunStore } from './autorun/auto-run-store.js';
 import { FeedbackWatcher, type FeedbackPorts } from './feedback/feedback-watcher.js';
 import { buildFeedbackCommand } from './feedback/feedback-command.js';
@@ -202,6 +204,48 @@ async function bootstrap(): Promise<void> {
       viewerLogin: readViewerLogin,
       isActionRunning: (projectId, actionId) => terminals?.isActionRunning(projectId, actionId) === true,
       spawn: (input) => spawnFeedbackTab(input),
+      /**
+       * What became of a pull request the open list stopped carrying.
+       *
+       * `null` on a failed read, which the watcher treats as "ask again next poll" rather than as an
+       * answer: the alternative is closing a ticket on a board because `gh` was slow once.
+       */
+      readState: async (slug, number) => (await readPullDetail(slug, number)).value?.state ?? null,
+      /**
+       * Moves the ticket to whatever this board calls done.
+       *
+       * Best effort by construction, the same rule `startIssue` follows at the other end: the merge
+       * happened whatever Jira answers, so a board that is unreachable, unconfigured, or whose workflow
+       * offers no done move from here is reported in a sentence and never treated as a failure of the
+       * watcher.
+       *
+       * The destination is chosen by `statusCategory` and never by name, because a board that calls the
+       * column "Terminé" is one on which matching the word "done" finds nothing.
+       */
+      closeTicket: async (ticketKey) => {
+        const { siteUrl, email } = settingsStore.get().jira;
+        const token = await secrets.read();
+        if (siteUrl.length === 0 || email.length === 0 || token.length === 0) {
+          return { ok: false, message: 'Jira is not configured' };
+        }
+        const credentials = { siteUrl, email, token };
+        const { transitions, error } = await readTransitions(credentials, ticketKey);
+        if (error !== null) {
+          return { ok: false, message: `Jira refused the transition list: ${error}` };
+        }
+        const done = pickDoneTransition(transitions);
+        if (done === null) {
+          return { ok: false, message: 'this workflow offers no done move from here' };
+        }
+        const applied = await applyTransition(credentials, ticketKey, done.id);
+        if (applied.ok) {
+          void jiraMonitor.refreshNow();
+        }
+        return applied.ok
+          ? { ok: true, message: `${ticketKey} moved to ${done.label}` }
+          : { ok: false, message: applied.message };
+      },
+      stopServer: (projectId) => terminals?.stopProjectServer(projectId) === true,
       now: () => new Date(),
     },
   );
@@ -214,8 +258,11 @@ async function bootstrap(): Promise<void> {
         dashboardWindow.send(IpcChannel.PullsChanged, repos);
         // After the broadcast, never before: the list must fill in whatever the watcher then decides,
         // and the records follow on their own channel once the tick has had its say.
+        // The whole rows and not the flattened pull requests: a repository whose poll failed hands
+        // back an empty list with an error, which looks exactly like all of its pull requests having
+        // been merged at once. The watcher needs to be able to tell those apart.
         void feedbackWatcher
-          .tick(pullMonitor.rows().flatMap((repo) => repo.pulls))
+          .tick(pullMonitor.rows())
           .then(() => dashboardWindow.send(IpcChannel.AutoRunsChanged, autoRuns.all()));
       },
     );

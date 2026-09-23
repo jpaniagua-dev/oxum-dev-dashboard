@@ -120,6 +120,7 @@ export function readRecord(value: unknown): AutoRunRecord | null {
     prMatchedAt: optionalText(entry['prMatchedAt']),
     feedbackPhase: readPhase(entry['feedbackPhase']),
     lastSeenCommentId: count(entry['lastSeenCommentId']),
+    mergedAt: optionalText(entry['mergedAt']),
     feedbackStartedAt: optionalText(entry['feedbackStartedAt']),
     feedbackFinishedAt: optionalText(entry['feedbackFinishedAt']),
     pendingCount: count(entry['pendingCount']),

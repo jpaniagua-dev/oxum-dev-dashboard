@@ -1,4 +1,4 @@
-import type { AutoRunRecord, PullRequest } from '@shared/contracts.js';
+import type { AutoRunRecord, PullRequest, RepoPulls } from '@shared/contracts.js';
 import { sameLogin } from '../github/bot-findings.js';
 import type { ReviewComment } from '../github/review-comments.js';
 import { nextWatermark } from '../github/review-comments.js';
@@ -152,4 +152,33 @@ function changed(before: AutoRunRecord, after: AutoRunRecord): boolean {
     before.notice !== after.notice ||
     before.lastRefusal !== after.lastRefusal
   );
+}
+
+/**
+ * Whether a record's pull request is worth asking GitHub about, because the poll no longer lists it.
+ *
+ * `gh pr list --state open` is what fills that payload, so a pull request that was there and is not
+ * any more has been merged or closed. The poll cannot say which, and the difference decides whether a
+ * ticket gets closed on a board the whole team reads, so this only says "go and ask".
+ *
+ * ⚠️ The guard that makes it safe is the repository, not the pull request. A poll that failed for one
+ * repository hands back an empty list with an `error`, which looks **exactly** like every pull request
+ * of that repository having been merged at once. Reading a missing repository as "gone" would close a
+ * sprint's worth of tickets on a network blip, so an absent or errored repository answers `false`.
+ */
+export function looksGone(record: AutoRunRecord, repos: readonly RepoPulls[]): boolean {
+  if (record.prNumber === null || record.mergedAt !== null) {
+    return false;
+  }
+  const repo = repos.find((entry) => entry.projectId === record.projectId);
+  if (repo === undefined || repo.error !== null) {
+    return false;
+  }
+  return !repo.pulls.some((pull) => pull.number === record.prNumber);
+}
+
+/** The pull requests of the repository a record belongs to, or none when that poll did not land. */
+export function pullsFor(record: AutoRunRecord, repos: readonly RepoPulls[]): PullRequest[] {
+  const repo = repos.find((entry) => entry.projectId === record.projectId);
+  return repo === undefined || repo.error !== null ? [] : repo.pulls;
 }

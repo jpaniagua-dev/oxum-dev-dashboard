@@ -1015,6 +1015,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
               prMatchedAt: null,
               feedbackPhase: 'watching',
               lastSeenCommentId: 0,
+              mergedAt: null,
               feedbackStartedAt: null,
               feedbackFinishedAt: null,
               pendingCount: 0,
