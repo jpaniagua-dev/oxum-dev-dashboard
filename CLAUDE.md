@@ -1993,10 +1993,13 @@ pattern are left ready.
   last open, and its interesting moments all happen with nobody watching.
 - ⚠️ **It rests entirely on the AppUserModelID, and it fails in silence.** Windows delivers a toast to
   a process whose AUMID matches a shortcut on the Start Menu. Without that pairing `show()` returns
-  normally and nothing appears: no error, no log, nothing to debug, and it works in `npm run dev`
-  where Electron's own identity is registered. `registerNotificationIdentity` is therefore called
-  **before `whenReady`** with the same `appId` electron-builder writes into the shortcut, and the
-  release ships an installer for no other reason.
+  normally and nothing appears: no error, no log, nothing to debug. `registerNotificationIdentity` is
+  therefore called **before `whenReady`** with the same `appId` electron-builder writes into the
+  shortcut, and the release ships an installer for no other reason.
+- ⚠️ **`npm run dev` is not a place to test this, and probably cannot deliver a toast at all.** Setting
+  the packaged `appId` is what makes the installed build work, and in dev no shortcut carries that id,
+  so the pairing Windows looks for does not exist. Judge the feature from an installed build; from
+  source, the taskbar flash is the only half that can be trusted to fire.
 - **The taskbar flash is not a fallback, it fires every time.** A toast can be swallowed without trace
   by Focus Assist, by a Do Not Disturb window, by settings the user changed months ago or by a missing
   shortcut; `flashFrame` depends on none of that. It is the only half that cannot silently do nothing,
