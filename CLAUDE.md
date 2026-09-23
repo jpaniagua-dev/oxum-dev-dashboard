@@ -2586,6 +2586,14 @@ Three rules the workflow enforces and that a change must not break silently:
   delivered to a process whose AppUserModelID matches a **shortcut installed on the Start Menu**, and
   a zip installs no shortcut. A build that only shipped the zip could never notify, however correct
   `notify.ts` is.
+- **Every `dist` script passes `--publish never`, and the one that did not is what broke 5.13.0.**
+  electron-builder **publishes by itself** when it sees a git tag, and NSIS is an updatable target, so
+  it generates an update descriptor and goes looking for a token: `GitHub Personal Access Token is not
+  set`, exit 1, after the installer had already been built correctly. The zip alone never hit it, which
+  is why the trap sat there unseen through every earlier release. It does not reproduce locally either,
+  and that is the nastiest half: a local build runs **before** the tag exists, so the same command
+  passes on the machine and fails on the runner. Publishing here is `gh release create`'s job, in the
+  workflow, where the assets and the notes are chosen.
 - **The installer's name is pinned on `nsis.artifactName`, not on the command line.** Unlike the zip,
   whose per-target name has to be an override, `NsisOptions` does carry an `artifactName`, so the
   stable name lives in the config where a reader looks for it. The versioned pattern stays on `win`
