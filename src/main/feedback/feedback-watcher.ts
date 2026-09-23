@@ -37,6 +37,14 @@ export interface FeedbackPorts {
   readonly closeTicket: (ticketKey: string) => Promise<{ ok: boolean; message: string }>;
   /** Stops a dev server this app started. `false` when there was none to stop. */
   readonly stopServer: (projectId: string) => boolean;
+  /**
+   * Says one thing to whoever is not looking at the app.
+   *
+   * A port and not an import, for the reason every other one here is: this watcher runs on a poll, and
+   * a test that cannot assert "this tick said nothing" is not a test of a feature whose whole job is to
+   * speak up on its own.
+   */
+  readonly notify: (title: string, body: string) => void;
   /** Whether a tab of that action is open and its process alive. */
   readonly isActionRunning: (projectId: string, actionId: string) => boolean;
   readonly spawn: (input: {
@@ -151,6 +159,12 @@ export class FeedbackWatcher {
       mergedAt: this.ports.now().toISOString(),
       notice: `Merged: ${jira.message}${stopped ? ', server stopped' : ''}${worktree}`,
     });
+    // The one moment in the whole chain where there is nothing left to do and nobody has been told:
+    // the pull request left the list minutes ago, and the tab may not have been open since.
+    this.ports.notify(
+      `${record.ticketKey} is merged`,
+      `${jira.message}${stopped ? ', the dev server is stopped' : ''}${worktree}`,
+    );
     return true;
   }
 
@@ -216,6 +230,10 @@ export class FeedbackWatcher {
      */
     await this.store.write();
     this.launch(advance.record, project, pull.number);
+    this.ports.notify(
+      `Review feedback on ${record.ticketKey}`,
+      `A pass is treating pull request #${pull.number}`,
+    );
     return false;
   }
 
@@ -262,5 +280,9 @@ export class FeedbackWatcher {
       notice: notice ?? 'Feedback pass finished',
     });
     await this.store.write();
+    this.ports.notify(
+      `${ticketKey}: feedback pass finished`,
+      notice ?? 'Read what it replied before the reviewer does',
+    );
   }
 }

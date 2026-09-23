@@ -1985,6 +1985,33 @@ plus `offline_access` (plus `Chat.Read`), `@azure/msal-node` in device code flow
 `.projects__header-actions` (formerly `.topbar__actions`, gone with the title bar) and the strip's
 pattern are left ready.
 
+## Notifications: saying it to somebody who is not looking
+
+- **Only the unattended chain notifies, and that is the whole justification.** Everything else this
+  app has to say is a sentence on a row, which is enough because the reader is looking at the row.
+  The unattended chain is the exception: it runs on a poll, it finishes minutes after the tab was
+  last open, and its interesting moments all happen with nobody watching.
+- ⚠️ **It rests entirely on the AppUserModelID, and it fails in silence.** Windows delivers a toast to
+  a process whose AUMID matches a shortcut on the Start Menu. Without that pairing `show()` returns
+  normally and nothing appears: no error, no log, nothing to debug, and it works in `npm run dev`
+  where Electron's own identity is registered. `registerNotificationIdentity` is therefore called
+  **before `whenReady`** with the same `appId` electron-builder writes into the shortcut, and the
+  release ships an installer for no other reason.
+- **The taskbar flash is not a fallback, it fires every time.** A toast can be swallowed without trace
+  by Focus Assist, by a Do Not Disturb window, by settings the user changed months ago or by a missing
+  shortcut; `flashFrame` depends on none of that. It is the only half that cannot silently do nothing,
+  it costs one line, and it removes the failure mode where the feature looks broken because Windows
+  decided not to show it. The click clears it: a taskbar still asking for attention it already got is
+  worse than none.
+- **No setting, deliberately.** Once the AUMID is registered Windows lists the app in its own
+  notification settings, which is where somebody already goes to silence an application. A second
+  switch here would be a second answer to one question, and the loser would be whichever one the
+  reader did not think to look at.
+- **`notify` is a port on the watcher, not an import.** Same reason every other one there is: a test
+  that cannot assert "this tick said nothing" is not a test of a feature whose whole job is to speak
+  up on its own. Three moments say something, and only three: a pass starting, a pass finishing, and a
+  merge. A poll that decided nothing says nothing.
+
 ## Workflows column: is CI busy on this project
 
 - **It answers "is something running", never "what is running".** No workflow name, no branch, no run
@@ -2532,12 +2559,13 @@ npm run lint       # ESLint, zero warnings tolerated
 npm run typecheck  # tsc on the node, web and test projects
 npm run dist       # installer, zip and portable build in release/
 npm run dist:zip   # only the zip, under the name the GitHub release carries
+npm run dist:setup # only the NSIS installer, under the name the GitHub release carries
 ```
 
 ## Release
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: the gates (lint, tests, typecheck), the zip
-build, then the publication. It is the only workflow and therefore the only gate, so a breakage only
+and installer builds, then the publication. It is the only workflow and therefore the only gate, so a breakage only
 shows up at tag time, and a failure means moving the tag rather than re-running the job: Actions
 resolves the workflow and the code from the pushed ref, so a re-run rebuilds the same broken commit.
 Three rules the workflow enforces and that a change must not break silently:
@@ -2548,12 +2576,23 @@ Three rules the workflow enforces and that a change must not break silently:
 - **One release lives at a time.** The earlier ones are deleted after the new one is published, in
   that order, so a failure never leaves zero releases. **Tags are kept**: they are the only link
   from a version to a commit.
-- **The asset name is stable** (`oxum-dev-dashboard-win-x64.zip`), imposed by `-c.win.artifactName`
-  on the `dist:zip` command line and not by `electron-builder.yml`: `TargetConfiguration` has no
-  per-target `artifactName`, and the versioned pattern in `win.artifactName` is what the other two
-  targets need. Putting `${version}` back would break the permanent URL
-  `releases/latest/download/oxum-dev-dashboard-win-x64.zip`, which is the whole point of keeping a
-  single release.
+- **Two assets now, and the installer is the one the notifications need.** `dist:zip` and
+  `dist:setup` both run, and the release carries `oxum-dev-dashboard-win-x64.zip` and
+  `oxum-dev-dashboard-win-x64-setup.exe`. The zip stays because its permanent URL is already in use
+  and because it is the install-free way in; the installer exists because a Windows toast is only
+  delivered to a process whose AppUserModelID matches a **shortcut installed on the Start Menu**, and
+  a zip installs no shortcut. A build that only shipped the zip could never notify, however correct
+  `notify.ts` is.
+- **The installer's name is pinned on `nsis.artifactName`, not on the command line.** Unlike the zip,
+  whose per-target name has to be an override, `NsisOptions` does carry an `artifactName`, so the
+  stable name lives in the config where a reader looks for it. The versioned pattern stays on `win`
+  because the portable target still needs it.
+- **The zip's stable name is a command-line override, and it has to be.** `-c.win.artifactName` on
+  the `dist:zip` line, because a **zip** target is a `TargetConfiguration`, which carries no
+  `artifactName` of its own; `nsis` is a config block and does, which is the whole asymmetry between
+  the two lines above. Putting `${version}` back on either would break the permanent URLs
+  `releases/latest/download/oxum-dev-dashboard-win-x64.zip` and `...-setup.exe`, which are the whole
+  point of keeping a single release.
 
 A repository with no workflow at all reads `no-runs` in the Workflows column, and this one now has
 one: if the dashboard watches its own repository, that cell moves to a real pipeline state while a

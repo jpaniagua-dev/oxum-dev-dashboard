@@ -477,6 +477,7 @@ describe('FeedbackWatcher', () => {
       readState: async () => 'MERGED',
       closeTicket: async () => ({ ok: true, message: 'TEC-1801 moved to Done' }),
       stopServer: () => true,
+      notify: () => {},
       now: () => NOW,
       ...over,
     };
@@ -731,12 +732,16 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     { projectId: 'neos', label: 'Neos', slug: 'Ethos-Services-SA/neos-shared-front', pulls: [], checkedAt: '', error },
   ];
 
-  const ports = (over: Partial<FeedbackPorts> = {}): FeedbackPorts & { closed: string[]; stopped: string[] } => {
+  const ports = (
+    over: Partial<FeedbackPorts> = {},
+  ): FeedbackPorts & { closed: string[]; stopped: string[]; said: string[] } => {
     const closed: string[] = [];
     const stopped: string[] = [];
+    const said: string[] = [];
     return {
       closed,
       stopped,
+      said,
       readComments: async () => ({ value: [], error: null }),
       viewerLogin: async () => 'julphi127',
       isActionRunning: () => false,
@@ -750,21 +755,42 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
         stopped.push(projectId);
         return true;
       },
+      notify: (title) => void said.push(title),
       now: () => NOW,
       ...over,
     };
   };
 
-  it('closes the ticket and stops the server when the pull request was merged', () => {
+  it('closes the ticket, stops the server and says so when the pull request was merged', async () => {
     const store = records([record()]);
     const port = ports();
+    await new FeedbackWatcher(store, settings, () => [project], port).tick(empty());
 
-    return new FeedbackWatcher(store, settings, () => [project], port).tick(empty()).then(() => {
-      expect(port.closed).toEqual(['TEC-1801']);
-      expect(port.stopped).toEqual(['neos']);
-      expect(store.get('TEC-1801')?.mergedAt).toBe(NOW.toISOString());
-      expect(store.get('TEC-1801')?.notice).toContain('Merged');
-    });
+    expect(port.closed).toEqual(['TEC-1801']);
+    expect(port.stopped).toEqual(['neos']);
+    expect(store.get('TEC-1801')?.mergedAt).toBe(NOW.toISOString());
+    expect(store.get('TEC-1801')?.notice).toContain('Merged');
+    // The one moment where there is nothing left to do and nobody has been told: the pull request
+    // left the list minutes ago and the tab may not have been open since.
+    expect(port.said).toEqual(['TEC-1801 is merged']);
+  });
+
+  it('says nothing when it decided nothing', async () => {
+    const port = ports({ readState: async () => null });
+    await new FeedbackWatcher(records([record()]), settings, () => [project], port).tick(empty());
+
+    expect(port.said).toEqual([]);
+  });
+
+  it('says nothing twice about one merge', async () => {
+    const store = records([record()]);
+    const port = ports();
+    const watcher = new FeedbackWatcher(store, settings, () => [project], port);
+
+    await watcher.tick(empty());
+    await watcher.tick(empty());
+
+    expect(port.said).toEqual(['TEC-1801 is merged']);
   });
 
   it('leaves the board alone when the pull request was closed rather than merged', async () => {

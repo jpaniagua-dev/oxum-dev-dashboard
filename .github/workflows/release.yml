@@ -46,6 +46,10 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run dist:zip # typecheck runs inside npm run build
+      # Both, and the installer is not a nicety: it is the only build that creates the Start Menu
+      # shortcut a Windows toast is delivered against. The zip stays because its permanent URL is
+      # already in use and because it is the install-free way in.
+      - run: npm run dist:setup
 
       - name: Publish the one living release
         env:
@@ -59,7 +63,9 @@ jobs:
 
           # Lets a re-run of a failed job work instead of failing on an existing release.
           gh release delete "$tag" --yes 2>/dev/null || true
-          gh release create "$tag" --title "$tag" --notes-file notes.md --latest release/oxum-dev-dashboard-win-x64.zip
+          gh release create "$tag" --title "$tag" --notes-file notes.md --latest \
+            release/oxum-dev-dashboard-win-x64.zip \
+            release/oxum-dev-dashboard-win-x64-setup.exe
 
           # One package alive. Creating before pruning matters: a failure never leaves zero
           # releases. Tags are kept, being the only link from a version to a commit.

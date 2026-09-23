@@ -20,6 +20,7 @@ import {
 import { applyTransition, readTransitions } from './jira/jira-service.js';
 import { pickDoneTransition } from './jira/jira-start.js';
 import { AutoRunStore } from './autorun/auto-run-store.js';
+import { notify, registerNotificationIdentity } from './notify.js';
 import { FeedbackWatcher, type FeedbackPorts } from './feedback/feedback-watcher.js';
 import { buildFeedbackCommand } from './feedback/feedback-command.js';
 import { feedbackActionId } from '@shared/contracts.js';
@@ -80,6 +81,9 @@ let quitConfirmed = false;
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
+  // Before anything else, and before any window: Windows delivers a toast against this identity, and
+  // a notification sent under the wrong one disappears without an error anywhere.
+  registerNotificationIdentity();
   await app.whenReady();
 
   const settingsStore = new SettingsStore(AppPaths.settings());
@@ -246,6 +250,7 @@ async function bootstrap(): Promise<void> {
           : { ok: false, message: applied.message };
       },
       stopServer: (projectId) => terminals?.stopProjectServer(projectId) === true,
+      notify,
       now: () => new Date(),
     },
   );

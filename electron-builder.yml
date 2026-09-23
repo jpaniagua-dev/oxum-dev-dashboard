@@ -21,8 +21,16 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
+  # Load bearing since 5.13.0, and not a convenience: a Windows toast is only delivered to a process
+  # whose AppUserModelID matches a shortcut installed on the Start Menu. Without this shortcut,
+  # `new Notification().show()` returns without error and nothing appears, which is why the zip build
+  # can never notify and the installer is what the feature actually needs.
   createStartMenuShortcut: true
   shortcutName: Oxum Dev Dashboard
+  # A stable name, like the zip's, so `releases/latest/download/...` is a permanent URL rather than one
+  # that moves every version. The versioned pattern on `win` is what the portable target needs, and a
+  # per-target name is the only way to have both.
+  artifactName: oxum-dev-dashboard-win-x64-setup.${ext}
 
 win:
   target:
