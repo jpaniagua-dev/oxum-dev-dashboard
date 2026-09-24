@@ -136,9 +136,21 @@ describe('LOCAL_ONLY_KEYS', () => {
       // servers window opens, and an echo would reload settings in the middle of that gesture.
       'serversDetached',
       'stripCollapsed',
+      // Local for the same reason: the grid is picked from the dashboard's own header, so an echo
+      // would re-adopt the layout in the middle of the click that changed it.
+      'terminalColumns',
       'triageHeight',
       'worktreesHeight',
     ]);
+  });
+
+  it('lets the dashboard remember how the terminal panes are arranged', () => {
+    expect(asPatch({ terminalColumns: 2 })).toEqual({ terminalColumns: 2 });
+    expect(asPatch({ terminalColumns: 0 })).toEqual({ terminalColumns: 0 });
+    // Coerced here and not merely type-checked, unlike its neighbours: this one names a grid the
+    // renderer will draw, so an impossible value has to become the default at the first gate.
+    expect(asPatch({ terminalColumns: 9 })).toEqual({ terminalColumns: 0 });
+    expect(asPatch({ terminalColumns: '2' })).toEqual({});
   });
 
   it('lets the dashboard remember that the servers were detached', () => {

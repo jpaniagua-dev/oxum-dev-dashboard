@@ -1055,41 +1055,178 @@ body {
   white-space: nowrap;
 }
 
+/* ------------------------------------------------------------------ *
+ * The Jira board
+ *
+ * One column per workflow stage, one card per issue. It replaced a sortable table, and it took the
+ * table's `.issue` rules with it. Worth recording that those rules also reached `.issue` in the
+ * SETTINGS window, which is a different thing entirely (`settings-entry__issues`): the list of
+ * problems under a rail entry was quietly inheriting a four-column grid and a pointer cursor.
+ * ------------------------------------------------------------------ */
+
 /*
- * Issues are a grid, unlike pull requests: their badges are conditional, so a flex row left no two lines
- * agreeing on where the status sat. Real columns are what make a list scannable.
+ * The board fills its panel instead of scrolling as one block.
+ *
+ * `.pulls__list` scrolls vertically, which is right for a list and wrong for a board: the columns
+ * have to keep their heads in view while each one scrolls on its own. A modifier rather than a new
+ * host element, the panel's three boxes being shared with the pull request tab.
  */
-.issue {
+.pulls__list--board {
+  /* `flex: 1` and not a height: the panel is a flex column whose height comes from the strip, so a
+     percentage here would resolve against a box sized by its own content. */
+  flex: 1;
+  overflow: hidden;
+}
+
+/*
+ * Equal columns, however many there are.
+ *
+ * `grid-auto-columns: minmax(0, 1fr)` and not a flex row: three columns and four (the fourth being
+ * the rare uncategorised one) must divide the width evenly without any of them being told how many
+ * siblings it has, and `minmax(0, ...)` is what lets a column narrower than its longest card exist
+ * at all.
+ */
+.board {
   display: grid;
-  grid-template-columns: 78px minmax(0, 1fr) 130px 120px;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  border: 1px solid transparent;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  padding: 2px 2px 0;
+}
+
+.board__column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   border-radius: var(--radius-sm);
+}
+
+/* The column under the pointer during a drag. The whole column, so a drop below the cards lands. */
+.board__column--over {
+  background: var(--primary-soft);
+}
+
+.board__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 4px 4px;
+}
+
+.board__title {
+  color: var(--text-dim);
+  /* Small caps, like every other column heading in this app: a label is not a value. */
+  font-size: var(--font-3xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.board__count {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The rule under a heading, and the only colour a column carries.
+ *
+ * Not a tint on the column itself: a tinted column paints the ground its cards sit on, and the cards
+ * are what carries this tab's states. A 2px rule says the same thing and touches nothing.
+ */
+.board__rule {
+  flex: none;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.board__column--in-progress .board__rule {
+  background: var(--warning);
+}
+
+.board__column--done .board__rule {
+  background: var(--success);
+}
+
+.board__column--unknown .board__rule {
+  background: var(--info);
+}
+
+.board__cards {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 2px;
+}
+
+.board__empty {
+  margin: 0;
+  padding: 10px 0;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+  text-align: center;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   color: var(--text);
   font-size: var(--font-md);
   cursor: pointer;
 }
 
-/* "My issues" drops the assignee column: every row would carry the same name. */
-.issues--mine .issue {
-  grid-template-columns: 78px minmax(0, 1fr) 120px;
+.card:hover {
+  border-color: var(--border-strong);
 }
 
-.issue:hover {
-  background: var(--surface-hover);
-  border-color: var(--border);
+/* Faded while it is being carried, so the column it came from still shows where it would return. */
+.card--dragging {
+  opacity: 0.4;
 }
 
-.issue__summary {
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.card__status {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.issue__assignee {
+/*
+ * Two lines of summary, then an ellipsis.
+ *
+ * A single line truncates most ticket titles to the point of being unreadable, and an untruncated one
+ * makes the cards different heights for no gain. Two is where a TEC summary usually fits.
+ */
+.card__summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  margin: 0;
+  overflow: hidden;
+}
+
+.card__assignee {
   color: var(--text-dim);
   font-size: var(--font-sm);
   overflow: hidden;
@@ -1098,58 +1235,9 @@ body {
 }
 
 /* Unassigned on a sprint board is usually a mistake, so it does not look like a name. */
-.issue__assignee--none {
+.card__assignee--none {
   color: var(--warning);
   font-style: italic;
-}
-
-/*
- * The sortable column headers.
- *
- * The same `.issue` grid as a row, which is the only way a label can sit over the column it names, plus
- * three overrides: no pointer (the row itself does nothing), no hover, and `position: sticky` so it
- * survives the scroll. Sticky rather than hoisted out of the scroller, because a header in a separate
- * box drifts by exactly the width of the scrollbar the moment the list overflows.
- */
-.issue--head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding-top: 0;
-  padding-bottom: 3px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  cursor: default;
-}
-
-.issue--head:hover {
-  background: var(--surface);
-  border-color: transparent;
-  border-bottom-color: var(--border);
-}
-
-.issue__head {
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
-  font: inherit;
-  /* Small caps, like the project table's own column heads: a label is not a value. */
-  font-size: var(--font-3xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.issue__head:hover {
-  color: var(--text);
-}
-
-.issue__head--active {
-  color: var(--text);
-  font-weight: 700;
 }
 
 .pull__age {
@@ -2028,16 +2116,52 @@ body {
 .terminal__strip {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-width: 0;
   padding: 4px 6px;
-  border-bottom: 1px solid var(--border);
+  /*
+   * The line under a strip is the pane's colour, and it is the widest thing on the cell that can
+   * carry one. `--tag-colour` is set by the `tag--<colour>` class the strip is given from its
+   * project's first tag, the same property the chips and the dots read, so a repository is the same
+   * colour here as it is on the pull request, Git and worktree rows. Untagged falls through to the
+   * plain border, which is the honest answer for a shell belonging to no project.
+   *
+   * 2px and not 1: at a quarter of the window this line is read from across the screen, and a
+   * hairline in a mid-tone is a grey hairline.
+   */
+  border-bottom: 2px solid var(--tag-colour, var(--border));
 }
 
-/* Which pane a new tab, a split or a shortcut would act on. */
+/*
+ * Which pane a new tab, a split or a shortcut would act on.
+ *
+ * A tint and no longer a coloured bottom border: that border now belongs to the project, and two
+ * facts on one channel means the one that lost is the one nobody thinks to look for. Focus is also
+ * said a second time, on the view's own frame, which is the louder of the two.
+ */
 .terminal__strip--focused {
-  border-bottom-color: var(--primary-border);
+  background: var(--surface-hover);
+}
+
+.terminal__strip-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+}
+
+/*
+ * Sized down from the chrome row's icon buttons: this one repeats once per pane, and at 3x3 nine
+ * copies of a full-size button is a row of chrome competing with the terminal it introduces.
+ */
+.terminal__strip-zoom {
+  width: 20px;
+  height: 20px;
+}
+
+.terminal__strip-zoom svg {
+  width: 12px;
+  height: 12px;
 }
 
 /* Dropping on the strip itself, away from any tab, appends to that pane. */
@@ -2053,10 +2177,13 @@ body {
   flex: none;
 }
 
+/* `flex: 1` so the strip buttons sit hard right whatever the pane is called. */
 .terminal__tabs {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex: 1;
+  min-width: 0;
   flex-wrap: wrap;
 }
 
@@ -2275,11 +2402,17 @@ body {
  * One permanent container per session, toggled with `hidden` rather than added and removed: xterm's
  * `open()` refuses to re-attach a terminal that already has an element, so detaching one leaves it
  * alive but invisible forever.
+ *
+ * The frame is always drawn, with a single pane as with nine. It used to appear only on a split,
+ * which left the one shape people actually look at, text on the inset background running edge to
+ * edge, with no boundary at all: the terminal and the panel above it read as one surface.
  */
 .terminal__view {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 
 .terminal__view[hidden] {
@@ -2291,12 +2424,15 @@ body {
 }
 
 /*
- * Which pane the keyboard goes to. Shown only when there is more than one, since a single pane leaves
- * no doubt, and drawn as an inset ring so it costs no layout space.
+ * Which pane the keyboard goes to. Shown only when there is more than one, a single pane leaving no
+ * doubt about where a keystroke lands.
+ *
+ * The frame's own colour rather than a second ring inside it: the frame is already there on every
+ * pane, so recolouring costs no pixel and no layout, and two concentric lines a pixel apart is the
+ * version that reads as a rendering artefact.
  */
 .terminal__view--focused {
-  box-shadow: inset 0 0 0 1px var(--primary-border);
-  border-radius: var(--radius-sm);
+  border-color: var(--primary);
 }
 
 .terminal__splitter {

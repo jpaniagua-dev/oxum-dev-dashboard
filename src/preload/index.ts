@@ -21,7 +21,6 @@ import {
   type TriageMode,
   type TriageState,
   type OpenShellRequest,
-  type PaneDirection,
   type ProjectCandidate,
   type ProjectConfig,
   type ProjectId,
@@ -286,8 +285,8 @@ const api: RendererApi = {
   renameTerminal: (terminalId: TerminalId, title: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.TerminalRename, terminalId, title),
 
-  setTerminalLayout: (groups: readonly TerminalGroup[], direction: PaneDirection): Promise<void> =>
-    ipcRenderer.invoke(IpcChannel.TerminalLayoutSet, groups, direction),
+  setTerminalLayout: (groups: readonly TerminalGroup[], columns: number): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.TerminalLayoutSet, groups, columns),
 
   onTerminalLayoutChanged: (listener: (layout: TerminalLayout) => void): (() => void) => {
     const handler = (_event: unknown, layout: TerminalLayout): void => listener(layout);

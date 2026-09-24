@@ -94,6 +94,26 @@
                 <path d="M2.6 3.2h10.8v4H2.6zM2.6 8.8h10.8v4H2.6zM4.6 5.2h.01M4.6 10.8h.01" />
               </svg>
             </button>
+            <!--
+              How many columns the terminal panes are arranged in.
+
+              In this row and not above the terminal, for the reason stated on `.projects__header`:
+              it is the one row of chrome in this window, it never folds, and every application
+              control already lives here. A toolbar of its own over the surface would cost a band of
+              vertical pixels permanently, on the half of the window the grid is short of.
+            -->
+            <button
+              type="button"
+              id="terminal-grid-button"
+              class="icon-button"
+              title="Arrange the terminal panes"
+              aria-label="Arrange the terminal panes"
+              aria-haspopup="menu"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                <path d="M2.5 2.5h11v11h-11zM8 2.5v11M2.5 8h11" />
+              </svg>
+            </button>
             <button
               type="button"
               id="settings-button"

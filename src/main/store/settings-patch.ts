@@ -1,6 +1,7 @@
 import { readProfile } from '@shared/agent-profile.js';
 import type { AppSettings } from '@shared/contracts.js';
 import { sanitizeTagColors } from '@shared/project-tags.js';
+import { sanitizeColumns } from '@shared/terminal-groups.js';
 
 /**
  * Settings the dashboard writes about its own geometry.
@@ -19,6 +20,9 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'activeStrip',
   'pullScope',
   'stripCollapsed',
+  // Picked from the dashboard's own header, so broadcasting it back would re-adopt the layout in the
+  // middle of the click that changed it.
+  'terminalColumns',
   // Written by the dashboard when the servers window opens or closes. Broadcasting it back would make
   // the dashboard reload settings in the middle of the gesture that produced it.
   'serversDetached',
@@ -66,6 +70,12 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (input.pullScope === 'mine' || input.pullScope === 'all') patch.pullScope = input.pullScope;
   if (typeof input.stripCollapsed === 'boolean') patch.stripCollapsed = input.stripCollapsed;
   if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
+  // Coerced rather than merely type-checked, unlike its neighbours: the store clamps every other
+  // number here, and this one names a grid the renderer will draw, so an out-of-range value has to
+  // become the default at the first gate rather than the second.
+  if (typeof input.terminalColumns === 'number') {
+    patch.terminalColumns = sanitizeColumns(input.terminalColumns);
+  }
   // Broadcast, and deliberately not in `LOCAL_ONLY_KEYS`: it is written by the settings window and has
   // to reach the dashboard, which is the window whose text it resizes.
   if (typeof input.uiFontSize === 'number') patch.uiFontSize = input.uiFontSize;

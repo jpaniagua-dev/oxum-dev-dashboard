@@ -1,4 +1,4 @@
-import type { TerminalGroup, TerminalId } from './contracts.js';
+import { PANE_COLUMNS_AUTO, PANE_COLUMNS_MAX, type TerminalGroup, type TerminalId } from './contracts.js';
 
 /**
  * The arithmetic of the pane groups.
@@ -237,4 +237,77 @@ export function closeGroup(groups: readonly TerminalGroup[], index: number): Ter
       )
       .filter((_group, at) => at !== index),
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * The shape of the grid
+ *
+ * One stored number, `columns`, and everything else derived from it and from how many panes exist.
+ * Pure and shared for the reason the group surgery above is: the main process clamps what it is
+ * handed with `sanitizeColumns` and the renderer lays out with `paneGrid`, and two implementations
+ * of "how many rows is that" would disagree the moment the pane count stops dividing evenly.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Coerces anything into a usable column count.
+ *
+ * Out-of-range and non-integer values fall back to `PANE_COLUMNS_AUTO` rather than being clamped to
+ * the nearest legal number: this value arrives from a hand-edited settings file and from an IPC
+ * boundary, and a `7` read as `3` is a layout nobody asked for, whereas reading it as "the default"
+ * is at least a shape the user recognises.
+ */
+export function sanitizeColumns(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return PANE_COLUMNS_AUTO;
+  }
+  if (value === PANE_COLUMNS_AUTO || (value >= 1 && value <= PANE_COLUMNS_MAX)) {
+    return value;
+  }
+  return PANE_COLUMNS_AUTO;
+}
+
+/** A resolved grid: how many columns are actually drawn, and how many rows that needs. */
+export interface PaneGrid {
+  readonly columns: number;
+  readonly rows: number;
+}
+
+/**
+ * Turns the stored column count into the grid actually drawn for a given number of panes.
+ *
+ * Two clamps, and both matter. `PANE_COLUMNS_AUTO` resolves to the pane count, which is the
+ * pre-grid behaviour: every pane on one row. And a fixed count is capped by the pane count too, so
+ * three columns holding two panes draws two half-width cells rather than two thirds of a row and an
+ * empty third: an empty cell is a rectangle with no gesture in it, and the user reads it as a pane
+ * that failed to open.
+ *
+ * Answers a 1x1 grid for zero panes rather than a zero-track one, a grid template with no tracks
+ * being a surface that collapses to nothing on the frame before the first session lands.
+ */
+export function paneGrid(columns: number, paneCount: number): PaneGrid {
+  if (paneCount <= 0) {
+    return { columns: 1, rows: 1 };
+  }
+  const wanted = columns === PANE_COLUMNS_AUTO ? paneCount : columns;
+  const resolved = Math.max(1, Math.min(wanted, paneCount));
+  return { columns: resolved, rows: Math.ceil(paneCount / resolved) };
+}
+
+/**
+ * Where one pane sits in the grid, and how many columns it takes.
+ *
+ * The **last pane stretches to the end of its row** when the row is short, which is what stops a
+ * five-pane 3-column grid from drawing a hole next to the fifth. Stretching rather than rebalancing
+ * the row into two equal cells: rebalancing would mean per-row column tracks, which a CSS grid
+ * cannot express, and the hole is the only alternative left.
+ */
+export function panePlacement(
+  index: number,
+  paneCount: number,
+  grid: PaneGrid,
+): { readonly row: number; readonly column: number; readonly span: number } {
+  const row = Math.floor(index / grid.columns);
+  const column = index % grid.columns;
+  const last = index === paneCount - 1;
+  return { row, column, span: last ? grid.columns - column : 1 };
 }

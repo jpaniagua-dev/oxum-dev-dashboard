@@ -115,6 +115,32 @@ exceptions:
   exactly.** Paths, commands, ports, model ids, project keys, the rail readouts. A project name and a
   button label are words a person chose and are set in the interface face. It is a rule, not a
   per-field decision, so `field()` takes a `mono` flag rather than the stylesheet guessing.
+- **The Jira tab is a board, not a list, and the sort went with the table.** One column per
+  `IssueStage`, cards inside. A board is already ordered by the only key that matters here, so
+  `sortIssues`, `nextSort` and the clickable column headers were removed rather than ported. What
+  survived is what was never about the table: `boardUrl`, `presentStage`, `assigneesOf`,
+  `filterByAssignee`, the views rail and the assignee filter.
+- **The three known stages are always drawn, `unknown` only when it holds something.** A column that
+  disappears when it empties takes the board's shape with it, and "nothing is in progress" is an
+  answer worth seeing. An uncategorised status is rare, so a permanent empty column for it would be
+  noise, but the issue must never be dropped: an issue on no column is a real ticket hidden from a
+  board read as the whole picture. Same rule as a session with no tab, different surface, and
+  `boardColumns` is tested on exactly that.
+- **Dropping a card writes to Jira immediately, with no confirmation.** An explicit decision, taken
+  knowing the cost: an accidental drag moves a real ticket that the whole team sees, and nothing in
+  this app undoes it. What limits the damage is that `transitionTo` can only pick from the moves
+  **Jira itself offered for that issue, read at drop time**, so an illegal move is refused here
+  rather than attempted; a drop on the column the card came from is a no-op; and the `unknown` column
+  accepts nothing, there being no transition into "no category".
+- **The drag payload is the whole issue, in a custom MIME type.** A module-level "currently dragging"
+  variable is the obvious way and it breaks: this panel is rebuilt whole on every poll, so a refresh
+  landing mid-drag clears it and the drop does nothing. `text/plain` would work and is worse, since
+  dragging a card onto any text field would paste a ticket key. The issue travels whole rather than
+  by key for the same poll reason: a key looked up in a list captured at render time can miss.
+- **Removing the table's `.issue` rules also unbound them from the settings window.** `.issue` is
+  used there too, for the problems listed under a rail entry (`settings-entry__issues`), and it was
+  silently inheriting a four-column grid and a pointer cursor from a Jira row. If a `.issue` rule
+  comes back, check both windows.
 - **Colour in the settings window is spent on "not yet true" and nowhere else**: unsaved, invalid, a
   broken path, a missing token, and the current rail entry. Everything else is greyscale. A connected
   Jira is stated in plain text, not painted green — naming the host already says it is connected.
@@ -171,12 +197,46 @@ exceptions:
 - **Never detach an xterm terminal from the DOM.** `open()` returns early when the terminal already has
   an element: detaching it leaves it alive but invisible forever. One permanent container per session,
   and `hidden` is toggled. That is also why the surface is a **grid** and why strips, views and
-  splitters are all direct children of the surface, placed on **explicit grid lines** (`stripLine`,
-  `viewLine`, `splitterLine`, pure and tested). A strip that wrapped its view would force an xterm to
-  be moved when its tab changes pane, and therefore killed.
-- **Pane layout has a single direction** (`columns` or `rows`), not a nested tree. A deliberate choice
-  against Windows Terminal's model: a pane's position follows from its index, which keeps the
-  arithmetic pure and testable. Do not mix directions without moving to a real tree.
+  splitters are all direct children of the surface, placed on **explicit grid lines**
+  (`paneColumnLine`, `columnSplitterLine`, `stripRowLine`, `viewRowLine`, `rowSplitterLine`, pure and
+  tested). A strip that wrapped its view would force an xterm to be moved when its tab changes pane,
+  and therefore killed. Zooming a pane and rearranging the grid are both done by rewriting grid
+  lines, never by moving a node.
+- **The pane layout is ONE number: `columns`.** `PANE_COLUMNS_AUTO` (0) means one row however many
+  panes there are, which is what this app did before the grid; 1 to `PANE_COLUMNS_MAX` (3) fix the
+  column count and the rows follow from the pane count (`paneGrid`). Still not a nested tree, and for
+  the same reason as before: a pane's position follows from its index, which keeps the arithmetic
+  pure and testable.
+- **No pane is ever hidden to make the grid fit, and this is the rule not to relax.** The preset
+  systems this was modelled on (Dorothy, and its Orkestra fork) fix both axes, which gives every
+  preset a maximum panel count and forces the panes past it out of sight. Here that would hide a
+  **session**, which is exactly the state `normalizeGroups` exists to make impossible: a session in
+  no group has no tab anywhere, so its process runs unreachable and unkillable. The grid grows
+  downwards instead. If a future preset needs a fixed row count, it has to answer this first.
+- **The last pane of a short row stretches to the end of it** (`panePlacement`), and a column divider
+  that falls inside that stretch stops above the last row. Both exist to avoid an empty cell, which
+  is a rectangle with no gesture in it and reads as a pane that failed to open.
+- **The two axes have different track patterns**, which is the off-by-one to watch. A column is one
+  `fr` track plus its divider, so it repeats every 2 lines; a row is `auto` for the strip, `fr` for
+  the view, then its divider, so it repeats every 3.
+- **`PaneDirection` is now only a gesture.** "Split right" and "split down" no longer set an axis:
+  where a new pane lands is the grid's business. They still flip between `PANE_COLUMNS_AUTO` and
+  `1` (`afterSplit`), which reproduces the old pair exactly, and they are **ignored** once a fixed
+  grid is picked. Rearranging the whole surface because somebody chose one menu entry over the other
+  would undo a choice they made deliberately.
+- **Zoom is on `Alt+Shift+Z`, never on `Escape`.** A terminal owns that key: it leaves insert mode in
+  vim and it is how Claude Code interrupts itself, printed on screen a few lines under the strip. A
+  surface-level `Escape` listener would have to swallow it before xterm sees it. The zoom is held as
+  a **session id** and not a group index, an index shifting when a pane closes.
+- **`terminalColumns` is a setting, the layout is not.** Which panes exist is a fact about the
+  sessions running right now, which die with the app; how many columns to arrange them in is a
+  preference. It therefore crosses both settings lists (`sanitizeSettings` **and** `asPatch`) and
+  sits in `LOCAL_ONLY_KEYS`, being written by the dashboard's own header.
+- **Two channels for two facts on a pane, and do not merge them.** The **view's frame** carries
+  focus, the **strip's bottom border** carries the project's first tag colour, and the tag dots
+  beside the tabs carry the full list. Focus used to live on the strip's bottom border, which is why
+  it had to move: a project colour and a focus ring on one border means the loser is whichever one
+  the reader did not think to look for.
 - **The layout lives in the main process, and it IS the tab order.** There are no longer two
   authorities: the `terminal:reorder` channel and the `Map` insertion order are gone, a tab is where
   its group says it is. The renderer computes the whole structure and sends it, the main process

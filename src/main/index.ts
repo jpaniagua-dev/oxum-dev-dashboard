@@ -361,7 +361,9 @@ async function bootstrap(): Promise<void> {
     },
     onLayoutChanged: (layout: TerminalLayout) =>
       dashboardWindow.send(IpcChannel.TerminalLayoutChanged, layout),
-  });
+  },
+  // The stored grid, so the very first layout the dashboard is handed already has the right shape.
+  settingsStore.get().terminalColumns);
   terminals = terminalManager;
 
   spawnFeedbackTab = (input) => {

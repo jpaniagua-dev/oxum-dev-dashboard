@@ -1,9 +1,8 @@
 import * as pty from '@lydell/node-pty';
 import type { IPty } from '@lydell/node-pty';
-import { RESERVED_ACTION_PREFIX } from '@shared/contracts.js';
+import { PANE_COLUMNS_AUTO, RESERVED_ACTION_PREFIX } from '@shared/contracts.js';
 import type {
   ActionRole,
-  PaneDirection,
   Project,
   ProjectAction,
   ProjectId,
@@ -15,7 +14,7 @@ import type {
   TerminalSession,
   TerminalSize,
 } from '@shared/contracts.js';
-import { normalizeGroups } from '@shared/terminal-groups.js';
+import { normalizeGroups, sanitizeColumns } from '@shared/terminal-groups.js';
 import { spawnOffThread } from '../spawn/spawn-pool.js';
 import { Scrollback } from './scrollback.js';
 import { parseOutputChunk, type ParsedOutput } from '../projects/output-parser.js';
@@ -116,7 +115,14 @@ export class TerminalManager {
    * they could disagree; now a tab is wherever its group says it is.
    */
   private groups: TerminalGroup[] = [];
-  private direction: PaneDirection = 'columns';
+  /**
+   * Panes per row, or `PANE_COLUMNS_AUTO` for one row however many there are.
+   *
+   * Held here with the groups rather than read from the settings on every call: this class is the
+   * authority on the layout, and a second reader of the stored preference would be a second answer
+   * to what the surface currently looks like. The settings seed it once, at construction.
+   */
+  private columns: number = PANE_COLUMNS_AUTO;
   /**
    * Whether the servers window is currently open.
    *
@@ -139,10 +145,22 @@ export class TerminalManager {
    */
   private readonly detachedIds = new Set<TerminalId>();
 
-  constructor(private readonly hooks: TerminalHooks) {}
+  constructor(
+    private readonly hooks: TerminalHooks,
+    /**
+     * The stored column preference, seeded once.
+     *
+     * A constructor argument and not a setter, so there is never a frame where the manager holds a
+     * default the renderer is about to contradict: the bootstrap carries the layout, and a layout
+     * reporting the wrong shape at boot is a grid that visibly snaps into place a moment later.
+     */
+    initialColumns: number = PANE_COLUMNS_AUTO,
+  ) {
+    this.columns = sanitizeColumns(initialColumns);
+  }
 
   layout(): TerminalLayout {
-    return { direction: this.direction, groups: this.snapshot() };
+    return { columns: this.columns, groups: this.snapshot() };
   }
 
   /** A copy, so a caller mutating what it received cannot reach into the manager's state. */
@@ -157,8 +175,8 @@ export class TerminalManager {
    * invisible until they bite. `normalizeGroups` is the whole gate, and it is the same function the
    * renderer applies, so the two sides cannot drift on what a sane layout is.
    */
-  setLayout(groups: readonly TerminalGroup[], direction: PaneDirection): void {
-    this.direction = direction;
+  setLayout(groups: readonly TerminalGroup[], columns: number): void {
+    this.columns = sanitizeColumns(columns);
     this.groups = normalizeGroups(groups, this.layoutLive());
     this.hooks.onLayoutChanged(this.layout());
   }

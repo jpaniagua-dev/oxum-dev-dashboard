@@ -2,17 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { buildJql, parseIssues, parseTransitions } from '../src/main/jira/jira-service.js';
 import {
   ASSIGNEE_NONE,
-  DEFAULT_JIRA_SORT,
   assigneesOf,
+  boardColumns,
   boardUrl,
-  compareIssueKeys,
   filterByAssignee,
-  nextSort,
-  orderIssues,
   presentStage,
-  sortIssues,
-} from '../src/renderer/ui/jira-list.js';
-import { ISSUE_KEY_PATTERN, type IssueStage, type JiraIssue } from '../src/shared/contracts.js';
+  transitionTo,
+} from '../src/renderer/ui/jira-board.js';
+import {
+  ISSUE_KEY_PATTERN,
+  type IssueStage,
+  type IssueTransition,
+  type JiraIssue,
+} from '../src/shared/contracts.js';
 
 const SITE = 'https://example.atlassian.net';
 const ME = 'dev@example.com';
@@ -194,8 +196,8 @@ describe('presentStage', () => {
   });
 });
 
-describe('orderIssues', () => {
-  /** Only the two fields the ordering reads; the rest of an issue is irrelevant here. */
+describe('boardColumns', () => {
+  /** Only the two fields the layout reads; the rest of an issue is irrelevant here. */
   function issue(key: string, stage: IssueStage): JiraIssue {
     return {
       key,
@@ -210,49 +212,86 @@ describe('orderIssues', () => {
     };
   }
 
-  it('puts what is in progress first', () => {
-    const ordered = orderIssues([
-      issue('PROJ-1', 'todo'),
-      issue('PROJ-2', 'done'),
-      issue('PROJ-3', 'in-progress'),
-    ]);
-    expect(ordered.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-1', 'PROJ-2']);
+  it('always draws the three known stages, empty or not', () => {
+    // A column that disappears when it empties takes the board's shape with it, and "nothing is in
+    // progress" is an answer worth seeing rather than a gap to interpret.
+    const columns = boardColumns([issue('PROJ-1', 'todo')]);
+    expect(columns.map((column) => column.stage)).toEqual(['todo', 'in-progress', 'done']);
+    expect(columns[1]?.issues).toEqual([]);
   });
 
-  it('keeps the order the JQL returned inside a group', () => {
-    /*
-     * The point of a stable sort on a single key: the search already ordered these (`updated DESC` in
-     * "Mes tickets"), so lifting the in-progress group must not reshuffle anything else. Without
-     * stability this is where a second, invisible ordering rule would creep in.
-     */
-    const ordered = orderIssues([
+  it('adds a fourth column only when something is uncategorised', () => {
+    expect(boardColumns([issue('PROJ-1', 'todo')]).map((c) => c.stage)).not.toContain('unknown');
+    const strays = boardColumns([issue('PROJ-1', 'todo'), issue('PROJ-2', 'unknown')]);
+    expect(strays.map((column) => column.stage)).toEqual([
+      'todo',
+      'in-progress',
+      'done',
+      'unknown',
+    ]);
+  });
+
+  it('never drops an issue, whatever its stage', () => {
+    // The rule that matters: an issue on no column is a real ticket hidden from a board read as the
+    // whole picture. Same failure as a session with no tab, different surface.
+    const source = [
+      issue('PROJ-1', 'todo'),
+      issue('PROJ-2', 'unknown'),
+      issue('PROJ-3', 'done'),
+      issue('PROJ-4', 'in-progress'),
+    ];
+    const placed = boardColumns(source).flatMap((column) => column.issues.map((i) => i.key));
+    expect(placed.sort()).toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3', 'PROJ-4']);
+  });
+
+  it('keeps the order the search returned inside a column', () => {
+    // The JQL already ordered these (`updated DESC` in the personal view). Re-sorting here would be a
+    // second authority on an order that already means something.
+    const columns = boardColumns([
       issue('PROJ-9', 'todo'),
       issue('PROJ-4', 'in-progress'),
       issue('PROJ-7', 'todo'),
-      issue('PROJ-2', 'in-progress'),
     ]);
-    expect(ordered.map((entry) => entry.key)).toEqual(['PROJ-4', 'PROJ-2', 'PROJ-9', 'PROJ-7']);
-  });
-
-  it('ranks an unknown category after the real work but before what is finished', () => {
-    const ordered = orderIssues([
-      issue('PROJ-1', 'done'),
-      issue('PROJ-2', 'unknown'),
-      issue('PROJ-3', 'todo'),
-    ]);
-    expect(ordered.map((entry) => entry.key)).toEqual(['PROJ-3', 'PROJ-2', 'PROJ-1']);
+    expect(columns[0]?.issues.map((entry) => entry.key)).toEqual(['PROJ-9', 'PROJ-7']);
   });
 
   it('does not touch the list it was given', () => {
     // The panel is rebuilt from pushed state on every poll; sorting that array in place would mutate
     // what the main process sent.
     const source = [issue('PROJ-1', 'todo'), issue('PROJ-2', 'in-progress')];
-    orderIssues(source);
+    boardColumns(source);
     expect(source.map((entry) => entry.key)).toEqual(['PROJ-1', 'PROJ-2']);
   });
 });
 
-describe('filtering and sorting the list', () => {
+describe('transitionTo', () => {
+  function move(id: string, label: string, stage: IssueStage): IssueTransition {
+    return { id, label, stage };
+  }
+
+  it('chooses on the destination category and never on its name', () => {
+    // The whole point: a board whose columns are called "Ready for QA" or "Developpement" still
+    // works, because the category is the only part of a workflow that means the same thing anywhere.
+    const transitions = [move('21', 'Ready for QA', 'in-progress'), move('31', 'Shipped', 'done')];
+    expect(transitionTo(transitions, 'in-progress')?.id).toBe('21');
+    expect(transitionTo(transitions, 'done')?.id).toBe('31');
+  });
+
+  it('answers null when the workflow offers no way there', () => {
+    // A real answer and not a failure to handle: a ticket in Done often has no path back to To do,
+    // and the caller says so rather than sending a move Jira would refuse.
+    expect(transitionTo([move('31', 'Shipped', 'done')], 'todo')).toBeNull();
+    expect(transitionTo([], 'done')).toBeNull();
+  });
+
+  it('takes the first of two ways into the same category', () => {
+    // Nothing on a dragged card could express a preference between them.
+    const transitions = [move('11', 'Start', 'in-progress'), move('12', 'Reopen', 'in-progress')];
+    expect(transitionTo(transitions, 'in-progress')?.id).toBe('11');
+  });
+});
+
+describe('filtering the board', () => {
   function issue(fields: Partial<JiraIssue> & { key: string }): JiraIssue {
     return {
       summary: '',
@@ -291,71 +330,10 @@ describe('filtering and sorting the list', () => {
     expect(filterByAssignee(sprint, ASSIGNEE_NONE).map((entry) => entry.key)).toEqual(['PROJ-1000']);
   });
 
-  it('sorts issue keys by number, not as text', () => {
-    // `localeCompare` puts PROJ-1000 before PROJ-999, which for a counter is simply wrong. Invisible
-    // until a project passes a power of ten, which PROJ did long ago.
-    expect(compareIssueKeys('PROJ-999', 'PROJ-1000')).toBeLessThan(0);
-    expect(compareIssueKeys('PROJ-1001', 'PROJ-1000')).toBeGreaterThan(0);
-    expect(compareIssueKeys('ABC-1', 'PROJ-1')).toBeLessThan(0);
-  });
-
-  it('falls back to the default order when no column is chosen', () => {
-    expect(sortIssues(sprint, DEFAULT_JIRA_SORT).map((entry) => entry.key)).toEqual(
-      orderIssues(sprint).map((entry) => entry.key),
-    );
-  });
-
-  it('replaces the default order when a column is chosen', () => {
-    // A column sort is not a refinement of "in progress first": someone who clicked a header expects
-    // that column to run in order down the whole list, groups included.
-    expect(sortIssues(sprint, { key: 'key', direction: 'asc' }).map((entry) => entry.key)).toEqual([
-      'PROJ-12',
-      'PROJ-999',
-      'PROJ-1000',
-      'PROJ-1001',
-    ]);
-  });
-
-  it('puts the unassigned last whichever direction is asked for', () => {
-    const ascending = sortIssues(sprint, { key: 'assignee', direction: 'asc' });
-    const descending = sortIssues(sprint, { key: 'assignee', direction: 'desc' });
-
-    expect(ascending[ascending.length - 1]?.key).toBe('PROJ-1000');
-    expect(descending[descending.length - 1]?.key).toBe('PROJ-1000');
-  });
-
-  it('reverses by comparison and not by reversing the array', () => {
-    /*
-     * Reversing would also reverse the ties: the two "To do" issues would swap places on a direction
-     * change, which makes a list look like it is shuffling rows nobody sorted.
-     */
-    const ascending = sortIssues(sprint, { key: 'status', direction: 'asc' });
-    const descending = sortIssues(sprint, { key: 'status', direction: 'desc' });
-    const tiedAsc = ascending.filter((entry) => entry.status === 'To do').map((e) => e.key);
-    const tiedDesc = descending.filter((entry) => entry.status === 'To do').map((e) => e.key);
-
-    expect(tiedAsc).toEqual(tiedDesc);
-  });
-
   it('does not touch the list it was given', () => {
     const source = [...sprint];
-    sortIssues(source, { key: 'key', direction: 'desc' });
     filterByAssignee(source, 'Alex Martin');
     expect(source.map((entry) => entry.key)).toEqual(sprint.map((entry) => entry.key));
-  });
-
-  it('cycles a header through ascending, descending, then back to the default', () => {
-    // Three states rather than two: a toggle would leave no way back to "in progress first" short of
-    // switching views and returning, and that is the order this tab is normally read in.
-    const first = nextSort(DEFAULT_JIRA_SORT, 'assignee');
-    expect(first).toEqual({ key: 'assignee', direction: 'asc' });
-
-    const second = nextSort(first, 'assignee');
-    expect(second).toEqual({ key: 'assignee', direction: 'desc' });
-
-    expect(nextSort(second, 'assignee')).toEqual(DEFAULT_JIRA_SORT);
-    // Another column starts over, ascending, rather than inheriting the previous direction.
-    expect(nextSort(second, 'status')).toEqual({ key: 'status', direction: 'asc' });
   });
 });
 

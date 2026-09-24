@@ -1,5 +1,7 @@
 import type { Terminal } from '@xterm/xterm';
+import { TAG_COLORS } from '@shared/project-tags.js';
 import {
+  PANE_COLUMNS_AUTO,
   TERMINAL_FONT_SIZE,
   type PaneDirection,
   type ResolvedTheme,
@@ -17,11 +19,15 @@ import {
   groupIndexOf,
   moveTab,
   normalizeGroups,
+  paneGrid,
+  panePlacement,
   splitGroup,
   tabsAfter,
+  type PaneGrid,
 } from '@shared/terminal-groups.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
+import { buildTagDots, primaryTagColor, type TagPalette } from './tags.js';
 import {
   createTerminalView,
   ensureTerminalRenderer,
@@ -39,6 +45,47 @@ function chevronDown(): SVGSVGElement {
   return createIcon('M3.5 6l4.5 4.5L12.5 6', { paint: 'stroke' });
 }
 
+/**
+ * Four arrows pushing outwards: this pane takes the whole surface.
+ *
+ * Corners rather than a plain square, which is what the operating system's own maximise button uses
+ * and therefore what already means "restore" to anyone who has seen a window.
+ */
+function growIcon(): SVGSVGElement {
+  return createIcon('M6.5 2.5h-4v4M9.5 2.5h4v4M6.5 13.5h-4v-4M9.5 13.5h4v-4', { paint: 'stroke' });
+}
+
+/** The same four arrows pulled back in: put this pane back in the grid. */
+function shrinkIcon(): SVGSVGElement {
+  return createIcon('M2.5 6.5h4v-4M13.5 6.5h-4v-4M2.5 9.5h4v4M13.5 9.5h-4v4', { paint: 'stroke' });
+}
+
+/**
+ * The shapes the picker offers, in the order it lists them.
+ *
+ * Four, and the cap is **vertical**. The terminal shares this window with the project strip, which
+ * leaves it around two thirds of the height; split into three rows that is roughly nine lines per
+ * cell here, and a Claude Code session spends five or six of them on its own frame and status line.
+ * A three-row preset would therefore offer three lines of conversation, which is a shape that looks
+ * like a feature and is not one. Three columns are fine: they cost width, and width is what this
+ * window has. Folding the strip is what buys the height back, which is why that button sits beside
+ * this one.
+ */
+export const PANE_COLUMN_CHOICES: readonly {
+  readonly columns: number;
+  readonly label: string;
+  readonly hint: string;
+}[] = [
+  {
+    columns: PANE_COLUMNS_AUTO,
+    label: 'Side by side',
+    hint: 'One row, one column per pane. What splitting right has always done.',
+  },
+  { columns: 1, label: 'Stacked', hint: 'One column, the panes under one another.' },
+  { columns: 2, label: 'Two columns', hint: 'Four panes make a 2x2. Fold the strip for the height.' },
+  { columns: 3, label: 'Three columns', hint: 'Wide window only: a third of the width per pane.' },
+];
+
 export interface TerminalPaneActions {
   onInput: (terminalId: TerminalId, data: string) => void;
   onResize: (terminalId: TerminalId, cols: number, rows: number) => void;
@@ -47,7 +94,7 @@ export interface TerminalPaneActions {
   /** Open a new shell tab from a profile, in the focused pane. */
   onNewShell: (profileId: string) => void;
   /** The panes and their tabs after a gesture. One call for every shape the surface can take. */
-  onLayout: (groups: readonly TerminalGroup[], direction: PaneDirection) => void;
+  onLayout: (groups: readonly TerminalGroup[], columns: number) => void;
   /**
    * Open a new shell in a directory, for a split.
    *
@@ -139,7 +186,15 @@ export class TerminalPane {
   /** Tab being dragged, if any. Held so a drop knows what to move. */
   private dragging: TerminalId | null = null;
   /** The panes, mirroring what the main process holds. */
-  private layout: TerminalLayout = { direction: 'columns', groups: [] };
+  private layout: TerminalLayout = { columns: PANE_COLUMNS_AUTO, groups: [] };
+  /**
+   * Which project carries which tag, for the colour a strip takes.
+   *
+   * Handed in rather than looked up, the same value the pull request, Git and worktree rows are
+   * given: a tag is a fact about a project, and four views resolving it four ways is four chances to
+   * paint the same repository two colours.
+   */
+  private palette: TagPalette = { projects: [], colors: {} };
   /**
    * Index of the pane the keyboard and every "here" gesture belong to.
    *
@@ -148,16 +203,43 @@ export class TerminalPane {
    */
   private focused = 0;
   /**
-   * Relative size of each pane, one entry per group.
+   * Relative width of each grid column, and height of each grid row.
    *
-   * Renderer-only, unlike the layout itself: it is a pixel preference rather than user intent, and
-   * resetting it when the number of panes changes is what keeps the arithmetic simple.
+   * Renderer-only, unlike the layout itself: a pixel preference rather than user intent. Two arrays
+   * and not one per pane, because the tracks are shared: dragging the divider between the first and
+   * second column moves it on **every** row, which is the only thing a CSS grid can express and also
+   * the only thing that keeps the cells aligned. Reset to equal shares whenever the shape changes,
+   * a fraction that meant something for three columns being meaningless for two.
    */
-  private sizes: number[] = [];
+  private colSizes: number[] = [];
+  private rowSizes: number[] = [];
   /** Tab strips, one per pane, reused across renders rather than rebuilt. */
   private readonly strips: HTMLElement[] = [];
-  /** Splitters between panes, reused across renders rather than rebuilt. */
-  private readonly splitters: HTMLElement[] = [];
+  /**
+   * Which group each strip is currently drawing, by strip position.
+   *
+   * A strip is reused across renders and its drop handler is bound once, so the handler cannot close
+   * over a group index: zooming draws one pane at position 0 that is not group 0, and a dropped tab
+   * would land in the wrong pane. The handler reads this instead, which is rewritten on every render.
+   */
+  private stripOwner: number[] = [];
+  /** Dividers between two columns, spanning the rows. Reused across renders. */
+  private readonly colSplitters: HTMLElement[] = [];
+  /** Dividers between two rows, spanning the columns. Reused across renders. */
+  private readonly rowSplitters: HTMLElement[] = [];
+  /**
+   * The pane blown up to the whole surface, named by its active tab, or `null`.
+   *
+   * Renderer-only and named by a **session** rather than by a group index: a group index shifts when
+   * a pane closes, so a zoom held that way would silently move to another pane. Cleared on its own
+   * when that session dies, which `zoomedIndex` does by answering `null` for an id in no group.
+   *
+   * Deliberately **not** bound to `Escape`. A terminal owns that key: it is how you leave insert mode
+   * in vim and how Claude Code interrupts itself, both printed on screen a few lines under the strip.
+   * A surface-level listener would have to swallow it before xterm sees it, and the gesture it would
+   * buy is already on a button and on `Alt+Shift+Z`.
+   */
+  private zoomed: TerminalId | null = null;
 
   constructor(
     private readonly surface: HTMLElement,
@@ -229,6 +311,9 @@ export class TerminalPane {
         } else if (key === 'w') {
           event.preventDefault();
           this.closeActiveTab();
+        } else if (key === 'z') {
+          event.preventDefault();
+          this.toggleZoom();
         }
       },
       true,
@@ -253,7 +338,31 @@ export class TerminalPane {
 
   /** Adopts the layout the main process reports. */
   setLayout(layout: TerminalLayout): void {
-    this.adopt(layout.groups, layout.direction);
+    this.adopt(layout.groups, layout.columns);
+    this.render();
+  }
+
+  /** Panes per row, as the surface currently holds it. */
+  get columns(): number {
+    return this.layout.columns;
+  }
+
+  /**
+   * Rearranges the panes into a different number of columns.
+   *
+   * Leaves the groups untouched: the grid is only how the same panes are placed, so switching from
+   * one row to a 2x2 moves no tab and kills nothing. Zoom is dropped, since picking a shape is a
+   * statement about seeing several panes at once.
+   */
+  setColumns(columns: number): void {
+    this.zoomed = null;
+    this.applyLayout(this.layout.groups, columns);
+    this.render();
+  }
+
+  /** The tag colours, for the accent a strip takes from its project. */
+  setTagPalette(palette: TagPalette): void {
+    this.palette = palette;
     this.render();
   }
 
@@ -326,7 +435,7 @@ export class TerminalPane {
 
     // A dead session cannot hold a tab, and a pane left with none must go. The main process says the
     // same thing a moment later, but waiting for it would leave a hole on the surface meanwhile.
-    this.adopt(this.layout.groups, this.layout.direction);
+    this.adopt(this.layout.groups, this.layout.columns);
     this.render();
   }
 
@@ -356,10 +465,15 @@ export class TerminalPane {
     this.ensure(terminalId);
     const at = groupIndexOf(this.layout.groups, terminalId);
     if (at === -1) {
-      this.applyLayout(addTab(this.layout.groups, this.focused, terminalId), this.layout.direction);
+      this.applyLayout(addTab(this.layout.groups, this.focused, terminalId), this.layout.columns);
     } else {
       this.focused = at;
-      this.applyLayout(activateTab(this.layout.groups, terminalId), this.layout.direction);
+      this.applyLayout(activateTab(this.layout.groups, terminalId), this.layout.columns);
+    }
+    // A tab clicked in another pane while one is blown up: the click says "show me this", so the
+    // zoom has to give way rather than hide the pane the user just asked for.
+    if (this.zoomed !== null && groupIndexOf(this.layout.groups, this.zoomed) !== this.focused) {
+      this.zoomed = null;
     }
     this.render();
     this.views.get(terminalId)?.term.focus();
@@ -369,10 +483,62 @@ export class TerminalPane {
   addPane(terminalId: TerminalId, direction: PaneDirection): void {
     this.ensure(terminalId);
     const at = this.focused;
-    this.applyLayout(splitGroup(this.layout.groups, at, terminalId), direction);
+    this.zoomed = null;
+    this.applyLayout(splitGroup(this.layout.groups, at, terminalId), this.afterSplit(direction));
     this.focused = groupIndexOf(this.layout.groups, terminalId);
     this.render();
     this.views.get(terminalId)?.term.focus();
+  }
+
+  /**
+   * What the grid becomes when the user splits right or splits down.
+   *
+   * Only the two shapes that have a direction answer to this. A surface on one row asked to split
+   * downwards becomes a single column, and a single column asked to split rightwards goes back to
+   * one row, which is exactly the pair this app had before the grid existed. Once a fixed grid is
+   * picked the direction is **ignored**: where a new pane lands is then the grid's business, and
+   * rearranging the whole surface because somebody chose one menu entry over the other would undo
+   * a choice they made deliberately.
+   */
+  private afterSplit(direction: PaneDirection): number {
+    const current = this.layout.columns;
+    if (direction === 'rows' && current === PANE_COLUMNS_AUTO) {
+      return 1;
+    }
+    if (direction === 'columns' && current === 1) {
+      return PANE_COLUMNS_AUTO;
+    }
+    return current;
+  }
+
+  /* ----------------------------------------------------------------- zoom */
+
+  /** The group currently blown up, or `null`. Answers `null` for a session that has since died. */
+  private zoomedIndex(): number | null {
+    if (this.zoomed === null) {
+      return null;
+    }
+    const at = groupIndexOf(this.layout.groups, this.zoomed);
+    return at === -1 ? null : at;
+  }
+
+  /**
+   * Blows the focused pane up to the whole surface, or puts it back.
+   *
+   * A no-op with a single pane: there is nothing to hide and nothing to come back to, and a button
+   * that appears to do nothing is worse than one that is not offered.
+   */
+  private toggleZoom(): void {
+    if (this.zoomedIndex() !== null) {
+      this.zoomed = null;
+    } else if (this.layout.groups.length > 1) {
+      this.zoomed = this.activeId;
+    }
+    this.render();
+    const active = this.activeId;
+    if (active !== null) {
+      this.views.get(active)?.term.focus();
+    }
   }
 
   /** Re-fits every visible terminal, needed after the surface is shown or resized. */
@@ -390,15 +556,10 @@ export class TerminalPane {
    * views are created for every tab, including the ones in the background, because output is written
    * to a session's view whether or not it is on screen.
    */
-  private adopt(groups: readonly TerminalGroup[], direction: PaneDirection): void {
+  private adopt(groups: readonly TerminalGroup[], columns: number): void {
     const live = this.sessions.map((session) => session.id);
     const next = normalizeGroups(groups, live);
-    this.layout = { direction, groups: next };
-    if (this.sizes.length !== next.length) {
-      // Equal shares on every change of count: keeping old fractions would make a new pane inherit a
-      // width that meant something for a different number of panes.
-      this.sizes = next.map(() => 1);
-    }
+    this.layout = { columns, groups: next };
     for (const group of next) {
       for (const id of group.tabs) {
         this.ensure(id);
@@ -414,15 +575,16 @@ export class TerminalPane {
    * click has to feel immediate. The main process is still the authority: its push arrives moments
    * later with the same value, or with a corrected one if a session died in between.
    */
-  private applyLayout(groups: readonly TerminalGroup[], direction: PaneDirection): void {
-    this.adopt(groups, direction);
-    this.actions.onLayout(this.layout.groups, direction);
+  private applyLayout(groups: readonly TerminalGroup[], columns: number): void {
+    this.adopt(groups, columns);
+    this.actions.onLayout(this.layout.groups, this.layout.columns);
   }
 
   /** Closes the focused pane, its tabs moving to a neighbour rather than dying with it. */
   private closeFocusedGroup(): void {
     const at = this.focused;
-    this.applyLayout(closeGroup(this.layout.groups, at), this.layout.direction);
+    this.zoomed = null;
+    this.applyLayout(closeGroup(this.layout.groups, at), this.layout.columns);
     this.focused = Math.min(at, this.layout.groups.length - 1);
     this.render();
   }
@@ -433,47 +595,107 @@ export class TerminalPane {
   }
 
   /**
+   * The panes currently drawn, with the index of the group each one holds.
+   *
+   * One entry per group normally, and exactly one while a pane is blown up. Every render walks this
+   * rather than `layout.groups`, which is what keeps zooming from becoming a special case in four
+   * separate places.
+   */
+  private visiblePanes(): { group: TerminalGroup; index: number }[] {
+    const { groups } = this.layout;
+    const zoomAt = this.zoomedIndex();
+    if (zoomAt === null) {
+      return groups.map((group, index) => ({ group, index }));
+    }
+    const group = groups[zoomAt];
+    return group === undefined ? [] : [{ group, index: zoomAt }];
+  }
+
+  /**
    * Places every pane on the surface.
    *
    * **No terminal is ever moved in the DOM.** Each keeps the permanent container it was opened on, and
    * placement is done by assigning explicit grid lines: detaching an xterm element to reorder it would
    * leave the terminal alive but blank forever. A pane is two cells of that grid, the strip above its
    * view, so both are direct children of the surface and neither wraps the other.
+   *
+   * The grid runs on two axes now, and the track pattern differs between them, which is the piece of
+   * arithmetic worth stating here. A column is a single `fr` track, so pane column `c` sits on line
+   * `2c + 1` with its divider on the even line after it. A row is **two** tracks, `auto` for the strip
+   * and `fr` for the view, so pane row `r` puts its strip on `3r + 1`, its view on `3r + 2` and its
+   * divider on `3r + 3`. Getting one of those wrong draws a pane on top of another, which reads as a
+   * pane that simply failed to appear, so both live in named functions pinned by test.
    */
   private renderSurface(): void {
-    const { groups, direction } = this.layout;
-    const columns = direction === 'columns';
+    const { groups } = this.layout;
+    const panes = this.visiblePanes();
+    const zoomed = this.zoomedIndex() !== null;
 
-    const tracks: string[] = [];
-    groups.forEach((_group, index) => {
-      if (index > 0) {
-        tracks.push('var(--pane-splitter)');
+    // The sizes are keyed to the real shape and not to the drawn one: zooming must not reset the
+    // fractions the user dragged, being a temporary look at one pane rather than a new layout.
+    const shape = paneGrid(this.layout.columns, groups.length);
+    if (this.colSizes.length !== shape.columns) {
+      this.colSizes = Array.from({ length: shape.columns }, () => 1);
+    }
+    if (this.rowSizes.length !== shape.rows) {
+      this.rowSizes = Array.from({ length: shape.rows }, () => 1);
+    }
+
+    const grid: PaneGrid = zoomed ? { columns: 1, rows: 1 } : shape;
+    const columnTracks: string[] = [];
+    for (let column = 0; column < grid.columns; column += 1) {
+      if (column > 0) {
+        columnTracks.push('var(--pane-splitter)');
       }
-      // In a column layout a pane is one track wide and the strip/view split is the two fixed rows.
-      // Stacked, a pane is two tracks tall, so its own strip and view each need one.
-      tracks.push(columns ? `${this.sizes[index] ?? 1}fr` : `auto ${this.sizes[index] ?? 1}fr`);
+      columnTracks.push(`${zoomed ? 1 : (this.colSizes[column] ?? 1)}fr`);
+    }
+    const rowTracks: string[] = [];
+    for (let row = 0; row < grid.rows; row += 1) {
+      if (row > 0) {
+        rowTracks.push('var(--pane-splitter)');
+      }
+      rowTracks.push('auto', `${zoomed ? 1 : (this.rowSizes[row] ?? 1)}fr`);
+    }
+
+    this.surface.style.gridTemplateColumns = columnTracks.join(' ');
+    this.surface.style.gridTemplateRows = rowTracks.join(' ');
+
+    this.syncStrips(panes.length);
+    this.syncSplitters(grid, panes.length);
+
+    // Where each drawn pane sits, keyed by the group it holds, so a view can find its own cell
+    // without walking the list a second time.
+    const cells = new Map<number, { columnLines: string; stripRow: string; viewRow: string }>();
+    panes.forEach((pane, position) => {
+      const { row, column, span } = panePlacement(position, panes.length, grid);
+      const columnLines = `${paneColumnLine(column)} / ${paneColumnLine(column + span - 1) + 1}`;
+      cells.set(pane.index, {
+        columnLines,
+        stripRow: String(stripRowLine(row)),
+        viewRow: String(viewRowLine(row)),
+      });
     });
-    const template = tracks.join(' ');
 
-    this.surface.classList.toggle('terminal__surface--split', groups.length > 1);
-    this.surface.style.gridTemplateColumns = columns ? template : '1fr';
-    this.surface.style.gridTemplateRows = columns ? 'auto 1fr' : template;
-
-    this.syncStrips(groups.length);
-    this.syncSplitters(groups.length, direction);
-
-    this.strips.forEach((strip, index) => {
-      strip.hidden = index >= groups.length;
-      place(strip, columns, stripLine(index, columns), columns ? '1' : undefined);
+    this.stripOwner = panes.map((pane) => pane.index);
+    this.strips.forEach((strip, position) => {
+      const pane = panes[position];
+      strip.hidden = pane === undefined;
+      const cell = pane === undefined ? undefined : cells.get(pane.index);
+      if (cell !== undefined) {
+        strip.style.gridColumn = cell.columnLines;
+        strip.style.gridRow = cell.stripRow;
+      }
     });
 
     const focusedActive = groups[this.focused]?.active ?? null;
     for (const [id, view] of this.views) {
       const at = groupIndexOf(groups, id);
       const group = at === -1 ? undefined : groups[at];
-      view.element.hidden = group === undefined || group.active !== id;
-      if (group !== undefined) {
-        place(view.element, columns, viewLine(at, columns), columns ? '2' : undefined);
+      const cell = cells.get(at);
+      view.element.hidden = group === undefined || group.active !== id || cell === undefined;
+      if (cell !== undefined) {
+        view.element.style.gridColumn = cell.columnLines;
+        view.element.style.gridRow = cell.viewRow;
       }
       view.element.classList.toggle(
         'terminal__view--focused',
@@ -481,49 +703,74 @@ export class TerminalPane {
       );
     }
 
-    this.splitters.forEach((splitter, index) => {
-      if (splitter.hidden) {
-        return;
-      }
-      const line = String(splitterLine(index, columns));
-      if (columns) {
-        splitter.style.gridColumn = line;
-        splitter.style.gridRow = '1 / 3';
-      } else {
-        splitter.style.gridColumn = '1';
-        splitter.style.gridRow = line;
-      }
-    });
-
     this.fitVisible();
   }
 
-  /** Keeps one strip per pane, reusing the elements across renders. */
+  /** Keeps one strip per drawn pane, reusing the elements across renders. */
   private syncStrips(paneCount: number): void {
     while (this.strips.length < paneCount) {
-      const index = this.strips.length;
+      const position = this.strips.length;
       const strip = createElement('div', { className: 'terminal__strip' });
-      this.attachStripDrop(strip, index);
+      this.attachStripDrop(strip, position);
       this.surface.append(strip);
       this.strips.push(strip);
     }
   }
 
-  /** Keeps one splitter per gap between panes, reusing the elements across renders. */
-  private syncSplitters(paneCount: number, direction: PaneDirection): void {
-    const needed = Math.max(0, paneCount - 1);
-    while (this.splitters.length < needed) {
-      const index = this.splitters.length;
-      const splitter = createElement('div', { className: 'terminal__splitter' });
-      splitter.setAttribute('role', 'separator');
-      this.attachSplitterDrag(splitter, index);
-      this.surface.append(splitter);
-      this.splitters.push(splitter);
+  /**
+   * Keeps one divider per gap in the grid, reusing the elements across renders.
+   *
+   * A column divider spans every row and a row divider spans every column, which is what a shared
+   * track means: there is one boundary between the first and second column, not one per row.
+   *
+   * The exception is the **short last row**. Its last pane stretches to the end of the row, so a
+   * column gap falling inside that stretch has no boundary there and has to stop above it, or a
+   * divider is drawn straight through a pane. `filled` is how many panes that last row holds.
+   */
+  private syncSplitters(grid: PaneGrid, paneCount: number): void {
+    const columnGaps = Math.max(0, grid.columns - 1);
+    const rowGaps = Math.max(0, grid.rows - 1);
+
+    while (this.colSplitters.length < columnGaps) {
+      this.colSplitters.push(this.buildSplitter(this.colSplitters.length, 'columns'));
     }
-    this.splitters.forEach((splitter, index) => {
-      splitter.hidden = index >= needed;
-      splitter.classList.toggle('terminal__splitter--rows', direction === 'rows');
+    while (this.rowSplitters.length < rowGaps) {
+      this.rowSplitters.push(this.buildSplitter(this.rowSplitters.length, 'rows'));
+    }
+
+    const filled = paneCount - (grid.rows - 1) * grid.columns;
+    this.colSplitters.forEach((splitter, gap) => {
+      splitter.hidden = gap >= columnGaps;
+      if (splitter.hidden) {
+        return;
+      }
+      // `grid.rows < 2` cannot reach the short-row branch today, a single row always being full by
+      // construction in `paneGrid`. Guarded all the same: the else branch would ask for row line 0,
+      // which is not a line, and CSS answers an invalid grid placement by silently ignoring it.
+      const toLastRow = grid.rows < 2 || filled === grid.columns || gap < filled - 1;
+      splitter.style.gridColumn = String(columnSplitterLine(gap));
+      splitter.style.gridRow = toLastRow ? '1 / -1' : `1 / ${rowSplitterLine(grid.rows - 2)}`;
     });
+
+    this.rowSplitters.forEach((splitter, gap) => {
+      splitter.hidden = gap >= rowGaps;
+      if (splitter.hidden) {
+        return;
+      }
+      splitter.style.gridColumn = '1 / -1';
+      splitter.style.gridRow = String(rowSplitterLine(gap));
+    });
+  }
+
+  private buildSplitter(gap: number, axis: PaneDirection): HTMLElement {
+    const splitter = createElement('div', {
+      className:
+        axis === 'rows' ? 'terminal__splitter terminal__splitter--rows' : 'terminal__splitter',
+    });
+    splitter.setAttribute('role', 'separator');
+    this.attachSplitterDrag(splitter, gap, axis);
+    this.surface.append(splitter);
+    return splitter;
   }
 
   /**
@@ -532,20 +779,24 @@ export class TerminalPane {
    * Only the two panes it sits between are touched, so the others keep exactly the space they had.
    * Pointer capture on the splitter is what makes a fast drag survive leaving the element.
    */
-  private attachSplitterDrag(splitter: HTMLElement, index: number): void {
+  private attachSplitterDrag(splitter: HTMLElement, gap: number, axis: PaneDirection): void {
+    const rows = axis === 'rows';
     let dragging = false;
     let startPos = 0;
     let before = 1;
     let after = 1;
     let extent = 1;
 
+    // The track array this divider moves size within. Read through a function rather than captured,
+    // because a change of shape replaces the arrays wholesale.
+    const sizes = (): number[] => (rows ? this.rowSizes : this.colSizes);
+
     splitter.addEventListener('pointerdown', (event) => {
-      const rows = this.layout.direction === 'rows';
       dragging = true;
       splitter.setPointerCapture(event.pointerId);
       startPos = rows ? event.clientY : event.clientX;
-      before = this.sizes[index] ?? 1;
-      after = this.sizes[index + 1] ?? 1;
+      before = sizes()[gap] ?? 1;
+      after = sizes()[gap + 1] ?? 1;
       const box = this.surface.getBoundingClientRect();
       extent = rows ? box.height : box.width;
       event.preventDefault();
@@ -555,7 +806,6 @@ export class TerminalPane {
       if (!dragging || extent <= 0) {
         return;
       }
-      const rows = this.layout.direction === 'rows';
       const moved = (rows ? event.clientY : event.clientX) - startPos;
       // Pixels to fractions: the pair shares `before + after` of the total, so the same ratio applies.
       const total = before + after;
@@ -564,8 +814,9 @@ export class TerminalPane {
       // A pane narrower than this is unusable, and a zero-width xterm throws on fit.
       const min = total * 0.12;
       const nextBefore = Math.min(Math.max(before + delta, min), total - min);
-      this.sizes[index] = nextBefore;
-      this.sizes[index + 1] = total - nextBefore;
+      const track = sizes();
+      track[gap] = nextBefore;
+      track[gap + 1] = total - nextBefore;
       this.renderSurface();
     });
 
@@ -652,7 +903,10 @@ export class TerminalPane {
   private fitVisible(): void {
     for (const group of this.layout.groups) {
       const view = this.views.get(group.active);
-      if (view === undefined) {
+      // A pane hidden behind a zoomed one has no box to measure. Skipped rather than left to throw
+      // inside the catch below: a hidden element measures zero, and xterm answers a zero box with a
+      // one-column geometry that would then be announced to the pty as if it were real.
+      if (view === undefined || view.element.hidden) {
         continue;
       }
       try {
@@ -721,7 +975,7 @@ export class TerminalPane {
     if (session === undefined || view === undefined || at === -1) {
       return;
     }
-    const { groups, direction } = this.layout;
+    const { groups } = this.layout;
 
     this.showMenu(x, y, [
       {
@@ -763,12 +1017,22 @@ export class TerminalPane {
         },
       },
       {
+        label: this.zoomedIndex() === null ? 'Blow this pane up' : 'Back to the grid',
+        hint: 'Alt+Shift+Z. Not Escape: the terminal owns that key.',
+        disabled: groups.length <= 1,
+        run: () => {
+          this.focused = at;
+          this.toggleZoom();
+        },
+      },
+      {
         label: 'Merge into a single pane',
         disabled: groups.length <= 1,
         run: () => {
           const tabs = groups.flatMap((group) => group.tabs);
           this.focused = 0;
-          this.applyLayout([{ tabs, active: terminalId }], direction);
+          this.zoomed = null;
+          this.applyLayout([{ tabs, active: terminalId }], this.layout.columns);
           this.render();
         },
       },
@@ -851,7 +1115,8 @@ export class TerminalPane {
   /** Takes a tab out of its pane and gives it one of its own, beside the pane it came from. */
   private moveToOwnPane(terminalId: TerminalId, direction: PaneDirection): void {
     const from = groupIndexOf(this.layout.groups, terminalId);
-    this.applyLayout(splitGroup(this.layout.groups, from, terminalId), direction);
+    this.zoomed = null;
+    this.applyLayout(splitGroup(this.layout.groups, from, terminalId), this.afterSplit(direction));
     this.focused = groupIndexOf(this.layout.groups, terminalId);
     this.render();
     this.views.get(terminalId)?.term.focus();
@@ -886,13 +1151,16 @@ export class TerminalPane {
     if (this.renaming !== null && this.renameInputLive()) {
       return;
     }
-    this.layout.groups.forEach((group, index) => {
-      const strip = this.strips[index];
+    const panes = this.visiblePanes();
+    const zoomed = this.zoomedIndex() !== null;
+    panes.forEach(({ group, index }, position) => {
+      const strip = this.strips[position];
       if (strip === undefined) {
         return;
       }
       clearChildren(strip);
       strip.classList.toggle('terminal__strip--focused', index === this.focused);
+      this.paintStripProject(strip, group.active);
 
       const tabs = createElement('div', { className: 'terminal__tabs' });
       for (const id of group.tabs) {
@@ -904,6 +1172,27 @@ export class TerminalPane {
       tabs.append(this.buildNewTabButton(index));
       strip.append(tabs);
 
+      const actions = createElement('div', { className: 'terminal__strip-actions' });
+
+      // Offered only when there is something to hide: with one pane the button would toggle a state
+      // nothing on screen distinguishes from the other.
+      if (this.layout.groups.length > 1) {
+        const zoom = createElement('button', { className: 'icon-button terminal__strip-zoom' });
+        zoom.type = 'button';
+        zoom.title = zoomed
+          ? 'Back to the grid (Alt+Shift+Z)'
+          : 'Blow this pane up to the whole surface (Alt+Shift+Z)';
+        zoom.setAttribute('aria-label', zoomed ? 'Back to the grid' : 'Blow this pane up');
+        zoom.setAttribute('aria-pressed', String(zoomed));
+        zoom.append(zoomed ? shrinkIcon() : growIcon());
+        zoom.addEventListener('click', (event) => {
+          event.stopPropagation();
+          this.focused = index;
+          this.toggleZoom();
+        });
+        actions.append(zoom);
+      }
+
       const clear = createElement('button', {
         className: 'button button--quiet terminal__strip-clear',
         text: 'Clear',
@@ -914,8 +1203,39 @@ export class TerminalPane {
         event.stopPropagation();
         this.clear(group.active);
       });
-      strip.append(clear);
+      actions.append(clear);
+      strip.append(actions);
     });
+  }
+
+  /**
+   * Gives a strip the colour and the tags of the project its visible tab belongs to.
+   *
+   * Two readings of one fact, at two distances. The **border** under the strip is the first tag's
+   * colour, and it is what tells one cell from another across the window, where a 7px dot is a
+   * smudge. The **dots** beside the tabs are the complete list, named in their tooltip, and they are
+   * the same element the pull request, Git and worktree rows draw, so a repository is the same
+   * colour everywhere in the app.
+   *
+   * A free shell belongs to no project and gets neither, which is itself the useful statement.
+   */
+  private paintStripProject(strip: HTMLElement, activeId: TerminalId): void {
+    for (const color of TAG_COLORS) {
+      strip.classList.remove(`tag--${color}`);
+    }
+    const session = this.sessions.find((entry) => entry.id === activeId);
+    const projectId = session?.projectId ?? null;
+    if (projectId === null) {
+      return;
+    }
+    const color = primaryTagColor(this.palette, projectId);
+    if (color !== null) {
+      strip.classList.add(`tag--${color}`);
+    }
+    const dots = buildTagDots(this.palette, projectId);
+    if (dots !== null) {
+      strip.append(dots);
+    }
   }
 
   private buildTab(session: TerminalSession, group: TerminalGroup, groupIndex: number): HTMLElement {
@@ -1038,7 +1358,7 @@ export class TerminalPane {
    * This is what makes an empty-ish strip a valid target at all, and it is the gesture for "put this
    * terminal in that pane" when the aim is the pane rather than a position in its order.
    */
-  private attachStripDrop(strip: HTMLElement, groupIndex: number): void {
+  private attachStripDrop(strip: HTMLElement, position: number): void {
     strip.addEventListener('dragover', (event) => {
       if (this.dragging === null) {
         return;
@@ -1057,7 +1377,9 @@ export class TerminalPane {
       }
       event.preventDefault();
       this.endDrag();
-      this.commitMove(moved, groupIndex, null);
+      // Resolved at drop time and not at bind time: a strip is reused across renders and, while a
+      // pane is zoomed, the strip at position 0 is not group 0.
+      this.commitMove(moved, this.stripOwner[position] ?? position, null);
     });
   }
 
@@ -1069,10 +1391,7 @@ export class TerminalPane {
    * exactly the nodes it is dragging from.
    */
   private commitMove(moved: TerminalId, toGroup: number, before: TerminalId | null): void {
-    this.actions.onLayout(
-      moveTab(this.layout.groups, moved, toGroup, before),
-      this.layout.direction,
-    );
+    this.actions.onLayout(moveTab(this.layout.groups, moved, toGroup, before), this.layout.columns);
   }
 
   /**
@@ -1243,34 +1562,36 @@ export class TerminalPane {
 /* ------------------------------------------------------------------ *
  * Grid arithmetic
  *
- * A pane occupies two cells: its strip and its view. In a column layout the two live in the two fixed
- * rows of the grid and a pane is one column; stacked, a pane is two rows of a single column. Pure
- * functions rather than inline arithmetic because "which line is pane 3 on" is exactly the kind of
- * off-by-one that shows up as a pane silently drawn on top of another.
+ * A pane occupies two cells: its tab strip and its terminal view, the strip directly above.
+ *
+ * The two axes are **not symmetrical**, and that is the whole reason these are named functions
+ * rather than inline sums. A column is one `fr` track with a divider track after it, so the pattern
+ * repeats every 2 lines. A row is two tracks, `auto` for the strip and `fr` for the view, plus its
+ * divider, so it repeats every 3. Getting one wrong draws a pane on top of another, which on screen
+ * looks exactly like a pane that failed to open, with nothing in the console.
  * ------------------------------------------------------------------ */
 
-/** Grid line of a pane's tab strip: its column when side by side, its row when stacked. */
-export function stripLine(index: number, columns: boolean): number {
-  return columns ? index * 2 + 1 : index * 3 + 1;
+/** Grid line where the panes of column `column` start. */
+export function paneColumnLine(column: number): number {
+  return column * 2 + 1;
 }
 
-/** Grid line of a pane's terminal view. */
-export function viewLine(index: number, columns: boolean): number {
-  return columns ? index * 2 + 1 : index * 3 + 2;
+/** Grid line of the divider between column `gap` and the one after it. */
+export function columnSplitterLine(gap: number): number {
+  return gap * 2 + 2;
 }
 
-/** Grid line of the splitter sitting after pane `index`. */
-export function splitterLine(index: number, columns: boolean): number {
-  return columns ? index * 2 + 2 : index * 3 + 3;
+/** Grid line of the tab strips of row `row`. */
+export function stripRowLine(row: number): number {
+  return row * 3 + 1;
 }
 
-/** Puts an element on a grid line, on the axis the layout runs along. */
-function place(element: HTMLElement, columns: boolean, line: number, row: string | undefined): void {
-  if (columns) {
-    element.style.gridColumn = String(line);
-    element.style.gridRow = row ?? 'auto';
-  } else {
-    element.style.gridColumn = '1';
-    element.style.gridRow = String(line);
-  }
+/** Grid line of the terminal views of row `row`, directly under their strips. */
+export function viewRowLine(row: number): number {
+  return row * 3 + 2;
+}
+
+/** Grid line of the divider between row `gap` and the one after it. */
+export function rowSplitterLine(gap: number): number {
+  return gap * 3 + 3;
 }

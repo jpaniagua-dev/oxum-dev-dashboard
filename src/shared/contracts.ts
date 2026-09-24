@@ -1063,13 +1063,34 @@ export interface TerminalSession {
 }
 
 /**
- * How the visible panes share the terminal surface.
+ * Which way a split puts the new pane.
  *
- * `columns` puts them side by side, `rows` stacks them. One direction for the whole surface, not a
- * nestable tree: three terminals side by side or three stacked, never a mix. That is the deliberate
- * limit of this layout, and what keeps a pane's position predictable from its index alone.
+ * Only a **gesture**, since the grid was introduced: panes fill it left to right and top to bottom,
+ * so where a new one lands is decided by `terminalColumns` and not by this. What it still decides is
+ * whether splitting is worth doing at all in the current shape, and it is what the two menu entries
+ * and the two chords are named after.
  */
 export type PaneDirection = 'columns' | 'rows';
+
+/**
+ * Panes per row, when the surface should keep them all on one line.
+ *
+ * A sentinel rather than a big number, because "as many columns as there are panes" is a different
+ * statement from "three columns": it grows with the next split instead of wrapping to a second row.
+ * It is the value this app shipped with before the grid, and therefore the default, so a user who
+ * never opens the picker sees exactly what they saw before.
+ */
+export const PANE_COLUMNS_AUTO = 0;
+
+/**
+ * Most columns the picker offers.
+ *
+ * Three, and the reason is vertical rather than horizontal. Past two rows a cell is under a fifth of
+ * the window, which is around nine lines of terminal here, and a Claude Code session spends five to
+ * six of them on its own frame and status line. A fourth column only makes sense on a surface that
+ * can take the whole window, which this one cannot while the project strip is open.
+ */
+export const PANE_COLUMNS_MAX = 3;
 
 /**
  * How the surface is divided, and what each division holds.
@@ -1080,7 +1101,17 @@ export type PaneDirection = 'columns' | 'rows';
  * development. Empty only when no session exists at all.
  */
 export interface TerminalLayout {
-  readonly direction: PaneDirection;
+  /**
+   * Panes per row: `PANE_COLUMNS_AUTO`, or 1 to `PANE_COLUMNS_MAX`.
+   *
+   * The **rows are derived**, never stored, and that is the whole difference with the preset systems
+   * this was modelled on. A preset that fixes both axes also fixes a maximum number of panels, and
+   * the panes past it have to go somewhere: hidden, in those designs. Hiding a pane here would hide
+   * a session, which is precisely the state `normalizeGroups` exists to make impossible, since a
+   * session with no tab anywhere is unreachable and unkillable while its process keeps running. One
+   * number, and the grid grows downwards instead.
+   */
+  readonly columns: number;
   /** The panes, in display order. Each carries its own tabs. */
   readonly groups: readonly TerminalGroup[];
 }
@@ -1623,6 +1654,14 @@ export interface AppSettings {
   defaultShellProfileId: string;
   /** Font size of every terminal, in pixels. */
   terminalFontSize: number;
+  /**
+   * Panes per row on the terminal surface: `PANE_COLUMNS_AUTO`, or 1 to `PANE_COLUMNS_MAX`.
+   *
+   * Persisted, unlike the layout itself. The panes are a fact about the sessions running right now,
+   * which die with the app; how many columns to arrange them in is a preference, and re-picking the
+   * grid at every launch is the kind of small friction that makes a feature go unused.
+   */
+  terminalColumns: number;
   /** Font size of the interface, in pixels: the base every other size is a ratio of. */
   uiFontSize: number;
   /** User-declared shell profiles, merged over the detected ones by id. */
@@ -2146,7 +2185,7 @@ export const IpcChannel = {
   PtyClear: 'pty:clear',
   /** on: (sessions: TerminalSession[]) => void, the tab strip is rebuilt from this */
   TerminalsChanged: 'terminal:sessions-changed',
-  /** invoke: (panes: TerminalId[], direction) => void, replaces the whole visible layout */
+  /** invoke: (groups: TerminalGroup[], columns: number) => void, replaces the whole visible layout */
   TerminalLayoutSet: 'terminal:layout-set',
   /** on: (layout: TerminalLayout) => void, pushed whenever the visible panes change */
   TerminalLayoutChanged: 'terminal:layout-changed',
@@ -2416,7 +2455,7 @@ export interface RendererApi {
    * handed with the very same functions. It also replaced a separate "reorder the tabs" call, which
    * was a second authority on where a tab lives and could disagree with this one.
    */
-  setTerminalLayout(groups: readonly TerminalGroup[], direction: PaneDirection): Promise<void>;
+  setTerminalLayout(groups: readonly TerminalGroup[], columns: number): Promise<void>;
   onTerminalLayoutChanged(listener: (layout: TerminalLayout) => void): () => void;
   sendPtyInput(terminalId: TerminalId, data: string): void;
   resizePty(terminalId: TerminalId, size: TerminalSize): void;

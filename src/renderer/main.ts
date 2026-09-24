@@ -5,6 +5,7 @@ import type {
   GitRepoState,
   GitNotice,
   GitSyncOp,
+  IssueStage,
   JiraIssue,
   JiraState,
   TriageHandoff,
@@ -26,6 +27,7 @@ import type {
   ThemeState,
   WorktreeCommand,
 } from '@shared/contracts.js';
+import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { moveProject } from '@shared/project-order.js';
 import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
@@ -36,6 +38,7 @@ import {
   withTagColor,
 } from '@shared/project-tags.js';
 import { showContextMenu } from './ui/context-menu.js';
+import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
   buildChangeMenuItems,
@@ -49,14 +52,7 @@ import {
   type GitViewId,
 } from './ui/git-panel.js';
 import { attachGitSplitter } from './ui/git-split.js';
-import {
-  DEFAULT_JIRA_SORT,
-  boardUrl,
-  nextSort,
-  renderJiraList,
-  type JiraSort,
-  type JiraSortKey,
-} from './ui/jira-list.js';
+import { boardUrl, renderJiraBoard, transitionTo } from './ui/jira-board.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
 import { findRun, renderPullList } from './ui/pull-list.js';
@@ -158,7 +154,6 @@ class App {
    * question you asked once.
    */
   private jiraAssignee = '';
-  private jiraSort: JiraSort = DEFAULT_JIRA_SORT;
   /**
    * Project the last branch was created in, offered first the next time.
    *
@@ -243,8 +238,8 @@ class App {
         // Reported rather than dropped: an `invoke` on a channel the main process does not know
         // rejects, and a bare `void` would turn that into an unhandled rejection nobody sees. That is
         // precisely how a stale main process makes a gesture look inert instead of broken.
-        onLayout: (groups, direction) => {
-          window.api.setTerminalLayout(groups, direction).catch((error: unknown) => {
+        onLayout: (groups, columns) => {
+          window.api.setTerminalLayout(groups, columns).catch((error: unknown) => {
             console.error('[terminal] layout refused:', error);
           });
         },
@@ -268,6 +263,9 @@ class App {
     // names sessions, so a layout applied to an empty strip would resolve to nothing.
     this.terminal.setSessions(bootstrap.terminals);
     this.terminal.setLayout(bootstrap.layout);
+    // After the layout, never before: the strips are painted per pane, so a palette applied to a
+    // surface with no panes yet would be a render thrown away.
+    this.terminal.setTagPalette(this.tagPalette());
 
     this.pulls = bootstrap.pulls;
     this.pullScope = bootstrap.settings.pullScope;
@@ -421,6 +419,22 @@ class App {
    * and the tab strip all derive from it, and the change may come from the settings window, where no
    * local knowledge of what changed is available.
    */
+  /**
+   * Rearranges the terminal panes, and remembers the choice.
+   *
+   * Two writes, and they answer different questions. The pane is told at once because the click has
+   * to feel immediate, and the setting is saved because the grid is a preference that should outlive
+   * the sessions it currently holds. The main process learns the new shape through the pane's own
+   * `onLayout`, so this does not report it a second time.
+   */
+  private setTerminalColumns(columns: number): void {
+    this.terminal?.setColumns(columns);
+    if (this.settings !== null) {
+      this.settings = { ...this.settings, terminalColumns: columns };
+    }
+    void window.api.updateSettings({ terminalColumns: columns });
+  }
+
   private async reloadAfterSettings(): Promise<void> {
     const bootstrap = await window.api.bootstrap();
     this.projects = bootstrap.projects;
@@ -428,6 +442,9 @@ class App {
     this.profiles = bootstrap.shellProfiles;
     this.terminal?.setProfiles(this.profiles);
     this.terminal?.setFontSize(bootstrap.settings.terminalFontSize);
+    // A tag renamed or recoloured in the settings window repaints the strips, the same way it
+    // repaints the dots on the pull request, Git and worktree rows.
+    this.terminal?.setTagPalette(this.tagPalette());
     /*
      * The interface size, then a refit.
      *
@@ -556,14 +573,14 @@ class App {
     if (this.jira === null) {
       return;
     }
-    renderJiraList(
+    renderJiraBoard(
       {
         views: requireElement('jira-views'),
         filter: requireElement('jira-filter'),
         list: requireElement('jira-list'),
       },
       this.jira,
-      { selected: this.selectedJiraView, assignee: this.jiraAssignee, sort: this.jiraSort },
+      { selected: this.selectedJiraView, assignee: this.jiraAssignee },
       {
         onOpen: (url) => void window.api.openExternal(url),
         onSelect: (view) => {
@@ -578,10 +595,7 @@ class App {
           this.jiraAssignee = assignee;
           this.renderJira();
         },
-        onSort: (key: JiraSortKey) => {
-          this.jiraSort = nextSort(this.jiraSort, key);
-          this.renderJira();
-        },
+        onMove: (issue, stage) => void this.moveIssue(issue, stage),
       },
       {
         siteUrl: this.settings?.jira.siteUrl ?? '',
@@ -637,6 +651,32 @@ class App {
       });
     }
     showContextMenu(x, y, items);
+  }
+
+  /**
+   * Moves an issue to the stage of the column it was dropped in.
+   *
+   * The transitions are read **now** rather than cached, the same rule the context menu follows: a
+   * workflow decides which moves are legal from the current status, so anything held from an earlier
+   * render would offer moves Jira then refuses.
+   *
+   * When it answers none, this says so and writes nothing. That is not an error case to hide: a
+   * board shows four columns and a workflow rarely allows all twelve moves between them, so "you
+   * cannot go straight there" is ordinary and the reader needs to be told, the card having already
+   * snapped back to where it was.
+   */
+  private async moveIssue(issue: JiraIssue, stage: IssueStage): Promise<void> {
+    const transitions = await window.api.jiraTransitions(issue.key);
+    const target = transitionTo(transitions, stage);
+    if (target === null) {
+      this.stampMessage(
+        transitions.length === 0
+          ? `${issue.key}: no transition available`
+          : `${issue.key} cannot move there from "${issue.status}"`,
+      );
+      return;
+    }
+    await this.runJiraWrite(() => window.api.transitionJira(issue.key, target.id));
   }
 
   /**
@@ -1853,6 +1893,25 @@ class App {
 
     requireElement<HTMLButtonElement>('theme-button').addEventListener('click', () => {
       void this.cycleTheme();
+    });
+
+    const gridButton = requireElement<HTMLButtonElement>('terminal-grid-button');
+    gridButton.addEventListener('click', () => {
+      const box = gridButton.getBoundingClientRect();
+      const current = this.terminal?.columns ?? PANE_COLUMNS_AUTO;
+      showContextMenu(
+        box.left,
+        box.bottom + 4,
+        PANE_COLUMN_CHOICES.map((choice) => ({
+          label: choice.label,
+          hint: choice.hint,
+          // The current shape is offered too, and disabled, rather than dropped from the list: a
+          // menu of four entries that silently becomes three is a menu whose items move under the
+          // pointer, and the disabled row is also how the menu says which shape is on screen.
+          disabled: choice.columns === current,
+          run: () => this.setTerminalColumns(choice.columns),
+        })),
+      );
     });
 
     requireElement<HTMLButtonElement>('add-project').addEventListener('click', () => {

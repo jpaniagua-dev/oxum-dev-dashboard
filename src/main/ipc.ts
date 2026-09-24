@@ -58,6 +58,7 @@ import {
   stashPush,
   sync,
 } from './git/git-commands.js';
+import { sanitizeColumns } from '@shared/terminal-groups.js';
 import { generateCommitMessage } from './git/generate-commit.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { readGitState, readRemoteSlug } from './git/git-service.js';
@@ -1306,11 +1307,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
   ipcMain.handle(
     IpcChannel.TerminalLayoutSet,
-    async (_event, groups: unknown, direction: unknown): Promise<void> => {
-      deps.terminals.setLayout(
-        readGroups(groups),
-        direction === 'rows' ? 'rows' : 'columns',
-      );
+    async (_event, groups: unknown, columns: unknown): Promise<void> => {
+      // `sanitizeColumns` and not a cast: this is an IPC boundary, and the manager clamps with the
+      // same function, so a value refused here and accepted there is not a shape that can exist.
+      deps.terminals.setLayout(readGroups(groups), sanitizeColumns(columns));
     },
   );
 

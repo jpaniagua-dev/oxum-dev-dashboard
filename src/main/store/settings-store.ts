@@ -5,7 +5,9 @@ import {
   sanitizeTags,
   withAssignedTagColors,
 } from '@shared/project-tags.js';
+import { sanitizeColumns } from '@shared/terminal-groups.js';
 import {
+  PANE_COLUMNS_AUTO,
   TERMINAL_FONT_SIZE,
   UI_FONT_SIZE,
   type ActionRole,
@@ -66,6 +68,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   projectsHeight: 250,
   defaultShellProfileId: 'git-bash',
   terminalFontSize: TERMINAL_FONT_SIZE.default,
+  // One row, however many panes: what this app did before the grid existed, so nobody who never
+  // opens the picker sees their surface rearrange itself after an update.
+  terminalColumns: PANE_COLUMNS_AUTO,
   uiFontSize: UI_FONT_SIZE.default,
   // Empty means the default folder. Resolved in the main process, never here: this module must not
   // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in CLAUDE.md.
@@ -188,6 +193,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       TERMINAL_FONT_SIZE.min,
       TERMINAL_FONT_SIZE.max,
     ),
+    terminalColumns: sanitizeColumns(input.terminalColumns),
     // Clamped for exactly the reason above, only more so: this one sizes the settings window's own
     // text, so a hand-edited `4` would have to be fixed in a form that is no longer readable.
     uiFontSize: clamp(
