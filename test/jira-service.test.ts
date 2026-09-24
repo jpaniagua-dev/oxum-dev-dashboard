@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildJql, parseIssues, parseTransitions } from '../src/main/jira/jira-service.js';
+import { buildJql, hitTheCap, parseIssues, parseTransitions } from '../src/main/jira/jira-service.js';
 import {
   ASSIGNEE_NONE,
   assigneesOf,
@@ -122,9 +122,18 @@ describe('buildJql', () => {
     expect(buildJql(['PROJ']).mine).toContain('sprint in openSprints()');
   });
 
-  it('leaves out what is already done', () => {
-    expect(buildJql(['PROJ']).sprint).toContain('statusCategory != Done');
-    expect(buildJql(['PROJ']).mine).toContain('statusCategory != Done');
+  it('includes what is already done, which it used to exclude', () => {
+    // The exclusion existed for a list, where a sprint's Done pile pushed today's rows off the
+    // visible part of a strip. A board gives Done a column of its own, so the whole sprint fits the
+    // question the tab is asked.
+    expect(buildJql(['PROJ']).sprint).not.toContain('statusCategory');
+    expect(buildJql(['PROJ']).mine).not.toContain('statusCategory');
+  });
+
+  it('asks for as many issues as one request can carry', () => {
+    // There is no pagination here, so the cap is the whole answer and a full one is suspect.
+    expect(hitTheCap(99)).toBe(false);
+    expect(hitTheCap(100)).toBe(true);
   });
 
   it('asks for the current user rather than a hardcoded name', () => {

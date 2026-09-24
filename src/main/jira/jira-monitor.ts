@@ -1,6 +1,6 @@
 import type { AppSettings, JiraState, JiraView } from '@shared/contracts.js';
 import type { SecretStore } from '../store/secret-store.js';
-import { buildJql, searchIssues } from './jira-service.js';
+import { buildJql, hitTheCap, searchIssues } from './jira-service.js';
 
 /**
  * Keeps the two Jira views.
@@ -11,8 +11,8 @@ import { buildJql, searchIssues } from './jira-service.js';
  */
 export class JiraMonitor {
   private views: JiraView[] = [
-    { id: 'sprint', label: 'Sprint courant', issues: [], checkedAt: null, error: null },
-    { id: 'mine', label: 'My issues', issues: [], checkedAt: null, error: null },
+    { id: 'sprint', label: 'Sprint courant', issues: [], checkedAt: null, error: null, truncated: false },
+    { id: 'mine', label: 'My issues', issues: [], checkedAt: null, error: null, truncated: false },
   ];
 
   private timer: NodeJS.Timeout | null = null;
@@ -74,8 +74,22 @@ export class JiraMonitor {
     ]);
 
     this.views = [
-      { id: 'sprint', label: 'Sprint courant', issues: sprint.issues, checkedAt: at, error: sprint.error },
-      { id: 'mine', label: 'My issues', issues: mine.issues, checkedAt: at, error: mine.error },
+      {
+        id: 'sprint',
+        label: 'Sprint courant',
+        issues: sprint.issues,
+        checkedAt: at,
+        error: sprint.error,
+        truncated: hitTheCap(sprint.issues.length),
+      },
+      {
+        id: 'mine',
+        label: 'My issues',
+        issues: mine.issues,
+        checkedAt: at,
+        error: mine.error,
+        truncated: hitTheCap(mine.issues.length),
+      },
     ];
     this.onChange(this.state());
   }

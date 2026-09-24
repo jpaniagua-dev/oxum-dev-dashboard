@@ -1,8 +1,26 @@
 import type { IssueStage, IssueTransition, JiraIssue, Sprint } from '@shared/contracts.js';
 
 const TIMEOUT_MS = 20_000;
-/** A sprint with more issues than this is not a list you read in a strip anyway. */
-const MAX_RESULTS = 60;
+/**
+  * Issues fetched per search, in one request: there is no pagination here.
+  *
+  * Raised from 60 when the tab started showing what is already done. A sprint carries its finished
+  * work for its whole length, so the count it has to hold is now the whole sprint rather than what
+  * is left of it, and 60 was chosen against the smaller question. 100 is the ceiling the Jira Cloud
+  * search endpoint accepts, so this is as far as a single request goes; past it the view says it was
+  * cut rather than quietly showing part of a sprint as if it were all of it.
+  */
+const MAX_RESULTS = 100;
+
+/**
+ * Whether a search came back exactly full, and is therefore probably missing issues.
+ *
+ * Exported so the cap lives in one place: a caller comparing against its own copy of the number is
+ * a second answer to "how many did we ask for" that drifts the first time this one moves.
+ */
+export function hitTheCap(count: number): boolean {
+  return count >= MAX_RESULTS;
+}
 
 export interface JiraCredentials {
   readonly siteUrl: string;
@@ -581,6 +599,13 @@ function asStage(key: unknown): IssueStage {
  * sprint's rows off the visible list. An assigned issue outside every open sprint is therefore not
  * shown here on purpose; the board is the place to see the whole assignment.
  *
+ * **What is already done is included, and used not to be.** The exclusion existed because a list
+ * ranked finished work alongside current work, and a sprint's Done pile is most of it by the end,
+ * so it pushed today's rows off the visible part of a strip. A board does not have that problem: Done
+ * is a column of its own, read or ignored at a glance, and a sprint with nothing in it is a question
+ * the tab could not answer before. What the change costs is volume, which is why `MAX_RESULTS` moved
+ * with it and why a full result now says so.
+ *
  * The two views stay two searches rather than one filtered twice, because `mine` orders by `updated`
  * and the sprint view by `status, key`: the same rows in a different order is exactly what makes the
  * second view worth having.
@@ -590,7 +615,7 @@ export function buildJql(projectKeys: readonly string[]): { sprint: string; mine
     projectKeys.length > 0
       ? `project in (${projectKeys.map((key) => `"${key.replace(/"/g, '')}"`).join(', ')}) AND `
       : '';
-  const open = 'sprint in openSprints() AND statusCategory != Done';
+  const open = 'sprint in openSprints()';
   return {
     sprint: `${scope}${open} ORDER BY status ASC, key ASC`,
     mine: `${scope}${open} AND assignee = currentUser() ORDER BY updated DESC`,

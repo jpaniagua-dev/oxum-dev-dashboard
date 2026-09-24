@@ -120,6 +120,13 @@ exceptions:
   `sortIssues`, `nextSort` and the clickable column headers were removed rather than ported. What
   survived is what was never about the table: `boardUrl`, `presentStage`, `assigneesOf`,
   `filterByAssignee`, the views rail and the assignee filter.
+- **The Jira searches include what is already done, and used not to.** The exclusion existed for a
+  list, where a sprint carries its finished work for its whole length and that pile pushed today's
+  rows off the visible part of a strip. A board gives Done a column of its own, read or ignored at a
+  glance. The cost is volume: `MAX_RESULTS` went from 60 to 100, which is the ceiling a single Jira
+  Cloud search accepts, and there is **no pagination here**, so a view that comes back exactly full
+  is flagged `truncated` and its count is shown as `100+`. A count that is really a ceiling,
+  presented as a total, is a wrong answer given confidently.
 - **The three known stages are always drawn, `unknown` only when it holds something.** A column that
   disappears when it empties takes the board's shape with it, and "nothing is in progress" is an
   answer worth seeing. An uncategorised status is rare, so a permanent empty column for it would be

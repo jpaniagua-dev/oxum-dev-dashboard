@@ -961,6 +961,17 @@ export interface JiraView {
   readonly issues: JiraIssue[];
   readonly checkedAt: string | null;
   readonly error: string | null;
+  /**
+   * Whether the search came back full, and is therefore probably missing issues.
+   *
+   * One request and no pagination, so a sprint bigger than the cap is silently cut. That was
+   * tolerable while the searches excluded everything already done; a sprint carries its finished
+   * work for its whole length, so including it is what makes the ceiling reachable in practice.
+   *
+   * Reported rather than guessed around: this cannot tell a sprint of exactly the cap from one of
+   * twice it, and saying "there may be more" on the rare exact hit is the harmless half of that.
+   */
+  readonly truncated: boolean;
 }
 
 /** Everything the Jira tab needs, including why it might be empty. */
