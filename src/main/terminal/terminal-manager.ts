@@ -6,6 +6,7 @@ import type {
   Project,
   ProjectAction,
   ProjectId,
+  SessionAgent,
   ShellProfile,
   TerminalGroup,
   TerminalId,
@@ -387,6 +388,14 @@ export class TerminalManager {
     /** Profile the command was resolved against, recorded so a split inherits the same shell. */
     profileId?: string | null;
     /**
+     * The coding agent this command runs, when it runs one.
+     *
+     * Passed in rather than inferred, and the caller is the only one who can know: it is the one that
+     * built the command line from a profile and a model, and by the time the string reaches here it
+     * is just a program and some arguments.
+     */
+    agent?: SessionAgent | null;
+    /**
      * Folder to start in, when it is not the project's own.
      *
      * The exception, not the rule: a commit has to run where the repository is. It exists for the
@@ -431,6 +440,7 @@ export class TerminalManager {
       args: [...options.args],
       size: options.size,
       projectKind: null,
+      agent: options.agent ?? null,
       onExit: options.onExit ?? null,
     });
   }
@@ -492,6 +502,42 @@ export class TerminalManager {
       size,
       projectKind: null,
       renamed: false,
+    });
+  }
+
+  /**
+   * Opens a coding agent in a tab of its own, tied to no project.
+   *
+   * A `shell` and not a `project` command, because it belongs to nothing: there is no action behind
+   * it, no row whose state it feeds, and it is closable from the first second. What separates it from
+   * an ordinary shell is the `agent` record, which is what the Agents tab lists.
+   *
+   * The caller resolves the command and the folder. This class knows how to spawn things; which
+   * binary an agent is and where a session ought to start are decisions made where the settings are.
+   */
+  openAgent(options: {
+    title: string;
+    file: string;
+    args: readonly string[];
+    cwd: string;
+    size: TerminalSize;
+    profileId: string | null;
+    agent: SessionAgent;
+  }): TerminalId | null {
+    return this.spawn({
+      title: options.title,
+      kind: 'shell',
+      projectId: null,
+      actionId: null,
+      role: null,
+      profileId: options.profileId,
+      cwd: options.cwd,
+      file: options.file,
+      args: [...options.args],
+      size: options.size,
+      projectKind: null,
+      renamed: false,
+      agent: options.agent,
     });
   }
 
@@ -684,6 +730,8 @@ export class TerminalManager {
     size: TerminalSize;
     projectKind: Project['kind'] | null;
     renamed: boolean;
+    /** The coding agent this command runs, when it runs one. See `runProjectCommand`. */
+    agent?: SessionAgent | null;
     /** See `runProjectCommand`. Null for every spawn that chains nothing. */
     onExit?: ((exitCode: number, stopped: boolean) => void) | null;
   }): TerminalId | null {
@@ -703,7 +751,14 @@ export class TerminalManager {
       // main process, so the failure is recorded as a dead session carrying the message.
       const message = error instanceof Error ? error.message : String(error);
       this.entries.set(id, {
-        session: { ...baseSession(id, options), running: false, closable: true },
+        session: {
+          ...baseSession(id, options),
+          running: false,
+          closable: true,
+          // The pty could not be spawned at all, which is a failure and not a clean end. `-1` is the
+          // code the `onExit` callback is handed on this path, so the two agree.
+          exitCode: -1,
+        },
         pty: null,
         role: options.role,
         // A session that failed to launch still gets a tab and a pane: its scrollback carries the
@@ -780,7 +835,11 @@ export class TerminalManager {
         return;
       }
       // The tab survives its process: the output is often the reason the user opened it.
-      this.entries.set(id, { ...current, pty: null, session: { ...current.session, running: false } });
+      this.entries.set(id, {
+        ...current,
+        pty: null,
+        session: { ...current.session, running: false, exitCode, stoppedOnPurpose: stopped },
+      });
       if (options.role === 'server' && options.projectId !== null) {
         this.hooks.onProjectStartExit(options.projectId, exitCode, stopped);
       }
@@ -833,9 +892,17 @@ function baseSession(
     profileId: string | null;
     cwd: string;
     renamed: boolean;
+    agent?: SessionAgent | null;
   },
 ): Omit<StoredSession, 'running' | 'closable'> {
   return {
+    // Null and false until the pty says otherwise: a session that has not ended has no verdict, and
+    // zero would read as "finished cleanly" on a process that is still working.
+    exitCode: null,
+    stoppedOnPurpose: false,
+    // Set by the caller that spawned an agent, never guessed from the command line: an action can run
+    // anything, and matching on the word `claude` would call `git log --grep claude` a coding agent.
+    agent: options.agent ?? null,
     id,
     title: options.title,
     kind: options.kind,

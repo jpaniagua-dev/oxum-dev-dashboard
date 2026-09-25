@@ -1,7 +1,8 @@
-import { release } from 'node:os';
+import { homedir, release } from 'node:os';
 import { basename } from 'node:path';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import {
+  type AgentOpenResult,
   GIT_COMMIT_ACTION_ID,
   IpcChannel,
   ISSUE_KEY_PATTERN,
@@ -59,6 +60,8 @@ import {
   sync,
 } from './git/git-commands.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
+import type { AgentContext } from '@shared/agent-context.js';
+import { readAgentContext } from './agent/agent-context-reader.js';
 import { generateCommitMessage } from './git/generate-commit.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { readGitState, readRemoteSlug } from './git/git-service.js';
@@ -100,7 +103,7 @@ import { findFreePort, withPort } from './projects/free-port.js';
 import type { PullReviewService } from './review/review-service.js';
 import type { AutoRunRecords } from './autorun/auto-run-store.js';
 import type { TriageService } from './triage/triage-service.js';
-import { buildWorkCommand, resolveWorkspaceRoot } from './triage/work-command.js';
+import { buildInteractiveCommand, buildWorkCommand, resolveWorkspaceRoot } from './triage/work-command.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -990,6 +993,15 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         size: deps.terminalSize(),
         profileId: profile.id,
         cwd,
+        // Captured from the settings as they stand at the spawn, never re-read later: both the model
+        // and the profile can change while this session runs, and reporting the new one would
+        // describe the NEXT handoff rather than this one.
+        agent: {
+          label: settings.agentProfile.label,
+          model: settings.agentWorkModel,
+          instructionFile: settings.agentProfile.instructionFile,
+          startedAt: new Date().toISOString(),
+        },
       });
 
       /*
@@ -1147,6 +1159,65 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       return { config: deps.jiraConfig(), message };
     },
   );
+
+  ipcMain.handle(
+    IpcChannel.AgentContextRead,
+    async (_event, terminalId: unknown): Promise<AgentContext | null> => {
+      if (typeof terminalId !== 'string') {
+        return null;
+      }
+      const session = deps.terminals.sessions().find((entry) => entry.id === terminalId);
+      // No agent means nothing to describe. A shell reads no instruction file of its own, and
+      // answering with the chain anyway would put a context panel on a bash prompt.
+      if (session?.agent == null) {
+        return null;
+      }
+      return readAgentContext(session.cwd, session.agent.instructionFile, homedir());
+    },
+  );
+
+  ipcMain.handle(IpcChannel.AgentOpen, async (): Promise<AgentOpenResult> => {
+    const settings = deps.settings.get();
+    const shell = resolveDefaultProfile(deps.profiles(), settings.defaultShellProfileId);
+    if (shell === undefined) {
+      return { terminalId: null, message: 'No shell profile available to run the agent in' };
+    }
+    if (settings.agentProfile.interactive.trim().length === 0) {
+      return { terminalId: null, message: 'The agent profile has no interactive command' };
+    }
+    /*
+     * The agent's own interactive command line, run through the shell profile.
+     *
+     * The same two-step every agent tab in this app goes through: the profile says what to run, the
+     * shell profile says how to run it on this machine. Skipping the second would spawn the binary
+     * directly and lose the environment a login shell sets up, which is where `claude` lives on a
+     * normal install.
+     */
+    const command = buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel);
+    const resolved = resolveShellCommand(shell, command);
+    const terminalId = deps.terminals.openAgent({
+      title: settings.agentProfile.label,
+      file: resolved.file,
+      args: resolved.args,
+      // The workspace root, never a repository: memory and instructions are indexed by working
+      // directory, so a session started in a repository begins with neither.
+      cwd: resolveWorkspaceRoot(settings.workspaceRoot, settings.projectsRoot),
+      size: deps.terminalSize(),
+      profileId: shell.id,
+      agent: {
+        label: settings.agentProfile.label,
+        model: settings.agentWorkModel,
+        instructionFile: settings.agentProfile.instructionFile,
+        startedAt: new Date().toISOString(),
+      },
+    });
+    return {
+      terminalId,
+      // A null from the manager means the pty could not be spawned, which it records as a dead tab
+      // carrying the reason. Saying so here as well is what stops the button looking inert.
+      message: terminalId === null ? `${settings.agentProfile.label} could not be started` : '',
+    };
+  });
 
   ipcMain.handle(
     IpcChannel.JiraTransitions,

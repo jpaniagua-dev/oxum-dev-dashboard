@@ -20,6 +20,7 @@ export const STRIP_TABS: readonly StripTab[] = [
   'git',
   'triage',
   'worktrees',
+  'agents',
 ];
 
 export class StripTabs {
@@ -32,6 +33,7 @@ export class StripTabs {
     git: requireElement<HTMLButtonElement>('strip-tab-git'),
     triage: requireElement<HTMLButtonElement>('strip-tab-triage'),
     worktrees: requireElement<HTMLButtonElement>('strip-tab-worktrees'),
+    agents: requireElement<HTMLButtonElement>('strip-tab-agents'),
   };
 
   private readonly panels: Record<StripTab, HTMLElement> = {
@@ -41,6 +43,7 @@ export class StripTabs {
     git: requireElement('strip-panel-git'),
     triage: requireElement('strip-panel-triage'),
     worktrees: requireElement('strip-panel-worktrees'),
+    agents: requireElement('strip-panel-agents'),
   };
 
   constructor(private readonly actions: StripTabsActions) {

@@ -29,8 +29,10 @@ import type {
   ThemeState,
   WorktreeCommand,
 } from '@shared/contracts.js';
+import type { AgentContext } from '@shared/agent-context.js';
 import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
+import { jobRuns } from '@shared/job-run.js';
 import { moveProject } from '@shared/project-order.js';
 import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
 import {
@@ -42,6 +44,7 @@ import {
 import { showContextMenu } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
+import { agentSessions, renderAgentsPanel } from './ui/agents-panel.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
   buildChangeMenuItems,
@@ -90,11 +93,24 @@ class App {
   /**
    * Whether the surface is showing cards instead of terminals.
    *
-   * Deliberately **not** persisted, unlike `terminalColumns` next to it. The grid shape is a lasting
-   * preference; which of the two surfaces you happen to be looking at is not, and coming back after
-   * a restart to a board with no terminals in sight is a launch that looks broken.
+   * Not persisted, and it starts **true**: the window opens on the board. Which of the two surfaces
+   * you last looked at is not a preference worth keeping across restarts, but which one a launch
+   * lands on is, and the board is the one that shows every session at once.
    */
   private boardMode = false;
+  /** Which agent session the Agents tab is looking at. Null means "the newest one". */
+  private selectedAgent: TerminalId | null = null;
+  /**
+   * The context of the selected agent, or null while it is being read.
+   *
+   * Cached rather than re-read on every repaint: the panel is rebuilt whenever the session list
+   * changes, which is every poll, and this touches the disk. It is invalidated by a change of
+   * selection and nothing else, a file edited under a running session being rare enough that
+   * `Refresh` is the honest answer to it.
+   */
+  private agentContext: AgentContext | null = null;
+  /** Which session `agentContext` describes, so a stale answer can be dropped. */
+  private agentContextFor: TerminalId | null = null;
   /** Ticks while the board is up, so a card goes quiet on its own rather than at the next poll. */
   private boardTimer: number | null = null;
   private profiles: readonly ShellProfile[] = [];
@@ -255,10 +271,22 @@ class App {
       {
         onInput: (terminalId, data) => window.api.sendPtyInput(terminalId, data),
         onResize: (terminalId, cols, rows) => window.api.resizePty(terminalId, { cols, rows }),
-        onClose: (terminalId) => void window.api.closeTerminal(terminalId),
+          onClose: (terminalId) => void window.api.closeTerminal(terminalId),
         onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
         onMoveToServers: (terminalId) => void window.api.moveTerminalToServers(terminalId, true),
         onNewShell: (profileId) => void this.openShell(profileId),
+        /*
+         * Reported and never bare-`void`ed, the rule this file already states for `onLayout`: an
+         * `invoke` that rejects inside a floating promise is an unhandled rejection nobody sees, and
+         * a button whose failure is invisible reads as a button that is not wired. That is exactly
+         * how this one shipped.
+         */
+        onNewAgent: () => {
+          this.openAgent().catch((error: unknown) => {
+            console.error('[agent] could not open a session:', error);
+            this.stampMessage('Could not start the agent, see the console');
+          });
+        },
         // Reported rather than dropped: an `invoke` on a channel the main process does not know
         // rejects, and a bare `void` would turn that into an unhandled rejection nobody sees. That is
         // precisely how a stale main process makes a gesture look inert instead of broken.
@@ -289,17 +317,27 @@ class App {
     this.terminal.setLayout(bootstrap.layout);
     this.sessions = bootstrap.terminals;
     this.board = new TerminalBoard(requireElement('terminal-board'), {
+      onOpenJob: (kind) => {
+        // The strip changes and the board stays: a headless run has no session to show down here,
+        // and its result only ever lands in the tab that started it.
+        this.strip?.select(kind === 'triage' ? 'triage' : 'pulls');
+      },
       // Showing a session is the only thing a card does that the grid cannot: it leaves the board.
       onOpen: (terminalId) => {
         this.setBoardMode(false);
         this.terminal?.select(terminalId);
       },
-      onClose: (terminalId) => void window.api.closeTerminal(terminalId),
       onMenu: (session, x, y) => this.openSessionMenu(session, x, y),
       // The very callback the tab strip is given, so the board cannot grow its own idea of what
       // opening a shell means. Staying on the board is deliberate: setting up three sessions should
       // not bounce through the grid three times, and the new card appears at once.
       onNewShell: (profileId) => void this.openShell(profileId),
+      onNewAgent: () => {
+        this.openAgent().catch((error: unknown) => {
+          console.error('[agent] could not open a session:', error);
+          this.stampMessage('Could not start the agent, see the console');
+        });
+      },
     });
     // After the layout, never before: the strips are painted per pane, so a palette applied to a
     // surface with no panes yet would be a render thrown away.
@@ -307,6 +345,16 @@ class App {
     // After the layout, for the same reason the palette is: they are placed inside a strip, and
     // there is no strip until the panes exist.
     this.placeSurfaceControls();
+    /*
+     * The board is what the window opens on.
+     *
+     * It was the grid, on the grounds that coming back to a board with no terminals in sight is a
+     * launch that looks broken. That objection died when the board grew the means to start a session
+     * and to unfold one: it is no longer a read-only picture of terminals that live elsewhere, it is
+     * where sessions begin. The grid is one click away and the choice does not outlive the window,
+     * which is the part worth knowing.
+     */
+    this.setBoardMode(true);
 
     this.pulls = bootstrap.pulls;
     this.pullScope = bootstrap.settings.pullScope;
@@ -316,6 +364,7 @@ class App {
     this.renderTable();
     this.renderPulls();
     this.renderJira();
+    this.renderAgents();
     // Painted so the tab is never blank, but only **read** when it is the one on screen: the reads
     // are per-repository and there is no monitor pushing them.
     this.renderGit();
@@ -394,11 +443,16 @@ class App {
       if (this.strip?.active === 'pulls') {
         this.renderPulls();
       }
+      // Unconditional, unlike the panel above: the board is a different surface from the strip, and
+      // the run's card is the whole reason this state reaches it. Cheap either way, `renderBoard`
+      // returning at once when the grid is the surface on screen.
+      this.renderBoard();
     });
 
     window.api.onTriageChanged((state) => {
       this.triage = state;
       this.renderTriage();
+      this.renderBoard();
     });
     window.api.onTerminalsChanged((sessions) => {
       /*
@@ -423,6 +477,7 @@ class App {
       }
       this.terminal?.setSessions(sessions);
       this.renderBoard();
+      this.renderAgents();
       // Closing the very last tab must not leave a dead surface: with no session there is no
       // strip, and the "+" that could open a new one lives in the strip. Same rule as the
       // bootstrap below — the terminal is this app's centre, so it is never left empty.
@@ -546,6 +601,44 @@ class App {
     this.terminal?.setSurfaceControls(controls);
   }
 
+  /**
+   * Repaints the Agents tab, reading the selected session's context when it is not the cached one.
+   *
+   * The read is fired and forgotten: it lands on a later tick and repaints, which is why the panel
+   * draws "Reading..." rather than waiting. A tab that blocked on the disk would be a tab that
+   * freezes the window on a network drive that went away.
+   */
+  private renderAgents(): void {
+    const agents = agentSessions(this.sessions);
+    const active = agents.find((entry) => entry.id === this.selectedAgent) ?? agents[0];
+    if (active !== undefined && active.id !== this.agentContextFor) {
+      this.agentContextFor = active.id;
+      this.agentContext = null;
+      void window.api.readAgentContext(active.id).then((context) => {
+        // Checked on the way back: a click on another session while this was in flight would
+        // otherwise paint the wrong context under the right name.
+        if (this.agentContextFor === active.id) {
+          this.agentContext = context;
+          this.renderAgents();
+        }
+      });
+    }
+
+    renderAgentsPanel(
+      { list: requireElement('agents-list'), detail: requireElement('agents-detail') },
+      this.sessions,
+      this.agentContext,
+      { selected: this.selectedAgent },
+      {
+        onOpen: (terminalId) => {
+          this.selectedAgent = terminalId;
+          this.renderAgents();
+        },
+      },
+      { rows: this.rows, lastOutputAt: this.lastOutputAt },
+    );
+  }
+
   /** Repaints the board, when it is the surface on screen. */
   private renderBoard(): void {
     if (!this.boardMode) {
@@ -553,6 +646,13 @@ class App {
     }
     this.board?.render({
       sessions: this.sessions,
+      /*
+       * The two headless runs, shaped where the shaping is testable.
+       *
+       * Built on every paint rather than held as a field: both states already live here and arrive
+       * on their own channels, so a third copy would be one more thing able to lag behind them.
+       */
+      jobs: jobRuns(this.triage, this.pullReview),
       rows: this.rows,
       lastOutputAt: this.lastOutputAt,
       profiles: this.profiles,
@@ -1811,6 +1911,26 @@ class App {
     }
   }
 
+  /**
+   * Starts the configured coding agent in a tab.
+   *
+   * Everything about where it runs and what it runs is decided in the main process, from the
+   * settings: the renderer holds no opinion about which binary an agent is. It focuses the new tab
+   * for the same reason opening a shell does, a tab you cannot see having no use.
+   */
+  private async openAgent(): Promise<void> {
+    const { terminalId, message } = await window.api.openAgentSession();
+    if (message.length > 0) {
+      this.stampMessage(message);
+    }
+    if (terminalId !== null) {
+      await this.focusTerminal(terminalId);
+      // The tab is what the Agents tab lists, so the list has to learn about it now rather than at
+      // the next session broadcast.
+      this.renderAgents();
+    }
+  }
+
   private async openShell(profileId: string): Promise<void> {
     const terminalId = await window.api.openShell({ profileId });
     if (terminalId !== null) {
@@ -2189,6 +2309,11 @@ class App {
         // Nothing is read for the Git tab while it is hidden, so showing it is the moment to read.
         // The stored column width goes back on here too: the splitter cannot measure a `display: none`
         // panel, so this is the first instant its value can actually be honoured.
+        // The context of an agent is read from the disk, so it is read when the tab is shown rather
+        // than kept warm behind it. Same reasoning as Git and Triage below.
+        if (tab === 'agents') {
+          this.renderAgents();
+        }
         if (tab === 'git') {
           this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);
           void this.loadGit();
@@ -2424,6 +2549,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.triageHeight;
     case 'worktrees':
       return settings.worktreesHeight;
+    case 'agents':
+      return settings.agentsHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -2438,7 +2565,8 @@ function heightKeyOf(
   | 'jiraHeight'
   | 'gitHeight'
   | 'triageHeight'
-  | 'worktreesHeight' {
+  | 'worktreesHeight'
+  | 'agentsHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -2450,6 +2578,8 @@ function heightKeyOf(
       return 'triageHeight';
     case 'worktrees':
       return 'worktreesHeight';
+    case 'agents':
+      return 'agentsHeight';
     case 'projects':
       return 'projectsHeight';
   }

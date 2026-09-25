@@ -28,6 +28,9 @@ function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
     cwd: 'C:/repos/web-app',
     running: true,
     closable: false,
+    exitCode: null,
+    stoppedOnPurpose: false,
+    agent: null,
     renamed: false,
     ...overrides,
   };

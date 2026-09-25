@@ -64,3 +64,16 @@ export const RUN_ICON = 'M5.6 3.9L12.6 8L5.6 12.1Z';
  * and the plus is given 6 of the 16 units so its two bars stay apart at that size.
  */
 export const RUN_NEW_ICON = 'M2.9 2.6L8.2 6.2L2.9 9.8Z M11.8 8.1V14.1 M8.8 11.1H14.8';
+
+/**
+ * A coding agent: a head with an aerial.
+ *
+ * Deliberately not a plus and not a terminal, because it sits beside both. Starting an agent and
+ * starting a shell are different acts with different consequences, and the pair only works if the two
+ * glyphs cannot be confused at 13px.
+ *
+ * Here rather than beside one of its two callers, which is what this module is for: the tab strip's
+ * launcher and the board's cards draw the same thing, and two copies of a path drift.
+ */
+export const AGENT_ICON =
+  'M8 2v2M4.5 4.5h7v7h-7zM6.5 7v1.2M9.5 7v1.2M6.4 9.8h3.2M3 6.5v3M13 6.5v3';

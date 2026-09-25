@@ -62,6 +62,13 @@
             <button type="button" id="strip-tab-worktrees" class="strip__tab" role="tab">
               Worktrees
             </button>
+            <!--
+              Last, because it is the newest and because a tab row is read by position: every other
+              tab keeps the place it has had, which is what stops a habit from breaking on an update.
+            -->
+            <button type="button" id="strip-tab-agents" class="strip__tab" role="tab">
+              Agents
+            </button>
           </div>
           <div class="projects__header-actions">
             <!--
@@ -211,6 +218,25 @@
           Every child is filled by `triage-panel.ts` with `textContent`: sprint names, ticket
           summaries and model output all come from outside.
         -->
+        <!--
+          Agents: the sessions running a coding agent on the left, what that agent reads on the right.
+
+          Master-detail with the same three boxes as the pull request and Jira tabs, and reusing their
+          classes rather than inventing a fourth layout for the same shape. Every child is filled from
+          `agents-panel.ts` with `textContent`: these are file paths and descriptions read off disk.
+        -->
+        <div class="pulls" id="strip-panel-agents" role="tabpanel" hidden>
+          <div class="pulls__repos" id="agents-list"></div>
+          <div class="pulls__main">
+            <!--
+              No filter bar here, unlike the pull request and Jira tabs: what sat in it was three
+              facts about the selected agent, and facts belong with the rest of them in the detail
+              rather than in a row of chrome above it.
+            -->
+            <div class="pulls__list" id="agents-detail"></div>
+          </div>
+        </div>
+
         <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
           <div class="pulls__repos" id="triage-sprints"></div>
           <div class="pulls__main">

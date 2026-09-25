@@ -11,6 +11,7 @@ import {
   type TriageState,
   type TriageVerdict,
 } from '@shared/contracts.js';
+import { describeElapsed } from '@shared/job-run.js';
 import { autonomyBlock, canRunUnattended, describeAutonomyBlock } from '@shared/triage-autonomy.js';
 import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
 import { RUN_ICON, RUN_NEW_ICON } from './icons.js';
@@ -857,8 +858,7 @@ export class TriagePanel {
  * a clock and "a moment ago" answers nothing. Exported for testing.
  */
 export function describeRun(progress: TriageProgress, now: Date): string {
-  const seconds = Math.max(0, Math.floor((now.getTime() - new Date(progress.startedAt).getTime()) / 1000));
-  const elapsed = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const elapsed = describeElapsed(progress.startedAt, now);
   const tickets = progress.tickets > 0 ? `${progress.tickets} tickets, ` : '';
   const steps = progress.steps > 0 ? `${progress.steps} steps, ` : '';
   return `${tickets}${steps}${elapsed}`;

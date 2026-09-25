@@ -10,21 +10,15 @@ import type { ProjectKind, ServerPhase } from '@shared/contracts.js';
  */
 
 /**
- * Strips ANSI escape sequences, which surround almost every marker in Angular's output.
+ * Re-exported, not reimplemented.
  *
- * Both patterns are anchored on the escape character (`\x1b`). Matching bracket sequences without
- * it would also eat literal text such as `[ERROR]`, silently destroying the very markers this file
- * exists to find.
+ * It moved to shared when the board grew a text preview of a session: the renderer needs the same
+ * stripping, and two strippers would disagree about what a line is. Still exported from here, the
+ * callers and the tests of this module naming it here.
  */
-export function stripAnsi(text: string): string {
-  return (
-    text
-      // CSI: colours, cursor moves, line erases.
-      .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-      // OSC: window titles, terminated by BEL or ST.
-      .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '')
-  );
-}
+import { stripAnsi } from '@shared/terminal-text.js';
+
+export { stripAnsi };
 
 export interface ParsedOutput {
   /** Phase implied by this chunk, or null when nothing conclusive appeared. */

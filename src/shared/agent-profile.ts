@@ -72,6 +72,16 @@ export interface AgentProfile {
    * are both common, and so is an agent that takes none at all.
    */
   readonly modelFlag: string;
+  /**
+   * File this agent reads its instructions from, looked up in the working directory and its
+   * ancestors.
+   *
+   * `CLAUDE.md` for Claude Code, `AGENTS.md` for Codex, and the reason it is a setting rather than a
+   * constant is that this app drives whichever agent the user configured. It is the one piece of an
+   * agent's context that is knowable without understanding that agent's private storage, so it is
+   * the part the Agents tab can show for **any** profile.
+   */
+  readonly instructionFile: string;
 }
 
 /**
@@ -92,6 +102,7 @@ export const CLAUDE_CODE_PROFILE: AgentProfile = {
   answerFormat: 'stream-json',
   extraDirFlag: '--add-dir',
   modelFlag: '--model {model}',
+  instructionFile: 'CLAUDE.md',
 };
 
 /**
@@ -231,5 +242,8 @@ export function readProfile(value: unknown, fallback: AgentProfile = CLAUDE_CODE
     // Empty is a real value here, unlike the two above: it means "this agent has no such flag".
     extraDirFlag: typeof raw['extraDirFlag'] === 'string' ? raw['extraDirFlag'].trim() : fallback.extraDirFlag,
     modelFlag: typeof raw['modelFlag'] === 'string' ? raw['modelFlag'].trim() : fallback.modelFlag,
+    // Not empty-able, unlike the two flags above: every agent reads its instructions from somewhere,
+    // and an empty name would make the Agents tab walk the tree looking for a file called nothing.
+    instructionFile: text('instructionFile', fallback.instructionFile),
   };
 }

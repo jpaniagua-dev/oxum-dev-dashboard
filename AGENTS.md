@@ -138,6 +138,35 @@ exceptions:
 - **Only a `server` session shows a server phase.** A `task` or a shell shares its project'''s row and
   has nothing to do with what `ng serve` is up to; painting that row'''s phase on it would be a card
   claiming something about a process it does not own.
+- **The board draws two kinds of card, and the second one has no session behind it.** Two agent
+  runs in this app never get a pty, by design: the sprint analysis and the pull request review both
+  produce a payload the app parses rather than output a reader watches, so they go through
+  `runAgent` and a pipe. A board that painted only `TerminalSession`s therefore showed neither, and
+  a surface whose whole subject is "what have I got running" with two running agents missing from it
+  misleads by omission, which is the same failure `normalizeGroups` exists to prevent one level down.
+  `shared/job-run.ts` shapes both service states into a `JobRun`; the board draws a run and never
+  learns what a sprint or a pull request is.
+- **A job card cannot unfold, has no menu, and LEAVES when its run ends.** Three consequences of one
+  fact. There is no scrollback to tail, so the detail line the run reports is already the whole
+  preview; everything a session's menu offers acts on a tab, and there is no tab, so a click brings
+  up the tab that owns the run instead; and `activityOf` reads the time since the last byte, of
+  which there are none, so a job exists exactly while it runs. There is no `exited` job card and no
+  dismissal gesture: the result lands in the run's own tab, and a finished card would need a way to
+  clear it that nothing else here has.
+- **A job's card id is stable per KIND, not per run.** Both services enforce one run at a time, so a
+  kind identifies a run uniquely while one exists. Keying on the sprint or the review target instead
+  would give every run a fresh card at the default position, throwing away wherever the last one was
+  dragged to.
+- **The job signature carries the elapsed clock as SECONDS**, and that is why it is written out
+  rather than folded into the sessions' one. A job card is the only thing on this board that has to
+  repaint on the tick with nothing having happened, and a signature holding `Date.now()` would
+  defeat the repaint guard entirely by never matching itself.
+- **A card no longer unfolds to a preview of its output, and it did for one version.** The unfolded
+  session card tailed the last fifteen lines through `readPtyBuffer`, which is text a terminal
+  emulator was going to render: a coding agent redraws a framed box in place with carriage returns
+  and cursor moves, so a `<pre>` showed every frame of that redraw stacked on itself. Honouring them
+  is implementing a terminal, which is what the grid one click away already is. `tailLines` went
+  with it rather than being left as a dead export.
 - **Card positions and the board mode itself are renderer-only and ephemeral.** Sessions die with the
   app, so positions keyed by session id have nothing to outlive. The mode is not persisted either,
   unlike `terminalColumns`: which surface you happen to be looking at is not a preference, and
@@ -243,6 +272,45 @@ exceptions:
   **only when a shape is explicitly picked**, never at boot and never on a poll, because it undoes a
   grouping built by dragging tabs together; the way back is the pane menu's "Merge into a single
   pane".
+- **The Agents tab is agnostic in its left half and Claude-specific in its right.** What the app
+  RECORDED at the spawn (`SessionAgent`: profile label, model, instruction file, start time) is as
+  true of Codex as of Claude Code, because the app itself decided it. What is read off disk
+  afterwards is a bonus: the instruction chain works for any agent, being a filename looked up the
+  directory tree, and the memory cards are Claude Code's own storage and are **absent by design**
+  for anything else, said out loud rather than shown as an empty list.
+- **`SessionAgent` is captured at the spawn and never re-read.** Both the model and the profile can
+  be changed in the settings while a session runs, so a panel re-reading them would describe the
+  NEXT handoff as though it were this one.
+- **An agent session is declared by its caller, never sniffed from the command line.** An action can
+  run anything, and matching on the word `claude` would classify `git log --grep claude` as a coding
+  agent. Two callers set it today: the ticket handoff and the feedback pass.
+- **`claudeProjectKey` is inferred from disk, not from a contract.** A Windows path becomes its own
+  name with every separator and the drive's colon turned into a dash; it matches every entry of a
+  real `~/.claude/projects` but nothing promises it survives a Claude Code release. A missing folder
+  is therefore "nothing to show", never an error, and the app must never write into that path. The
+  encoding is **lossy** and is never inverted: a folder whose name holds a dash encodes like a
+  nested one, which is pinned by a test.
+- **Memory is indexed by working directory, and the tab exists to make that visible.** Measured on
+  this machine: the workspace root held 70 cards, every repository folder held none. A session
+  started inside a repository therefore begins with no memory at all, which the panel says in the
+  warning colour because it is invisible everywhere else.
+- **Paths in that tab are read-only.** Opening one would need an IPC handing an arbitrary path to the
+  shell, which is a capability this app does not have and does not need to say what an agent reads.
+- **The activity panel groups sessions by how loudly they ask for you**, and `attention` is the
+  HONEST version of Dorothy's "Needs Attention", not a copy. That panel lists agents waiting for an
+  answer, which its host learns from Claude Code's hooks; here a session waiting for you and one
+  that has finished are both silence. So the group is built from what can be established: a process
+  that ended with a non-zero code **nobody asked for**, and a dev server whose project is in
+  `lint-error`, `build-error` or `crashed`. `stoppedOnPurpose` is what keeps a cancelled build out
+  of it, killing a process being a non-zero exit like any other.
+- **`exitCode` and `stoppedOnPurpose` are published on `TerminalSession`.** The main process always
+  knew both and kept them; they are the only "something needs you" signal this app can state for a
+  session that is not a dev server. The phase is read for a `server` session **only**: a task or a
+  shell shares its project's row and has nothing to do with what `ng serve` is up to.
+- **The panel sits UNDER the board toolbar, not beside it.** Both are anchored to the same corner, so
+  at the same `top` the panel covered the toolbar whole, the button that leaves the board included.
+  Third variant of the same failure in this feature, and the reason the offset is a named decision
+  rather than a number.
 - **The surface controls follow whichever surface is on screen**, through `placeSurfaceControls`.
   They are ONE element, moved and never copied, so the routing has to be decided in a single place:
   they ride in the first pane's tab strip in grid mode and in the board's own toolbar in board mode.
@@ -527,6 +595,15 @@ exceptions:
   to the top of the viewport with `getBoundingClientRect` at the moment it needs it, never from a
   constant. The panel simply starts higher. Do not introduce a hardcoded header height there, that is
   precisely what would have broken here.
+- **Every tab's content sits in the same box.** A raised surface inside a hairline, inset from the
+  strip's edge, which for six versions was the projects table's alone while the other six panels
+  painted onto the window background with some padding: side by side, one read as a panel and the
+  rest read as text loose on the page. One rule on `.projects [role='tabpanel']`, selected by the
+  role and **not** by listing the classes, for the reason the fold rule already records: a list has
+  to be extended every time a tab is added, it was forgotten once, and the symptom is silent. It
+  sets no `display`, so each panel stays the grid or flex column it is, and it stops at the strip:
+  the terminal below carries its own frames, and a box around the panes would be a second border
+  around every xterm.
 - **The strip folds down to its tab row** (`stripCollapsed`, a button and `Alt+Shift+A`), to work in the
   terminal without losing sight of anything. **The tab row itself never folds**: a control that hides
   itself leaves no way back. An accepted and intended corollary: clicking a tab while folded unfolds,

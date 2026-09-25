@@ -1,6 +1,9 @@
 import type { ProjectRow, ShellProfile, TerminalId, TerminalSession } from '@shared/contracts.js';
 import { showContextMenu } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
+import { AGENT_ICON } from './icons.js';
+import type { JobKind, JobRun } from '@shared/job-run.js';
+import { describeElapsed } from '@shared/job-run.js';
 import { buildPill } from './project-table.js';
 import { presentServer } from './presenters.js';
 
@@ -70,6 +73,15 @@ export function describeActivity(activity: SessionActivity): string {
   }
 }
 
+/**
+ * What a card is about: a terminal session, or a headless run that has no session.
+ *
+ * A `TerminalId` for the first, a `JobRun.id` for the second, and both are strings, so the map of
+ * dragged positions needs no second home. The two namespaces cannot collide: a job id is minted by
+ * `job-run.ts` with a `job:` prefix while a terminal id comes from the manager's own counter.
+ */
+export type CardId = string;
+
 /** A card's position on the canvas, in canvas units (before pan and zoom). */
 export interface CardPoint {
   readonly x: number;
@@ -108,8 +120,6 @@ export function clampZoom(zoom: number): number {
 export interface TerminalBoardActions {
   /** Shows this session in the grid, which is what a click on a card means. */
   onOpen: (terminalId: TerminalId) => void;
-  /** Ends the session. Only offered when the tab itself could be closed. */
-  onClose: (terminalId: TerminalId) => void;
   /** Right-click, so a card offers what its tab offers. */
   onMenu: (session: TerminalSession, x: number, y: number) => void;
   /**
@@ -120,11 +130,33 @@ export interface TerminalBoardActions {
    * opening a shell means.
    */
   onNewShell: (profileId: string) => void;
+  /**
+   * Opens the configured coding agent, without leaving the board.
+   *
+   * The board could start a shell and not an agent, which on a surface whose whole subject is
+   * running agents was the wrong way round. Same callback the tab strip is given, so the two cannot
+   * grow different ideas of what starting an agent means.
+   */
+  onNewAgent: () => void;
+  /**
+   * Shows the tab that owns a headless run, which is what a click on a job card means.
+   *
+   * Not `onOpen`: there is no session to show in the grid, and the run's own tab is the only place
+   * its result will ever land. The board stays on screen, the strip above it changes.
+   */
+  onOpenJob: (kind: JobKind) => void;
 }
 
 /** What the board needs to know about the world, handed in on every render. */
 export interface TerminalBoardState {
   readonly sessions: readonly TerminalSession[];
+  /**
+   * The headless agent runs going right now, which have no session to be found under.
+   *
+   * They arrive already shaped by `job-run.ts` rather than as the two service states, so this
+   * surface never learns what a sprint or a pull request review is. It draws a run.
+   */
+  readonly jobs: readonly JobRun[];
   /** Project rows, for the server phase of a session that runs one. */
   readonly rows: readonly ProjectRow[];
   /** When each session was last heard from, by id. Absent means never. */
@@ -142,23 +174,24 @@ export interface TerminalBoardState {
  * more steps.
  */
 export class TerminalBoard {
-  /** Dragged positions, by session. Lost on reload, exactly like the sessions themselves. */
-  private readonly points = new Map<TerminalId, CardPoint>();
+  /** Dragged positions, by card. Lost on reload, exactly like the sessions themselves. */
+  private readonly points = new Map<CardId, CardPoint>();
   private pan: CardPoint = { x: 0, y: 0 };
   private zoom = 1;
   private state: TerminalBoardState = {
     sessions: [],
+    jobs: [],
     rows: [],
     lastOutputAt: new Map(),
     profiles: [],
   };
   private readonly content: HTMLElement;
   private readonly toolbar: HTMLElement;
+  private readonly zoomLabel: HTMLElement;
+  /** Set while the plane itself is being dragged, so a click on the background opens no card. */
+  private panning = false;
   /** The separator drawn before the surface controls, built once and relocated with them. */
   private readonly controlsRule: HTMLElement;
-  private readonly zoomLabel: HTMLElement;
-  /** Set while the canvas itself is being dragged, so a click on the background does not open a card. */
-  private panning = false;
   /** The chevron beside `+`. Hidden when there is only one shell to choose from. */
   private pickShell: HTMLElement | null = null;
   /**
@@ -194,33 +227,44 @@ export class TerminalBoard {
     /*
      * Creating comes first, then the view controls, separated by a rule.
      *
-     * `+` opens the first profile straight away and the chevron picks another, which is exactly the
-     * pair the tab strip offers. Reading the profile list at click time rather than at construction
-     * is what makes a profile added in the settings appear here without the board being rebuilt.
+     * The same pair as the tab strip, and deliberately: an agent in one click, a terminal through a
+     * menu that names what it opens. A surface whose subject is running agents could start a shell
+     * and not an agent until this was added, which was the wrong way round.
+     *
+     * Reading the profile list at click time rather than at construction is what makes a profile
+     * added in the settings appear here without the board being rebuilt.
      */
-    // A terminal with a prompt in it, and deliberately not a bare plus: the zoom-in button three
-    // places along is already a plus, and two identical glyphs in one strip of six icons is a
-    // toolbar you have to hover to read. This one also says WHAT gets created, which a plus cannot.
-    const add = this.toolbarButton('New terminal', 'M2.5 3.5h11v9h-11zM5 6.6l1.7 1.4L5 9.4M8.6 9.8h3.2', () => {
-      const first = this.state.profiles[0];
-      if (first !== undefined) {
-        this.actions.onNewShell(first.id);
-      }
-    });
-    toolbar.append(add);
+    toolbar.append(
+      this.toolbarButton('Start the configured coding agent', AGENT_ICON, () => {
+        this.actions.onNewAgent();
+      }),
+    );
 
-    const pick = this.toolbarButton('Choose a shell', 'M3.5 6l4.5 4.5L12.5 6', (event) => {
-      const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      showContextMenu(
-        box.left,
-        box.bottom + 4,
-        this.state.profiles.map((profile) => ({
-          label: profile.label,
-          hint: profile.file,
-          run: () => this.actions.onNewShell(profile.id),
-        })),
-      );
-    });
+    const pick = this.toolbarButton(
+      'New terminal',
+      'M2.5 3.5h11v9h-11zM5 6.6l1.7 1.4L5 9.4M8.6 9.8h3.2',
+      (event) => {
+        const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+        showContextMenu(
+          box.left,
+          box.bottom + 4,
+          this.state.profiles.map((profile) => ({
+            label: profile.label,
+            hint: profile.file,
+            run: () => this.actions.onNewShell(profile.id),
+          })),
+        );
+      },
+    );
+    /*
+     * Two glyphs in one button, so it cannot keep the plain `.icon-button` shape.
+     *
+     * That class is a 26px grid cell with one column: a second child lands on a second ROW, which is
+     * how this came out as a terminal with a chevron underneath it. The modifier makes it a row and
+     * lets it be as wide as it needs.
+     */
+    pick.classList.add('board-canvas__pick');
+    pick.append(createIcon('M3.5 6l4.5 4.5L12.5 6', { paint: 'stroke' }));
     this.pickShell = pick;
     toolbar.append(pick);
     toolbar.append(this.rule());
@@ -264,7 +308,12 @@ export class TerminalBoard {
     this.paint();
   }
 
-  /** Repaints from the state it already has, which is how a card goes quiet as time passes. */
+  /**
+   * Repaints from the state it already has, which is how a card goes quiet as time passes.
+   *
+   * It is also what makes a job card's clock tick, the only thing on this board that changes with
+   * time rather than with an event.
+   */
   refresh(): void {
     this.paint();
   }
@@ -287,9 +336,39 @@ export class TerminalBoard {
           session.id,
           session.title,
           activity,
-          String(session.closable),
           project?.project.label ?? '',
           phase,
+          // The panel groups on these two, so a session that failed while the card looked the same
+          // still has to repaint.
+          String(session.exitCode),
+          String(session.stoppedOnPurpose),
+          String(session.agent !== null),
+          point === undefined ? '' : `${point.x},${point.y}`,
+        ].join('\u0001');
+      })
+      .join('\u0002');
+  }
+
+  /**
+   * What the job cards would show right now, as a string.
+   *
+   * The elapsed clock is in it as SECONDS and not as a timestamp, which is the whole reason this is
+   * written out rather than folded into the one above: a job card is the one thing on this board
+   * that has to repaint on the tick with nothing having happened, and a signature carrying
+   * `Date.now()` would defeat the guard entirely by never matching itself.
+   */
+  private jobSignature(now: number): string {
+    const at = new Date(now);
+    return this.state.jobs
+      .map((job) => {
+        const point = this.points.get(job.id);
+        return [
+          job.id,
+          job.subject,
+          job.detail,
+          job.progress ?? '',
+          String(job.steps),
+          describeElapsed(job.startedAt, at),
           point === undefined ? '' : `${point.x},${point.y}`,
         ].join('\u0001');
       })
@@ -302,7 +381,7 @@ export class TerminalBoard {
       return;
     }
     const now = Date.now();
-    const next = this.signature(now);
+    const next = `${this.signature(now)}\u0003${this.jobSignature(now)}`;
     if (!force && next === this.painted) {
       return;
     }
@@ -310,44 +389,144 @@ export class TerminalBoard {
 
     clearChildren(this.content);
     this.applyTransform();
-    // A chevron offering a choice of one is a control that cannot do anything, the same rule the tab
-    // strip's own new-tab button follows.
-    if (this.pickShell !== null) {
-      this.pickShell.hidden = this.state.profiles.length <= 1;
-    }
+    // Never hidden any more: it is the only way to open a terminal from here, so a machine with a
+    // single shell profile would otherwise have none. Same correction the tab strip needed.
 
-    if (this.state.sessions.length === 0) {
+
+    if (this.state.sessions.length === 0 && this.state.jobs.length === 0) {
       this.content.append(
         createElement('p', {
           className: 'board-canvas__empty',
-          text: 'No session running. Open a terminal and it appears here.',
+          text: 'Nothing running. Open a terminal and it appears here.',
         }),
       );
       return;
     }
 
-
     this.state.sessions.forEach((session, index) => {
       const point = this.points.get(session.id) ?? defaultPoint(index);
       this.content.append(this.buildCard(session, point, now));
     });
+
+    // After the sessions in the default layout, so a run starting while four terminals are open
+    // lands in the next free slot rather than on top of one of them.
+    this.state.jobs.forEach((job, index) => {
+      const point = this.points.get(job.id) ?? defaultPoint(this.state.sessions.length + index);
+      this.content.append(this.buildJobCard(job, point, now));
+    });
   }
 
+  /**
+   * One headless run, as a card.
+   *
+   * Deliberately NOT a session card with fields left out, and every difference is the same fact
+   * restated: this is a process with no pty behind it.
+   *
+   * - **It cannot unfold.** There is no scrollback to tail, so the detail line the run reports IS
+   *   the preview, and it is already on the folded card. A card that opened to show nothing would
+   *   be worse than one that does not open.
+   * - **It has no context menu.** Everything a session's menu offers acts on a tab, and there is no
+   *   tab. Clicking it brings up the tab that owns the run instead.
+   * - **It is always `working`, and it LEAVES when the run ends.** `activityOf` reads the time since
+   *   the last byte of output and there are no bytes here; what there is is a run that exists while
+   *   it runs. So there is no `exited` job card and no dismissal gesture: the result lands in the
+   *   run's own tab, which is where a reader goes for it, and a finished card would need a way to
+   *   clear it that nothing else on this board has.
+   */
+  private buildJobCard(job: JobRun, point: CardPoint, now: number): HTMLElement {
+    const card = createElement('div', {
+      className: 'board-card board-card--working board-card--agent board-card--job',
+    });
+    card.style.left = `${point.x}px`;
+    card.style.top = `${point.y}px`;
+    card.title = `${job.title}: ${job.subject}\n(drag to move it, click to show the tab that owns it)`;
+
+    const avatar = createElement('span', { className: 'board-card__avatar' });
+    avatar.setAttribute('role', 'img');
+    avatar.setAttribute('aria-label', `${job.title}, a headless agent run`);
+    avatar.append(createIcon(AGENT_ICON, { paint: 'stroke' }));
+    card.append(avatar);
+
+    const body = createElement('div', { className: 'board-card__body' });
+    const head = createElement('div', { className: 'board-card__head' });
+    head.append(createElement('span', { className: 'board-card__dot' }));
+    head.append(createElement('span', { className: 'board-card__title', text: job.title }));
+    body.append(head);
+
+    body.append(createElement('span', { className: 'board-card__activity', text: job.subject }));
+
+    /*
+     * The line the run is on, and it is why this card exists at all.
+     *
+     * Clamped to two lines by the stylesheet rather than cut here: a detail reads
+     * `web-app#588: reading list.component.ts`, and truncating it at the width of a card would take
+     * the file name, which is the half that changes and therefore the half that proves it is alive.
+     */
+    if (job.detail.length > 0) {
+      body.append(createElement('span', { className: 'board-card__detail', text: job.detail }));
+    }
+
+    const counts = [
+      job.progress,
+      job.steps > 0 ? `${job.steps} steps` : null,
+      describeElapsed(job.startedAt, new Date(now)),
+    ].filter((part): part is string => part !== null);
+    body.append(
+      createElement('span', { className: 'board-card__counts', text: counts.join(' · ') }),
+    );
+    card.append(body);
+
+    this.attachCardDrag(card, job.id, point, () => {
+      this.actions.onOpenJob(job.kind);
+    });
+    return card;
+  }
+
+  /**
+   * One session, as a card.
+   *
+   * It says who it is and what it is doing, and it carries no buttons at all: clicking it shows the
+   * session in the grid, right-clicking opens the tab's own menu.
+   *
+   * It does not unfold, and it did for one version. The unfolded card tailed the last fifteen lines
+   * of the pty through `readTerminalBuffer`, which is text a terminal emulator was going to render:
+   * a coding agent redraws a framed box in place with carriage returns and cursor moves, so what a
+   * `<pre>` showed was every frame of that redraw stacked on top of each other. Honouring those is
+   * implementing a terminal, which is what the grid one click away already is.
+   */
   private buildCard(session: TerminalSession, point: CardPoint, now: number): HTMLElement {
     const activity = activityOf(session.running, this.state.lastOutputAt.get(session.id), now);
+    const isAgent = session.agent !== null;
     const card = createElement('div', {
-      className: `board-card board-card--${activity}`,
+      className: `board-card board-card--${activity}${isAgent ? ' board-card--agent' : ''}`,
     });
     card.style.left = `${point.x}px`;
     card.style.top = `${point.y}px`;
     card.title = `${session.title}\n${session.cwd}\n(drag to move it, click to show it, right click to act)`;
 
+    /*
+     * A coding agent wears its badge, a shell does not.
+     *
+     * The one distinction on this board that changes how you read everything else on the card: a
+     * shell going quiet means nothing, an agent going quiet means it is waiting or it is finished.
+     * Drawn large and to the left rather than as another small mark in the header, because the header
+     * already carries a status dot and a name and a third thing there is a row nobody parses.
+     */
+    const body = createElement('div', { className: 'board-card__body' });
+    if (isAgent) {
+      const avatar = createElement('span', { className: 'board-card__avatar' });
+      avatar.setAttribute('role', 'img');
+      avatar.setAttribute('aria-label', `${session.agent?.label ?? 'Agent'} session`);
+      avatar.append(createIcon(AGENT_ICON, { paint: 'stroke' }));
+      card.append(avatar);
+    }
+
     const head = createElement('div', { className: 'board-card__head' });
     head.append(createElement('span', { className: 'board-card__dot' }));
     head.append(createElement('span', { className: 'board-card__title', text: session.title }));
-    card.append(head);
+    body.append(head);
 
-    card.append(
+    body.append(
       createElement('span', {
         className: 'board-card__activity',
         text: describeActivity(activity),
@@ -356,7 +535,7 @@ export class TerminalBoard {
 
     const project = this.state.rows.find((row) => row.project.id === session.projectId);
     if (project !== undefined) {
-      card.append(
+      body.append(
         createElement('span', { className: 'board-card__project', text: project.project.label }),
       );
     }
@@ -371,37 +550,18 @@ export class TerminalBoard {
     if (session.role === 'server' && project !== undefined) {
       const phase = createElement('span', { className: 'board-card__phase' });
       phase.append(buildPill(presentServer(project.server)));
-      card.append(phase);
+      body.append(phase);
     }
-
-    const actions = createElement('div', { className: 'board-card__actions' });
-    const open = createElement('button', { className: 'button button--quiet', text: 'Show' });
-    open.type = 'button';
-    open.title = 'Show this session in the terminal grid';
-    open.addEventListener('click', (event) => {
-      event.stopPropagation();
-      this.actions.onOpen(session.id);
-    });
-    actions.append(open);
-
-    if (session.closable) {
-      const close = createElement('button', { className: 'button button--quiet', text: 'Close' });
-      close.type = 'button';
-      close.title = 'End this session';
-      close.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.actions.onClose(session.id);
-      });
-      actions.append(close);
-    }
-    card.append(actions);
+    card.append(body);
 
     card.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.actions.onMenu(session, event.clientX, event.clientY);
     });
-    this.attachCardDrag(card, session.id, point);
+    this.attachCardDrag(card, session.id, point, () => {
+      this.actions.onOpen(session.id);
+    });
     return card;
   }
 
@@ -415,13 +575,30 @@ export class TerminalBoard {
    *
    * The threshold is why a card is still clickable: below it the gesture stays a click, so a card
    * nudged by two pixels opens instead of drifting.
+   *
+   * `onClick` is handed in rather than decided here, because a click means two different things on
+   * this board: unfold a session, or show the tab that owns a headless run. Branching inside on
+   * which kind of card it is would put the two cards' behaviour in a third place.
    */
-  private attachCardDrag(card: HTMLElement, id: TerminalId, from: CardPoint): void {
+  private attachCardDrag(
+    card: HTMLElement,
+    id: CardId,
+    from: CardPoint,
+    onClick: () => void,
+  ): void {
     const THRESHOLD = 4;
     let origin: CardPoint | null = null;
     let moved = false;
 
     card.addEventListener('pointerdown', (event) => {
+      /*
+       * Insurance, and deliberately kept though a card carries no button today.
+       *
+       * Capturing the pointer here retargets the `pointerup`, so a button added to a card without
+       * this would fire its `click` on the card instead of on itself and look inert. That exact
+       * failure was paid for three times on this surface already, twice on the plane behind and once
+       * on the panel beside it, so the guard stays where the next button will land.
+       */
       if ((event.target as HTMLElement).closest('button') !== null) {
         return;
       }
@@ -466,7 +643,7 @@ export class TerminalBoard {
         card.releasePointerCapture(event.pointerId);
       }
       if (!moved) {
-        this.actions.onOpen(id);
+        onClick();
         return;
       }
       // Forced: the card was moved by writing to its style, so the signature of what is on screen
@@ -485,17 +662,22 @@ export class TerminalBoard {
 
     this.host.addEventListener('pointerdown', (event) => {
       /*
-       * Never pan from a press that landed on a card or on the toolbar, and the card half of that is
-       * not merely tidy: it is what makes the buttons on a card work at all.
+       * Pan only from a press that landed on the PLANE ITSELF, and never from one that landed on
+       * something drawn over it.
        *
-       * Capturing the pointer here **retargets the `pointerup` to this element**, so the browser
-       * fires the `click` on the nearest common ancestor of the two, which is the plane and not the
-       * button that was pressed. The button's listener then never runs, and "Show" looks inert while
-       * everything about it is correctly wired. The card's own handler ignores presses on buttons, so
-       * it cannot stop the propagation on their behalf either.
+       * A whitelist, after a blacklist of selectors failed twice for the same reason. Capturing the
+       * pointer here **retargets the `pointerup` to this element**, so the browser fires the `click`
+       * on the nearest common ancestor of the two, which is the plane and not the button that was
+       * pressed: every control floating above the plane silently stops working. It was the cards'
+       * buttons first, then the activity panel's fold, and naming one more selector each time is a
+       * fix that is always one control behind.
+       *
+       * The host and the content div are the only two elements that ARE the plane. Cards live inside
+       * the content and answer for their own drag; the toolbar and the panel are siblings. Anything
+       * added later is a control until it says otherwise, which is the right default.
        */
-      const target = event.target as HTMLElement;
-      if (target.closest('.board-canvas__toolbar') !== null || target.closest('.board-card') !== null) {
+      const target = event.target;
+      if (target !== this.host && target !== this.content) {
         return;
       }
       origin = { x: event.clientX, y: event.clientY };

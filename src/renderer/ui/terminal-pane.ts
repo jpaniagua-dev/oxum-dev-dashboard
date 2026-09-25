@@ -26,6 +26,7 @@ import {
   tabsAfter,
   type PaneGrid,
 } from '@shared/terminal-groups.js';
+import { AGENT_ICON } from './icons.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
 import { buildTagDots, primaryTagColor, type TagPalette } from './tags.js';
@@ -54,6 +55,11 @@ function chevronDown(): SVGSVGElement {
  */
 function growIcon(): SVGSVGElement {
   return createIcon('M6.5 2.5h-4v4M9.5 2.5h4v4M6.5 13.5h-4v-4M9.5 13.5h4v-4', { paint: 'stroke' });
+}
+
+/** A terminal: a screen with a prompt in it. Opens the default shell. */
+function terminalIcon(): SVGSVGElement {
+  return createIcon('M2.5 3.5h11v9h-11zM5 6.6l1.7 1.4L5 9.4M8.6 9.8h3.2', { paint: 'stroke' });
 }
 
 /** The same four arrows pulled back in: put this pane back in the grid. */
@@ -94,6 +100,14 @@ export interface TerminalPaneActions {
   onRename: (terminalId: TerminalId, title: string) => void;
   /** Open a new shell tab from a profile, in the focused pane. */
   onNewShell: (profileId: string) => void;
+  /**
+   * Open the configured coding agent in a tab of its own.
+   *
+   * Its own action and not a profile in the list above, because it is not a shell: it starts in the
+   * workspace root whatever the focused pane is doing, it belongs to no project, and it is what the
+   * Agents tab lists. Folding it into `onNewShell` would mean a profile id that is not a profile.
+   */
+  onNewAgent: () => void;
   /** The panes and their tabs after a gesture. One call for every shape the surface can take. */
   onLayout: (groups: readonly TerminalGroup[], columns: number) => void;
   /**
@@ -1569,50 +1583,82 @@ export class TerminalPane {
    * near an edge, and it brings the dismissal rules this file had already reimplemented once,
    * including the opening-click trap that shipped broken twice.
    */
+  /**
+   * What a pane offers to start: an agent in one click, a terminal through the chevron.
+   *
+   * A `+` and a chevron once, then three buttons, now two. The `+` had to go because it said "one
+   * more of whatever this is", which stopped being true the moment a tab could be a coding agent
+   * that writes to the repository. The plain terminal button went next, on the grounds that opening
+   * a shell is the thing you do while choosing which shell anyway: the chevron was already there and
+   * the extra click buys a menu that names what it opens.
+   *
+   * Which leaves one bare icon, the agent, and that asymmetry is deliberate. Starting an agent is
+   * the act worth one click; starting a shell is the act worth reading a list first.
+   */
   private buildNewTabButton(groupIndex: number): HTMLElement {
     const group = createElement('span', { className: 'terminal__new' });
 
-    const add = createElement('button', { className: 'terminal__new-button', text: '+' });
-    add.type = 'button';
-    add.title = 'New tab in this pane';
-    add.addEventListener('click', (event) => {
+    const agent = createElement('button', { className: 'terminal__new-button' });
+    agent.type = 'button';
+    agent.title = 'Start the configured coding agent, in the workspace root';
+    agent.setAttribute('aria-label', 'Start the coding agent');
+    agent.append(createIcon(AGENT_ICON, { paint: 'stroke' }));
+    agent.addEventListener('click', (event) => {
       event.stopPropagation();
-      const first = this.profiles[0];
-      if (first !== undefined) {
-        this.focused = groupIndex;
-        this.actions.onNewShell(first.id);
-      }
+      this.focused = groupIndex;
+      this.actions.onNewAgent();
     });
-    group.append(add);
+    group.append(agent);
 
-    if (this.profiles.length > 1) {
-      const caret = createElement('button', { className: 'terminal__new-caret' });
-      caret.type = 'button';
-      // A drawn chevron rather than the `⌄` character: as text it renders at whatever size and
-      // baseline the font decides, which is why it looked like a stray mark next to the `+`.
-      caret.append(chevronDown());
-      caret.title = 'Choose a shell';
-      caret.setAttribute('aria-label', 'Choose a shell');
-      caret.addEventListener('click', (event) => {
-        event.stopPropagation();
-        const box = caret.getBoundingClientRect();
-        showContextMenu(
-          box.left,
-          box.bottom + 4,
-          this.profiles.map((profile) => ({
-            label: profile.label,
-            hint: profile.file,
-            run: () => {
-              this.focused = groupIndex;
-              this.actions.onNewShell(profile.id);
-            },
-          })),
-        );
-      });
-      group.append(caret);
-    }
+    /*
+     * The chevron is now the ONLY way to open a terminal, so it is always drawn.
+     *
+     * It used to appear only with more than one profile, which was right while a plain terminal
+     * button sat beside it. Keeping that condition after removing the button would leave a machine
+     * with a single shell profile unable to open a shell at all.
+     */
+    const caret = createElement('button', { className: 'terminal__new-caret' });
+    caret.type = 'button';
+    caret.append(terminalIcon());
+    // A drawn chevron rather than the `⌄` character: as text it renders at whatever size and
+    // baseline the font decides, which is why it looked like a stray mark next to the `+`.
+    caret.append(chevronDown());
+    caret.title = 'New terminal in this pane';
+    caret.setAttribute('aria-label', 'New terminal');
+    caret.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const box = caret.getBoundingClientRect();
+      const fallback = this.defaultProfile();
+      showContextMenu(
+        box.left,
+        box.bottom + 4,
+        this.profiles.map((profile) => ({
+          // The default is marked rather than repeated as its own entry: a list holding both
+          // "Default" and "Git Bash" for one shell is a list where picking either does the same
+          // thing and the reader has to work out that it does.
+          label: profile.id === fallback?.id ? `${profile.label} (default)` : profile.label,
+          hint: profile.file,
+          run: () => {
+            this.focused = groupIndex;
+            this.actions.onNewShell(profile.id);
+          },
+        })),
+      );
+    });
+    group.append(caret);
 
     return group;
+  }
+
+  /**
+   * The shell the plain terminal button opens.
+   *
+   * The first profile, which is what the `+` used before and what `resolveDefaultProfile` lands on in
+   * the main process when nothing is pinned. Held in one place so the button and the mark in the menu
+   * cannot disagree about which one is the default.
+   */
+  private defaultProfile(): ShellProfile | undefined {
+    return this.profiles[0];
   }
 }
 

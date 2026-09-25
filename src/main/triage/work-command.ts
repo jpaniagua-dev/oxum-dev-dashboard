@@ -94,8 +94,26 @@ export function buildWorkCommand(
    * `safeRepoName`), so the double quotes here are enough; nothing a colleague wrote reaches this
    * line.
    */
-  const command = profile.interactive.replace('{model}', model.trim().length === 0 ? '' : modelFlag(model).trim());
-  return `${command.replace(/\s+/g, ' ').trim()} "${prompt}"`;
+  return `${buildInteractiveCommand(profile, model)} "${prompt}"`;
+}
+
+/**
+ * The agent's interactive command line, with no prompt appended.
+ *
+ * What the Agent button in the tab strip runs: the same template and the same model flag as a
+ * handed-over ticket, minus the ticket. Shared with `buildWorkCommand` rather than written twice,
+ * because the model flag is the one token in there that is whitelisted rather than trusted and two
+ * copies of that rule is one copy too many.
+ */
+export function buildInteractiveCommand(
+  profile: AgentProfile = CLAUDE_CODE_PROFILE,
+  model = '',
+): string {
+  const command = profile.interactive.replace(
+    '{model}',
+    model.trim().length === 0 ? '' : modelFlag(model).trim(),
+  );
+  return command.replace(/\s+/g, ' ').trim();
 }
 
 /**

@@ -18,6 +18,8 @@ import type { AgentProfile } from './agent-profile.js';
  * the set cannot be known at compile time. Ids are generated from the folder name and never change
  * when a project is renamed, which is what keeps a rename from orphaning its running terminal.
  */
+import type { AgentContext } from './agent-context.js';
+
 export type ProjectId = string;
 
 /**
@@ -1034,6 +1036,42 @@ export type TerminalId = string;
 /** What a terminal session is for, which decides how its exit is interpreted. */
 export type TerminalKind = 'project' | 'shell';
 
+/**
+ * What the app knows about the coding agent it launched in a session.
+ *
+ * Recorded **at the spawn**, from the settings as they were then, and never re-derived: the model
+ * and the profile can both be changed in the settings while a session runs, and a panel that
+ * re-read them would report what the NEXT session will use as though it were what this one is
+ * using. This is a fact about a process, so it is captured with the process.
+ *
+ * Deliberately agnostic. Everything here is what this app itself decided, so it is as true of Codex
+ * or OpenCode as of Claude Code. Anything read out of an agent's own files afterwards is a bonus
+ * layered on top, and is allowed to be missing.
+ */
+export interface SessionAgent {
+  /** The profile's label at launch: `Claude Code`, `Codex`, whatever the user configured. */
+  readonly label: string;
+  /** The model pinned at launch. Empty means none was, and the CLI chose for itself. */
+  readonly model: string;
+  /** The file an agent of this profile reads its instructions from: `CLAUDE.md`, `AGENTS.md`. */
+  readonly instructionFile: string;
+  /** When the process was spawned, ISO. */
+  readonly startedAt: string;
+}
+
+/**
+ * What came of asking for an agent tab.
+ *
+ * A message and not a bare `null`, and the null is what shipped first: three ways to refuse, all of
+ * them silent, so a click that resolved nothing looked exactly like a button that was not wired. A
+ * refusal the user cannot see is worse than an error.
+ */
+export interface AgentOpenResult {
+  readonly terminalId: TerminalId | null;
+  /** Empty when it worked. The reason otherwise, ready to show. */
+  readonly message: string;
+}
+
 export interface TerminalSession {
   readonly id: TerminalId;
   readonly title: string;
@@ -1062,6 +1100,23 @@ export interface TerminalSession {
   /** False once the process has exited; the tab stays so its output can still be read. */
   readonly running: boolean;
   /**
+   * How the process ended, or `null` while it is still going.
+   *
+   * The main process has always known this and kept it to itself. It is published because the
+   * difference between a task that finished and one that failed is the only "something needs you"
+   * signal this app can state for a session that is not a dev server: everything else it knows is
+   * output timing, and a finished session and a session waiting for an answer are both silence.
+   */
+  readonly exitCode: number | null;
+  /**
+   * Whether the process was ended on purpose, by `Stop` or by closing the tab.
+   *
+   * Paired with `exitCode` and not derivable from it: killing a process gives it a non-zero code, so
+   * the code alone reports every deliberate stop as a failure. This is what separates a build the
+   * user cancelled from a build that broke.
+   */
+  readonly stoppedOnPurpose: boolean;
+  /**
    * Whether the tab can be closed.
    *
    * Derived from live state rather than stored: a one-shot task is always closable, a shell always
@@ -1071,6 +1126,15 @@ export interface TerminalSession {
   readonly closable: boolean;
   /** True once the user renamed the tab, which stops the title being re-derived on a rerun. */
   readonly renamed: boolean;
+  /**
+   * The agent running in this tab, or `null` when there is none.
+   *
+   * Null for a shell, a dev server and any ordinary project command. It is what separates the tabs
+   * the Agents tab lists from the rest, and it is set by the caller that spawned an agent rather
+   * than guessed from the command line: an action can run anything, and matching on the word
+   * `claude` would classify a `git log --grep claude` as a coding agent.
+   */
+  readonly agent: SessionAgent | null;
 }
 
 /**
@@ -1189,7 +1253,7 @@ export const TERMINAL_FONT_SIZE = { default: 14, min: 9, max: 28 } as const;
 export const UI_FONT_SIZE = { default: 13, min: 11, max: 17 } as const;
 
 /** Which view the top strip shows. The terminal below is unaffected by this choice. */
-export type StripTab = 'projects' | 'pulls' | 'jira' | 'git' | 'triage' | 'worktrees';
+export type StripTab = 'projects' | 'pulls' | 'jira' | 'git' | 'triage' | 'worktrees' | 'agents';
 
 /**
  * A sprint offered for triage.
@@ -1663,6 +1727,8 @@ export interface AppSettings {
   jira: { siteUrl: string; email: string; projectKeys: string[] };
   /** Profile the bare "new tab" click uses. */
   defaultShellProfileId: string;
+  /** Height of the Agents strip, in pixels. */
+  agentsHeight: number;
   /** Font size of every terminal, in pixels. */
   terminalFontSize: number;
   /**
@@ -2113,6 +2179,10 @@ export const IpcChannel = {
    * Keys only, like every other Jira channel. The estimate is looked up in `triage.json` by the main
    * process rather than travelling, so it is always the current one.
    */
+  /** invoke: (terminalId) => AgentContext | null, what the agent of that session reads */
+  AgentContextRead: 'agent:context',
+  /** invoke: () => AgentOpenResult, opens the configured coding agent in a tab of its own */
+  AgentOpen: 'agent:open',
   TriageStartInJira: 'triage:start-in-jira',
   /**
    * invoke: (ticketKey) => { terminalId, result }
@@ -2308,6 +2378,22 @@ export interface RendererApi {
   testJira(): Promise<{ ok: boolean; message: string }>;
   /** The moves an issue can make, asked at the moment the menu opens rather than cached. */
   jiraTransitions(key: string): Promise<IssueTransition[]>;
+  /**
+   * The instruction files and memory the agent of one session reads.
+   *
+   * Read on demand rather than pushed with the session list: it touches the disk, it only matters
+   * while the Agents tab is open on that one session, and it cannot change without somebody editing
+   * a file. `null` when the terminal is unknown or runs no agent.
+   */
+  readAgentContext(terminalId: TerminalId): Promise<AgentContext | null>;
+  /**
+   * Opens the configured coding agent in a tab, in the workspace root.
+   *
+   * The workspace and not a repository, and it is the one decision in this call: memory and
+   * instructions are both indexed by working directory, so a session started inside a repository
+   * begins with neither. The same reasoning that put `Work on this` there.
+   */
+  openAgentSession(): Promise<AgentOpenResult>;
   transitionJira(key: string, transitionId: string): Promise<{ ok: boolean; message: string }>;
   assignJiraToMe(key: string): Promise<{ ok: boolean; message: string }>;
   /**

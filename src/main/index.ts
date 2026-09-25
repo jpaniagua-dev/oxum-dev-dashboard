@@ -384,6 +384,14 @@ async function bootstrap(): Promise<void> {
       size: terminalSize,
       profileId: profile.id,
       cwd: input.cwd,
+      // A feedback pass is a coding agent like the ticket handoff, and the Agents tab lists it for
+      // the same reason: it is a session that reads instructions and writes code.
+      agent: {
+        label: settingsStore.get().agentProfile.label,
+        model: settingsStore.get().agentWorkModel,
+        instructionFile: settingsStore.get().agentProfile.instructionFile,
+        startedAt: new Date().toISOString(),
+      },
       onExit: () => input.onExit(),
     });
   };
