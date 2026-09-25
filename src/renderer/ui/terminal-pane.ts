@@ -22,6 +22,7 @@ import {
   paneGrid,
   panePlacement,
   splitGroup,
+  spreadTabs,
   tabsAfter,
   type PaneGrid,
 } from '@shared/terminal-groups.js';
@@ -213,6 +214,15 @@ export class TerminalPane {
    */
   private colSizes: number[] = [];
   private rowSizes: number[] = [];
+  /**
+   * The controls that act on the whole surface, which ride in the first pane's strip.
+   *
+   * Owned by the page and only placed here: they are application chrome, and building them in this
+   * class would give the pane an opinion about what the application offers. `null` until handed over.
+   */
+  private surfaceControls: HTMLElement | null = null;
+  /** Where those controls live when there is no strip to put them in. */
+  private surfaceControlsHome: HTMLElement | null = null;
   /** Tab strips, one per pane, reused across renders rather than rebuilt. */
   private readonly strips: HTMLElement[] = [];
   /**
@@ -348,16 +358,39 @@ export class TerminalPane {
   }
 
   /**
-   * Rearranges the panes into a different number of columns.
+   * Rearranges the surface into a different number of columns, one session per cell.
    *
-   * Leaves the groups untouched: the grid is only how the same panes are placed, so switching from
-   * one row to a 2x2 moves no tab and kills nothing. Zoom is dropped, since picking a shape is a
-   * statement about seeing several panes at once.
+   * **It spreads the tabs, and that is the whole point.** A pane is a group of tabs and every
+   * session opens into the focused one, so a surface left alone holds a single pane however many
+   * sessions are running, and a column count then resolves to one. Picking a shape and watching
+   * nothing move is what this does without the spread, which is exactly how it shipped first.
+   *
+   * Nothing is killed and nothing is hidden: the same sessions are held one per pane, the grid grows
+   * downwards to fit them all, and the pane menu's "Merge into a single pane" is the way back. Zoom
+   * is dropped, picking a shape being a statement about seeing several panes at once.
    */
   setColumns(columns: number): void {
     this.zoomed = null;
-    this.applyLayout(this.layout.groups, columns);
+    this.applyLayout(spreadTabs(this.layout.groups), columns);
     this.render();
+  }
+
+  /**
+   * Adopts the surface-wide controls, to be shown in the first pane's strip.
+   *
+   * **The first pane and not every one**, which is the decision worth stating: these act on the
+   * whole surface, so one copy per pane would be nine copies of one control at 3x3, and a reader
+   * would reasonably expect the one in a pane's strip to act on that pane. First rather than last
+   * because the first strip is the top-left one, which is where a grid is read from.
+   */
+  setSurfaceControls(element: HTMLElement | null): void {
+    this.surfaceControls = element;
+    // Captured once and kept. Re-reading the parent on every call would record wherever the element
+    // happens to be at the time, and it spends part of its life inside the board's own toolbar.
+    if (this.surfaceControlsHome === null && element !== null) {
+      this.surfaceControlsHome = element.parentElement;
+    }
+    this.renderStrips();
   }
 
   /** The tag colours, for the accent a strip takes from its project. */
@@ -1039,8 +1072,14 @@ export class TerminalPane {
     ]);
   }
 
-  /** The menu on a tab: moving it to a pane of its own, renaming, closing. */
-  private openTabMenu(session: TerminalSession, x: number, y: number): void {
+  /**
+   * The menu on a tab: moving it to a pane of its own, renaming, closing.
+   *
+   * Public since the board draws the same sessions as cards and offers the same gestures on them.
+   * One list and not two: a card and a tab are two drawings of one session, and a second menu would
+   * drift the first time an entry was added to only one of them.
+   */
+  openSessionMenu(session: TerminalSession, x: number, y: number): void {
     const alone = (this.layout.groups[groupIndexOf(this.layout.groups, session.id)]?.tabs.length ?? 0) <= 1;
 
     /*
@@ -1174,6 +1213,18 @@ export class TerminalPane {
 
       const actions = createElement('div', { className: 'terminal__strip-actions' });
 
+      /*
+       * Widest scope first: the surface controls, then this pane's zoom, then `Clear`, which acts on
+       * the active tab alone. Reading a cluster of icons is guesswork unless something orders it, and
+       * "how much does this affect" is the only ordering these three share.
+       *
+       * `prepend` MOVES the element, listeners and all. `clearChildren` above detached it from the
+       * strip it was in a moment ago, which is why this runs on every repaint rather than once.
+       */
+      if (position === 0 && this.surfaceControls !== null) {
+        actions.append(this.surfaceControls);
+      }
+
       // Offered only when there is something to hide: with one pane the button would toggle a state
       // nothing on screen distinguishes from the other.
       if (this.layout.groups.length > 1) {
@@ -1206,6 +1257,12 @@ export class TerminalPane {
       actions.append(clear);
       strip.append(actions);
     });
+
+    // No pane took them, which happens for the frame between the last tab closing and the default
+    // shell opening. Left detached they would simply vanish, so they go back where they were declared.
+    if (panes.length === 0 && this.surfaceControls !== null && this.surfaceControlsHome !== null) {
+      this.surfaceControlsHome.append(this.surfaceControls);
+    }
   }
 
   /**
@@ -1252,7 +1309,7 @@ export class TerminalPane {
     wrapper.dataset.terminalId = session.id;
     wrapper.addEventListener('contextmenu', (event) => {
       event.preventDefault();
-      this.openTabMenu(session, event.clientX, event.clientY);
+      this.openSessionMenu(session, event.clientX, event.clientY);
     });
 
     if (this.renaming === session.id) {

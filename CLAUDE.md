@@ -120,6 +120,28 @@ exceptions:
   `sortIssues`, `nextSort` and the clickable column headers were removed rather than ported. What
   survived is what was never about the table: `boardUrl`, `presentStage`, `assigneesOf`,
   `filterByAssignee`, the views rail and the assignee filter.
+- **The terminal pane has two surfaces, and they are never both on screen.** `.terminal__surface`
+  (the grid) and `.terminal__board` (session cards) are siblings, toggled with `hidden`. Board mode
+  hides the grid **wholesale** rather than emptying it: every xterm keeps the element it was opened
+  on, so coming back costs a `refit()` and nothing else. A board that embedded live terminals, or
+  that emptied the surface, would detach xterms that `open()` then refuses to re-attach.
+- **A session'''s activity is derived from WHEN it last spoke, never from what it said.** `activityOf`
+  reads `running` plus the time since the last chunk: `working` under `QUIET_AFTER_MS` (2.5 s),
+  `quiet` past it, `exited` when the pty is gone. Matching output strings would let a card claim
+  "waiting for your answer" and be wrong the first time Claude Code reworded a prompt. **The limit is
+  named and tested**: this cannot tell a session waiting for an answer from one that has finished,
+  both being silence. That distinction needs a signal from the program, which on Claude Code means
+  its hooks, and it is not built.
+- **The timestamps live in the renderer, not on `TerminalSession`.** Every chunk already passes
+  through `onPtyOutput` in `main.ts`. Carrying the field on the session instead would be stale
+  between two opens, the session list being pushed when the **set** changes and not on output.
+- **Only a `server` session shows a server phase.** A `task` or a shell shares its project'''s row and
+  has nothing to do with what `ng serve` is up to; painting that row'''s phase on it would be a card
+  claiming something about a process it does not own.
+- **Card positions and the board mode itself are renderer-only and ephemeral.** Sessions die with the
+  app, so positions keyed by session id have nothing to outlive. The mode is not persisted either,
+  unlike `terminalColumns`: which surface you happen to be looking at is not a preference, and
+  coming back after a restart to a board with no terminals in sight is a launch that looks broken.
 - **The Jira searches include what is already done, and used not to.** The exclusion existed for a
   list, where a sprint carries its finished work for its whole length and that pile pushed today's
   rows off the visible part of a strip. A board gives Done a column of its own, read or ignored at a
@@ -214,6 +236,29 @@ exceptions:
   column count and the rows follow from the pane count (`paneGrid`). Still not a nested tree, and for
   the same reason as before: a pane's position follows from its index, which keeps the arithmetic
   pure and testable.
+- **Picking a column count SPREADS the tabs, one session per pane.** Without it the picker is inert
+  and correctly so: a pane is a group of tabs, every session opens into the focused pane, so a
+  surface left alone holds exactly one pane and `paneGrid` resolves any column count to 1. That is
+  how the grid shipped first, and it looked broken while behaving as written. `spreadTabs` runs
+  **only when a shape is explicitly picked**, never at boot and never on a poll, because it undoes a
+  grouping built by dragging tabs together; the way back is the pane menu's "Merge into a single
+  pane".
+- **The surface controls follow whichever surface is on screen**, through `placeSurfaceControls`.
+  They are ONE element, moved and never copied, so the routing has to be decided in a single place:
+  they ride in the first pane's tab strip in grid mode and in the board's own toolbar in board mode.
+  Getting this wrong has a specific and nasty shape, and it shipped once: board mode hides every
+  strip, so controls left in a strip take the toggle that LEAVES the board with them, and the board
+  becomes a room with no door. The pane is told to let go before the board takes them, or the next
+  repaint of the strips pulls the element straight back out.
+- **Nothing re-renders while a card is being dragged on the board.** The board repaints on the poll
+  and on a once-a-second tick that ages `working` into `quiet`, and a repaint rebuilds every card:
+  the one under the pointer is destroyed, its pointer capture dies with it, and the drag stops
+  mid-gesture with the button still down. `carrying` holds repaints off, and the drag forces one on
+  release. Same invariant the tab strip carries, reached from a different direction.
+- **The board skips a repaint that would draw the same pixels.** `signature()` covers everything a
+  card shows, the activity included, since that is the one field that changes with the clock rather
+  than with an event. Without it the tick rebuilt every card every second, dropping text selections
+  and flickering whatever was hovered.
 - **No pane is ever hidden to make the grid fit, and this is the rule not to relax.** The preset
   systems this was modelled on (Dorothy, and its Orkestra fork) fix both axes, which gives every
   preset a maximum panel count and forces the panes past it out of sight. Here that would hide a
@@ -470,6 +515,14 @@ exceptions:
   above a terminal is one too many when the terminal is the subject of the window. The application title
   went with it, the native title bar already saying it. Benefit of the move: that row is the one that
   never collapses, so settings and refresh stay one click away when the strip is folded.
+- **The terminal has a chrome row of its own, and it is the one exception to the rule above.** The
+  bullet before this one says two chrome rows above a terminal is one too many, and that still holds
+  for *application* chrome: refresh, settings, theme and the fold belong to the window and stay in
+  the strip tab row. `.terminal__toolbar` carries only controls that act on the **terminal surface
+  itself**, the pane arrangement and the board toggle, and it earns its twenty-four pixels by being
+  next to what it acts on. They spent a version up in the application row and the distance was the
+  complaint: the panes are at the bottom of the window, so every gesture on them began with a trip to
+  the opposite edge. Anything that is not about the surface does not go here.
 - **`pane-resizer.ts` survived the removal untouched**: it measures the distance from `#projects-pane`
   to the top of the viewport with `getBoundingClientRect` at the moment it needs it, never from a
   constant. The panel simply starts higher. Do not introduce a hardcoded header height there, that is

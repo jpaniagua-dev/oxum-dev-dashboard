@@ -311,3 +311,24 @@ export function panePlacement(
   const last = index === paneCount - 1;
   return { row, column, span: last ? grid.columns - column : 1 };
 }
+
+/**
+ * Gives every session a pane of its own, keeping the order they are read in.
+ *
+ * What makes a column count mean anything. A pane is a **group of tabs**, and every session opens
+ * into the pane that was focused, so a surface left alone has exactly one pane however many sessions
+ * are running. Asking for two columns then resolves to one (`paneGrid` never draws a column with no
+ * pane in it) and the picker looks broken while behaving exactly as written. It was: the shape was
+ * about panes, and the question it is asked is about sessions.
+ *
+ * Applied only when a shape is **explicitly picked**, never at boot and never on a poll. Picking a
+ * shape is a request to rearrange, so rearranging is the answer; doing it on its own would undo a
+ * grouping the user built by dragging tabs together, and the way back is the pane menu's "Merge into
+ * a single pane".
+ *
+ * The order is the current reading order, pane by pane and tab by tab, rather than the order the
+ * sessions were created in: what is on the left stays on the left.
+ */
+export function spreadTabs(groups: readonly TerminalGroup[]): TerminalGroup[] {
+  return groups.flatMap((group) => group.tabs).map((id) => ({ tabs: [id], active: id }));
+}

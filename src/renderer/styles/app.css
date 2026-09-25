@@ -2109,6 +2109,44 @@ body {
 }
 
 /*
+ * The controls that act on the whole terminal surface.
+ *
+ * They ride inside the first pane's tab strip, which is why there is no padding and no alignment
+ * here: the strip's own action cluster does both. The rule still has to exist because the element is
+ * declared in the page and spends the odd frame outside any strip, when no pane exists at all.
+ */
+.terminal__controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: none;
+  gap: 2px;
+}
+
+/*
+ * Smaller than the ones in the application chrome row.
+ *
+ * That row is read at the top of the window and can afford its size; these sit in a 26px strip next
+ * to the tabs, and matching the strip's own buttons is what keeps that row one height rather than
+ * growing around its tallest occupant.
+ */
+.terminal__controls .icon-button {
+  width: 22px;
+  height: 22px;
+}
+
+.terminal__controls .icon-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* A hairline between the surface controls and the ones that act on this pane or on its active tab. */
+.terminal__controls + .terminal__strip-zoom,
+.terminal__controls + .terminal__strip-clear {
+  margin-left: 6px;
+}
+
+/*
  * One tab strip per pane, laid on the surface grid next to the view it belongs to rather than
  * wrapping it: a wrapper would mean moving an xterm element when a tab changes pane, and a detached
  * xterm never comes back.
@@ -2383,6 +2421,15 @@ body {
   user-select: text;
 }
 
+/*
+ * A class setting `display` beats the browser's own rule for `[hidden]`, so board mode has to hide
+ * this explicitly or both surfaces stay stacked on screen at once. Third time this trap has been
+ * paid for in this file, after `.pulls` and `.terminal__view`.
+ */
+.terminal__surface[hidden] {
+  display: none;
+}
+
 /* Padding lives on the cells, not the surface: on the surface it would sit outside the splitters. */
 .terminal__strip,
 .terminal__view {
@@ -2453,6 +2500,187 @@ body {
 .terminal__splitter[hidden] {
   display: none;
 }
+
+/* ------------------------------------------------------------------ *
+ * The session board
+ *
+ * The other surface of the terminal pane: the same sessions as cards on a pannable plane. A sibling
+ * of `.terminal__surface`, never a child, and the two are never both on screen. Board mode hides the
+ * surface wholesale, which is what keeps every xterm on the element it was opened on.
+ * ------------------------------------------------------------------ */
+
+.terminal__board {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* `display` set by a class beats the browser's `[hidden]`, the trap `.terminal__view` already carries. */
+.terminal__board[hidden] {
+  display: none;
+}
+
+.board-canvas {
+  height: 100%;
+  background: var(--surface-inset);
+  /* The plane is grabbable everywhere the cards are not, which is what says it pans. */
+  cursor: grab;
+  /* A pointer drag must not also select the text on the cards it passes over. */
+  user-select: none;
+  touch-action: none;
+}
+
+.board-canvas--panning {
+  cursor: grabbing;
+}
+
+/*
+ * The toolbar floats over the plane rather than sitting above it.
+ *
+ * Above, it would be a permanent band of chrome on a surface whose whole point is room; floating, it
+ * costs nothing and stays put while the plane moves under it.
+ */
+.board-canvas__toolbar {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: default;
+}
+
+/* Separates creating a session from looking at the ones already there. */
+.board-canvas__rule {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+.board-canvas__zoom {
+  min-width: 38px;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+/*
+ * The plane itself.
+ *
+ * `transform-origin: 0 0` so the zoom grows away from the top-left corner: centred, every card
+ * shifts when the zoom changes and the one being read walks off under the pointer.
+ */
+.board-canvas__content {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+
+.board-canvas__empty {
+  position: absolute;
+  top: 40px;
+  left: 20px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--font-md);
+}
+
+.board-card {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 240px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+
+.board-card:hover {
+  border-color: var(--border-strong);
+}
+
+/* Lifted while carried, so it is visibly above the cards it crosses rather than tangled with them. */
+.board-card--dragging {
+  z-index: 3;
+  box-shadow: 0 6px 16px rgb(0 0 0 / 28%);
+  cursor: grabbing;
+}
+
+.board-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * The activity dot, and the only colour the card spends.
+ *
+ * Same 7px circle as `.tag__dot` and `.pill__dot`, because this app already says "which family is
+ * this" with that shape and a reader should not have to learn a second one.
+ */
+.board-card__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.board-card--working .board-card__dot {
+  background: var(--success);
+}
+
+.board-card--exited .board-card__dot {
+  background: var(--text-faint);
+}
+
+.board-card__title {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-card__activity,
+.board-card__project {
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An ended session is still readable, and says so by being quieter than the live ones. */
+.board-card--exited {
+  color: var(--text-dim);
+}
+
+.board-card__phase {
+  display: flex;
+  min-width: 0;
+}
+
+.board-card__actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
 
 /* ------------------------------------------------------------ context menu */
 

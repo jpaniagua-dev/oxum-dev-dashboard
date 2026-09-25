@@ -8,6 +8,7 @@ import {
   moveTab,
   normalizeGroups,
   splitGroup,
+  spreadTabs,
   tabsAfter,
 } from '../src/shared/terminal-groups.js';
 
@@ -252,5 +253,53 @@ describe('groupIndexOf', () => {
 
   it('reports -1 for a session in no pane', () => {
     expect(groupIndexOf([group(['a'], 'a')], 'zzz')).toBe(-1);
+  });
+});
+
+/**
+ * Giving every session a pane of its own is what makes a column count mean anything.
+ *
+ * A pane is a group of tabs, and every session opens into the focused pane, so a surface left alone
+ * has exactly ONE pane however many sessions are running. `paneGrid` then resolves any column count
+ * to 1, correctly and uselessly: the picker looked dead while behaving as written. That is the bug
+ * these tests exist to keep fixed.
+ */
+describe('spreadTabs', () => {
+  it('turns one pane of many tabs into many panes of one', () => {
+    const spread = spreadTabs([group(['a', 'b', 'c'], 'b')]);
+    expect(spread).toEqual([
+      { tabs: ['a'], active: 'a' },
+      { tabs: ['b'], active: 'b' },
+      { tabs: ['c'], active: 'c' },
+    ]);
+    expectSane(spread);
+  });
+
+  it('keeps the order the panes are read in, pane by pane then tab by tab', () => {
+    // What is on the left stays on the left. Sorting by anything else would shuffle the surface
+    // under a gesture that only asked for a different shape.
+    const spread = spreadTabs([group(['a', 'b'], 'a'), group(['c'], 'c')]);
+    expect(allTabs(spread)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('loses no session, which is the rule it must not break', () => {
+    // A session in no group has no tab anywhere: its process runs unreachable and unkillable.
+    const source = [group(['a', 'b'], 'a'), group(['c', 'd', 'e'], 'd')];
+    expect(allTabs(spreadTabs(source))).toEqual(allTabs(source));
+  });
+
+  it('is idempotent, so picking the same shape twice changes nothing', () => {
+    const once = spreadTabs([group(['a', 'b'], 'a')]);
+    expect(spreadTabs(once)).toEqual(once);
+  });
+
+  it('answers an empty layout for an empty one', () => {
+    expect(spreadTabs([])).toEqual([]);
+  });
+
+  it('does not touch the layout it was given', () => {
+    const source = [group(['a', 'b'], 'a')];
+    spreadTabs(source);
+    expect(source).toEqual([group(['a', 'b'], 'a')]);
   });
 });

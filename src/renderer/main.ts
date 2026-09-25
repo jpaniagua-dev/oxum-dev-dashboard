@@ -7,6 +7,8 @@ import type {
   GitSyncOp,
   IssueStage,
   JiraIssue,
+  TerminalId,
+  TerminalSession,
   JiraState,
   TriageHandoff,
   TriageState,
@@ -39,6 +41,7 @@ import {
 } from '@shared/project-tags.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
+import { TerminalBoard } from './ui/terminal-board.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
   buildChangeMenuItems,
@@ -73,6 +76,27 @@ import { applyUiFontSize } from './ui/ui-font.js';
 class App {
   private projects: readonly Project[] = [];
   private rows: readonly ProjectRow[] = [];
+  private board: TerminalBoard | null = null;
+  /** The sessions as last reported, held because the board draws from them and the pane owns them. */
+  private sessions: readonly TerminalSession[] = [];
+  /**
+   * When each session was last heard from.
+   *
+   * Kept here and nowhere else because this is where every chunk already passes on its way to the
+   * pane. The main process could carry it on `TerminalSession` instead, and that would be worse: the
+   * session list is pushed when the **set** changes, so the field would be stale between two opens.
+   */
+  private readonly lastOutputAt = new Map<TerminalId, number>();
+  /**
+   * Whether the surface is showing cards instead of terminals.
+   *
+   * Deliberately **not** persisted, unlike `terminalColumns` next to it. The grid shape is a lasting
+   * preference; which of the two surfaces you happen to be looking at is not, and coming back after
+   * a restart to a board with no terminals in sight is a launch that looks broken.
+   */
+  private boardMode = false;
+  /** Ticks while the board is up, so a card goes quiet on its own rather than at the next poll. */
+  private boardTimer: number | null = null;
   private profiles: readonly ShellProfile[] = [];
   private settings: AppSettings | null = null;
   private theme: ThemeState = { mode: 'system', resolved: 'light' };
@@ -263,9 +287,26 @@ class App {
     // names sessions, so a layout applied to an empty strip would resolve to nothing.
     this.terminal.setSessions(bootstrap.terminals);
     this.terminal.setLayout(bootstrap.layout);
+    this.sessions = bootstrap.terminals;
+    this.board = new TerminalBoard(requireElement('terminal-board'), {
+      // Showing a session is the only thing a card does that the grid cannot: it leaves the board.
+      onOpen: (terminalId) => {
+        this.setBoardMode(false);
+        this.terminal?.select(terminalId);
+      },
+      onClose: (terminalId) => void window.api.closeTerminal(terminalId),
+      onMenu: (session, x, y) => this.openSessionMenu(session, x, y),
+      // The very callback the tab strip is given, so the board cannot grow its own idea of what
+      // opening a shell means. Staying on the board is deliberate: setting up three sessions should
+      // not bounce through the grid three times, and the new card appears at once.
+      onNewShell: (profileId) => void this.openShell(profileId),
+    });
     // After the layout, never before: the strips are painted per pane, so a palette applied to a
     // surface with no panes yet would be a render thrown away.
     this.terminal.setTagPalette(this.tagPalette());
+    // After the layout, for the same reason the palette is: they are placed inside a strip, and
+    // there is no strip until the panes exist.
+    this.placeSurfaceControls();
 
     this.pulls = bootstrap.pulls;
     this.pullScope = bootstrap.settings.pullScope;
@@ -374,7 +415,14 @@ class App {
           this.replayed.delete(id);
         }
       }
+      this.sessions = sessions;
+      for (const id of this.lastOutputAt.keys()) {
+        if (!live.has(id)) {
+          this.lastOutputAt.delete(id);
+        }
+      }
       this.terminal?.setSessions(sessions);
+      this.renderBoard();
       // Closing the very last tab must not leave a dead surface: with no session there is no
       // strip, and the "+" that could open a new one lives in the strip. Same rule as the
       // bootstrap below — the terminal is this app's centre, so it is never left empty.
@@ -383,7 +431,12 @@ class App {
       }
     });
     window.api.onTerminalLayoutChanged((layout) => this.terminal?.setLayout(layout));
-    window.api.onPtyOutput(({ terminalId, data }) => this.terminal?.write(terminalId, data));
+    window.api.onPtyOutput(({ terminalId, data }) => {
+      // Stamped before the write, not after: the write is what costs, and a card claiming a session
+      // is working is about the byte having arrived rather than about it being painted.
+      this.lastOutputAt.set(terminalId, Date.now());
+      this.terminal?.write(terminalId, data);
+    });
     window.api.onThemeChanged((state) => this.applyTheme(state));
 
     this.rows = await window.api.refreshNow();
@@ -420,6 +473,103 @@ class App {
    * local knowledge of what changed is available.
    */
   /**
+   * Swaps the terminal surface for the board of cards, or back.
+   *
+   * The grid's host is hidden wholesale rather than emptied: every xterm keeps the element it was
+   * opened on, so coming back costs a refit and nothing else. Emptying it would detach terminals
+   * that `open()` then refuses to re-attach, and they would come back blank for good.
+   */
+  private setBoardMode(on: boolean): void {
+    if (this.boardMode === on) {
+      return;
+    }
+    this.boardMode = on;
+    requireElement('terminal-surface').hidden = on;
+    requireElement('terminal-board').hidden = !on;
+    /*
+     * The controls move with the surface that is on screen.
+     *
+     * `append` relocates the element, so handing it to one side takes it off the other; the pane is
+     * told to stop placing it first, or the next repaint of the strips would yank it back out of the
+     * board mid-session. One element, one set of listeners, wherever it currently lives.
+     */
+    this.placeSurfaceControls();
+
+    const button = requireElement<HTMLButtonElement>('terminal-board-button');
+    button.setAttribute('aria-pressed', String(on));
+    button.title = on ? 'Back to the terminals' : 'Show the sessions as cards';
+
+    /*
+     * The grid picker is meaningless while the board is up, and now that the two sit side by side it
+     * is obvious rather than merely true: rearranging panes nobody can see is a control that appears
+     * to do nothing. Disabled and saying why, instead of silently rearranging a hidden surface.
+     */
+    const grid = requireElement<HTMLButtonElement>('terminal-grid-button');
+    grid.disabled = on;
+    grid.title = on
+      ? 'Arrange the terminal panes (back to the terminals first)'
+      : 'Arrange the terminal panes';
+
+    if (this.boardTimer !== null) {
+      window.clearInterval(this.boardTimer);
+      this.boardTimer = null;
+    }
+    if (on) {
+      this.renderBoard();
+      // A second is what it takes for "working" to decay into "quiet" without the reader noticing a
+      // step. Only while the board is up: a timer repainting a hidden surface is pure waste.
+      this.boardTimer = window.setInterval(() => this.board?.refresh(), 1000);
+      return;
+    }
+    // The panes were hidden and therefore unmeasurable, so every one of them needs its geometry
+    // announced again. Same trap as unfolding the project strip.
+    this.terminal?.refit();
+  }
+
+  /**
+   * Puts the surface-wide controls in whichever surface is on screen.
+   *
+   * Routed on the state rather than done inline at each call site, and that is not tidiness: the
+   * element is **moved** by whoever takes it, so two call sites in the wrong order leave it in the
+   * hidden one. That is exactly what a boot sequence did while this was two branches at the toggle,
+   * and the board came up with no way out of it.
+   */
+  private placeSurfaceControls(): void {
+    const controls = requireElement('terminal-controls');
+    if (this.boardMode) {
+      // The pane is told to let go first, or its next repaint of the strips pulls the element back
+      // out of the board.
+      this.terminal?.setSurfaceControls(null);
+      this.board?.adoptControls(controls);
+      return;
+    }
+    this.terminal?.setSurfaceControls(controls);
+  }
+
+  /** Repaints the board, when it is the surface on screen. */
+  private renderBoard(): void {
+    if (!this.boardMode) {
+      return;
+    }
+    this.board?.render({
+      sessions: this.sessions,
+      rows: this.rows,
+      lastOutputAt: this.lastOutputAt,
+      profiles: this.profiles,
+    });
+  }
+
+  /**
+   * The menu of a card, which is the menu of its tab.
+   *
+   * Reaches into the pane rather than rebuilding the list: a card and a tab are two drawings of one
+   * session, and two menus would drift the first time an entry was added to one of them.
+   */
+  private openSessionMenu(session: TerminalSession, x: number, y: number): void {
+    this.terminal?.openSessionMenu(session, x, y);
+  }
+
+  /**
    * Rearranges the terminal panes, and remembers the choice.
    *
    * Two writes, and they answer different questions. The pane is told at once because the click has
@@ -445,6 +595,9 @@ class App {
     // A tag renamed or recoloured in the settings window repaints the strips, the same way it
     // repaints the dots on the pull request, Git and worktree rows.
     this.terminal?.setTagPalette(this.tagPalette());
+    // The board offers the same shells as the strip, so a profile added in the settings has to reach
+    // it too.
+    this.renderBoard();
     /*
      * The interface size, then a refit.
      *
@@ -1893,6 +2046,10 @@ class App {
 
     requireElement<HTMLButtonElement>('theme-button').addEventListener('click', () => {
       void this.cycleTheme();
+    });
+
+    requireElement<HTMLButtonElement>('terminal-board-button').addEventListener('click', () => {
+      this.setBoardMode(!this.boardMode);
     });
 
     const gridButton = requireElement<HTMLButtonElement>('terminal-grid-button');
