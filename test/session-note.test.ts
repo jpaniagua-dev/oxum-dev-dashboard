@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { TriagedTicket } from '../src/shared/contracts.js';
 import {
   NOTE_LIMIT,
-  describeNoteAge,
   noteFromTicket,
   trimNote,
 } from '../src/shared/session-note.js';
@@ -75,29 +74,5 @@ describe('noteFromTicket', () => {
     expect(noteFromTicket(TICKET, '')).toBe(
       'PROJ-123\nThe endpoint is live and the mockup is approved.',
     );
-  });
-});
-
-describe('describeNoteAge', () => {
-  const now = new Date('2026-09-25T12:00:00.000Z');
-
-  it('says just now under a minute, because seconds answer nothing here', () => {
-    expect(describeNoteAge('2026-09-25T11:59:30.000Z', now)).toBe('just now');
-  });
-
-  it('counts minutes, then hours, then days', () => {
-    expect(describeNoteAge('2026-09-25T11:47:00.000Z', now)).toBe('13 min ago');
-    expect(describeNoteAge('2026-09-25T09:00:00.000Z', now)).toBe('3h ago');
-    expect(describeNoteAge('2026-09-23T12:00:00.000Z', now)).toBe('2d ago');
-  });
-
-  it('never goes negative when the two clocks disagree', () => {
-    expect(describeNoteAge('2026-09-25T12:00:30.000Z', now)).toBe('just now');
-  });
-
-  it('says nothing at all for an unreadable stamp', () => {
-    // Empty rather than a guess: the age exists to let a reader discount the note, so an age this
-    // cannot compute must not be replaced by one it invented.
-    expect(describeNoteAge('not a date', now)).toBe('');
   });
 });

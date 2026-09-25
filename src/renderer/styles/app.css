@@ -1472,7 +1472,8 @@ body {
 .card__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* One child now, and it belongs on the right: `space-between` would put a lone cross on the left. */
+  justify-content: flex-end;
   gap: 6px;
 }
 
@@ -2634,6 +2635,7 @@ body {
  * xterm never comes back.
  */
 .terminal__strip {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2661,6 +2663,162 @@ body {
  */
 .terminal__strip--focused {
   background: var(--surface-hover);
+}
+
+/*
+ * The note at the head of a pane.
+ *
+ * Anchored to the strip and hanging over the view, which is the one place in a pane that belongs to
+ * no terminal: the strip is a grid child of the surface, the view is its neighbour below, and the
+ * box is drawn out of the first over the second. Nothing is moved and no xterm is touched, which is
+ * the invariant this whole surface is built around.
+ *
+ * `.terminal__surface` is `overflow: hidden`, so this cannot escape the window the way an upward
+ * menu did before the shell picker moved to `showContextMenu`. It opens downwards, which is where
+ * there is always room.
+ */
+.terminal__note {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+/*
+ * Quiet while the note is on screen, lit only while it is hidden.
+ *
+ * It was the other way round for a version and read as a toggle stuck on: the rule keyed on
+ * `aria-expanded`, which was right while a note had to be opened and became always-true the moment
+ * the box was shown by default. A control cannot mark the NORM; what it can mark is the exception,
+ * and here the exception is a pane whose note the reader has put away. Then the button is the only
+ * way back and is the only thing that says the note still exists.
+ *
+ * There is no "has a note" colour any more either, for the same reason: the note itself is two
+ * centimetres away, so a second mark saying it is there is a mark that means nothing.
+ */
+.terminal__note-button {
+  opacity: 0.45;
+}
+
+.terminal__note-button:hover:not(:disabled),
+.terminal__note-button:focus-visible {
+  opacity: 1;
+}
+
+/*
+ * On: the note is on screen, and the icon's colour alone says it.
+ *
+ * ⚠️ **The selector has to out-specify `.icon-button[aria-pressed='true']`**, which paints a tinted
+ * ground app-wide and which this button fell into the moment it became a switch rather than a panel
+ * opener. That rule is right for the pane zoom and wrong here: on a strip of five flat icons the
+ * ground reads as a key held down rather than as a lit indicator, and it is one control wearing a
+ * shape none of its neighbours have. Overridden for this button rather than weakened for everybody,
+ * since the zoom is the rule's reason to exist.
+ */
+.icon-button.terminal__note-button[aria-pressed='true'] {
+  opacity: 1;
+  background: transparent;
+  color: var(--primary);
+}
+
+/*
+ * Off, but there IS a note behind it.
+ *
+ * Full opacity and the ordinary colour: enough to say the button is not empty, quiet enough that it
+ * cannot be read as the lit state above. Without it nothing at all says a put-away note exists,
+ * which became true the moment the box lost its cross.
+ */
+.terminal__note-button--full {
+  opacity: 1;
+}
+
+/*
+ * Pinned in the terminal's top-right corner, and NOT hanging off its button.
+ *
+ * The containing block is the strip, which spans the pane, so `top: 100%` is the first row of the
+ * terminal and `right` is the pane's own right edge. Anchored to the button instead it was a
+ * dropdown: a panel belonging to a control rather than a note stuck to the thing it describes, and
+ * on a wide pane it read as a menu somebody had left open.
+ *
+ * Top right and not top left because that corner is the quiet one: a program prints from the left,
+ * so a box over the first column covers the beginning of every line it writes.
+ */
+.terminal__note-box {
+  /* Shared by both views of the note, which is what makes their heights comparable at all. */
+  --note-line-height: 1.45;
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 20px);
+  right: 8px;
+  max-width: calc(100% - 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 260px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+}
+
+/*
+ * The two views are one box, and that is the whole reason these values are repeated rather than
+ * inherited.
+ *
+ * Reading and writing a note are the same panel in two states, so switching between them must
+ * change the caret and nothing else. They had different box models at first (the field padded and
+ * bordered, the text neither), so clicking to edit made the note grow by ten pixels and shift six to
+ * the right, which reads as the panel having been replaced rather than as a caret arriving.
+ *
+ * `font: inherit` resets `line-height`, so the field's own must come after it. The read view's
+ * height is the same arithmetic the textarea does for `rows="3"`: three line boxes, plus the
+ * padding and borders both now share.
+ */
+.terminal__note-field {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  line-height: var(--note-line-height);
+  resize: none;
+}
+
+.terminal__note-field:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+}
+
+/*
+ * The note at rest: read, not edited.
+ *
+ * A permanent box holding a focused field would swallow every keystroke meant for the terminal
+ * directly under it, so the resting state is text and a click on it is what asks for the caret.
+ * `pre-wrap` because a note has line breaks and they are the reader's own.
+ */
+/* An empty note is an invitation, in the type of a placeholder rather than of a sentence. */
+.terminal__note-text--empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.terminal__note-text {
+  margin: 0;
+  padding: 4px 6px;
+  /* Transparent rather than absent: a border still occupies its two pixels, so the two views line
+     up, and the read one does not look like a field you can type into. */
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  min-height: calc(3 * var(--note-line-height) * var(--font-sm));
+  color: var(--text);
+  font-size: var(--font-sm);
+  line-height: var(--note-line-height);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
 }
 
 .terminal__strip-actions {
@@ -3294,11 +3452,6 @@ body {
   white-space: pre-wrap;
 }
 
-.board-card__note-age {
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
-}
-
 /* The editor, sized like the note it replaces so the card does not jump when it opens. */
 .board-card__editor {
   width: 100%;
@@ -3311,23 +3464,6 @@ body {
   font: inherit;
   font-size: var(--font-sm);
   resize: none;
-}
-
-/*
- * A tab whose session carries a note.
- *
- * A dot and not a second line of text: the strip is dense and the note itself is in the tooltip.
- * Drawn on the label rather than on the wrapper so it sits with the title and not with the cross.
- */
-.terminal__tab-label--noted::before {
-  content: '';
-  display: inline-block;
-  width: 4px;
-  height: 4px;
-  margin-right: 4px;
-  border-radius: 50%;
-  background: var(--text-faint);
-  vertical-align: middle;
 }
 
 /*

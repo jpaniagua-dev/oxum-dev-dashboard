@@ -1,5 +1,6 @@
 import type { Terminal } from '@xterm/xterm';
 import { TAG_COLORS } from '@shared/project-tags.js';
+import { NOTE_LIMIT } from '@shared/session-note.js';
 import {
   PANE_COLUMNS_AUTO,
   TERMINAL_FONT_SIZE,
@@ -119,10 +120,25 @@ export interface TerminalPaneActions {
   onSplitShell: (cwd: string, direction: PaneDirection) => void;
   /** Hands one tab over to the servers window. Only offered while that window is open. */
   onMoveToServers: (terminalId: TerminalId) => void;
-  /** Opens the note editor, which lives on the board. See the menu entry for why. */
+  /**
+   * Writes what a session is for, or clears it when the text is empty.
+   *
+   * The pane edits notes itself, and used to hand the gesture to the board. That was wrong for the
+   * everyday case: in the grid you are looking at ONE pane's terminal, which is exactly when you
+   * want to know what it was for, and being told to switch surfaces first is a refusal dressed as a
+   * hint. Same callback the board is given, so the two cannot grow different ideas of what writing
+   * a note means.
+   */
+  onNote: (terminalId: TerminalId, text: string) => void;
+  /**
+   * Opens the note editor of whichever surface is on screen.
+   *
+   * Routed by the app and not decided here, because a pane cannot know whether it is the surface
+   * being looked at. This shipped broken once: the menu opened the box in a pane's strip, board mode
+   * hides every strip, so a note started from a card went into a panel nobody could see. The card
+   * view is the default one, which made it the common case rather than the edge.
+   */
   onEditNote: (terminalId: TerminalId) => void;
-  /** Whether the board is the surface on screen, and so whether a note can be edited at all. */
-  canEditNote: () => boolean;
   /** Puts a selection on the system clipboard. */
   onCopy: (text: string) => void;
   /**
@@ -194,6 +210,26 @@ export class TerminalPane {
   private fontSize: number = TERMINAL_FONT_SIZE.default;
   /** Id of the tab currently being renamed in place, if any. */
   private renaming: TerminalId | null = null;
+  /**
+   * The session whose note is being TYPED, or `null`.
+   *
+   * One at a time, and distinct from "which notes are on screen" below: a box is normally read, and
+   * only the one being written holds a focused field. That split is what lets the box be permanent
+   * without the textarea stealing every keystroke meant for the terminal under it.
+   */
+  private notingEdit: TerminalId | null = null;
+  /**
+   * The sessions whose note the reader has dismissed with the cross.
+   *
+   * A note shows by default and is hidden on request, which is the opposite of the first version and
+   * is the right way round: the reason to write one is to be reminded without asking. Stored as the
+   * exception rather than as the rule, so a note written later is visible without anything having to
+   * remember to reveal it.
+   *
+   * Renderer-only and ephemeral, like the board's card positions and for the same reason: it is
+   * keyed on sessions, and sessions die with the app.
+   */
+  private readonly notesHidden = new Set<TerminalId>();
   /**
    * Whether the servers window is open, which decides whether a tab can be sent there.
    *
@@ -1091,6 +1127,203 @@ export class TerminalPane {
   }
 
   /**
+   * Opens this pane's note box with the caret in it.
+   *
+   * Selects the tab first, and that is not a convenience: the box belongs to a pane and shows its
+   * ACTIVE session, so opening one for a tab sitting in the background would put a note under the
+   * wrong terminal. Selecting is also what the reader meant, having right-clicked the tab they want
+   * to think about.
+   */
+  editNote(terminalId: TerminalId): void {
+    this.select(terminalId);
+    this.notesHidden.delete(terminalId);
+    this.notingEdit = terminalId;
+    this.renderStrips();
+  }
+
+  /**
+   * True while a note is actually being typed into.
+   *
+   * The FIELD and not the box, which is the whole reason the two states are separate: a box that is
+   * merely being read holds nothing that a repaint could throw away, and blocking every repaint for
+   * as long as a note is on screen would freeze four panes' tab strips indefinitely.
+   */
+  private noteFieldLive(): boolean {
+    return this.strips.some((strip) => strip.querySelector('.terminal__note-field') !== null);
+  }
+
+  /**
+   * The note at the head of a pane: a button, and the box it hides or reveals.
+   *
+   * **Shown by default, hidden on request**, which is the opposite of the first version. The reason
+   * to write a note is to be reminded of it without asking, so a note that has to be opened is one
+   * you only see when you already remembered. The cross is what makes that liveable when a pane is
+   * small.
+   *
+   * A pane with NO note shows the box too, as a line inviting one. That was refused here once, on
+   * the grounds that an empty box covers a terminal to hold nothing, and it was overruled
+   * deliberately: an empty box is the only thing that says the gesture exists at all, and a note
+   * button among five icons is not something anybody finds. The cross answers the original
+   * objection, one click per pane and permanent.
+   */
+  private buildNoteControl(group: TerminalGroup): HTMLElement {
+    const session = this.sessions.find((entry) => entry.id === group.active);
+    const wrap = createElement('span', { className: 'terminal__note' });
+    if (session === undefined) {
+      return wrap;
+    }
+    const editing = this.notingEdit === session.id;
+    const shown = editing || !this.notesHidden.has(session.id);
+
+    /*
+     * A toggle, and the only one: the box lost its cross, so this is the whole of showing and hiding.
+     *
+     * Three states, each carrying a different fact. Pressed says the note is on screen. Unpressed
+     * and tinted says there is a note behind this button, which matters precisely because the box is
+     * gone and nothing else can say so. Unpressed and plain says there is nothing there yet.
+     *
+     * `aria-pressed` and not `aria-expanded`, which this carried while the box was a panel it
+     * opened. It is a switch now, and the difference is what a screen reader announces.
+     */
+    // Only the 'has a note but it is put away' state needs a class: the lit state is carried by
+    // `aria-pressed`, which the stylesheet already keys on, so a second name for it would be two
+    // ways to say one thing.
+    const state = !shown && session.note !== null ? ' terminal__note-button--full' : '';
+    const button = createElement('button', {
+      className: `icon-button terminal__note-button${state}`,
+    });
+    button.type = 'button';
+    button.title = shown
+      ? 'Hide this note'
+      : session.note === null
+        ? 'Add a note saying what this session is for'
+        : `${session.note.text}\n(click to show this note)`;
+    button.setAttribute('aria-label', session.note === null ? 'Add a note' : 'Show or hide the note');
+    button.setAttribute('aria-pressed', String(shown));
+    // A folded page corner: the one glyph that reads as "a note" without a label, and nothing else
+    // in this app uses it, so it cannot be confused with an action.
+    button.append(createIcon('M4 2.5h5l3 3v8h-8zM9 2.5v3h3', { paint: 'stroke' }));
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      if (shown) {
+        this.notingEdit = null;
+        this.notesHidden.add(session.id);
+      } else {
+        this.notesHidden.delete(session.id);
+      }
+      this.renderStrips();
+    });
+    wrap.append(button);
+
+    if (shown) {
+      wrap.append(this.buildNoteBox(session, editing));
+    }
+    return wrap;
+  }
+
+  /**
+   * The box: the note as text, or as a field while it is being written.
+   *
+   * The split is load-bearing rather than tidy. A permanent box holding a focused `<textarea>` would
+   * swallow every keystroke meant for the terminal directly under it, so the resting state is read
+   * only and a click on the text is what asks for the caret.
+   *
+   * No click-outside dismissal, which is the settings modal's lesson applied: a `click` fires on the
+   * common ancestor of its `mousedown` and its `mouseup`, so selecting text in the field and
+   * releasing outside would close the box over the text being edited. Blur commits, `Escape`
+   * abandons, `Enter` commits and `Shift+Enter` breaks a line, which is the card editor's grammar
+   * and the rename input's before it.
+   */
+  private buildNoteBox(session: TerminalSession, editing: boolean): HTMLElement {
+    const box = createElement('div', { className: 'terminal__note-box' });
+
+    /*
+     * No chrome at all: the box is its content.
+     *
+     * It carried the note's age and then a cross, and both were taken out for the same reason. The
+     * panel is three lines of text pinned over a terminal, so anything that is not that text is a
+     * share of a very small surface spent on something other than the answer. Hiding moved to the
+     * button in the strip, which had to become a real toggle to carry it; the age stays on the
+     * board's card, where a note is consulted rather than glanced at.
+     */
+    if (!editing) {
+      /*
+       * At rest, and **never focused**, which is the point of the whole read/write split.
+       *
+       * A caret sitting in a box over a terminal swallows every keystroke meant for it, so nothing
+       * here takes focus: the box appears, it is read, and a click is what asks for the caret. An
+       * empty note shows its invitation where the text will go, so the box does not change shape
+       * when the first word is written.
+       */
+      const empty = session.note === null;
+      const text = createElement('p', {
+        className: `terminal__note-text${empty ? ' terminal__note-text--empty' : ''}`,
+        text: empty ? 'Notes' : (session.note?.text ?? ''),
+      });
+      text.title = empty ? 'Click to write a note' : 'Click to edit';
+      text.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.notingEdit = session.id;
+        this.renderStrips();
+      });
+      box.append(text);
+      return box;
+    }
+
+    const field = document.createElement('textarea');
+    field.className = 'terminal__note-field';
+    field.value = session.note?.text ?? '';
+    field.rows = 3;
+    field.maxLength = NOTE_LIMIT;
+    field.setAttribute('aria-label', 'Note about this session');
+
+    let done = false;
+    const finish = (commit: boolean): void => {
+      if (done) {
+        return;
+      }
+      done = true;
+      const text = field.value;
+      this.notingEdit = null;
+      if (commit) {
+        // A note just written is a note to be seen, whatever the reader dismissed before it.
+        this.notesHidden.delete(session.id);
+        this.actions.onNote(session.id, text);
+      }
+      // Repainted here rather than left to the broadcast: clearing a note that was already empty
+      // changes nothing in the main process, so nothing comes back and the field would stay open.
+      this.renderStrips();
+    };
+
+    field.addEventListener('keydown', (event) => {
+      // The terminal below binds its shortcuts on `document` in the capture phase, so a keystroke
+      // that reaches it from here would act on a session while its note is being written.
+      event.stopPropagation();
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+        return;
+      }
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        finish(true);
+      }
+    });
+    field.addEventListener('blur', () => {
+      finish(true);
+    });
+    box.append(field);
+
+    // A microtask, not an animation frame: a frame is throttled in an occluded window and loses the
+    // race against the next layout broadcast. The correction the rename input already carries.
+    void Promise.resolve().then(() => {
+      field.focus();
+      field.select();
+    });
+    return box;
+  }
+
+  /**
    * The menu on a tab: moving it to a pane of its own, renaming, closing.
    *
    * Public since the board draws the same sessions as cards and offers the same gestures on them.
@@ -1156,10 +1389,7 @@ export class TerminalPane {
          * you where to go.
          */
         label: session.note === null ? 'Add a note' : 'Edit the note',
-        disabled: !this.actions.canEditNote(),
-        hint: this.actions.canEditNote()
-          ? 'What this session is for, shown on its card'
-          : 'Switch to the card view first: a note is edited on the card',
+        hint: 'What this session is for, shown on its card and at the head of its pane',
         run: () => {
           this.actions.onEditNote(session.id);
         },
@@ -1229,6 +1459,17 @@ export class TerminalPane {
     if (this.renaming !== null && this.renameInputLive()) {
       return;
     }
+    /*
+     * The same guard for the note box, and for a heavier reason.
+     *
+     * A rebuild here destroys a focused `<textarea>` and everything typed into it since the last
+     * poll, where the rename input loses one line. Checked on the DOM rather than on the flag alone,
+     * exactly as the rename is: opening the box goes through this very method, so the flag is set
+     * before the element exists.
+     */
+    if (this.notingEdit !== null && this.noteFieldLive()) {
+      return;
+    }
     const panes = this.visiblePanes();
     const zoomed = this.zoomedIndex() !== null;
     panes.forEach(({ group, index }, position) => {
@@ -1251,6 +1492,20 @@ export class TerminalPane {
       strip.append(tabs);
 
       const actions = createElement('div', { className: 'terminal__strip-actions' });
+
+      /*
+       * The note, at the top RIGHT of the pane, last in the row of controls.
+       *
+       * Last because of the ordering this row already follows, widest scope first: the surface
+       * controls, then the pane's zoom, then `Clear`, then this, which like `Clear` acts on the
+       * active tab alone. Being last is also what puts it directly above its own box, which is
+       * anchored to the right edge.
+       *
+       * It reads the pane's ACTIVE session, the one whose terminal fills the cell below: the
+       * question this answers is "what is this thing showing me for", which in the grid is always
+       * about what is on screen rather than about a tab sitting in the background.
+       */
+      actions.append(this.buildNoteControl(group));
 
       /*
        * Widest scope first: the surface controls, then this pane's zoom, then `Clear`, which acts on
@@ -1355,11 +1610,12 @@ export class TerminalPane {
       wrapper.append(this.buildRenameInput(session));
     } else {
       /*
-       * A note reaches the grid as a tooltip and nothing more.
+       * A note reaches a tab as a tooltip and nothing more.
        *
-       * The board draws it; here there is no room, and a second rendering of the same sentence in a
-       * strip this dense would push the titles out. The tooltip is free and it is where a reader
-       * already looks when a tab title is not enough, which is exactly the case a note answers.
+       * No marker on the title, and it had one for a version: the note of the pane's active session
+       * is now drawn in full at the head of the pane, so a dot saying "there is a note" next to a
+       * note you are already reading is a mark that means nothing. The tooltip stays because it is
+       * the only way to see the note of a tab sitting in the BACKGROUND, which the box never shows.
        */
       const label = createElement('button', {
         className: 'terminal__tab-label',
@@ -1369,9 +1625,6 @@ export class TerminalPane {
           (session.note === null ? '' : `${session.note.text}\n\n`) +
           `${session.cwd}\n(double-click to rename, drag to reorder or change pane)`,
       });
-      if (session.note !== null) {
-        label.classList.add('terminal__tab-label--noted');
-      }
       label.type = 'button';
       label.setAttribute('aria-selected', String(session.id === this.activeId));
       label.addEventListener('click', () => this.select(session.id));

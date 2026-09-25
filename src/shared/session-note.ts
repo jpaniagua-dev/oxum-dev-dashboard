@@ -11,11 +11,14 @@ import type { TriagedTicket } from './contracts.js';
  *
  * ⚠️ **It is also the only thing here that can be confidently wrong.** Every other field on a card
  * is a fact the app observed a second ago; a note is a sentence somebody typed once and did not
- * come back to. That is why `describeNoteAge` exists and why the card shows it: a note reading
- * "waiting for my answer on the schema" is worth less than nothing forty minutes later, because it
- * will be believed. It answers "what was this for", which never goes stale, and it must not be
- * relied on for "where is it at", which the activity dot already refuses to claim for the same
- * reason.
+ * come back to. It answers "what was this for", which never goes stale, and it must not be relied
+ * on for "where is it at", which the activity dot already refuses to claim for the same reason.
+ *
+ * Both surfaces showed the note's age for exactly that reason, and both stopped: the pane's box is
+ * three lines pinned over a terminal and the card's is read in a glance across forty of them, so in
+ * neither did a timestamp earn its line. The caveat above is now carried by this comment and by
+ * nothing on screen, which is a deliberate trade and the one to revisit first if a stale note ever
+ * misleads somebody.
  */
 
 /**
@@ -59,30 +62,4 @@ export function noteFromTicket(ticket: TriagedTicket | undefined, repo: string):
   const head = repo.length > 0 ? `${ticket.key} in ${repo}` : ticket.key;
   const reason = ticket.reason.trim();
   return trimNote(reason.length > 0 ? `${head}\n${reason}` : head);
-}
-
-/**
- * How old a note is, in the coarsest unit that is still true.
- *
- * Coarse on purpose, and the opposite choice from the job cards' `m:ss`: there the reader is
- * watching a clock, here the only question is whether the sentence is still likely to hold. A note
- * written four minutes ago and one written six are the same note; one written yesterday is not.
- */
-export function describeNoteAge(writtenAt: string, now: Date): string {
-  const at = new Date(writtenAt).getTime();
-  if (Number.isNaN(at)) {
-    return '';
-  }
-  const minutes = Math.max(0, Math.floor((now.getTime() - at) / 60_000));
-  if (minutes < 1) {
-    return 'just now';
-  }
-  if (minutes < 60) {
-    return `${String(minutes)} min ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${String(hours)}h ago`;
-  }
-  return `${String(Math.floor(hours / 24))}d ago`;
 }

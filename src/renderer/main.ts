@@ -278,11 +278,20 @@ class App {
           onClose: (terminalId) => void window.api.closeTerminal(terminalId),
         onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
         onMoveToServers: (terminalId) => void window.api.moveTerminalToServers(terminalId, true),
-        // The editor is the board's, so the entry is offered only while the board is on screen and
-        // says why when it is not. A menu entry that accepts a click and does nothing is the
-        // failure this app names outright.
-        onEditNote: (terminalId) => this.board?.editNote(terminalId),
-        canEditNote: () => this.boardMode,
+        // The same callback the board is given: two surfaces drawing one session must not grow two
+        // ideas of what writing a note means.
+        onNote: (terminalId, text) => {
+          void window.api.setTerminalNote(terminalId, text);
+        },
+        // One menu entry, two editors, and this is the only place that knows which one is visible.
+        // Routed here rather than in the pane, which cannot see whether it is on screen.
+        onEditNote: (terminalId) => {
+          if (this.boardMode) {
+            this.board?.editNote(terminalId);
+          } else {
+            this.terminal?.editNote(terminalId);
+          }
+        },
         onNewShell: (profileId) => void this.openShell(profileId),
         /*
          * Reported and never bare-`void`ed, the rule this file already states for `onLayout`: an

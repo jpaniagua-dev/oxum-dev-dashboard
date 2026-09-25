@@ -178,11 +178,17 @@ row. None of it can say what a session was opened FOR.
   no identity at all; a pane's position is its index. A note on a pane would die at the first split
   and "pane 2" would mean something else, which is the silent loss this file spends its length
   refusing.
-- ⚠️ **It is the only thing on a card that can be confidently wrong**, and that is why the age is
-  drawn next to it. Every other field is a fact observed a second ago; this is a sentence somebody
-  typed once and did not come back to. It answers "what was this for", which never goes stale, and
-  it must NOT be relied on for "where is it at", which `activityOf` already refuses to claim for
-  exactly the same reason.
+- ⚠️ **It is the only thing on a card that can be confidently wrong.** Every other field is a fact
+  observed a second ago; this is a sentence somebody typed once and did not come back to. It answers
+  "what was this for", which never goes stale, and it must NOT be relied on for "where is it at",
+  which `activityOf` already refuses to claim for exactly the same reason.
+- **Both surfaces showed the note's age and both stopped**, on request. In a pane the box is three
+  lines pinned over a terminal, and on a card it is read in a glance across forty of them, so in
+  neither did a timestamp earn its line. `describeNoteAge` went with them rather than staying a dead
+  export. The caveat above is now carried by comments and by nothing on screen, which is a
+  deliberate trade and the first thing to revisit if a stale note ever misleads somebody. Removing
+  it from the card also took it out of the signature, which is what had made a card repaint every
+  minute.
 - **The handoff seeds it, and that is what makes the feature worth having.** A note the reader types
   is a note on the five sessions they thought about, and it is the other ninety that make a board
   unreadable. `Work on this` builds one from `triage.json` through `noteFromTicket`, read off disk
@@ -197,11 +203,58 @@ row. None of it can say what a session was opened FOR.
 - **Clearing a note IS deleting it.** `trimNote` answers `null` for anything blank, so there is no
   second channel and no stored empty string: two ways to say "no note" would be two states to keep
   in step.
-- **The board is the only surface that edits one, and the grid shows it as a tooltip.** A rename is
-  a title, one line, and a strip has room for its input; a note is three lines and a 24px strip does
-  not. The pane's session menu carries the entry, because a card and a tab are two drawings of one
-  session and this app already refuses to keep two menus for them, and it is **disabled with its
-  reason** while the grid is on screen rather than switching surfaces under the reader.
+- **Both surfaces edit one, through the same callback.** The board's editor sits on the card; the
+  grid's is a box at the head of each pane, opened from a note button before the tabs and hanging
+  over the view. The first version made the board the only editor and greyed the pane's menu entry
+  out with "switch to the card view first", which was a refusal dressed as a hint: in the grid you
+  are looking at ONE terminal, which is exactly when you want to know what it was for.
+- **The pane's box is SHOWN by default and hidden on request**, which is the opposite of the first
+  version and is the right way round: the reason to write a note is to be reminded of it without
+  asking, so a note you have to open is one you see only when you already remembered. The dismissal
+  is stored as the exception (`notesHidden`, a set of session ids) rather than as the rule, so a
+  note written later appears without anything having to remember to reveal it. A session with no
+  note shows no box, only the button: a permanently open empty field on four panes would cover four
+  terminals to hold nothing.
+- ⚠️ **A permanent box is READ, and only the one being written holds a field.** This is the split
+  `notingEdit` exists for and it is load-bearing, not tidiness: a focused `<textarea>` sitting over a
+  terminal swallows every keystroke meant for it. The resting state is text and a click on it asks
+  for the caret. For the same reason the repaint guard watches the FIELD and not the box, or four
+  panes' strips would be frozen for as long as any note was on screen.
+- **It sits top RIGHT, last in the row of controls.** The row is ordered widest scope first (surface
+  controls, pane zoom, `Clear`), and a note acts on the active tab alone exactly as `Clear` does.
+  Last is also what puts it directly above its own box, which is anchored to the right edge.
+- **The pane's box reads the pane's ACTIVE session**, so the menu entry selects the tab before
+  opening it. A box showing a background tab's note under a different terminal would be a note about
+  the wrong thing.
+- **No marker on the tab title, and there was one for a version.** The active session's note is now
+  drawn in full at the head of its pane, so a dot saying "there is a note" beside a note already on
+  screen is a mark that means nothing. The tooltip stays, being the only way to see the note of a
+  tab sitting in the background.
+- **The box has no click-outside dismissal**, and that is the settings modal's lesson applied: a
+  `click` fires on the common ancestor of its `mousedown` and its `mouseup`, so selecting text in
+  the field and releasing outside would close the box over the text being edited. Blur commits,
+  `Escape` abandons.
+- **The note button is the only switch, and it has three states.** The box lost its cross, so
+  showing and hiding live here entirely: lit in `--primary` while the note is on screen, full
+  opacity in the ordinary colour while a note exists but is put away, faded when there is nothing.
+  The middle one is not decoration; without the cross it is the only thing that says a hidden note
+  exists.
+- ⚠️ **Its lit state has to out-specify `.icon-button[aria-pressed='true']`**, which paints a tinted
+  ground app-wide. The button fell into that rule the moment it became a switch rather than a panel
+  opener, and removing the background from its own rule did nothing because the shared selector was
+  the more specific one. That rule is right for the pane zoom and wrong here, so it is overridden
+  for this button rather than weakened for everybody.
+- ⚠️ **One menu entry, two editors, routed by the app.** A pane cannot know whether it is the surface
+  on screen, so `onEditNote` is decided in `main.ts` on `boardMode`. This shipped broken once: the
+  entry opened the box in a pane's strip, board mode hides every strip, and the card view is the
+  DEFAULT one, so writing a note from a card silently did nothing at all.
+- ⚠️ **A card's pointer handlers check `event.button`, and this shipped broken.** `pointerdown` fires
+  for the right button too, so a right click captured the pointer, opened the context menu, then
+  took the `pointerup` as a plain click and opened the card in the grid: the menu appeared and the
+  surface changed underneath it in the same gesture, which reads as a right click that does nothing.
+  The fourth pointer-capture failure on this surface and the first caused by the BUTTON rather than
+  by the target, so no guard on the target could have caught it. Both the card's drag and the
+  plane's pan now refuse anything but the primary button.
 - **Nothing repaints while the editor is open.** `paint` refuses on `editing` exactly as it refuses
   on `carrying`. This is the fourth instance of one failure in this codebase (the tab rename, the
   table's inline rename, the commit draft), and a `<textarea>` loses more than a field does: it

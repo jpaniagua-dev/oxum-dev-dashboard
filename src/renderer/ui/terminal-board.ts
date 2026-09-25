@@ -4,7 +4,7 @@ import { clearChildren, createElement, createIcon } from './dom.js';
 import { AGENT_ICON } from './icons.js';
 import type { JobKind, JobRun } from '@shared/job-run.js';
 import { describeElapsed } from '@shared/job-run.js';
-import { NOTE_LIMIT, describeNoteAge } from '@shared/session-note.js';
+import { NOTE_LIMIT } from '@shared/session-note.js';
 import { buildPill } from './project-table.js';
 import { presentServer } from './presenters.js';
 
@@ -362,12 +362,11 @@ export class TerminalBoard {
           String(session.exitCode),
           String(session.stoppedOnPurpose),
           String(session.agent !== null),
-          // The text AND the age AS RENDERED, never the raw stamp. The stamp never changes, so a
-          // signature carrying it would hold `12 min ago` on the card for the rest of the session:
-          // the same trap the job cards' elapsed clock records, reached from the other direction.
-          session.note === null
-            ? ''
-            : `${session.note.text}@${describeNoteAge(session.note.writtenAt, new Date(now))}`,
+          // The text alone. It carried the age as rendered while the card drew one, which was what
+          // made a card repaint on the minute; with the age gone a note only changes when it is
+          // written, and a signature that made the board rebuild every minute for nothing would be
+          // the tick's flicker back again.
+          session.note?.text ?? '',
           point === undefined ? '' : `${point.x},${point.y}`,
         ].join('\u0001');
       })
@@ -590,12 +589,8 @@ export class TerminalBoard {
      */
     if (session.note !== null) {
       const note = createElement('div', { className: 'board-card__note' });
-      note.append(createElement('p', { className: 'board-card__note-text', text: session.note.text }));
       note.append(
-        createElement('span', {
-          className: 'board-card__note-age',
-          text: describeNoteAge(session.note.writtenAt, new Date(now)),
-        }),
+        createElement('p', { className: 'board-card__note-text', text: session.note.text }),
       );
       body.append(note);
     }
@@ -647,6 +642,21 @@ export class TerminalBoard {
        * on the panel beside it, so the guard stays where the next button will land.
        */
       if ((event.target as HTMLElement).closest('button') !== null) {
+        return;
+      }
+      /*
+       * The primary button only, and this shipped broken.
+       *
+       * `pointerdown` fires for the right button too, so a right click captured the pointer, opened
+       * the context menu on `contextmenu`, and then took the `pointerup` here: `moved` was false, so
+       * the gesture was read as a plain click and the card was opened in the grid. The menu appeared
+       * and the surface changed underneath it in the same gesture, which reads as a right click that
+       * does nothing at all.
+       *
+       * The fourth pointer-capture failure on this surface, and the first one caused by the BUTTON
+       * rather than by the target. A guard on the target could never have caught it.
+       */
+      if (event.button !== 0) {
         return;
       }
       origin = { x: event.clientX, y: event.clientY };
@@ -746,7 +756,6 @@ export class TerminalBoard {
     field.value = session?.note?.text ?? '';
     field.maxLength = NOTE_LIMIT;
     field.rows = 3;
-    field.placeholder = 'What is this session for?';
     field.setAttribute('aria-label', 'Note about this session');
     // Stops the card's own drag from starting on a press inside the field, which would otherwise
     // capture the pointer and make selecting text move the card.
@@ -816,7 +825,13 @@ export class TerminalBoard {
        * The host and the content div are the only two elements that ARE the plane. Cards live inside
        * the content and answer for their own drag; the toolbar and the panel are siblings. Anything
        * added later is a control until it says otherwise, which is the right default.
+       *
+       * The primary button only, for the reason a card's own drag checks it: a right click that
+       * captured the pointer here would swallow the `contextmenu` gesture the same way.
        */
+      if (event.button !== 0) {
+        return;
+      }
       const target = event.target;
       if (target !== this.host && target !== this.content) {
         return;
