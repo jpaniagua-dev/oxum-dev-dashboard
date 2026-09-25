@@ -4,6 +4,7 @@ import type { AgentProfile } from '@shared/agent-profile.js';
 import {
   IpcChannel,
   type AgentOpenResult,
+  type UsageState,
   type AppSettings,
   type BootstrapState,
   type GeneratedCommit,
@@ -291,6 +292,11 @@ const api: RendererApi = {
 
   renameTerminal: (terminalId: TerminalId, title: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.TerminalRename, terminalId, title),
+
+  setTerminalNote: (terminalId: TerminalId, text: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.TerminalNote, terminalId, text),
+
+  readUsage: (): Promise<UsageState> => ipcRenderer.invoke(IpcChannel.UsageRead),
 
   setTerminalLayout: (groups: readonly TerminalGroup[], columns: number): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.TerminalLayoutSet, groups, columns),

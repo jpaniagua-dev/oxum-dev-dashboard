@@ -1075,6 +1075,255 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
+ * The Usage tab
+ * ------------------------------------------------------------------ */
+
+/*
+ * Two columns and no master-detail, unlike its neighbours: nothing here is selected.
+ *
+ * Equal columns rather than a narrow list plus a wide reader, because neither half is subordinate
+ * to the other: the left is what happened, the right is what it cost, and the reader moves between
+ * them rather than drilling from one into the other.
+ */
+.usage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+}
+
+.usage[hidden] {
+  display: none;
+}
+
+.usage__column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.usage__heading {
+  margin: 0;
+  font-size: var(--font-xs);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.usage__subheading {
+  margin: 6px 0 0;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+/*
+ * The cache's age, and it is the most important line on this tab.
+ *
+ * Every token count under it describes whatever day Claude Code last rebuilt its cache, which was
+ * measured at forty-seven days behind on the machine this was built for. The warning colour is
+ * earned rather than decorative, and it only appears past STATS_STALE_AFTER_DAYS.
+ */
+.usage__age {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--text-dim);
+}
+
+.usage__age--stale {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.usage__note {
+  margin: 0;
+  font-size: var(--font-xs);
+  color: var(--text-faint);
+}
+
+.usage__note--warn {
+  color: var(--warning);
+}
+
+.usage__empty {
+  margin: 0;
+  font-size: var(--font-sm);
+  color: var(--text-faint);
+}
+
+.usage__figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.usage__figure {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.usage__figure-value {
+  font-size: var(--font-lg);
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage__figure-label {
+  font-size: var(--font-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+/* A chart of divs, not a library: this app ships no charting dependency and these are bars. */
+.usage__chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 78px;
+}
+
+.usage__chart--hours {
+  height: 56px;
+}
+
+.usage__chart-column {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  height: 100%;
+}
+
+.usage__chart-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: var(--primary);
+  /* A bar is never zero-height: an empty column reads as a missing bar rather than as a quiet day,
+     and the minimum is set in the builder so the two cannot disagree. */
+}
+
+.usage__chart-label {
+  font-size: var(--font-3xs);
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage__projects {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usage__project {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px 84px;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--font-sm);
+}
+
+/* Truncated on the LEFT, the rule this app already follows for a path: the end tells two apart. */
+.usage__project-path {
+  min-width: 0;
+  color: var(--text);
+}
+
+.usage__project-count {
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.usage__models {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usage__model {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage__model-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.usage__model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+
+.usage__model-cost {
+  flex: none;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* "no price" is a statement, not a figure, so it is not set in the figure's weight. */
+.usage__model-cost--none {
+  font-weight: 400;
+  color: var(--warning);
+}
+
+.usage__bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-inset);
+  overflow: hidden;
+}
+
+.usage__bar-fill {
+  height: 100%;
+  background: var(--primary);
+}
+
+.usage__model-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.usage__part {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+
+.usage__part-value {
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.usage__part-label {
+  font-size: var(--font-2xs);
+  color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------------ *
  * The Jira board
  *
  * One column per workflow stage, one card per issue. It replaced a sortable table, and it took the
@@ -3016,6 +3265,72 @@ body {
  */
 
 /*
+ * The note, and the age that makes it readable.
+ *
+ * Inset and quieter than the fields above it, because it is the one thing on the card the app did
+ * not observe: a sentence somebody typed once. The left rule is the same idiom `.pulls__finding`
+ * uses for a quoted remark, for the same reason, and the age is `--text-faint` so it is there when
+ * looked for and out of the way when not.
+ */
+.board-card__note {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+  padding-left: 6px;
+  border-left: 2px solid var(--border);
+}
+
+.board-card__note-text {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-sm);
+  /* Three lines, then clipped, which is what NOTE_LIMIT is sized for. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.board-card__note-age {
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+}
+
+/* The editor, sized like the note it replaces so the card does not jump when it opens. */
+.board-card__editor {
+  width: 100%;
+  margin-top: 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  resize: none;
+}
+
+/*
+ * A tab whose session carries a note.
+ *
+ * A dot and not a second line of text: the strip is dense and the note itself is in the tooltip.
+ * Drawn on the label rather than on the wrapper so it sits with the title and not with the cross.
+ */
+.terminal__tab-label--noted::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  vertical-align: middle;
+}
+
+/*
  * A headless run's card: wider, because its subject is a sentence and not a tab title.
  *
  * `web-app#588: reading list.component.ts` is the whole reason to look at one of these, and at the
@@ -3337,15 +3652,18 @@ body {
  * trailing punctuation gets reordered to the wrong end. `plaintext` derives the run's direction from
  * its own first strong character, so the path reads normally inside a right-anchored box.
  */
-.git__path {
-  flex: 1;
-  min-width: 0;
+.path-clip-start {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   direction: rtl;
   unicode-bidi: plaintext;
   text-align: left;
+}
+
+.git__path {
+  flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--font-sm);
 }

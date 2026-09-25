@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Master-detail with a list of instruction files and a list of memory cards on the right, so it
   // wants the room the Git tab wants rather than the room a status table wants.
   agentsHeight: 460,
+  usageHeight: 460,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
   // 340 was not. The diff keeps the rest, and the separator is there to change the balance.
   gitListWidth: 460,
@@ -185,6 +186,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       1200,
     ),
     agentsHeight: clamp(asNumber(input.agentsHeight, DEFAULT_SETTINGS.agentsHeight), 90, 1200),
+    usageHeight: clamp(asNumber(input.usageHeight, DEFAULT_SETTINGS.usageHeight), 90, 1200),
     gitListWidth: clamp(asNumber(input.gitListWidth, DEFAULT_SETTINGS.gitListWidth), 240, 1400),
     defaultShellProfileId: asString(
       input.defaultShellProfileId,
@@ -398,7 +400,8 @@ function asStrip(value: unknown): StripTab {
     value === 'git' ||
     value === 'triage' ||
     value === 'worktrees' ||
-    value === 'agents'
+    value === 'agents' ||
+    value === 'usage'
     ? value
     : 'projects';
 }

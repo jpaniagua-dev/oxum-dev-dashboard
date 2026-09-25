@@ -141,6 +141,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       // would re-adopt the layout in the middle of the click that changed it.
       'terminalColumns',
       'triageHeight',
+      'usageHeight',
       'worktreesHeight',
     ]);
   });

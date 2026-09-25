@@ -76,6 +76,17 @@ export class TriageService {
   }
 
   /**
+   * The stored analysis of one ticket, for a caller that needs more than the estimate.
+   *
+   * Same argument as `estimateFor` one line up, and the same door: the handoff channel carries keys
+   * and nothing else on purpose, so anything else a spawn wants to know about a ticket is read off
+   * disk at the moment it is wanted rather than copied through a shell argument.
+   */
+  ticketFor(key: string): TriagedTicket | undefined {
+    return this.store.findTicket(key);
+  }
+
+  /**
    * Drops one ticket from a stored analysis.
    *
    * A local edit of the tab's own list: the ticket is not touched in Jira, and the next run on that

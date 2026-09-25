@@ -1,4 +1,5 @@
 import type { AgentProfile } from './agent-profile.js';
+import type { UsageActivity, UsageStats } from './usage.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
  *
@@ -1072,6 +1073,24 @@ export interface AgentOpenResult {
   readonly message: string;
 }
 
+/**
+ * A sentence the reader wrote about a session, and the only unverified thing on a card.
+ *
+ * Kept on the session and not in the renderer, unlike the card positions, for one reason: the
+ * ticket handoff seeds it, and the handoff happens in the main process. A note held renderer-side
+ * would have no home at the moment the only writer that scales is trying to write one.
+ *
+ * It dies with the session, deliberately. A note keyed on a session id cannot outlive it, and the
+ * seeded half comes back on its own: a restart kills the sessions, the next handoff rebuilds the
+ * note from `triage.json`. What is genuinely lost is a note typed by hand on a hand-opened shell,
+ * which is the accepted cost of not inventing a second, durable key for the same field.
+ */
+export interface SessionNote {
+  readonly text: string;
+  /** ISO instant it was last written, which is what lets a card say how old it is. */
+  readonly writtenAt: string;
+}
+
 export interface TerminalSession {
   readonly id: TerminalId;
   readonly title: string;
@@ -1097,6 +1116,8 @@ export interface TerminalSession {
   /** Set for `shell` sessions. */
   readonly profileId: string | null;
   readonly cwd: string;
+  /** What this session is for, in the reader's own words, or `null`. */
+  readonly note: SessionNote | null;
   /** False once the process has exited; the tab stays so its output can still be read. */
   readonly running: boolean;
   /**
@@ -1253,7 +1274,30 @@ export const TERMINAL_FONT_SIZE = { default: 14, min: 9, max: 28 } as const;
 export const UI_FONT_SIZE = { default: 13, min: 11, max: 17 } as const;
 
 /** Which view the top strip shows. The terminal below is unaffected by this choice. */
-export type StripTab = 'projects' | 'pulls' | 'jira' | 'git' | 'triage' | 'worktrees' | 'agents';
+export type StripTab =
+  | 'projects'
+  | 'pulls'
+  | 'jira'
+  | 'git'
+  | 'triage'
+  | 'worktrees'
+  | 'agents'
+  | 'usage';
+
+/**
+ * What the coding agent on this machine has been doing, read from its own files.
+ *
+ * Two halves that do not agree about "now", which is the whole point of handing them over together:
+ * `activity` comes from a log appended on every prompt and is live to the second, `stats` comes from
+ * a cache Claude Code rebuilds on its own schedule and can be weeks behind. Either is `null` when
+ * the file behind it is absent or unreadable, which is "nothing to show" and never an error.
+ */
+export interface UsageState {
+  readonly activity: UsageActivity | null;
+  readonly stats: UsageStats | null;
+  /** When this app read them, so the panel can say how fresh its own answer is. */
+  readonly readAt: string;
+}
 
 /**
  * A sprint offered for triage.
@@ -1729,6 +1773,7 @@ export interface AppSettings {
   defaultShellProfileId: string;
   /** Height of the Agents strip, in pixels. */
   agentsHeight: number;
+  usageHeight: number;
   /** Font size of every terminal, in pixels. */
   terminalFontSize: number;
   /**
@@ -2254,6 +2299,8 @@ export const IpcChannel = {
   TerminalClose: 'terminal:close',
   /** invoke: (terminalId, title) => void, renames a tab */
   TerminalRename: 'terminal:rename',
+  TerminalNote: 'terminal:note',
+  UsageRead: 'usage:read',
   /** send: (terminalId, data) => void, keystrokes from xterm to the pty */
   PtyInput: 'pty:input',
   /** send: (terminalId, size) => void */
@@ -2543,6 +2590,10 @@ export interface RendererApi {
   stopProjectServer(projectId: ProjectId): Promise<boolean>;
   closeTerminal(terminalId: TerminalId): Promise<void>;
   renameTerminal(terminalId: TerminalId, title: string): Promise<void>;
+  /** Writes what a session is for, or clears it: an empty string IS the delete. */
+  setTerminalNote(terminalId: TerminalId, text: string): Promise<void>;
+  /** Reads Claude Code's own usage files. Pulled when the tab is shown, never polled. */
+  readUsage(): Promise<UsageState>;
   /**
    * Replaces the layout, panes and tab order together.
    *

@@ -119,6 +119,10 @@ export interface TerminalPaneActions {
   onSplitShell: (cwd: string, direction: PaneDirection) => void;
   /** Hands one tab over to the servers window. Only offered while that window is open. */
   onMoveToServers: (terminalId: TerminalId) => void;
+  /** Opens the note editor, which lives on the board. See the menu entry for why. */
+  onEditNote: (terminalId: TerminalId) => void;
+  /** Whether the board is the surface on screen, and so whether a note can be edited at all. */
+  canEditNote: () => boolean;
   /** Puts a selection on the system clipboard. */
   onCopy: (text: string) => void;
   /**
@@ -1140,6 +1144,27 @@ export class TerminalPane {
         },
       },
       {
+        /*
+         * One menu for a tab and for its card, which is why this entry lives here and acts over
+         * there.
+         *
+         * A rename is a title, one line, and this strip has room for its input. A note is three
+         * lines about what a session is FOR, which is the question a board of forty cards makes
+         * unanswerable and which no twenty-four pixel strip can host an editor for. So the editor is
+         * the board's, and this entry says so in its hint rather than switching surfaces under the
+         * reader: a menu that moves you somewhere you did not ask to go is worse than one that tells
+         * you where to go.
+         */
+        label: session.note === null ? 'Add a note' : 'Edit the note',
+        disabled: !this.actions.canEditNote(),
+        hint: this.actions.canEditNote()
+          ? 'What this session is for, shown on its card'
+          : 'Switch to the card view first: a note is edited on the card',
+        run: () => {
+          this.actions.onEditNote(session.id);
+        },
+      },
+      {
         label: 'Close the tab',
         hint: 'Alt+Shift+W on the active tab',
         disabled: !session.closable,
@@ -1329,12 +1354,24 @@ export class TerminalPane {
     if (this.renaming === session.id) {
       wrapper.append(this.buildRenameInput(session));
     } else {
+      /*
+       * A note reaches the grid as a tooltip and nothing more.
+       *
+       * The board draws it; here there is no room, and a second rendering of the same sentence in a
+       * strip this dense would push the titles out. The tooltip is free and it is where a reader
+       * already looks when a tab title is not enough, which is exactly the case a note answers.
+       */
       const label = createElement('button', {
         className: 'terminal__tab-label',
         text: session.title,
         // The working directory is the one thing you always want to know about a shell tab.
-        title: `${session.cwd}\n(double-click to rename, drag to reorder or change pane)`,
+        title:
+          (session.note === null ? '' : `${session.note.text}\n\n`) +
+          `${session.cwd}\n(double-click to rename, drag to reorder or change pane)`,
       });
+      if (session.note !== null) {
+        label.classList.add('terminal__tab-label--noted');
+      }
       label.type = 'button';
       label.setAttribute('aria-selected', String(session.id === this.activeId));
       label.addEventListener('click', () => this.select(session.id));

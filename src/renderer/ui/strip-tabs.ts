@@ -21,6 +21,7 @@ export const STRIP_TABS: readonly StripTab[] = [
   'triage',
   'worktrees',
   'agents',
+  'usage',
 ];
 
 export class StripTabs {
@@ -34,6 +35,7 @@ export class StripTabs {
     triage: requireElement<HTMLButtonElement>('strip-tab-triage'),
     worktrees: requireElement<HTMLButtonElement>('strip-tab-worktrees'),
     agents: requireElement<HTMLButtonElement>('strip-tab-agents'),
+    usage: requireElement<HTMLButtonElement>('strip-tab-usage'),
   };
 
   private readonly panels: Record<StripTab, HTMLElement> = {
@@ -44,6 +46,7 @@ export class StripTabs {
     triage: requireElement('strip-panel-triage'),
     worktrees: requireElement('strip-panel-worktrees'),
     agents: requireElement('strip-panel-agents'),
+    usage: requireElement('strip-panel-usage'),
   };
 
   constructor(private readonly actions: StripTabsActions) {

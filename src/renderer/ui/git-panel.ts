@@ -798,7 +798,7 @@ function buildChangeRow(
 
   row.append(buildPill(label));
   // `textContent` throughout: a path comes from the file system, not from this app.
-  row.append(createElement('span', { className: 'git__path', text: change.path }));
+  row.append(createElement('span', { className: 'git__path path-clip-start', text: change.path }));
 
   row.addEventListener('click', (event) => {
     if (hitsInteractive(event)) {

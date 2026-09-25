@@ -26,6 +26,7 @@ function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
     role: 'server',
     profileId: 'cmd',
     cwd: 'C:/repos/web-app',
+    note: null,
     running: true,
     closable: false,
     exitCode: null,

@@ -7,6 +7,7 @@ import type {
   ProjectAction,
   ProjectId,
   SessionAgent,
+  SessionNote,
   ShellProfile,
   TerminalGroup,
   TerminalId,
@@ -15,6 +16,7 @@ import type {
   TerminalSession,
   TerminalSize,
 } from '@shared/contracts.js';
+import { trimNote } from '@shared/session-note.js';
 import { normalizeGroups, sanitizeColumns } from '@shared/terminal-groups.js';
 import { spawnOffThread } from '../spawn/spawn-pool.js';
 import { Scrollback } from './scrollback.js';
@@ -395,6 +397,8 @@ export class TerminalManager {
      * is just a program and some arguments.
      */
     agent?: SessionAgent | null;
+    /** What this session is for, when the caller knows. Seeded by the ticket handoff. */
+    note?: string | null;
     /**
      * Folder to start in, when it is not the project's own.
      *
@@ -441,6 +445,7 @@ export class TerminalManager {
       size: options.size,
       projectKind: null,
       agent: options.agent ?? null,
+      note: options.note ?? null,
       onExit: options.onExit ?? null,
     });
   }
@@ -691,6 +696,35 @@ export class TerminalManager {
     this.hooks.onSessionsChanged(this.sessions());
   }
 
+  /**
+   * Writes what a session is for, or clears it.
+   *
+   * An empty text removes the note rather than storing a blank one, which is why there is no second
+   * channel for deleting: two ways to say "no note" would be two states to keep in step. The stamp
+   * is refreshed on every write, because the card shows the note's age and an edit is what makes an
+   * old sentence current again.
+   */
+  setNote(terminalId: TerminalId, text: string): void {
+    const entry = this.entries.get(terminalId);
+    if (entry === undefined) {
+      return;
+    }
+    const trimmed = trimNote(text);
+    // Nothing changed, so nothing is broadcast: a session list pushed for an identical note rebuilds
+    // every tab strip in both windows for no visible difference.
+    if (trimmed === (entry.session.note?.text ?? null)) {
+      return;
+    }
+    this.entries.set(terminalId, {
+      ...entry,
+      session: {
+        ...entry.session,
+        note: trimmed === null ? null : { text: trimmed, writtenAt: new Date().toISOString() },
+      },
+    });
+    this.hooks.onSessionsChanged(this.sessions());
+  }
+
   /** Stops if needed, then forgets the tab entirely. */
   close(terminalId: TerminalId): void {
     const entry = this.entries.get(terminalId);
@@ -732,6 +766,8 @@ export class TerminalManager {
     renamed: boolean;
     /** The coding agent this command runs, when it runs one. See `runProjectCommand`. */
     agent?: SessionAgent | null;
+    /** See `runProjectCommand`. */
+    note?: string | null;
     /** See `runProjectCommand`. Null for every spawn that chains nothing. */
     onExit?: ((exitCode: number, stopped: boolean) => void) | null;
   }): TerminalId | null {
@@ -882,6 +918,12 @@ function failedScrollback(file: string, message: string): Scrollback {
   return scrollback;
 }
 
+/** A seeded note, stamped now, or nothing at all when the caller had nothing to say. */
+function buildNote(text: string | null): SessionNote | null {
+  const trimmed = text === null ? null : trimNote(text);
+  return trimmed === null ? null : { text: trimmed, writtenAt: new Date().toISOString() };
+}
+
 function baseSession(
   id: TerminalId,
   options: {
@@ -893,6 +935,7 @@ function baseSession(
     cwd: string;
     renamed: boolean;
     agent?: SessionAgent | null;
+    note?: string | null;
   },
 ): Omit<StoredSession, 'running' | 'closable'> {
   return {
@@ -903,6 +946,15 @@ function baseSession(
     // Set by the caller that spawned an agent, never guessed from the command line: an action can run
     // anything, and matching on the word `claude` would call `git log --grep claude` a coding agent.
     agent: options.agent ?? null,
+    /*
+     * Seeded by the caller that knows what the session is for, exactly like `agent`.
+     *
+     * Only the ticket handoff passes one today, and that is the whole reason this field is worth
+     * having at the scale the board is built for: a note the reader has to type is a note written
+     * on the five sessions they happened to think about, and it is the other ninety-five that are
+     * the problem.
+     */
+    note: buildNote(options.note ?? null),
     id,
     title: options.title,
     kind: options.kind,

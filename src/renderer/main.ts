@@ -33,6 +33,8 @@ import type { AgentContext } from '@shared/agent-context.js';
 import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
+import type { UsageState } from '@shared/contracts.js';
+import { renderUsagePanel } from './ui/usage-panel.js';
 import { moveProject } from '@shared/project-order.js';
 import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
 import {
@@ -181,6 +183,8 @@ class App {
   /** Single-flight state for the worktree read. See {@link singleFlight}. */
   private readonly worktreesFlight: Flight = idleFlight();
   private triage: TriageState | null = null;
+  /** The last usage read, kept only so a re-show paints something before the files are read again. */
+  private usage: UsageState | null = null;
   /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
   private autoRuns: AutoRunRecord[] = [];
   private triagePanel: TriagePanel | null = null;
@@ -274,6 +278,11 @@ class App {
           onClose: (terminalId) => void window.api.closeTerminal(terminalId),
         onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
         onMoveToServers: (terminalId) => void window.api.moveTerminalToServers(terminalId, true),
+        // The editor is the board's, so the entry is offered only while the board is on screen and
+        // says why when it is not. A menu entry that accepts a click and does nothing is the
+        // failure this app names outright.
+        onEditNote: (terminalId) => this.board?.editNote(terminalId),
+        canEditNote: () => this.boardMode,
         onNewShell: (profileId) => void this.openShell(profileId),
         /*
          * Reported and never bare-`void`ed, the rule this file already states for `onLayout`: an
@@ -331,6 +340,9 @@ class App {
       // The very callback the tab strip is given, so the board cannot grow its own idea of what
       // opening a shell means. Staying on the board is deliberate: setting up three sessions should
       // not bounce through the grid three times, and the new card appears at once.
+      onNote: (terminalId, text) => {
+        void window.api.setTerminalNote(terminalId, text);
+      },
       onNewShell: (profileId) => void this.openShell(profileId),
       onNewAgent: () => {
         this.openAgent().catch((error: unknown) => {
@@ -608,6 +620,20 @@ class App {
    * draws "Reading..." rather than waiting. A tab that blocked on the disk would be a tab that
    * freezes the window on a network drive that went away.
    */
+  /**
+   * Reads Claude Code's usage files and paints the tab.
+   *
+   * Nothing is cached between shows. The whole read is two `readFile` calls answered off the main
+   * thread, and a cache here would only be able to be wrong about a file another program owns.
+   */
+  private async loadUsage(): Promise<void> {
+    renderUsagePanel(requireElement('strip-panel-usage'), this.usage);
+    this.usage = await window.api.readUsage();
+    // Re-read on the way back rather than held: the tab may have been left while this was in flight,
+    // and painting then is harmless, the panel being hidden.
+    renderUsagePanel(requireElement('strip-panel-usage'), this.usage);
+  }
+
   private renderAgents(): void {
     const agents = agentSessions(this.sessions);
     const active = agents.find((entry) => entry.id === this.selectedAgent) ?? agents[0];
@@ -2314,6 +2340,12 @@ class App {
         if (tab === 'agents') {
           this.renderAgents();
         }
+        // Two files on disk that change when an agent runs, so the tab being shown is exactly
+        // when the answer can have changed and somebody is there to read it. No monitor, the
+        // rule the Git and Worktrees tabs already follow.
+        if (tab === 'usage') {
+          void this.loadUsage();
+        }
         if (tab === 'git') {
           this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);
           void this.loadGit();
@@ -2551,6 +2583,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.worktreesHeight;
     case 'agents':
       return settings.agentsHeight;
+    case 'usage':
+      return settings.usageHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -2566,7 +2600,8 @@ function heightKeyOf(
   | 'gitHeight'
   | 'triageHeight'
   | 'worktreesHeight'
-  | 'agentsHeight' {
+  | 'agentsHeight'
+  | 'usageHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -2580,6 +2615,8 @@ function heightKeyOf(
       return 'worktreesHeight';
     case 'agents':
       return 'agentsHeight';
+    case 'usage':
+      return 'usageHeight';
     case 'projects':
       return 'projectsHeight';
   }

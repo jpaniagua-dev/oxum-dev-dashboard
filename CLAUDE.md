@@ -167,6 +167,52 @@ exceptions:
   and cursor moves, so a `<pre>` showed every frame of that redraw stacked on itself. Honouring them
   is implementing a terminal, which is what the grid one click away already is. `tailLines` went
   with it rather than being left as a dead export.
+### Notes on a session
+
+Added on 2026-09-25, because a board past a dozen cards answers "what have I got running" and not
+"which of these is the one about the fiscal year dropdown". Everything else on a card is derived: a
+title built from a project and an action, an activity read off timing, a phase read off a project
+row. None of it can say what a session was opened FOR.
+
+- **A note attaches to a SESSION, never to a pane.** `TerminalGroup` is `{ tabs, active }` and has
+  no identity at all; a pane's position is its index. A note on a pane would die at the first split
+  and "pane 2" would mean something else, which is the silent loss this file spends its length
+  refusing.
+- ⚠️ **It is the only thing on a card that can be confidently wrong**, and that is why the age is
+  drawn next to it. Every other field is a fact observed a second ago; this is a sentence somebody
+  typed once and did not come back to. It answers "what was this for", which never goes stale, and
+  it must NOT be relied on for "where is it at", which `activityOf` already refuses to claim for
+  exactly the same reason.
+- **The handoff seeds it, and that is what makes the feature worth having.** A note the reader types
+  is a note on the five sessions they thought about, and it is the other ninety that make a board
+  unreadable. `Work on this` builds one from `triage.json` through `noteFromTicket`, read off disk
+  at the spawn like `estimateFor` and never carried on the channel, which still takes keys and
+  nothing else. A **batch gets none**: `noteFromTicket` describes one ticket, and eight of them in a
+  three-line box say less than the tab title beside them.
+- **It dies with the session, and the seeded half comes back on its own.** A restart kills the
+  sessions, and the next handoff rebuilds the note from the analysis still on disk. What is
+  genuinely lost is a note typed by hand on a hand-opened shell, which is the accepted cost of not
+  inventing a second, durable key for one field. Chosen deliberately over keying on the working
+  directory.
+- **Clearing a note IS deleting it.** `trimNote` answers `null` for anything blank, so there is no
+  second channel and no stored empty string: two ways to say "no note" would be two states to keep
+  in step.
+- **The board is the only surface that edits one, and the grid shows it as a tooltip.** A rename is
+  a title, one line, and a strip has room for its input; a note is three lines and a 24px strip does
+  not. The pane's session menu carries the entry, because a card and a tab are two drawings of one
+  session and this app already refuses to keep two menus for them, and it is **disabled with its
+  reason** while the grid is on screen rather than switching surfaces under the reader.
+- **Nothing repaints while the editor is open.** `paint` refuses on `editing` exactly as it refuses
+  on `carrying`. This is the fourth instance of one failure in this codebase (the tab rename, the
+  table's inline rename, the commit draft), and a `<textarea>` loses more than a field does: it
+  loses everything typed since the last poll. `editNote` therefore repaints **before** raising the
+  guard, which is the whole correctness of its four lines.
+- **The note signature carries the age AS RENDERED, never the stamp.** The stamp never changes, so a
+  signature built on it would hold `12 min ago` on the card for the rest of the session. Same trap
+  as the job cards' elapsed clock, reached from the other direction, and it was written wrong first.
+- **`setNote` does not broadcast when nothing moved**, the rule `applyLiveToTickets` set: a session
+  list pushed for an identical note rebuilds every tab strip in both windows for no difference.
+
 - **Card positions and the board mode itself are renderer-only and ephemeral.** Sessions die with the
   app, so positions keyed by session id have nothing to outlive. The mode is not persisted either,
   unlike `terminalColumns`: which surface you happen to be looking at is not a preference, and
@@ -789,6 +835,64 @@ user's own identity, on a colleague's work.
   went out before I pressed Stop" has to have an answer. **Not `singleFlight`**, whose trailing
   re-run would silently run the whole batch, and post, a second time.
 
+
+## Usage tab
+
+Added on 2026-09-25. Reads what the coding agent on this machine has been doing, out of Claude
+Code's own files: no API key, no network call, no vendor CLI, no `ccusage`.
+
+- ⚠️ **Its two halves are not the same age, and the tab exists to say so.** `~/.claude/history.jsonl`
+  is appended on every prompt and is live to the second; `~/.claude/stats-cache.json` is a cache
+  Claude Code rebuilds on its own schedule and is the **only** place per-model token counts exist.
+  Measured on the machine this was built for: the cache said `2026-08-09` when it was read on
+  `2026-09-25`, forty-seven days behind. So `describeStatsAge` runs above every figure that comes
+  from it, and past `STATS_STALE_AFTER_DAYS` it is painted in the warning colour. A tab presenting
+  six-week-old totals as current would be the most confident wrong answer in the app.
+- **An unknown model has NO price, and is said to have none.** The one decision this module turns
+  on. The app this idea came from carries the same hardcoded table and resolves an unknown model
+  through a substring chain onto a family default, so a model it has never heard of is billed at
+  another model's rate with nothing on screen saying so; its table already misses a whole
+  generation. Here `priceFor` matches the id, or the id with its date suffix removed, and nothing
+  else. `estimateTotal` returns the total **and** the names of the models it left out, and the panel
+  prints them. An incomplete total that says what is missing beats a wrong total that does not.
+- **`PRICES_AS_OF` is printed next to every figure the table produces.** A price list in source is a
+  fact that goes stale without telling anybody, so the date is part of the answer rather than a
+  comment above the constant.
+- **A figure Claude Code recorded beats one we computed.** `costUSD` is used when it is non-zero,
+  which is API usage; it is `0` on a subscription, which is when the estimate takes over.
+- **Pulled when the tab is shown, never polled.** Two files that change when an agent runs, so the
+  moment the tab is opened is exactly when the answer can have changed and somebody is there to read
+  it. Same judgement as the Git and Worktrees tabs, and there is no monitor.
+- **Async `readFile`, not `readFileSync`**, unlike the agent context reader next door. That one
+  reads a page; `history.jsonl` measured 1.35 MB here and only grows, and the main loop is the one
+  thread that must not stop.
+- **The project list comes from the history log's own `project` field, not from `~/.claude/projects`.**
+  Those folder names are a path with its separators mangled into dashes, and `claudeProjectKey`
+  already records that the encoding is lossy and is never inverted: a list built from them would
+  show names that are nearly, but not quite, the folders they stand for. The log carries the path
+  untouched.
+- **Sessions are counted with a `Set` per bucket.** A session is resumed, so its prompts are not
+  contiguous in the log and counting transitions would report one session as several.
+- **Days are bucketed in LOCAL time.** `toISOString` would move every evening after 01:00 CEST onto
+  the next day, which is most of an evening's work.
+- **A day with nothing in it is absent from the chart, not a zero bar.** The chart draws what
+  happened, and a run of empty bars over a holiday is noise.
+- **Charts are divs.** This app ships no charting dependency and these are bars; adding one for two
+  of them would be the largest dependency in the tree for the smallest feature.
+- **A missing file is "nothing to show", never an error.** Both halves are `null` independently, and
+  each says which file is absent and what writes it. `parseStatsCache` answers `null` rather than a
+  summary of zeroes, the distinction `no-runs` and `idle` already record.
+- **`.path-clip-start` was extracted out of `.git__path`** when this tab needed the same
+  left-truncation. Same correction as `.git__view` becoming `.subtab`: a class named after one panel
+  is a class the next panel copies instead of reusing.
+- **Deliberately not read: the message bodies under `~/.claude/projects/`.** They hold per-message
+  usage, and reading them means parsing every transcript on the machine on every glance at a tab.
+  If token counts ever have to be current, that is the source, and the price is a cache of our own.
+- **Quota is not shown, and that is a decision.** The 5-hour and 7-day limits reach a Claude Code
+  `statusLine` script on stdin, so reading them means installing one and passing `--settings` at the
+  spawn. This app's agent profile is a command template the user copies from their own agent's
+  documentation; reaching into it to inject our own settings file would break the one promise that
+  template makes. If it is ever wanted, that is the cost to accept first.
 
 ## Jira tab
 

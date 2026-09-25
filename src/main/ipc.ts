@@ -109,6 +109,9 @@ import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
 import { resolveShellCommand, type TerminalManager } from './terminal/terminal-manager.js';
 import type { ThemeController } from './theme.js';
+import { noteFromTicket } from '@shared/session-note.js';
+import type { UsageState } from '@shared/contracts.js';
+import { readUsage } from './usage/usage-reader.js';
 
 export interface IpcDependencies {
   /** Live project list, re-read on every call since settings can change it at any time. */
@@ -1002,6 +1005,23 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           instructionFile: settings.agentProfile.instructionFile,
           startedAt: new Date().toISOString(),
         },
+        /*
+         * The session is born saying what it was sent to do, and this is what makes notes worth
+         * having at all.
+         *
+         * A note the reader has to type is a note written on the handful of sessions they happened
+         * to think about, and it is the other ninety that make a board unreadable. The text comes
+         * from `triage.json` rather than from the channel, the same door `estimateFor` uses: the
+         * analysis is on disk and any part of the app may go and read the current one.
+         *
+         * A batch gets no note. `noteFromTicket` describes ONE ticket, and eight of them in a box
+         * three lines tall would be a note that says less than the tab title beside it already
+         * does.
+         */
+        note:
+          keys.length === 1 && keys[0] !== undefined
+            ? noteFromTicket(deps.triage().ticketFor(keys[0]), basename(project.path))
+            : null,
       });
 
       /*
@@ -1375,6 +1395,25 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       }
     },
   );
+
+  ipcMain.handle(
+    IpcChannel.TerminalNote,
+    async (_event, terminalId: unknown, text: unknown): Promise<void> => {
+      if (typeof terminalId === 'string' && typeof text === 'string') {
+        deps.terminals.setNote(terminalId, text);
+      }
+    },
+  );
+
+  /*
+   * Pulled when the tab is shown, never polled.
+   *
+   * Same judgement as the Git and Worktrees tabs: these are two files on disk that change when an
+   * agent runs, and reading them for a tab nobody is looking at is work for nobody. The renderer
+   * asks when it shows the tab and when the refresh button is pressed, which is exactly when the
+   * answer can have changed and somebody is there to read it.
+   */
+  ipcMain.handle(IpcChannel.UsageRead, async (): Promise<UsageState> => readUsage());
 
   ipcMain.handle(
     IpcChannel.TerminalLayoutSet,

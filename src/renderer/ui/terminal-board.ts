@@ -4,6 +4,7 @@ import { clearChildren, createElement, createIcon } from './dom.js';
 import { AGENT_ICON } from './icons.js';
 import type { JobKind, JobRun } from '@shared/job-run.js';
 import { describeElapsed } from '@shared/job-run.js';
+import { NOTE_LIMIT, describeNoteAge } from '@shared/session-note.js';
 import { buildPill } from './project-table.js';
 import { presentServer } from './presenters.js';
 
@@ -145,6 +146,14 @@ export interface TerminalBoardActions {
    * its result will ever land. The board stays on screen, the strip above it changes.
    */
   onOpenJob: (kind: JobKind) => void;
+  /**
+   * Writes what a session is for, or clears it when the text is empty.
+   *
+   * The board is the only surface that edits a note, and that is a scope decision rather than an
+   * oversight: a note is three lines, a tab strip is twenty-four pixels tall, and the grid already
+   * shows the note as a tab tooltip. One editor, in the one place with room for it.
+   */
+  onNote: (terminalId: TerminalId, text: string) => void;
 }
 
 /** What the board needs to know about the world, handed in on every render. */
@@ -190,6 +199,16 @@ export class TerminalBoard {
   private readonly zoomLabel: HTMLElement;
   /** Set while the plane itself is being dragged, so a click on the background opens no card. */
   private panning = false;
+  /**
+   * The card whose note is being written, or `null`.
+   *
+   * It is also what holds the repaint off. A note editor destroyed under the caret by the one-second
+   * tick is the failure this app has already paid for three times, on the tab rename, the table's
+   * inline rename and the commit draft, and a `<textarea>` loses more than a field does: everything
+   * typed since the last poll.
+   */
+  private editing: TerminalId | null = null;
+
   /** The separator drawn before the surface controls, built once and relocated with them. */
   private readonly controlsRule: HTMLElement;
   /** The chevron beside `+`. Hidden when there is only one shell to choose from. */
@@ -343,6 +362,12 @@ export class TerminalBoard {
           String(session.exitCode),
           String(session.stoppedOnPurpose),
           String(session.agent !== null),
+          // The text AND the age AS RENDERED, never the raw stamp. The stamp never changes, so a
+          // signature carrying it would hold `12 min ago` on the card for the rest of the session:
+          // the same trap the job cards' elapsed clock records, reached from the other direction.
+          session.note === null
+            ? ''
+            : `${session.note.text}@${describeNoteAge(session.note.writtenAt, new Date(now))}`,
           point === undefined ? '' : `${point.x},${point.y}`,
         ].join('\u0001');
       })
@@ -376,8 +401,9 @@ export class TerminalBoard {
   }
 
   private paint(force = false): void {
-    // Never under a pointer that is carrying a card: rebuilding it drops the capture mid-gesture.
-    if (this.carrying) {
+    // Never under a pointer that is carrying a card, and never under an open note editor: the first
+    // drops the pointer capture mid-gesture, the second throws away what is being typed.
+    if (this.carrying || this.editing !== null) {
       return;
     }
     const now = Date.now();
@@ -500,6 +526,7 @@ export class TerminalBoard {
     const card = createElement('div', {
       className: `board-card board-card--${activity}${isAgent ? ' board-card--agent' : ''}`,
     });
+    card.dataset['card'] = session.id;
     card.style.left = `${point.x}px`;
     card.style.top = `${point.y}px`;
     card.title = `${session.title}\n${session.cwd}\n(drag to move it, click to show it, right click to act)`;
@@ -551,6 +578,26 @@ export class TerminalBoard {
       const phase = createElement('span', { className: 'board-card__phase' });
       phase.append(buildPill(presentServer(project.server)));
       body.append(phase);
+    }
+
+    /*
+     * The note, and its age, which is the only pairing on this card that is not decoration.
+     *
+     * Everything else here is a fact the app observed a second ago. This is a sentence a human typed
+     * once and did not come back to, so it is the one thing that can be confidently wrong, and the
+     * age is what lets the reader discount it. Drawn last, under the derived fields, so a card is
+     * still read the same way whether it carries one or not.
+     */
+    if (session.note !== null) {
+      const note = createElement('div', { className: 'board-card__note' });
+      note.append(createElement('p', { className: 'board-card__note-text', text: session.note.text }));
+      note.append(
+        createElement('span', {
+          className: 'board-card__note-age',
+          text: describeNoteAge(session.note.writtenAt, new Date(now)),
+        }),
+      );
+      body.append(note);
     }
     card.append(body);
 
@@ -653,6 +700,100 @@ export class TerminalBoard {
     };
     card.addEventListener('pointerup', end);
     card.addEventListener('pointercancel', end);
+  }
+
+  /**
+   * Opens the note editor on a card, replacing whatever that card was showing.
+   *
+   * Public, because the menu that offers it is the pane's: a card and a tab are two drawings of one
+   * session, and the app already refuses to keep two menus for them. The board is the only surface
+   * that can host the editor, so the pane's menu entry reaches in here.
+   *
+   * Returns quietly when the session has no card, which is every session while the grid is the
+   * surface on screen. A menu entry that silently does nothing would be the failure this app names
+   * outright, so the caller is what decides whether to offer it.
+   */
+  editNote(id: TerminalId): void {
+    if (!this.state.sessions.some((session) => session.id === id)) {
+      return;
+    }
+    // Repaint BEFORE the guard goes up, and forced: an editor may be open on another card, and
+    // `paint` refuses once `editing` is set, so the order here is the whole correctness of it.
+    this.editing = null;
+    this.paint(true);
+    this.editing = id;
+    this.openEditor(id);
+  }
+
+  /**
+   * Puts a textarea over the card's note and hands it the caret.
+   *
+   * A textarea and not a prompt dialog, for the reason this app has no modals at all: under this CSP
+   * a page dialog is not worth the name, and a modal of our own is the pattern that got the settings
+   * modal removed. It commits on blur and on `Enter`, and abandons on `Escape`, which is the rename
+   * input's own grammar, except that `Shift+Enter` breaks a line here because a note has more than
+   * one.
+   */
+  private openEditor(id: TerminalId): void {
+    const card = this.content.querySelector<HTMLElement>(`[data-card="${id}"]`);
+    if (card === null) {
+      this.editing = null;
+      return;
+    }
+    const session = this.state.sessions.find((entry) => entry.id === id);
+    const field = document.createElement('textarea');
+    field.className = 'board-card__editor';
+    field.value = session?.note?.text ?? '';
+    field.maxLength = NOTE_LIMIT;
+    field.rows = 3;
+    field.placeholder = 'What is this session for?';
+    field.setAttribute('aria-label', 'Note about this session');
+    // Stops the card's own drag from starting on a press inside the field, which would otherwise
+    // capture the pointer and make selecting text move the card.
+    field.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
+
+    let done = false;
+    const finish = (commit: boolean): void => {
+      if (done) {
+        return;
+      }
+      done = true;
+      const text = field.value;
+      this.editing = null;
+      if (commit) {
+        this.actions.onNote(id, text);
+      }
+      // Forced, because the session list may come back identical: clearing a note that was already
+      // empty changes nothing in the main process, so nothing is broadcast, and without this the
+      // card would keep the textarea on it.
+      this.paint(true);
+    };
+
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+        return;
+      }
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        finish(true);
+      }
+    });
+    field.addEventListener('blur', () => {
+      finish(true);
+    });
+
+    card.querySelector('.board-card__note')?.remove();
+    card.querySelector('.board-card__body')?.append(field);
+    // A microtask and not an animation frame, the correction the tab rename already carries: a frame
+    // is throttled in an occluded window and loses the race against the next broadcast.
+    void Promise.resolve().then(() => {
+      field.focus();
+      field.select();
+    });
   }
 
   /** Dragging the background moves the whole plane. */
