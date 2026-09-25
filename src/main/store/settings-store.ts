@@ -61,6 +61,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // wants the room the Git tab wants rather than the room a status table wants.
   agentsHeight: 460,
   usageHeight: 460,
+  automationsHeight: 460,
+  automationsEnabled: false,
+  automationShellEnabled: false,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
   // 340 was not. The diff keeps the rest, and the separator is there to change the balance.
   gitListWidth: 460,
@@ -187,6 +190,15 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     ),
     agentsHeight: clamp(asNumber(input.agentsHeight, DEFAULT_SETTINGS.agentsHeight), 90, 1200),
     usageHeight: clamp(asNumber(input.usageHeight, DEFAULT_SETTINGS.usageHeight), 90, 1200),
+    automationsHeight: clamp(
+      asNumber(input.automationsHeight, DEFAULT_SETTINGS.automationsHeight),
+      90,
+      1200,
+    ),
+    // `=== true` and never a truthy read: a hand-edited file must not be able to switch on a
+    // feature that starts agents by itself with the string "false".
+    automationsEnabled: input.automationsEnabled === true,
+    automationShellEnabled: input.automationShellEnabled === true,
     gitListWidth: clamp(asNumber(input.gitListWidth, DEFAULT_SETTINGS.gitListWidth), 240, 1400),
     defaultShellProfileId: asString(
       input.defaultShellProfileId,
@@ -401,7 +413,8 @@ function asStrip(value: unknown): StripTab {
     value === 'triage' ||
     value === 'worktrees' ||
     value === 'agents' ||
-    value === 'usage'
+    value === 'usage' ||
+    value === 'automations'
     ? value
     : 'projects';
 }

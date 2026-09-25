@@ -25,6 +25,7 @@ async function start(): Promise<void> {
       terminal: requireElement('settings-terminal'),
       claude: requireElement('settings-claude'),
       review: requireElement('settings-review'),
+      automations: requireElement('settings-automations'),
       jira: requireElement('settings-jira'),
       footer: requireElement('settings-footer'),
     },

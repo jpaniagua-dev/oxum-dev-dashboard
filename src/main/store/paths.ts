@@ -49,6 +49,14 @@ export const AppPaths = {
    */
   autoRuns: (): string => join(app.getPath('userData'), 'auto-runs.json'),
   /**
+   * The rules that act on their own, their ledgers, and when each scheduled one last ran.
+   *
+   * Its own file for the reasons above, plus the load-bearing one: the ledger is what stops a rule
+   * firing twice on the same fact. Losing it would not lose a preference, it would replay a
+   * morning's worth of notifications and re-arm every rule.
+   */
+  automations: (): string => join(app.getPath('userData'), 'automations.json'),
+  /**
    * Bodies posted to pull requests, one file per review.
    *
    * Written before the post and **kept after it**, exactly like a commit message and for the same

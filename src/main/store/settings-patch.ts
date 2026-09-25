@@ -18,6 +18,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'worktreesHeight',
   'agentsHeight',
   'usageHeight',
+  'automationsHeight',
   'gitListWidth',
   'activeStrip',
   'pullScope',
@@ -57,6 +58,14 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.worktreesHeight === 'number') patch.worktreesHeight = input.worktreesHeight;
   if (typeof input.agentsHeight === 'number') patch.agentsHeight = input.agentsHeight;
   if (typeof input.usageHeight === 'number') patch.usageHeight = input.usageHeight;
+  if (typeof input.automationsHeight === 'number')
+    patch.automationsHeight = input.automationsHeight;
+  // Broadcast, unlike the heights: both are written by the settings window and have to reach the
+  // dashboard, which is the window whose runner reads them.
+  if (typeof input.automationsEnabled === 'boolean')
+    patch.automationsEnabled = input.automationsEnabled;
+  if (typeof input.automationShellEnabled === 'boolean')
+    patch.automationShellEnabled = input.automationShellEnabled;
   if (typeof input.gitListWidth === 'number') patch.gitListWidth = input.gitListWidth;
   // Kept in step with `asStrip` in `settings-store.ts`: a tab this list accepts and that one drops is
   // saved as `projects` on its way to disk, which is how the Triage tab spent a version not being

@@ -1,5 +1,4 @@
 import type { Terminal } from '@xterm/xterm';
-import { TAG_COLORS } from '@shared/project-tags.js';
 import { NOTE_LIMIT } from '@shared/session-note.js';
 import {
   PANE_COLUMNS_AUTO,
@@ -30,7 +29,6 @@ import {
 import { AGENT_ICON } from './icons.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
-import { buildTagDots, primaryTagColor, type TagPalette } from './tags.js';
 import {
   createTerminalView,
   ensureTerminalRenderer,
@@ -249,7 +247,6 @@ export class TerminalPane {
    * given: a tag is a fact about a project, and four views resolving it four ways is four chances to
    * paint the same repository two colours.
    */
-  private palette: TagPalette = { projects: [], colors: {} };
   /**
    * Index of the pane the keyboard and every "here" gesture belong to.
    *
@@ -445,12 +442,6 @@ export class TerminalPane {
       this.surfaceControlsHome = element.parentElement;
     }
     this.renderStrips();
-  }
-
-  /** The tag colours, for the accent a strip takes from its project. */
-  setTagPalette(palette: TagPalette): void {
-    this.palette = palette;
-    this.render();
   }
 
   setTheme(theme: ResolvedTheme): void {
@@ -1479,7 +1470,6 @@ export class TerminalPane {
       }
       clearChildren(strip);
       strip.classList.toggle('terminal__strip--focused', index === this.focused);
-      this.paintStripProject(strip, group.active);
 
       const tabs = createElement('div', { className: 'terminal__tabs' });
       for (const id of group.tabs) {
@@ -1570,25 +1560,6 @@ export class TerminalPane {
    *
    * A free shell belongs to no project and gets neither, which is itself the useful statement.
    */
-  private paintStripProject(strip: HTMLElement, activeId: TerminalId): void {
-    for (const color of TAG_COLORS) {
-      strip.classList.remove(`tag--${color}`);
-    }
-    const session = this.sessions.find((entry) => entry.id === activeId);
-    const projectId = session?.projectId ?? null;
-    if (projectId === null) {
-      return;
-    }
-    const color = primaryTagColor(this.palette, projectId);
-    if (color !== null) {
-      strip.classList.add(`tag--${color}`);
-    }
-    const dots = buildTagDots(this.palette, projectId);
-    if (dots !== null) {
-      strip.append(dots);
-    }
-  }
-
   private buildTab(session: TerminalSession, group: TerminalGroup, groupIndex: number): HTMLElement {
     // Two levels of highlight: `visible` says "this is what its pane is showing", `active` says "the
     // keyboard goes here", which with several panes on screen are genuinely different things.

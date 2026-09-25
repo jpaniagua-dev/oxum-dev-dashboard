@@ -1,9 +1,11 @@
 import type { AgentContext } from '@shared/agent-context.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AgentProfile } from '@shared/agent-profile.js';
+import type { AutomationRule } from '@shared/automation.js';
 import {
   IpcChannel,
   type AgentOpenResult,
+  type AutomationState,
   type UsageState,
   type AppSettings,
   type BootstrapState,
@@ -297,6 +299,24 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.TerminalNote, terminalId, text),
 
   readUsage: (): Promise<UsageState> => ipcRenderer.invoke(IpcChannel.UsageRead),
+
+  readAutomations: (): Promise<AutomationState> =>
+    ipcRenderer.invoke(IpcChannel.AutomationsRead),
+
+  saveAutomations: (rules: readonly AutomationRule[]): Promise<AutomationState> =>
+    ipcRenderer.invoke(IpcChannel.AutomationsSave, rules),
+
+  forgetAutomationTarget: (ruleId: string, targetId: string | null): Promise<AutomationState> =>
+    ipcRenderer.invoke(IpcChannel.AutomationsForget, ruleId, targetId),
+
+  clearAutomationLog: (): Promise<AutomationState> =>
+    ipcRenderer.invoke(IpcChannel.AutomationsClearLog),
+
+  onAutomationsChanged: (listener: (state: AutomationState) => void): (() => void) => {
+    const handler = (_event: unknown, state: AutomationState): void => { listener(state); };
+    ipcRenderer.on(IpcChannel.AutomationsChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.AutomationsChanged, handler);
+  },
 
   setTerminalLayout: (groups: readonly TerminalGroup[], columns: number): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.TerminalLayoutSet, groups, columns),

@@ -112,6 +112,9 @@ import type { ThemeController } from './theme.js';
 import { noteFromTicket } from '@shared/session-note.js';
 import type { UsageState } from '@shared/contracts.js';
 import { readUsage } from './usage/usage-reader.js';
+import type { AutomationRule } from '@shared/automation.js';
+import type { AutomationState } from '@shared/contracts.js';
+import { parseRule } from './automation/automation-store.js';
 
 export interface IpcDependencies {
   /** Live project list, re-read on every call since settings can change it at any time. */
@@ -120,6 +123,10 @@ export interface IpcDependencies {
   readonly pulls: () => PullMonitor;
   readonly jira: () => JiraMonitor;
   readonly triage: () => TriageService;
+  readonly automations: () => AutomationState;
+  readonly saveAutomationRules: (rules: readonly AutomationRule[]) => Promise<AutomationState>;
+  readonly forgetAutomation: (ruleId: string, targetId: string | null) => Promise<AutomationState>;
+  readonly clearAutomationLog: () => AutomationState;
   readonly pullReview: () => PullReviewService;
   readonly autoRuns: () => AutoRunRecords;
   /** Starts a feedback pass by hand, through the same gate the watcher uses. */
@@ -1414,6 +1421,44 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
    * answer can have changed and somebody is there to read it.
    */
   ipcMain.handle(IpcChannel.UsageRead, async (): Promise<UsageState> => readUsage());
+
+  ipcMain.handle(
+    IpcChannel.AutomationsRead,
+    async (): Promise<AutomationState> => deps.automations(),
+  );
+
+  ipcMain.handle(
+    IpcChannel.AutomationsSave,
+    async (_event, rules: unknown): Promise<AutomationState> => {
+      /*
+       * Sanitised in the main process, never trusted as sent.
+       *
+       * The renderer builds a form; what arrives is whatever reached this channel. These rows decide
+       * whether an agent starts on its own, so they go through the same parser a hand-edited file
+       * goes through, which is the rule `tagColors` records: a whole object crossing the boundary is
+       * checked at the boundary and not only where it is read.
+       */
+      const parsed = Array.isArray(rules)
+        ? rules.map(parseRule).filter((rule): rule is AutomationRule => rule !== null)
+        : [];
+      return deps.saveAutomationRules(parsed);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.AutomationsClearLog,
+    async (): Promise<AutomationState> => deps.clearAutomationLog(),
+  );
+
+  ipcMain.handle(
+    IpcChannel.AutomationsForget,
+    async (_event, ruleId: unknown, targetId: unknown): Promise<AutomationState> => {
+      if (typeof ruleId !== 'string') {
+        return deps.automations();
+      }
+      return deps.forgetAutomation(ruleId, typeof targetId === 'string' ? targetId : null);
+    },
+  );
 
   ipcMain.handle(
     IpcChannel.TerminalLayoutSet,

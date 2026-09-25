@@ -1,4 +1,5 @@
 import type { AgentProfile } from './agent-profile.js';
+import type { AutomationRule } from './automation.js';
 import type { UsageActivity, UsageStats } from './usage.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
@@ -1282,7 +1283,8 @@ export type StripTab =
   | 'triage'
   | 'worktrees'
   | 'agents'
-  | 'usage';
+  | 'usage'
+  | 'automations';
 
 /**
  * What the coding agent on this machine has been doing, read from its own files.
@@ -1292,6 +1294,24 @@ export type StripTab =
  * a cache Claude Code rebuilds on its own schedule and can be weeks behind. Either is `null` when
  * the file behind it is absent or unreadable, which is "nothing to show" and never an error.
  */
+/**
+ * The rules, and what the last tick made of them.
+ *
+ * `notice` and `refusals` are stored facts rather than toasts, the rule the feedback watcher's row
+ * already follows: a rule that refused to run is a row that sits there doing nothing, and a reason
+ * recorded where nobody can read it is the failure this whole design argues against.
+ */
+export interface AutomationState {
+  readonly rules: readonly AutomationRule[];
+  /** Per rule, the targets it has already acted on and that are still true. */
+  readonly ledger: Readonly<Record<string, readonly string[]>>;
+  readonly lastRun: Readonly<Record<string, string>>;
+  /** What the last tick ran, newest first, capped for display. */
+  readonly recent: readonly string[];
+  /** Why something did not run. Cleared by the next tick that runs cleanly. */
+  readonly refusals: readonly string[];
+}
+
 export interface UsageState {
   readonly activity: UsageActivity | null;
   readonly stats: UsageStats | null;
@@ -1774,6 +1794,22 @@ export interface AppSettings {
   /** Height of the Agents strip, in pixels. */
   agentsHeight: number;
   usageHeight: number;
+  automationsHeight: number;
+  /**
+   * Whether rules may act at all. **False by default.**
+   *
+   * The switch that guarantees an update cannot start anything before its owner has said, once, that
+   * the feature may exist. Same reasoning as `reviewWritesEnabled` and `feedbackPassEnabled`, and
+   * the same default.
+   */
+  automationsEnabled: boolean;
+  /**
+   * Whether a rule may run a SHELL COMMAND. **False by default, and separate on purpose.**
+   *
+   * A larger grant of a different kind: a notification on a timer is a message, a command line on a
+   * timer with no click anywhere is this app running something nobody read at the moment it ran.
+   */
+  automationShellEnabled: boolean;
   /** Font size of every terminal, in pixels. */
   terminalFontSize: number;
   /**
@@ -2301,6 +2337,11 @@ export const IpcChannel = {
   TerminalRename: 'terminal:rename',
   TerminalNote: 'terminal:note',
   UsageRead: 'usage:read',
+  AutomationsRead: 'automations:read',
+  AutomationsSave: 'automations:save',
+  AutomationsForget: 'automations:forget',
+  AutomationsClearLog: 'automations:clear-log',
+  AutomationsChanged: 'automations:changed',
   /** send: (terminalId, data) => void, keystrokes from xterm to the pty */
   PtyInput: 'pty:input',
   /** send: (terminalId, size) => void */
@@ -2594,6 +2635,21 @@ export interface RendererApi {
   setTerminalNote(terminalId: TerminalId, text: string): Promise<void>;
   /** Reads Claude Code's own usage files. Pulled when the tab is shown, never polled. */
   readUsage(): Promise<UsageState>;
+  readAutomations(): Promise<AutomationState>;
+  /** Replaces the whole rule list. The main process sanitises it, as it does every settings write. */
+  saveAutomations(rules: readonly AutomationRule[]): Promise<AutomationState>;
+  /** Lets a rule act on a target again, or on everything when the target is null. */
+  forgetAutomationTarget(ruleId: string, targetId: string | null): Promise<AutomationState>;
+  /**
+   * Empties the activity list.
+   *
+   * The log only, never the ledger: one is a note of what happened, the other is what stops a rule
+   * acting twice on the same fact. Clearing the second from a button labelled "clear" would re-fire
+   * every rule against everything currently true, which is why the two gestures are separate and
+   * only this one is a cross.
+   */
+  clearAutomationLog(): Promise<AutomationState>;
+  onAutomationsChanged(listener: (state: AutomationState) => void): () => void;
   /**
    * Replaces the layout, panes and tab order together.
    *

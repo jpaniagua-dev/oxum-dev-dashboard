@@ -1324,6 +1324,282 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
+ * The Rules tab
+ * ------------------------------------------------------------------ */
+
+/*
+ * One column and no master-detail, unlike its neighbours.
+ *
+ * A rule is six fields, which fits beside its neighbours and is read in a line; a third column for
+ * that would be the Git tab's grammar applied where it buys nothing. The rules wrap into columns as
+ * the strip widens, since a rule card has a natural width and a single stretched column would be
+ * one 900px-wide checkbox per row.
+ */
+/*
+ * Two columns, both full height, and each scrolling on its own.
+ *
+ * The panel itself does NOT scroll: it is the grid, and a grid that scrolls would move the aside
+ * out of view, which is the one thing a full-height column is for. `min-height: 0` on both tracks
+ * is what lets a grid child be shorter than its content and scroll instead of growing the row,
+ * which is the trap that makes a nested scroller silently do nothing.
+ */
+.automations {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px 10px;
+  overflow: hidden;
+}
+
+.automations__main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+ * The log, down the right, full height and scrolling on its own.
+ *
+ * It was as tall as its content and sticky at first, which read as a note pinned beside the rules;
+ * full height it reads as a column of the tab, which is what it is. Its own scroller rather than
+ * the panel's, so a long history never pushes the rules out of view or the heading off the top.
+ */
+.automations__aside {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+/* The empty state is a sentence, not a blank column: "nothing yet" is an answer. */
+.automations__log--none {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+.automations[hidden] {
+  display: none;
+}
+
+/* The switch being off is the first thing the tab says, in the warning colour and above the form. */
+.automations__off {
+  margin: 0;
+  color: var(--warning);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.automations__bar {
+  display: flex;
+  gap: 8px;
+}
+
+.automations__empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.automations__refusals {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.automations__refusal {
+  margin: 0;
+  color: var(--warning);
+  font-size: var(--font-sm);
+}
+
+.automations__log {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  overflow-wrap: anywhere;
+}
+
+.automations__recent-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 2px;
+}
+
+/* Pushed to the far edge of the heading, so the cross never sits against the word. */
+.automations__clear {
+  margin-left: auto;
+  width: 18px;
+  height: 18px;
+}
+
+.automations__clear svg {
+  width: 10px;
+  height: 10px;
+}
+
+.automations__recent-title svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+
+.automations__recent-title {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.automations__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.automation {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+/* A disabled rule is readable and quiet, never hidden: it is still a thing you configured. */
+.automation--off {
+  opacity: 0.6;
+}
+
+.automation__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.automation__name {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+/*
+ * An unnamed rule, which is the one state that blocks its own switch.
+ *
+ * Coloured because it is "not yet true", which is the only thing colour is spent on in this window
+ * and in the settings one: unsaved, invalid, a missing token. Everything else here is greyscale.
+ */
+.automation__name--missing {
+  border-color: var(--warning);
+}
+
+.automation__name:hover:not(:disabled),
+.automation__name:focus-visible {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+
+.automation__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.automation__label {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+}
+
+.automation__select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+.automation__select--narrow {
+  flex: 1 1 130px;
+}
+
+.automation__clock,
+.automation__every {
+  width: 64px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  /* A time and a count are values something else reads back exactly, which is this app's one rule
+     for reaching for the monospace face. */
+  font-family: var(--font-mono);
+}
+
+.automation__text {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  resize: vertical;
+}
+
+.automation__hint {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+}
+
+.automation__warn {
+  margin: 0;
+  color: var(--warning);
+  font-size: var(--font-2xs);
+}
+
+.automation__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* ------------------------------------------------------------------ *
  * The Jira board
  *
  * One column per workflow stage, one card per issue. It replaced a sortable table, and it took the
@@ -2642,16 +2918,18 @@ body {
   min-width: 0;
   padding: 4px 6px;
   /*
-   * The line under a strip is the pane's colour, and it is the widest thing on the cell that can
-   * carry one. `--tag-colour` is set by the `tag--<colour>` class the strip is given from its
-   * project's first tag, the same property the chips and the dots read, so a repository is the same
-   * colour here as it is on the pull request, Git and worktree rows. Untagged falls through to the
-   * plain border, which is the honest answer for a shell belonging to no project.
+   * A plain hairline, and it carried the project's tag colour until 2026-09-25.
    *
-   * 2px and not 1: at a quarter of the window this line is read from across the screen, and a
-   * hairline in a mid-tone is a grey hairline.
+   * Removed on request, along with the dots beside the tabs. What the colour answered is a
+   * question a pane does not raise: it is one terminal you are already looking at, whose project
+   * you chose when you opened it, and the accent only became noticeable once rules started
+   * opening project-bound agent tabs. The lists that ARE about telling projects apart, the pull
+   * request, Git and worktree rows, keep their dots.
+   *
+   * 2px and not 1: at a quarter of the window this line separates a strip from the terminal under
+   * it across the screen, and a hairline in a mid-tone is invisible there.
    */
-  border-bottom: 2px solid var(--tag-colour, var(--border));
+  border-bottom: 2px solid var(--border);
 }
 
 /*

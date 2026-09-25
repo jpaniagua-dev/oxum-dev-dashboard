@@ -72,6 +72,9 @@
             <button type="button" id="strip-tab-usage" class="strip__tab" role="tab">
               Usage
             </button>
+            <button type="button" id="strip-tab-automations" class="strip__tab" role="tab">
+              Rules
+            </button>
           </div>
           <div class="projects__header-actions">
             <!--
@@ -247,6 +250,13 @@
           cache's age stated over the figures it applies to.
         -->
         <div class="usage" id="strip-panel-usage" role="tabpanel" hidden></div>
+
+        <!--
+          One column, no master-detail: a rule is six fields and fits beside its neighbours, so a
+          third column for something readable in a line would be the Git tab's grammar applied where
+          it buys nothing.
+        -->
+        <div class="automations" id="strip-panel-automations" role="tabpanel" hidden></div>
 
         <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
           <div class="pulls__repos" id="triage-sprints"></div>

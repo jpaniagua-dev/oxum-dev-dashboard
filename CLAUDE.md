@@ -451,11 +451,21 @@ row. None of it can say what a session was opened FOR.
   sessions running right now, which die with the app; how many columns to arrange them in is a
   preference. It therefore crosses both settings lists (`sanitizeSettings` **and** `asPatch`) and
   sits in `LOCAL_ONLY_KEYS`, being written by the dashboard's own header.
-- **Two channels for two facts on a pane, and do not merge them.** The **view's frame** carries
-  focus, the **strip's bottom border** carries the project's first tag colour, and the tag dots
-  beside the tabs carry the full list. Focus used to live on the strip's bottom border, which is why
-  it had to move: a project colour and a focus ring on one border means the loser is whichever one
-  the reader did not think to look for.
+- **A pane carries ONE fact in colour: which one the keyboard is in.** The view's frame says it,
+  and the strip's bottom border is a plain hairline. That border used to carry the project's
+  first tag colour, and the tabs used to carry tag dots beside them; both went on 2026-09-25, on
+  request. The reason they had been there is the reason they stopped being worth it: they answer
+  "which stack is this line", which is a question a LIST of projects raises and a single terminal
+  you are already looking at does not. The accent had gone unnoticed for versions and only became
+  visible once rules started opening project-bound agent tabs.
+- **The pane no longer knows about the tag palette at all.** `setTagPalette`, `paintStripProject`
+  and `primaryTagColor` went with the accent rather than staying as plumbing nothing reads. The
+  dots themselves stay in `tags.ts` and in their three other callers, the pull request, Git and
+  worktree rows, which are lists of projects and are what they were built for.
+- **Focus used to live on the strip's bottom border**, which is why it moved to the view's frame:
+  a project colour and a focus ring on one border means the loser is whichever one the reader did
+  not think to look for. The border is free again now, and putting anything back on it would be
+  re-running that mistake.
 - **The layout lives in the main process, and it IS the tab order.** There are no longer two
   authorities: the `terminal:reorder` channel and the `Map` insertion order are gone, a tab is where
   its group says it is. The renderer computes the whole structure and sends it, the main process
@@ -946,6 +956,89 @@ Code's own files: no API key, no network call, no vendor CLI, no `ccusage`.
   spawn. This app's agent profile is a command template the user copies from their own agent's
   documentation; reaching into it to inject our own settings file would break the one promise that
   template makes. If it is ever wanted, that is the cost to accept first.
+
+## Rules: automations that act on their own
+
+Added on 2026-09-25, after measuring the tab it was asked to imitate. Worth knowing before touching
+this: in the app it came from, that tab **schedules nothing on Windows** (launchd, with a crontab
+fallback that throws), so what looks like a working feature there is CRUD over a JSON file. Three of
+its design choices are deliberately not copied, and each is a rule here.
+
+- **A rule observes a fact that has BECOME TRUE, it does not diff two states.** Diffing needs a
+  "before" that a restart loses, and it cannot tell "this became true while I was closed" from "this
+  was already true". A condition over the current state plus a ledger of what has been acted on
+  gives edge detection and the anti-loop guard with one mechanism instead of two that can disagree.
+- ⚠️ **The ledger holds what is STILL true and drops the rest**, which is the half the first draft
+  got wrong. A ledger that remembered for ever meant a dev server broke, was fixed, broke again, and
+  said nothing the second time. Keeping only what is currently true makes a rule fire once per
+  CONTINUOUS period during which its fact holds, which is what "tell me when this happens" means in
+  every case here. It also bounds the ledger for free, so the cap that was written first is gone.
+  It is rewritten on **every** tick, including one that fires nothing, because a quiet tick is
+  exactly when things fall out.
+- ⚠️ **A rule starts DISARMED.** The first evaluation records what is true and acts on none of it.
+  Without that, a rule created on a morning with nine approved pull requests announces all nine.
+  `armed` is stored, so this happens once in a rule's life and not once per launch. Editing a rule's
+  trigger re-arms it and clears its ledger, in `saveAutomationRules`: what a rule watches decides
+  what is true for it, so keeping the old ledger would leave it silent for ever about everything
+  already matching.
+- **The triggers are a CLOSED LIST and the engine is generic**, which is the honest division. The
+  schedule, the guard, the ledger, the templating and the actions know no special case; the triggers
+  are named because this app knows a named set of facts. The alternative is a predicate language
+  over an untyped state blob, which is a DSL, and there is none here to extend. Adding one is a
+  branch in `targetsFor` and its test.
+- **Event rules ride the existing polls and have no timer.** The payload is the authority on what is
+  true, so a cadence of its own would be free to disagree with the state it depends on, the argument
+  the feedback watcher already records. `schedule` is the ONE kind with a timer, a single 30 s
+  interval, and it is the only reason that timer exists. The two families must never share an answer
+  to "is it time".
+- **A scheduled rule touches no ledger.** It has no target, so `lastRun` is the whole of its state:
+  a constant target id would make a daily rule fire exactly once ever, and a changing one would grow
+  the ledger without bound.
+- **No cron.** `atMinute` (local minutes past midnight) or `everyMinutes`, and nothing else. The
+  expressions actually wanted are "at HH:MM" and "every N minutes", while a cron parser is a
+  subsystem with an edge case per field; the app this was modelled on hand-rolled a partial one that
+  understands one shape and silently falls back to "an hour from now" for every other. A rule that
+  says when in neither way **never runs**, rather than running every tick.
+- **Two switches, both false by default, and they grant different things.** `automationsEnabled`
+  means "this app may act with nobody at the keyboard"; `automationShellEnabled` means "and one of
+  those acts may be a command line". Folding them into one would hand the second to everyone who
+  wanted the first. A shell action under a closed switch is **refused in words**, on the rule's own
+  row and in the tick's report, never skipped in silence: it would otherwise look exactly like a
+  rule that never matched.
+- **The record is flushed BEFORE anything runs, and the write is awaited.** The ordering the feedback
+  pass pays for in its own note: recording afterwards leaves a window in which the file says a target
+  has not been acted on while an agent is already acting on it, and the next poll is seconds away.
+- **The runner never throws.** It rides other features' polls, so an exception would take the project
+  rows or the pull request list down with it. A plain `busy` flag and not `singleFlight`, whose
+  trailing re-run would fire everything a second time.
+- ⚠️ **`quotePrompt` is the one place free text reaches a shell.** The ticket handoff appends its
+  prompt the same way and says the quotes suffice *because* nothing a colleague wrote reaches that
+  line; a rule's prompt is not that. Backslash, double quote, dollar and backtick are escaped and
+  newlines are folded to spaces, since a line break inside the quotes would end the command and run
+  the rest as a second one. It is **not** written to be safe against a hostile author, which would
+  mean refusing the feature: whoever edits these rules already has a terminal.
+- **Outputs are code, not prompt instructions.** The app this came from appends "post this to
+  Telegram" to the agent's prompt and lets the model decide whether to do it. Here an action is a
+  branch in `perform`, so what happens is what the code does.
+- **A rule's tab id comes from its own text**, reduced to letters, digits and dashes and carrying
+  `RESERVED_ACTION_PREFIX`. Two rules never share a tab, the same rule firing twice lands in the one
+  already open, and a settings save cannot close a running one.
+- **The panel is one column, no master-detail.** A rule is six fields and is read in a line; a third
+  column for that would be the Git tab's grammar where it buys nothing. Every control is **disabled
+  while the feature is off**, with the reason on screen: this is the only surface whose controls arm
+  something that then runs unwatched, so a form that looked live would be the worst version of a
+  button that does nothing.
+- **Fields commit on `change`, never on `input`.** A save broadcasts and the panel rebuilds, so a
+  field rebuilt on every keystroke loses the caret. Same guard the project table's rename needs.
+- **`parseRule` reads `enabled` and `armed` as `=== true`.** A rule read from a file this version did
+  not write is one whose meaning may have drifted, and one that starts agents by itself must not be
+  switched on, or armed, by a value that merely failed to be `false`.
+- **Rules sent over IPC go through `parseRule` too**, not just files. The renderer builds a form;
+  what arrives is whatever reached the channel, and these rows decide whether an agent starts on its
+  own. Same rule `tagColors` records: a whole object crossing the boundary is checked at the
+  boundary.
+- **The one guess this feature makes is stated**: an action with no project falls back to the first
+  configured one, because a tab needs a folder and a rule can watch something with no repository.
 
 ## Jira tab
 

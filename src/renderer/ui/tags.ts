@@ -198,21 +198,3 @@ export function buildTagDots(palette: TagPalette, projectId: ProjectId): HTMLEle
   return host;
 }
 
-/**
- * The colour of a project's first tag, or `null` when it carries none.
- *
- * Deliberately **lossy**, and it exists for one surface: the terminal strip, where the colour is
- * carried by a border spanning the cell rather than by a 7px dot. At the size a pane is read from in
- * a grid, the dots answer "which stack, exactly" only once you are close enough to count them, and
- * the border answers "not the one I was looking for" from across the window. The dots stay beside it
- * as the complete statement, so nothing is hidden, only summarised.
- *
- * The **first** tag and not a blend or a priority rule: the tag order is the order they were typed,
- * it is stable, and it is the same order the chips are read in on the projects table, so the cell
- * takes the colour of the chip furthest left on the row that configured it.
- */
-export function primaryTagColor(palette: TagPalette, projectId: ProjectId): TagColor | null {
-  const project = palette.projects.find((entry) => entry.id === projectId);
-  const first = project?.tags[0];
-  return first === undefined ? null : tagColorOf(palette.colors, first);
-}

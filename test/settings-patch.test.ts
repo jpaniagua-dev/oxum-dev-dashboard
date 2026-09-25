@@ -127,6 +127,7 @@ describe('LOCAL_ONLY_KEYS', () => {
     expect([...LOCAL_ONLY_KEYS].sort()).toEqual([
       'activeStrip',
       'agentsHeight',
+      'automationsHeight',
       'gitHeight',
       'gitListWidth',
       'jiraHeight',

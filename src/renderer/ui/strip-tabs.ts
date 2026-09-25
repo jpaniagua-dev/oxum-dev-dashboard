@@ -22,6 +22,7 @@ export const STRIP_TABS: readonly StripTab[] = [
   'worktrees',
   'agents',
   'usage',
+  'automations',
 ];
 
 export class StripTabs {
@@ -36,6 +37,7 @@ export class StripTabs {
     worktrees: requireElement<HTMLButtonElement>('strip-tab-worktrees'),
     agents: requireElement<HTMLButtonElement>('strip-tab-agents'),
     usage: requireElement<HTMLButtonElement>('strip-tab-usage'),
+    automations: requireElement<HTMLButtonElement>('strip-tab-automations'),
   };
 
   private readonly panels: Record<StripTab, HTMLElement> = {
@@ -47,6 +49,7 @@ export class StripTabs {
     worktrees: requireElement('strip-panel-worktrees'),
     agents: requireElement('strip-panel-agents'),
     usage: requireElement('strip-panel-usage'),
+    automations: requireElement('strip-panel-automations'),
   };
 
   constructor(private readonly actions: StripTabsActions) {

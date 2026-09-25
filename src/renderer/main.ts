@@ -33,8 +33,9 @@ import type { AgentContext } from '@shared/agent-context.js';
 import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
-import type { UsageState } from '@shared/contracts.js';
+import type { AutomationState, UsageState } from '@shared/contracts.js';
 import { renderUsagePanel } from './ui/usage-panel.js';
+import { renderAutomationPanel } from './ui/automation-panel.js';
 import { moveProject } from '@shared/project-order.js';
 import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
 import {
@@ -185,6 +186,7 @@ class App {
   private triage: TriageState | null = null;
   /** The last usage read, kept only so a re-show paints something before the files are read again. */
   private usage: UsageState | null = null;
+  private automations: AutomationState | null = null;
   /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
   private autoRuns: AutoRunRecord[] = [];
   private triagePanel: TriagePanel | null = null;
@@ -362,7 +364,6 @@ class App {
     });
     // After the layout, never before: the strips are painted per pane, so a palette applied to a
     // surface with no panes yet would be a render thrown away.
-    this.terminal.setTagPalette(this.tagPalette());
     // After the layout, for the same reason the palette is: they are placed inside a strip, and
     // there is no strip until the panes exist.
     this.placeSurfaceControls();
@@ -470,6 +471,12 @@ class App {
       this.renderBoard();
     });
 
+    window.api.onAutomationsChanged((state) => {
+      this.automations = state;
+      if (this.strip?.active === 'automations') {
+        this.renderAutomations();
+      }
+    });
     window.api.onTriageChanged((state) => {
       this.triage = state;
       this.renderTriage();
@@ -643,6 +650,44 @@ class App {
     renderUsagePanel(requireElement('strip-panel-usage'), this.usage);
   }
 
+  /** Reads the rules once, then paints. The broadcast keeps it current afterwards. */
+  private async loadAutomations(): Promise<void> {
+    this.automations = await window.api.readAutomations();
+    this.renderAutomations();
+  }
+
+  private renderAutomations(): void {
+    renderAutomationPanel(
+      requireElement('strip-panel-automations'),
+      {
+        state: this.automations,
+        projects: this.projects,
+        enabled: this.settings?.automationsEnabled ?? false,
+        shellEnabled: this.settings?.automationShellEnabled ?? false,
+      },
+      {
+        onSave: (rules) => {
+          void window.api.saveAutomations(rules).then((state) => {
+            this.automations = state;
+            this.renderAutomations();
+          });
+        },
+        onForget: (ruleId, targetId) => {
+          void window.api.forgetAutomationTarget(ruleId, targetId).then((state) => {
+            this.automations = state;
+            this.renderAutomations();
+          });
+        },
+        onClearLog: () => {
+          void window.api.clearAutomationLog().then((state) => {
+            this.automations = state;
+            this.renderAutomations();
+          });
+        },
+      },
+    );
+  }
+
   private renderAgents(): void {
     const agents = agentSessions(this.sessions);
     const active = agents.find((entry) => entry.id === this.selectedAgent) ?? agents[0];
@@ -729,7 +774,6 @@ class App {
     this.terminal?.setFontSize(bootstrap.settings.terminalFontSize);
     // A tag renamed or recoloured in the settings window repaints the strips, the same way it
     // repaints the dots on the pull request, Git and worktree rows.
-    this.terminal?.setTagPalette(this.tagPalette());
     // The board offers the same shells as the strip, so a profile added in the settings has to reach
     // it too.
     this.renderBoard();
@@ -2355,6 +2399,11 @@ class App {
         if (tab === 'usage') {
           void this.loadUsage();
         }
+        // Read once on show, then kept current by the broadcast: unlike Usage, this state changes
+        // because the main process changed it, and it says so on its own channel when it does.
+        if (tab === 'automations') {
+          void this.loadAutomations();
+        }
         if (tab === 'git') {
           this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);
           void this.loadGit();
@@ -2594,6 +2643,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.agentsHeight;
     case 'usage':
       return settings.usageHeight;
+    case 'automations':
+      return settings.automationsHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -2610,7 +2661,8 @@ function heightKeyOf(
   | 'triageHeight'
   | 'worktreesHeight'
   | 'agentsHeight'
-  | 'usageHeight' {
+  | 'usageHeight'
+  | 'automationsHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -2626,6 +2678,8 @@ function heightKeyOf(
       return 'agentsHeight';
     case 'usage':
       return 'usageHeight';
+    case 'automations':
+      return 'automationsHeight';
     case 'projects':
       return 'projectsHeight';
   }

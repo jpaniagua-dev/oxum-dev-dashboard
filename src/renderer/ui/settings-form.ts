@@ -123,6 +123,7 @@ export interface SettingsFormHosts {
   readonly terminal: HTMLElement;
   readonly claude: HTMLElement;
   readonly review: HTMLElement;
+  readonly automations: HTMLElement;
   readonly jira: HTMLElement;
   readonly footer: HTMLElement;
 }
@@ -199,6 +200,8 @@ export class SettingsForm {
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
   private feedbackPass = false;
+  private automationsOn = false;
+  private automationShell = false;
   private botLogin = '';
   /** The agent profile being edited. Its own copy: the form must not mutate what the app renders from. */
   private agent: AgentProfile = CLAUDE_CODE_PROFILE;
@@ -253,6 +256,8 @@ export class SettingsForm {
     };
     this.reviewWrites = settings.reviewWritesEnabled;
     this.feedbackPass = settings.feedbackPassEnabled;
+    this.automationsOn = settings.automationsEnabled;
+    this.automationShell = settings.automationShellEnabled;
     this.botLogin = settings.geminiBotLogin;
     this.agent = { ...settings.agentProfile };
     this.agentStatus = '';
@@ -303,6 +308,7 @@ export class SettingsForm {
     this.renderTerminal();
     this.renderAgent();
     this.renderReview();
+    this.renderAutomations();
     this.renderJira();
     this.renderFooter();
     this.renderRail();
@@ -429,6 +435,23 @@ export class SettingsForm {
             ? 'posts to GitHub as you'
             : 'reads only',
         tone: this.feedbackPass || this.reviewWrites ? 'warn' : 'neutral',
+      },
+      {
+        id: 'section-automations',
+        name: 'Rules',
+        /*
+         * The state names what is granted, not whether a box is ticked.
+         *
+         * The same judgement the review entry records one row up: "on" is a word nobody weighs,
+         * while "runs commands by itself" is the sentence that makes somebody think before leaving
+         * it that way. The louder grant wins the line.
+         */
+        state: !this.automationsOn
+          ? 'off'
+          : this.automationShell
+            ? 'runs commands by itself'
+            : 'starts agents by itself',
+        tone: this.automationsOn ? 'warn' : 'neutral',
       },
       {
         id: 'section-jira',
@@ -764,6 +787,58 @@ export class SettingsForm {
    * cannot leak it back and an empty field means "leave it alone" rather than "erase it". The test button
    * runs one real query, because only that proves the credentials and the project keys together.
    */
+  /**
+   * The two switches a rule needs, and they are two for the same reason the review's are.
+   *
+   * The first grants "this app may act without a click". The second grants "and one of those acts
+   * may be a command line". Folding them into one would hand the second to everybody who wanted
+   * the first, which is the mistake the review section's own note records.
+   */
+  private renderAutomations(): void {
+    clearChildren(this.hosts.automations);
+
+    const on = this.checkbox(
+      'Let rules act on their own',
+      this.automationsOn,
+      (checked) => {
+        this.automationsOn = checked;
+        this.touch();
+        this.renderAutomations();
+        this.renderRail();
+      },
+    );
+    on.title =
+      'With this off, rules can be written and edited and none of them runs. With it on, a rule ' +
+      'acts the moment what it watches becomes true, with nobody at the keyboard.';
+    this.hosts.automations.append(on);
+
+    const shell = this.checkbox(
+      'Let a rule run a shell command',
+      this.automationShell,
+      (checked) => {
+        this.automationShell = checked;
+        this.touch();
+        this.renderRail();
+      },
+    );
+    /*
+     * Disabled while the master switch is off, rather than hidden.
+     *
+     * A control that vanishes takes the knowledge that it exists with it, and this is the one a
+     * reader should see before deciding: knowing a rule COULD run a command is part of weighing
+     * whether to turn rules on at all.
+     */
+    shell.title = this.automationsOn
+      ? 'A rule may open a terminal tab and run whatever its text says, on a poll or on a timer, ' +
+        'with no click anywhere. Off, a rule configured that way refuses and says so.'
+      : 'Turn rules on first.';
+    const shellBox = shell.querySelector('input');
+    if (shellBox !== null && !this.automationsOn) {
+      shellBox.disabled = true;
+    }
+    this.hosts.automations.append(shell);
+  }
+
   private renderJira(): void {
     clearChildren(this.hosts.jira);
 
@@ -1624,6 +1699,8 @@ export class SettingsForm {
       agentReviewModel: this.agentModels.review,
       reviewWritesEnabled: this.reviewWrites,
       feedbackPassEnabled: this.feedbackPass,
+      automationsEnabled: this.automationsOn,
+      automationShellEnabled: this.automationShell,
       geminiBotLogin: this.botLogin,
       agentProfile: this.agent,
       tagColors: this.tagColors,
@@ -1641,6 +1718,8 @@ export class SettingsForm {
     };
     this.reviewWrites = saved.reviewWritesEnabled;
     this.feedbackPass = saved.feedbackPassEnabled;
+    this.automationsOn = saved.automationsEnabled;
+    this.automationShell = saved.automationShellEnabled;
     // Read back like the models: the store falls back to the default login when the field is blanked,
     // so leaving the empty string on screen would show a setting that is not the one in force.
     this.botLogin = saved.geminiBotLogin;

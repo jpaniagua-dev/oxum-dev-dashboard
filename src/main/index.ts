@@ -1,7 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import {
   IpcChannel,
+  RESERVED_ACTION_PREFIX,
   type AppSettings,
+  type AutomationState,
+  type Project,
   type JiraConfig,
   type ProjectRow,
   type ShellProfile,
@@ -48,6 +51,10 @@ import { detectProfiles, mergeProfiles, resolveDefaultProfile } from './terminal
 import { TerminalManager, resolveShellCommand } from './terminal/terminal-manager.js';
 import { ThemeController } from './theme.js';
 import { DashboardWindow, loadRendererPage, preloadPath } from './window.js';
+import { quotePrompt } from '@shared/automation.js';
+import { AutomationRunner, forgetRule, forgetTarget } from './automation/automation-runner.js';
+import { AutomationStore } from './automation/automation-store.js';
+import { buildInteractiveCommand } from './triage/work-command.js';
 
 /**
  * Development runs get their own data directory.
@@ -170,6 +177,9 @@ async function bootstrap(): Promise<void> {
         // than routed, unlike the pty output: this is one small payload on the poll's cadence, not a
         // byte stream, and there is nothing per-window to decide about it.
         serversWindow.send(IpcChannel.RowsChanged, rows);
+        // Never awaited by the poll: the runner reports on its own channel, and a rule that takes a
+        // moment must not hold the row payload the whole app paints from.
+        void runAutomations();
       },
       // The dashboard only: the servers window has no tab that reads git on demand.
       () => dashboardWindow.send(IpcChannel.GitPolled),
@@ -198,6 +208,18 @@ async function bootstrap(): Promise<void> {
    * during start-up: there is no window to bring a session forward into yet.
    */
   let spawnFeedbackTab: FeedbackPorts['spawn'] = () => null;
+
+  /*
+   * The two spawns a rule can ask for, assigned once the terminal manager exists.
+   *
+   * `false` until then, and that is the correct state during start-up rather than a gap: a rule that
+   * fired in the first second would have nowhere to put a tab, and reporting "could not" is what
+   * makes that visible instead of silent.
+   */
+  let startAutomationAgent: (prompt: string, projectId: string | null, title: string) => boolean =
+    () => false;
+  let startAutomationShell: (command: string, projectId: string | null, title: string) => boolean =
+    () => false;
 
   const feedbackWatcher = new FeedbackWatcher(
     autoRuns,
@@ -269,6 +291,7 @@ async function bootstrap(): Promise<void> {
         void feedbackWatcher
           .tick(pullMonitor.rows())
           .then(() => dashboardWindow.send(IpcChannel.AutoRunsChanged, autoRuns.all()));
+        void runAutomations();
       },
     );
 
@@ -279,8 +302,120 @@ async function bootstrap(): Promise<void> {
   const jiraMonitor = new JiraMonitor(
     () => settingsStore.get(),
     secrets,
-    (state) => dashboardWindow.send(IpcChannel.JiraChanged, state),
+    (state) => {
+      dashboardWindow.send(IpcChannel.JiraChanged, state);
+      void runAutomations();
+    },
   );
+
+  /*
+   * The rules that act on their own.
+   *
+   * Every side effect is a port, handed in rather than imported, for the reason the feedback
+   * watcher's are: a test that cannot assert "this tick started nothing" is not a test of a feature
+   * whose whole job is starting things without being asked.
+   */
+  /*
+   * Thirty seconds, which is a minute's resolution with room for a tick to be late.
+   *
+   * The only timer this feature has, and it serves scheduled rules alone: everything else rides a
+   * poll that was going to run anyway.
+   */
+  const AUTOMATION_TICK_MS = 30_000;
+  /** How many lines of "what ran" the row keeps. Enough to answer "did it fire", not a log file. */
+  const AUTOMATION_LOG_LIMIT = 20;
+
+  const automationStore = new AutomationStore(AppPaths.automations());
+  await automationStore.load();
+
+  let automationRecent: readonly string[] = [];
+  let automationRefusals: readonly string[] = [];
+  const automationState = (): AutomationState => {
+    const data = automationStore.all();
+    return {
+      rules: data.rules,
+      ledger: data.ledger,
+      lastRun: data.lastRun,
+      recent: automationRecent,
+      refusals: automationRefusals,
+    };
+  };
+  const pushAutomations = (): AutomationState => {
+    const state = automationState();
+    dashboardWindow.send(IpcChannel.AutomationsChanged, state);
+    return state;
+  };
+
+  const automationRunner = new AutomationRunner(
+    automationStore,
+    () => {
+      const settings = settingsStore.get();
+      return {
+        enabled: settings.automationsEnabled,
+        shellEnabled: settings.automationShellEnabled,
+      };
+    },
+    {
+      notify,
+      runAgent: (prompt, projectId, title) => startAutomationAgent(prompt, projectId, title),
+      runShell: (command, projectId, title) => startAutomationShell(command, projectId, title),
+      now: () => new Date(),
+    },
+  );
+
+  /**
+   * One tick over everything a rule can see.
+   *
+   * Assembled here rather than passed by each poll, because a rule may watch any of the three and
+   * the caller should not have to know which: whichever poll reported, the world it is handed is the
+   * whole of what the app currently believes.
+   */
+  const runAutomations = async (): Promise<void> => {
+    const result = await automationRunner.tick({
+      rows: monitor?.rows() ?? [],
+      pulls: pullMonitor.rows(),
+      /*
+       * Every issue across the views, de-duplicated by key.
+       *
+       * The two views overlap by design (`My issues` is a subset of the sprint in all but order), so
+       * a flat concatenation would hand the same ticket to a rule twice and the ledger would hold
+       * one id for two entries. Keyed rather than filtered, because which view an issue came from
+       * says nothing about the issue.
+       */
+      issues: [
+        ...new Map(
+          jiraMonitor
+            .state()
+            .views.flatMap((view) => view.issues)
+            .map((issue) => [issue.key, issue] as const),
+        ).values(),
+      ],
+    });
+    if (result.ran.length > 0 || result.refusals.length > 0) {
+      automationRecent = [...result.ran, ...automationRecent].slice(0, AUTOMATION_LOG_LIMIT);
+      automationRefusals = result.refusals;
+      pushAutomations();
+    }
+  };
+
+  /*
+   * The one timer in this feature, and the only reason it exists.
+   *
+   * Thirty seconds, which is a minute's resolution with room for a tick to be late. Only scheduled
+   * rules come through here; everything else rides a poll and is free.
+   */
+  const scheduleTimer = setInterval(() => {
+    void automationRunner.tickSchedule().then((result) => {
+      if (result.ran.length > 0 || result.refusals.length > 0) {
+        automationRecent = [...result.ran, ...automationRecent].slice(0, AUTOMATION_LOG_LIMIT);
+        automationRefusals = result.refusals;
+        pushAutomations();
+      }
+    });
+  }, AUTOMATION_TICK_MS);
+  app.on('will-quit', () => {
+    clearInterval(scheduleTimer);
+  });
 
   // Triage shares the Jira credentials and nothing else: it is pulled, never polled.
   const triageService = new TriageService(
@@ -365,6 +500,109 @@ async function bootstrap(): Promise<void> {
   // The stored grid, so the very first layout the dashboard is handed already has the right shape.
   settingsStore.get().terminalColumns);
   terminals = terminalManager;
+
+  /**
+   * Where a rule's tab opens.
+   *
+   * The named project, or the first configured one. A rule can watch something with no project at
+   * all (a scheduled report, an issue that names no repository), and a spawn needs a folder, so
+   * "the first configured project" is the fallback rather than a refusal. Stated here because it is
+   * a guess, and the only one this feature makes.
+   */
+  /**
+   * A tab id from a rule's own text.
+   *
+   * Two rules must not share a tab, and the same rule firing twice must land in the one already
+   * open, which is what `runProjectCommand` does for a repeated action id. Derived from the text
+   * rather than from the rule's id because the text is what the tab is running: edit a rule and it
+   * gets a new tab, which is the honest outcome.
+   *
+   * Reduced to letters, digits and dashes: this ends up inside an action id that `isUnreachable`
+   * matches on, and a slash or a quote in there is a key nothing can look up again.
+   */
+  const automationTabKey = (text: string): string =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40);
+
+  /** A rule tab wears its rule name, prefixed, so the strip separates what a rule started
+      from what you opened. The middle dot is the separator every other title here uses. */
+  const automationTabTitle = (name: string): string => `Rule · ${name}`;
+
+  const automationProject = (projectId: string | null): Project | undefined => {
+    const all = resolveProjects(settingsStore.get().projects);
+    return all.find((project) => project.id === projectId) ?? all[0];
+  };
+
+  startAutomationAgent = (prompt, projectId, title) => {
+    const project = automationProject(projectId);
+    const settings = settingsStore.get();
+    const profile = resolveDefaultProfile(
+      mergeProfiles(detectProfiles(), settings.shellProfiles),
+      settings.defaultShellProfileId,
+    );
+    if (project === undefined || profile === undefined) {
+      return false;
+    }
+    const resolved = resolveShellCommand(
+      profile,
+      `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel)} "${quotePrompt(prompt)}"`,
+    );
+    const id = terminalManager.runProjectCommand({
+      project,
+      // Keyed on the rule's own prompt so two rules never share a tab, and reserved so a settings
+      // save cannot close a running one: `isUnreachable` exempts this prefix.
+      actionId: `${RESERVED_ACTION_PREFIX}auto:${automationTabKey(prompt)}`,
+      /*
+       * The rule's own name, and nothing else.
+       *
+       * A tab called `web-app · rule` is indistinguishable from the next one, which on a board of
+       * cards is the exact problem notes were added to solve. The name is required for a rule to
+       * run at all, so this can never be empty.
+       */
+      title: automationTabTitle(title),
+      file: resolved.file,
+      args: resolved.args,
+      size: terminalSize,
+      profileId: profile.id,
+      cwd: resolveWorkspaceRoot(settings.workspaceRoot, project.path),
+      agent: {
+        label: settings.agentProfile.label,
+        model: settings.agentWorkModel,
+        instructionFile: settings.agentProfile.instructionFile,
+        startedAt: new Date().toISOString(),
+      },
+      note: prompt,
+    });
+    return id !== null;
+  };
+
+  startAutomationShell = (command, projectId, title) => {
+    const project = automationProject(projectId);
+    const settings = settingsStore.get();
+    const profile = resolveDefaultProfile(
+      mergeProfiles(detectProfiles(), settings.shellProfiles),
+      settings.defaultShellProfileId,
+    );
+    if (project === undefined || profile === undefined) {
+      return false;
+    }
+    const resolved = resolveShellCommand(profile, command);
+    return (
+      terminalManager.runProjectCommand({
+        project,
+        actionId: `${RESERVED_ACTION_PREFIX}auto:${automationTabKey(command)}`,
+        title: automationTabTitle(title),
+        file: resolved.file,
+        args: resolved.args,
+        size: terminalSize,
+        profileId: profile.id,
+        note: command,
+      }) !== null
+    );
+  };
 
   spawnFeedbackTab = (input) => {
     const profile = resolveDefaultProfile(
@@ -452,6 +690,53 @@ async function bootstrap(): Promise<void> {
     pulls: () => pullMonitor,
     jira: () => jiraMonitor,
     triage: () => triageService,
+    automations: automationState,
+    clearAutomationLog: () => {
+      /*
+       * In memory only, so there is nothing to write.
+       *
+       * The log is what this process has seen since it started and is deliberately not persisted:
+       * it answers "did my rule fire just now", and a list surviving a restart would answer that
+       * with last week. The ledger, which IS persisted, is untouched here.
+       */
+      automationRecent = [];
+      automationRefusals = [];
+      return pushAutomations();
+    },
+    saveAutomationRules: async (rules) => {
+      /*
+       * A rule the reader has just edited is UNARMED again.
+       *
+       * Changing what a rule watches changes what is true for it, so keeping the old ledger would
+       * make it silent about everything already matching its new trigger, for ever. Re-arming means
+       * one quiet adoption pass and then normal behaviour, which is the same courtesy a new rule
+       * gets.
+       */
+      const previous = new Map(automationStore.all().rules.map((rule) => [rule.id, rule]));
+      const ledger = { ...automationStore.all().ledger };
+      const next = rules.map((rule) => {
+        const before = previous.get(rule.id);
+        const changed = before === undefined || before.trigger !== rule.trigger;
+        if (changed) {
+          delete ledger[rule.id];
+          return { ...rule, armed: false };
+        }
+        return { ...rule, armed: before.armed };
+      });
+      await automationStore.save({ ...automationStore.all(), rules: next, ledger });
+      return pushAutomations();
+    },
+    forgetAutomation: async (ruleId, targetId) => {
+      const data = automationStore.all();
+      await automationStore.save({
+        ...data,
+        ledger:
+          targetId === null
+            ? forgetRule(data.ledger, ruleId)
+            : forgetTarget(data.ledger, ruleId, targetId),
+      });
+      return pushAutomations();
+    },
     pullReview: () => pullReviewService,
     autoRuns: () => autoRuns,
     /**
