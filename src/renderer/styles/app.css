@@ -3026,7 +3026,7 @@ body {
   position: absolute;
   z-index: 20;
   top: calc(100% + 20px);
-  right: 8px;
+  right: 22px;
   max-width: calc(100% - 8px);
   display: flex;
   flex-direction: column;
