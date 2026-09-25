@@ -3012,6 +3012,33 @@ npm run dist:zip   # only the zip, under the name the GitHub release carries
 npm run dist:setup # only the NSIS installer, under the name the GitHub release carries
 ```
 
+## Versioning
+
+**SemVer, and the major is the one that needs a rule** because this is an application and not a
+library: there is no API for a caller to break, so "breaking" has to be defined against the
+person running it. It is, and these are the cases:
+
+- **MAJOR** when an upgrade does not leave the app as its owner left it. Stored state that can no
+  longer be read or that loses a value (`settings.json`, `triage.json`, `auto-runs.json`,
+  `pull-reviews.json`, `automations.json`), a setting that has to be filled in again, or a
+  feature that is **removed** rather than changed. A visible affordance disappearing counts:
+  somebody had it yesterday and does not today, which is exactly what a major number is for
+  warning about.
+- **MINOR** for a feature that adds. A new tab, a new column, a new setting with a default, a new
+  file the app writes for itself. Nothing an existing install has to be told about.
+- **PATCH** for a fix, and for anything invisible: a refactor, a comment, a test, a dependency
+  that changes nothing on screen.
+
+Two consequences worth stating, because both have come up:
+
+- **A settings key renamed with a fallback is MINOR, not major.** `claudeAnalysisModel` becoming
+  `agent*` read the old name for a version, so nobody had to do anything, which is the whole
+  test above. Dropping that fallback later would be the major.
+- ⚠️ **The number is also the only way to tell three builds apart**, since the installer, the
+  portable and the zip are identical on screen and share one `userData`. That job is served by
+  the version changing at all, not by which digit changed, so it is never an argument for
+  choosing one over another. Pick the digit by the rule above and nothing else.
+
 ## Release
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`: the gates (lint, tests, typecheck), the zip
