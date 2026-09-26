@@ -72,7 +72,7 @@ import { renderReviewOverview } from './ui/review-overview.js';
 import { renderWorktreeList } from './ui/worktree-list.js';
 import type { TagPalette } from './ui/tags.js';
 import { TriagePanel } from './ui/triage-panel.js';
-import { StripTabs } from './ui/strip-tabs.js';
+import { loadRestoredStrip, StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
 import { applyUiFontSize } from './ui/ui-font.js';
 import { appShortcut } from './ui/app-shortcuts.js';
@@ -411,22 +411,23 @@ class App {
     // Painted so the tab is never blank, but only **read** when it is the one on screen: the reads
     // are per-repository and there is no monitor pushing them.
     this.renderGit();
-    if (bootstrap.settings.activeStrip === 'git') {
-      void this.loadGit();
-    }
     // Same rule for the worktrees, which are read the same way and for the same reason: `Reading...`
     // until the tab is the one on screen.
     this.renderWorktrees();
-    if (bootstrap.settings.activeStrip === 'worktrees') {
-      void this.loadWorktrees();
-    }
-    // `adopt` restores the active tab without firing the user's `onChange` callback. Paint the
-    // Vault once during bootstrap and start its on-demand read here when it was the saved tab;
-    // otherwise an app reopened on Vault stays empty until somebody leaves and comes back.
+    // Paint the Vault even while hidden so a future reveal never flashes an empty panel. Its
+    // on-demand read follows the restored-tab rule above.
     this.renderVault();
-    if (bootstrap.settings.activeStrip === 'vault') {
-      void this.loadVault();
-    }
+    // `adopt` restores the saved tab without firing the user's `onChange` callback. Every panel
+    // whose state is read only when shown therefore needs the same bootstrap path as a click, or an
+    // app reopened on that tab stays empty until somebody leaves and comes back.
+    loadRestoredStrip(bootstrap.settings.activeStrip, {
+      usage: () => void this.loadUsage(),
+      automations: () => void this.loadAutomations(),
+      vault: () => void this.loadVault(),
+      triage: () => void this.loadTriage(),
+      worktrees: () => void this.loadWorktrees(),
+      git: () => void this.loadGit(),
+    });
 
     window.api.onRowsChanged((rows) => {
       this.rows = rows;
@@ -749,6 +750,9 @@ class App {
 
   /** Reads the rules once, then paints. The broadcast keeps it current afterwards. */
   private async loadAutomations(): Promise<void> {
+    // Unlike the structured tabs, this panel starts as an empty host. Paint its loading state before
+    // crossing IPC so even a slow disk read looks deliberate rather than broken.
+    this.renderAutomations();
     this.automations = await window.api.readAutomations();
     this.renderAutomations();
   }

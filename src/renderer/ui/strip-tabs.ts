@@ -6,6 +6,44 @@ export interface StripTabsActions {
   onChange: (tab: StripTab) => void;
 }
 
+export interface RestoredStripLoaders {
+  readonly usage: () => void;
+  readonly automations: () => void;
+  readonly vault: () => void;
+  readonly triage: () => void;
+  readonly worktrees: () => void;
+  readonly git: () => void;
+}
+
+/** Runs the on-demand read that `adopt` deliberately does not report as a user tab change. */
+export function loadRestoredStrip(tab: StripTab, loaders: RestoredStripLoaders): void {
+  switch (tab) {
+    case 'usage':
+      loaders.usage();
+      break;
+    case 'automations':
+      loaders.automations();
+      break;
+    case 'vault':
+      loaders.vault();
+      break;
+    case 'triage':
+      loaders.triage();
+      break;
+    case 'worktrees':
+      loaders.worktrees();
+      break;
+    case 'git':
+      loaders.git();
+      break;
+    case 'projects':
+    case 'pulls':
+    case 'jira':
+    case 'agents':
+      break;
+  }
+}
+
 /**
  * The two views of the top strip.
  *

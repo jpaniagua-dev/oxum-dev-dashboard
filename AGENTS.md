@@ -1129,9 +1129,10 @@ committed or pasted into a chat.
   out, behind a confirmation, because a refusal with no exit is a dead feature.
 - **`VaultChanged` is routed to the dashboard, never broadcast.** The servers window has no business
   receiving a payload about secrets even when it carries none.
-- **A saved Vault tab is loaded explicitly during bootstrap.** `StripTabs.adopt` restores the tab
-  without firing `onChange`, so relying on the click-time loader leaves the restored panel empty
-  until the user visits another tab and comes back.
+- **Every saved on-demand tab is loaded explicitly during bootstrap.** `StripTabs.adopt` restores a
+  tab without firing `onChange`, so `Usage`, `Rules`, `Vault` and `Triage` all take the same read path
+  during startup as they do after a click. Otherwise their empty hosts stay empty until the user
+  visits another tab and comes back. Rules also paints its loading state before crossing IPC.
 
 ## Jira tab
 
