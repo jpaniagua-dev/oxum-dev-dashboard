@@ -1606,10 +1606,10 @@ body {
 .vault {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
   min-height: 0;
-  padding: 8px 10px 10px;
+  padding: 10px 12px 12px;
   overflow-y: auto;
 }
 
@@ -1617,22 +1617,65 @@ body {
   display: none;
 }
 
-/*
- * The limit, permanently and first.
- *
- * Not a dismissible banner and not a tooltip: it is the sentence that stops this feature being
- * trusted for something it cannot do, and a reader who dismissed it once would never see it again.
- * Painted in the warning colour, which in this app means "not yet true" and here means "not true
- * after this point".
- */
-.vault__warning {
-  margin: 0;
-  padding: 6px 8px;
-  border-left: 2px solid var(--warning);
+.vault__intro {
+  display: flex;
+  flex-direction: column;
+  align-self: flex-start;
+  width: min(100%, 500px);
+  gap: 8px;
+}
+
+.vault__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.vault__new-variable {
+  padding: 3px 9px;
+  font-size: var(--font-xs);
+}
+
+.vault__info {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+}
+
+.vault__info[aria-expanded='true'] {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.vault__help {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--primary);
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
+}
+
+.vault__help[hidden] {
+  display: none;
+}
+
+.vault__help-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.vault__help-steps {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 18px;
   color: var(--text-dim);
   font-size: var(--font-xs);
+  line-height: 1.45;
 }
 
 .vault__blocked {
@@ -1650,26 +1693,33 @@ body {
 }
 
 .vault__empty {
-  margin: 0;
+  width: min(100%, 500px);
+  margin: 2px 0 0;
   color: var(--text-faint);
   font-size: var(--font-sm);
 }
 
-.vault__form {
+.vault__editor {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  box-sizing: border-box;
+  gap: 10px;
+  padding: 11px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-inset) 58%, var(--surface));
 }
 
 .vault__form-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+.vault__editor-title {
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-weight: 600;
 }
 
 .vault__field,
@@ -1690,7 +1740,90 @@ body {
 /* The secret itself is a value something else reads back exactly, which is this app's one rule for
    reaching for the monospace face. */
 .vault__value {
-  flex: 1 1 100%;
+  box-sizing: border-box;
+  flex: 1;
+  width: auto;
+  min-height: 30px;
+  height: 30px;
+  padding: 0 4px 0 8px;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+}
+
+.vault__value:focus {
+  outline: 0;
+}
+
+.vault__field--wide {
+  flex-basis: 100%;
+  width: 100%;
+}
+
+.vault__field--mono {
+  font-family: var(--font-mono);
+}
+
+.vault__form-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--font-xs);
+}
+
+.vault__file-target {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(190px, 1.2fr);
+  gap: 8px;
+}
+
+.vault__advanced {
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+}
+
+.vault__advanced > summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.vault__advanced[open] > summary {
+  margin-bottom: 6px;
+}
+
+.vault__capability-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+}
+
+.vault__capability-toggle,
+.vault__method {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  font-size: var(--font-xs);
+}
+
+.vault__capability-copy {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+}
+
+.vault__methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.vault__method {
+  color: var(--text-dim);
   font-family: var(--font-mono);
 }
 
@@ -1699,32 +1832,123 @@ body {
   font-size: var(--font-2xs);
 }
 
-/* The same track as the Rules list, so the two tabs read at one rhythm. */
-.vault__list {
+.vault__files {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 500px));
+  align-self: flex-start;
   align-items: start;
+  justify-content: start;
+  box-sizing: border-box;
+  width: 100%;
+  gap: 10px;
+}
+
+.vault__file {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 2%);
+}
+
+.vault__file--editing {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+}
+
+.vault__file-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+.vault__file-identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.vault__file-project {
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.vault__file-path {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault__file-actions {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.vault__generate,
+.vault__file-add,
+.vault__remove-file {
+  padding: 2px 7px;
+  font-size: var(--font-xs);
+}
+
+.vault__variables {
+  display: flex;
+  flex-direction: column;
+}
+
+.vault__variables > .vault__card {
+  border-bottom: 1px solid var(--border);
+}
+
+.vault__variables > :last-child {
+  border-bottom: 0;
+}
+
+.vault__variables .vault__card-name {
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
 }
 
 .vault__card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
+  gap: 7px;
+  padding: 10px 11px;
 }
 
 .vault__card-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
+.vault__card-identity {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  gap: 8px;
+}
+
+.vault__card-actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
 .vault__card-name {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1740,36 +1964,145 @@ body {
   font-size: var(--font-2xs);
 }
 
-/*
- * The mask, and it is a constant twelve dots.
- *
- * Never sized from the value: a mask as long as the secret says whether it is a six-digit PIN or a
- * sixty-four character key, which is a third of the answer given away by a decoration.
- */
-.vault__secret {
-  padding: 3px 6px;
+.vault__secret-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 30px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
+}
+
+.vault__secret-control:focus-within {
+  border-color: var(--primary);
+}
+
+.vault__secret-control--shown {
+  border-color: var(--warning);
+}
+
+/* The mask is always twelve dots: its length must not reveal the length of the stored value. */
+.vault__secret {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: var(--font-sm);
-  /* Clipped on one line: a card's height must not depend on the length of what it holds, which is
-     the same thing the constant mask exists to hide. */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.vault__secret--shown {
-  border-color: var(--warning);
+.vault__secret-control--shown .vault__secret {
   color: var(--text);
 }
 
-.vault__card-row {
+.vault__secret-action {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-right: 2px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.vault__secret-action:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+}
+
+.vault__editor-actions {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
+}
+
+.vault__file-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-inset);
+}
+
+.vault__file-count {
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+}
+
+.vault__capability {
+  padding: 5px 7px;
+  border-left: 2px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-2xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.vault__activity {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.vault__activity-title {
+  margin: 2px 0 0;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+.vault__activity-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.vault__activity-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(220px, 1.3fr);
+  gap: 8px;
+  padding: 5px 7px;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-xs);
+}
+
+.vault__activity-row:last-child {
+  border-bottom: 0;
+}
+
+.vault__activity-row--succeeded {
+  border-left: 2px solid var(--success);
+}
+
+.vault__activity-row--denied,
+.vault__activity-row--failed {
+  border-left: 2px solid var(--warning);
+}
+
+.vault__activity-operation {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault__activity-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------------ *
@@ -3041,6 +3374,52 @@ body {
 }
 
 /*
+ * A selected card opens the existing terminal view as a fixed-width sidebar beside the board.
+ *
+ * Both children keep their original DOM nodes. In particular, no xterm is moved into a card: the
+ * pane isolates one session inside its own permanent container, removes the grid-only tab strip,
+ * and lets the terminal occupy the whole sidebar. This rule only divides that space from the canvas.
+ */
+.terminal--board-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--pane-splitter) var(--board-preview-width, 420px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.terminal--board-preview .terminal__surface {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.terminal--board-preview .terminal__strip {
+  display: none;
+}
+
+.terminal__board-resizer {
+  grid-column: 2;
+  grid-row: 1;
+  background: var(--border-strong);
+  cursor: ew-resize;
+}
+
+.terminal__board-resizer:hover,
+.terminal__board-resizer:focus-visible {
+  background: var(--primary);
+  outline: none;
+}
+
+.terminal__board-resizer[hidden] {
+  display: none;
+}
+
+.terminal--board-preview .terminal__board {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+}
+
+/*
  * The controls that act on the whole terminal surface.
  *
  * They ride inside the first pane's tab strip, which is why there is no padding and no alignment
@@ -3622,8 +4001,8 @@ body {
  * The session board
  *
  * The other surface of the terminal pane: the same sessions as cards on a pannable plane. A sibling
- * of `.terminal__surface`, never a child, and the two are never both on screen. Board mode hides the
- * surface wholesale, which is what keeps every xterm on the element it was opened on.
+ * of `.terminal__surface`, never a child. It fills the pane until a card is selected, then shares it
+ * with the existing terminal surface; neither arrangement moves an xterm from its permanent element.
  * ------------------------------------------------------------------ */
 
 .terminal__board {
@@ -3754,6 +4133,12 @@ body {
 
 .board-card:hover {
   border-color: var(--border-strong);
+}
+
+/* The card whose live terminal occupies the sidebar. One accent, on the selection boundary only. */
+.board-card--selected {
+  border-color: var(--primary);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
 
 /*
@@ -3946,7 +4331,6 @@ body {
   font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
 }
-
 
 /* ------------------------------------------------------------ context menu */
 

@@ -117,7 +117,14 @@ import type { AutomationState } from '@shared/contracts.js';
 import { parseRule } from './automation/automation-store.js';
 import type { VaultResult } from '@shared/contracts.js';
 import type { VaultCard, VaultState } from '@shared/vault.js';
-import { sanitizeHint, sanitizeName } from '@shared/vault.js';
+import {
+  sanitizeHint,
+  sanitizeHttpCapability,
+  sanitizeName,
+  sanitizeVaultFileBinding,
+  sanitizeVaultVariableName,
+} from '@shared/vault.js';
+import type { VaultFiles } from './vault/vault-files.js';
 import type { VaultStore } from './vault/vault-store.js';
 
 export interface IpcDependencies {
@@ -132,6 +139,9 @@ export interface IpcDependencies {
   readonly forgetAutomation: (ruleId: string, targetId: string | null) => Promise<AutomationState>;
   readonly clearAutomationLog: () => AutomationState;
   readonly vault: () => VaultStore;
+  readonly vaultFiles: () => VaultFiles;
+  /** Metadata and the in-memory broker audit, never secret values. */
+  readonly vaultState: () => VaultState;
   /** Pushes the vault to the dashboard after a change. Routed, never broadcast: see the channel. */
   readonly pushVault: () => VaultState;
   readonly pullReview: () => PullReviewService;
@@ -1470,11 +1480,26 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     }
     const row = payload as Record<string, unknown>;
     const id = typeof row['id'] === 'string' ? row['id'] : '';
-    const name = sanitizeName(row['name']);
+    const hasFile = row['file'] !== null && row['file'] !== undefined;
+    const file = hasFile ? sanitizeVaultFileBinding(row['file']) : null;
+    const name = file === null ? sanitizeName(row['name']) : sanitizeVaultVariableName(row['name']);
     if (id.length === 0 || name.length === 0) {
       return null;
     }
     const createdAt = typeof row['createdAt'] === 'string' ? row['createdAt'] : '';
+    const hasCapability = row['capability'] !== null && row['capability'] !== undefined;
+    const capability = hasCapability ? sanitizeHttpCapability(row['capability']) : null;
+    if (
+      (hasFile &&
+        (file === null || !deps.projects().some((project) => project.id === file.projectId))) ||
+      (hasCapability &&
+        (capability === null ||
+          capability.projectIds.some(
+            (projectId) => !deps.projects().some((project) => project.id === projectId),
+          )))
+    ) {
+      return null;
+    }
     return {
       id,
       name,
@@ -1483,6 +1508,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         ? new Date().toISOString()
         : createdAt,
       expiresAt: typeof row['expiresAt'] === 'string' ? row['expiresAt'] : null,
+      file,
+      capability,
     };
   }
 
@@ -1517,8 +1544,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
   ipcMain.handle(IpcChannel.VaultRead, async (): Promise<VaultState> => {
     // Swept before it answers, so a card that died while the app was closed is never listed.
-    await deps.vault().sweep(new Date());
-    return deps.vault().state();
+    const dropped = await deps.vault().sweep(new Date());
+    await deps.vaultFiles().sync(
+      dropped.flatMap((card) => (card.file === null ? [] : [card.file])),
+    );
+    return deps.vaultState();
   });
 
   ipcMain.handle(
@@ -1528,7 +1558,15 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       if (parsed === null || typeof value !== 'string') {
         return { ok: false, message: 'That card could not be read' };
       }
+      const previous = deps.vault().state().cards.find((entry) => entry.id === parsed.id);
       const result = await deps.vault().save(parsed, value);
+      if (result.ok) {
+        await deps.vaultFiles().sync(
+          [previous?.file ?? null, parsed.file].flatMap((binding) =>
+            binding === null ? [] : [binding],
+          ),
+        );
+      }
       deps.pushVault();
       return result;
     },
@@ -1561,6 +1599,9 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return { ok: false, message: 'Nothing was deleted' };
       }
       const removed = await deps.vault().remove(id);
+      if (removed && card.file !== null) {
+        await deps.vaultFiles().sync([card.file]);
+      }
       deps.pushVault();
       return removed
         ? { ok: true, message: `Deleted ${card.name}` }
@@ -1581,54 +1622,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     typeof id === 'string' ? ((await deps.vault().valueOf(id, new Date())) ?? '') : '',
   );
 
-  ipcMain.handle(
-    IpcChannel.VaultSend,
-    async (event, id: unknown, terminalId: unknown): Promise<VaultResult> => {
-      if (typeof id !== 'string' || typeof terminalId !== 'string') {
-        return { ok: false, message: 'No card or no session named' };
-      }
-      const card = deps.vault().state().cards.find((entry) => entry.id === id);
-      const session = deps.terminals.sessions().find((entry) => entry.id === terminalId);
-      if (card === undefined || session === undefined) {
-        return { ok: false, message: 'That card or that session no longer exists' };
-      }
-      /*
-       * Confirmed, and naming BOTH the card and the tab.
-       *
-       * The `Approve` button refuses a dialog on the grounds that a box answered twenty times a day
-       * is a reflex rather than a decision. That argument cuts the other way here: this is not a
-       * twenty-times-a-day gesture, and a production key typed into the wrong terminal, possibly a
-       * shared screen, is not undoable by anything.
-       */
-      const ok = await confirm(event, {
-        title: 'Send a secret to a session',
-        message: `Type "${card.name}" into ${session.title}?`,
-        detail:
-          'The value is typed at the prompt and NOT submitted, so you can read it before pressing ' +
-          'Enter. Whatever receives it keeps it: an agent holds it in its context and writes it to ' +
-          'its own transcript.',
-        confirmLabel: 'Send',
-      });
-      if (!ok) {
-        return { ok: false, message: 'Nothing was sent' };
-      }
-      const value = await deps.vault().valueOf(id, new Date());
-      if (value === null) {
-        deps.pushVault();
-        return { ok: false, message: 'That card has expired' };
-      }
-      /*
-       * No trailing carriage return, and that is the decision.
-       *
-       * `write` is raw pty input, so a `\r` submits. The worst case without it is one keypress; the
-       * worst case with it is a production key submitted to a prompt nobody read.
-       */
-      return deps.terminals.write(terminalId, value)
-        ? { ok: true, message: `Typed ${card.name} into ${session.title}` }
-        : { ok: false, message: 'That session is no longer running, so nothing was typed' };
-    },
-  );
-
   ipcMain.handle(IpcChannel.VaultCopy, async (_event, id: unknown): Promise<VaultResult> => {
     if (typeof id !== 'string') {
       return { ok: false, message: 'No card named' };
@@ -1644,6 +1637,50 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     return { ok: true, message: 'Copied. Windows keeps a clipboard history, so paste it soon.' };
   });
 
+  ipcMain.handle(
+    IpcChannel.VaultGenerateFile,
+    async (event, payload: unknown): Promise<VaultResult> => {
+      const binding = sanitizeVaultFileBinding(payload);
+      const project =
+        binding === null
+          ? undefined
+          : deps.projects().find((entry) => entry.id === binding.projectId);
+      if (binding === null || project === undefined) {
+        return { ok: false, message: 'The project or output file is invalid.' };
+      }
+      const ok = await confirm(event, {
+        title: 'Generate a Vault file',
+        message: `Generate ${binding.path} in ${project.label}?`,
+        detail:
+          'The file contains plaintext secrets. Project processes, including agents, can read it. ' +
+          'Oxum keeps the values out of the renderer and conversation, and writes only to a path ignored by Git.',
+        confirmLabel: 'Generate file',
+      });
+      return ok
+        ? deps.vaultFiles().generate(binding)
+        : { ok: false, message: 'No file was generated' };
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.VaultRemoveFile,
+    async (event, payload: unknown): Promise<VaultResult> => {
+      const binding = sanitizeVaultFileBinding(payload);
+      if (binding === null) {
+        return { ok: false, message: 'The project or output file is invalid.' };
+      }
+      const ok = await confirm(event, {
+        title: 'Remove a generated Vault file',
+        message: `Remove ${binding.path}?`,
+        detail: 'Only a file carrying the Oxum Vault marker can be removed.',
+        confirmLabel: 'Remove file',
+      });
+      return ok
+        ? deps.vaultFiles().remove(binding)
+        : { ok: false, message: 'The file was left untouched' };
+    },
+  );
+
   ipcMain.handle(IpcChannel.VaultReset, async (event): Promise<VaultState> => {
     const ok = await confirm(event, {
       title: 'Start a new vault',
@@ -1654,7 +1691,12 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       confirmLabel: 'Start over',
     });
     if (ok) {
+      const files = deps
+        .vault()
+        .state()
+        .cards.flatMap((card) => (card.file === null ? [] : [card.file]));
       await deps.vault().reset();
+      await deps.vaultFiles().sync(files);
     }
     return deps.pushVault();
   });

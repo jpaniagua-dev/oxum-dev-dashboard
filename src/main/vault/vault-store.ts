@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { safeStorage } from 'electron';
 import type { VaultCard, VaultEntry, VaultState } from '@shared/vault.js';
-import { cardsOf, parseVault, sweepExpired } from '@shared/vault.js';
+import { cardsOf, parseVault, sameVaultFile, sweepExpired, type VaultFileBinding } from '@shared/vault.js';
 import { atomicWriteFile, fileExists } from '../store/atomic-write.js';
 
 /**
- * The half of the vault that encrypts, and the only place a secret is in memory as plain text.
+ * The half of the vault that encrypts, and the authority that may release a value inside main.
  *
  * Modelled on `SecretStore` and different from it in one way that decides the shape: that one holds
  * a single scalar, this holds a set. **One encrypted blob rather than a file per card**, because
@@ -13,9 +13,8 @@ import { atomicWriteFile, fileExists } from '../store/atomic-write.js';
  * consistent, with a half-written vault as the failure. The whole blob is rewritten on every
  * change, which for a handful of cards costs nothing.
  *
- * Everything that can be tested lives in `shared/vault.ts`. What is here is the call Electron owns
- * and the file handling around it, which is the split `secret-store.ts` never made and pays for by
- * having no test at all.
+ * Values returned by `valueOf` may be used by the main-process operation broker or by an explicit
+ * manual gesture. They never ride on `VaultState` or an activity record.
  */
 export class VaultStore {
   private entries: VaultEntry[] = [];
@@ -69,6 +68,7 @@ export class VaultStore {
   state(): VaultState {
     return {
       cards: cardsOf(this.entries),
+      activity: [],
       available: this.available(),
       unreadable: this.unreadable,
     };
@@ -87,8 +87,14 @@ export class VaultStore {
     return this.entries.find((entry) => entry.card.id === id)?.value ?? null;
   }
 
+  /** Values for one generated file. Main-process only; never exposed through IPC. */
+  async entriesForFile(binding: VaultFileBinding, now: Date): Promise<readonly VaultEntry[]> {
+    await this.sweep(now);
+    return this.entries.filter((entry) => sameVaultFile(entry.card.file, binding));
+  }
+
   /**
-   * Adds a card, or renames one.
+   * Adds a card, or edits its non-secret metadata and capability.
    *
    * ⚠️ **The value of an existing card is never replaced, and the expiry rule is what forbids it.**
    * A lifetime is measured from creation, so a new secret under an old card would either inherit
@@ -111,6 +117,17 @@ export class VaultStore {
     if (existing === undefined && value.length === 0) {
       return { ok: false, message: 'A card needs a value' };
     }
+    if (
+      card.file !== null &&
+      this.entries.some(
+        (entry) =>
+          entry.card.id !== card.id &&
+          entry.card.name.toLowerCase() === card.name.toLowerCase() &&
+          sameVaultFile(entry.card.file, card.file),
+      )
+    ) {
+      return { ok: false, message: `${card.name} already exists in that file` };
+    }
     /*
      * An existing card keeps its stored value AND its expiry, whatever arrives.
      *
@@ -124,7 +141,11 @@ export class VaultStore {
         : this.entries.map((entry) =>
             entry.card.id === card.id
               ? {
-                  card: { ...card, createdAt: entry.card.createdAt, expiresAt: entry.card.expiresAt },
+                  card: {
+                    ...card,
+                    createdAt: entry.card.createdAt,
+                    expiresAt: entry.card.expiresAt,
+                  },
                   value: entry.value,
                 }
               : entry,

@@ -56,6 +56,8 @@ import { AutomationRunner, forgetRule, forgetTarget } from './automation/automat
 import { AutomationStore } from './automation/automation-store.js';
 import { buildInteractiveCommand } from './triage/work-command.js';
 import type { VaultState } from '@shared/vault.js';
+import { VaultBroker } from './vault/vault-broker.js';
+import { VaultFiles } from './vault/vault-files.js';
 import { VaultStore } from './vault/vault-store.js';
 
 /**
@@ -428,7 +430,18 @@ async function bootstrap(): Promise<void> {
    */
   const vaultStore = new VaultStore(AppPaths.vault());
   await vaultStore.load();
-  await vaultStore.sweep(new Date());
+  const vaultFiles = new VaultFiles({ vault: vaultStore, projects: () => projects });
+  const startupDropped = await vaultStore.sweep(new Date());
+  await vaultFiles.sync(
+    startupDropped.flatMap((card) => (card.file === null ? [] : [card.file])),
+  );
+  let vaultBroker: VaultBroker | null = null;
+
+  /** Adds the current-process audit trail without ever persisting it beside the credentials. */
+  const vaultState = (): VaultState => ({
+    ...vaultStore.state(),
+    activity: vaultBroker?.activity() ?? [],
+  });
 
   /**
    * Pushes the vault to the DASHBOARD only, never broadcast.
@@ -438,24 +451,53 @@ async function bootstrap(): Promise<void> {
    * this app where the cost of being wrong is not a wasted xterm.
    */
   const pushVault = (): VaultState => {
-    const state = vaultStore.state();
+    const state = vaultState();
     dashboardWindow.send(IpcChannel.VaultChanged, state);
     return state;
   };
 
+  vaultBroker = new VaultBroker({
+    vault: vaultStore,
+    projects: () => projects,
+    onActivity: pushVault,
+    confirm: async (request) => {
+      const options: Electron.MessageBoxOptions = {
+        type: 'warning',
+        buttons: ['Approve once', 'Deny'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        title: request.title,
+        message: request.message,
+        detail: request.detail,
+      };
+      const owner = dashboardWindow.browserWindow;
+      const { response } =
+        owner === null
+          ? await dialog.showMessageBox(options)
+          : await dialog.showMessageBox(owner, options);
+      return response === 0;
+    },
+  });
+  await vaultBroker.start();
+
   /** A minute, which is finer than the shortest lifetime the form offers. */
   const VAULT_SWEEP_MS = 60_000;
   const vaultTimer = setInterval(() => {
-    void vaultStore.sweep(new Date()).then((dropped) => {
+    void vaultStore.sweep(new Date()).then(async (dropped) => {
       // Only when something died: a quiet minute must not re-encrypt and rewrite the file 1440
       // times a day, the rule `advanceRun` and `setNote` already follow.
       if (dropped.length > 0) {
+        await vaultFiles.sync(
+          dropped.flatMap((card) => (card.file === null ? [] : [card.file])),
+        );
         pushVault();
       }
     });
   }, VAULT_SWEEP_MS);
   app.on('will-quit', () => {
     clearInterval(vaultTimer);
+    void vaultBroker?.stop();
   });
 
   // Triage shares the Jira credentials and nothing else: it is pulled, never polled.
@@ -539,7 +581,8 @@ async function bootstrap(): Promise<void> {
       dashboardWindow.send(IpcChannel.TerminalLayoutChanged, layout),
   },
   // The stored grid, so the very first layout the dashboard is handed already has the right shape.
-  settingsStore.get().terminalColumns);
+  settingsStore.get().terminalColumns,
+  (projectId) => vaultBroker?.environmentFor(projectId) ?? {});
   terminals = terminalManager;
 
   /**
@@ -732,6 +775,8 @@ async function bootstrap(): Promise<void> {
     jira: () => jiraMonitor,
     triage: () => triageService,
     vault: () => vaultStore,
+    vaultFiles: () => vaultFiles,
+    vaultState,
     pushVault,
     automations: automationState,
     clearAutomationLog: () => {

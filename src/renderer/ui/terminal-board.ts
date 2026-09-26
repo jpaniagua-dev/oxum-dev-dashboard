@@ -1,4 +1,10 @@
-import type { ProjectRow, ShellProfile, TerminalId, TerminalSession } from '@shared/contracts.js';
+import type {
+  ProjectKind,
+  ProjectRow,
+  ShellProfile,
+  TerminalId,
+  TerminalSession,
+} from '@shared/contracts.js';
 import { showContextMenu } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
 import { AGENT_ICON } from './icons.js';
@@ -74,6 +80,38 @@ export function describeActivity(activity: SessionActivity): string {
   }
 }
 
+export type SessionCardKind = 'terminal' | 'agent' | 'server' | 'build';
+
+/** The visual family of a session card, derived from facts already carried by the session. */
+export function sessionCardKind(
+  session: Pick<TerminalSession, 'agent' | 'role'>,
+  projectKind: ProjectKind | null,
+): SessionCardKind {
+  if (session.agent !== null) {
+    return 'agent';
+  }
+  if (session.role === 'server') {
+    return projectKind === 'watch' ? 'build' : 'server';
+  }
+  return 'terminal';
+}
+
+/**
+ * Removes the project subtitle when the title already starts with that exact project name.
+ *
+ * Action titles are born as `project · action`, so repeating `project` on the next line buys no
+ * information. A renamed title keeps the subtitle because the rename may no longer identify the
+ * repository at all.
+ */
+export function projectSubtitle(title: string, projectLabel: string): string | null {
+  const foldedTitle = title.trim().toLocaleLowerCase();
+  const foldedProject = projectLabel.trim().toLocaleLowerCase();
+  if (foldedTitle === foldedProject || foldedTitle.startsWith(`${foldedProject} ·`)) {
+    return null;
+  }
+  return projectLabel;
+}
+
 /**
  * What a card is about: a terminal session, or a headless run that has no session.
  *
@@ -119,7 +157,7 @@ export function clampZoom(zoom: number): number {
 }
 
 export interface TerminalBoardActions {
-  /** Shows this session in the grid, which is what a click on a card means. */
+  /** Shows this session in the board's terminal sidebar, which is what a click on a card means. */
   onOpen: (terminalId: TerminalId) => void;
   /** Right-click, so a card offers what its tab offers. */
   onMenu: (session: TerminalSession, x: number, y: number) => void;
@@ -172,7 +210,12 @@ export interface TerminalBoardState {
   readonly lastOutputAt: ReadonlyMap<TerminalId, number>;
   /** The shells that can be started, for the `+` and its picker. */
   readonly profiles: readonly ShellProfile[];
+  /** Session currently shown in the terminal sidebar. */
+  readonly selectedId: TerminalId | null;
 }
+
+const SERVER_ICON = 'M2.5 3h11v4h-11zM2.5 9h11v4h-11zM4.5 5h.1M4.5 11h.1M7 5h4.5M7 11h4.5';
+const BUILD_ICON = 'M2.5 2.5h4.5v4.5h-4.5zM9 2.5h4.5v4.5h-4.5zM5.75 9h4.5v4.5h-4.5z';
 
 /**
  * The board surface: a pannable, zoomable plane of cards.
@@ -193,6 +236,7 @@ export class TerminalBoard {
     rows: [],
     lastOutputAt: new Map(),
     profiles: [],
+    selectedId: null,
   };
   private readonly content: HTMLElement;
   private readonly toolbar: HTMLElement;
@@ -254,13 +298,13 @@ export class TerminalBoard {
      * added in the settings appear here without the board being rebuilt.
      */
     toolbar.append(
-      this.toolbarButton('Start the configured coding agent', AGENT_ICON, () => {
+      this.toolbarButton('Start the configured coding agent (Ctrl+Shift+N)', AGENT_ICON, () => {
         this.actions.onNewAgent();
       }),
     );
 
     const pick = this.toolbarButton(
-      'New terminal',
+      'New terminal (Ctrl+N opens the default profile)',
       'M2.5 3.5h11v9h-11zM5 6.6l1.7 1.4L5 9.4M8.6 9.8h3.2',
       (event) => {
         const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -292,10 +336,8 @@ export class TerminalBoard {
       this.toolbarButton('Zoom out', 'M3 8h10', () => this.setZoom(this.zoom - 0.1)),
       this.zoomLabel,
       this.toolbarButton('Zoom in', 'M8 3v10M3 8h10', () => this.setZoom(this.zoom + 0.1)),
-      this.toolbarButton(
-        'Recentre the board',
-        'M8 3v10M3 8h10M4.5 4.5l7 7M11.5 4.5l-7 7',
-        () => this.resetView(),
+      this.toolbarButton('Recentre the board', 'M8 3v10M3 8h10M4.5 4.5l7 7M11.5 4.5l-7 7', () =>
+        this.resetView(),
       ),
     );
     this.host.append(toolbar);
@@ -367,6 +409,7 @@ export class TerminalBoard {
           // written, and a signature that made the board rebuild every minute for nothing would be
           // the tick's flicker back again.
           session.note?.text ?? '',
+          String(this.state.selectedId === session.id),
           point === undefined ? '' : `${point.x},${point.y}`,
         ].join('\u0001');
       })
@@ -416,7 +459,6 @@ export class TerminalBoard {
     this.applyTransform();
     // Never hidden any more: it is the only way to open a terminal from here, so a machine with a
     // single shell profile would otherwise have none. Same correction the tab strip needed.
-
 
     if (this.state.sessions.length === 0 && this.state.jobs.length === 0) {
       this.content.append(
@@ -521,14 +563,24 @@ export class TerminalBoard {
    */
   private buildCard(session: TerminalSession, point: CardPoint, now: number): HTMLElement {
     const activity = activityOf(session.running, this.state.lastOutputAt.get(session.id), now);
-    const isAgent = session.agent !== null;
+    const project = this.state.rows.find((row) => row.project.id === session.projectId);
+    const kind = sessionCardKind(session, project?.project.kind ?? null);
+    const selected = this.state.selectedId === session.id;
     const card = createElement('div', {
-      className: `board-card board-card--${activity}${isAgent ? ' board-card--agent' : ''}`,
+      className: [
+        'board-card',
+        `board-card--${activity}`,
+        `board-card--${kind}`,
+        selected ? 'board-card--selected' : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
     });
     card.dataset['card'] = session.id;
+    card.setAttribute('aria-current', selected ? 'true' : 'false');
     card.style.left = `${point.x}px`;
     card.style.top = `${point.y}px`;
-    card.title = `${session.title}\n${session.cwd}\n(drag to move it, click to show it, right click to act)`;
+    card.title = `${session.title}\n${session.cwd}\n(drag to move it, click to preview it, right click to act)`;
 
     /*
      * A coding agent wears its badge, a shell does not.
@@ -539,11 +591,18 @@ export class TerminalBoard {
      * already carries a status dot and a name and a third thing there is a row nobody parses.
      */
     const body = createElement('div', { className: 'board-card__body' });
-    if (isAgent) {
+    if (kind !== 'terminal') {
+      const icon = kind === 'agent' ? AGENT_ICON : kind === 'server' ? SERVER_ICON : BUILD_ICON;
+      const label =
+        kind === 'agent'
+          ? `${session.agent?.label ?? 'Agent'} session`
+          : kind === 'server'
+            ? 'Server session'
+            : 'Build watcher session';
       const avatar = createElement('span', { className: 'board-card__avatar' });
       avatar.setAttribute('role', 'img');
-      avatar.setAttribute('aria-label', `${session.agent?.label ?? 'Agent'} session`);
-      avatar.append(createIcon(AGENT_ICON, { paint: 'stroke' }));
+      avatar.setAttribute('aria-label', label);
+      avatar.append(createIcon(icon, { paint: 'stroke' }));
       card.append(avatar);
     }
 
@@ -552,18 +611,22 @@ export class TerminalBoard {
     head.append(createElement('span', { className: 'board-card__title', text: session.title }));
     body.append(head);
 
-    body.append(
-      createElement('span', {
-        className: 'board-card__activity',
-        text: describeActivity(activity),
-      }),
-    );
-
-    const project = this.state.rows.find((row) => row.project.id === session.projectId);
-    if (project !== undefined) {
+    // A server or build has a more precise phase below. "working" immediately above "building"
+    // was two lines saying the same thing, while a terminal and an agent still need the activity.
+    if (kind === 'terminal' || kind === 'agent' || project === undefined) {
       body.append(
-        createElement('span', { className: 'board-card__project', text: project.project.label }),
+        createElement('span', {
+          className: 'board-card__activity',
+          text: describeActivity(activity),
+        }),
       );
+    }
+
+    if (project !== undefined) {
+      const subtitle = projectSubtitle(session.title, project.project.label);
+      if (subtitle !== null) {
+        body.append(createElement('span', { className: 'board-card__project', text: subtitle }));
+      }
     }
 
     /*

@@ -6,8 +6,11 @@ import {
   expiryFrom,
   isExpired,
   parseVault,
+  sanitizeHttpCapability,
   sanitizeHint,
   sanitizeName,
+  sanitizeVaultFileBinding,
+  sanitizeVaultVariableName,
   sweepExpired,
 } from '../src/shared/vault.js';
 
@@ -28,6 +31,8 @@ function card(over: Partial<VaultCard> = {}): VaultCard {
     hint: 'sandbox only',
     createdAt: '2026-09-26T11:00:00.000Z',
     expiresAt: null,
+    file: null,
+    capability: null,
     ...over,
   };
 }
@@ -48,6 +53,29 @@ describe('sanitizeName and sanitizeHint', () => {
   it('reads anything that is not a string as empty', () => {
     expect(sanitizeName(42)).toBe('');
     expect(sanitizeName(null)).toBe('');
+  });
+});
+
+describe('dotenv file metadata', () => {
+  it('accepts variable names agents can reference without quoting', () => {
+    expect(sanitizeVaultVariableName(' DATABASE_URL ')).toBe('DATABASE_URL');
+    expect(sanitizeVaultVariableName('stripe-key')).toBe('');
+    expect(sanitizeVaultVariableName('2FA_TOKEN')).toBe('');
+  });
+
+  it('keeps a relative project file and rejects traversal or .git internals', () => {
+    expect(
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: '.env.local' }),
+    ).toEqual({ kind: 'dotenv', projectId: 'business', path: '.env.local' });
+    expect(
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: '../.env' }),
+    ).toBeNull();
+    expect(
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: '.git/config' }),
+    ).toBeNull();
+    expect(
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: 'config/NUL.env' }),
+    ).toBeNull();
   });
 });
 
@@ -145,6 +173,8 @@ describe('parseVault', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.value).toBe('sk-secret');
     expect(entries[0]?.card.name).toBe('Key');
+    expect(entries[0]?.card.file).toBeNull();
+    expect(entries[0]?.card.capability).toBeNull();
   });
 
   it('drops ONE bad entry without taking the others with it', () => {
@@ -181,6 +211,68 @@ describe('parseVault', () => {
     const entries = parseVault([{ ...good, createdAt: 'whenever' }]);
     expect(entries).toHaveLength(1);
     expect(Number.isNaN(new Date(entries[0]?.card.createdAt ?? '').getTime())).toBe(false);
+  });
+
+  it('loads a valid file binding but drops an unusable optional binding without losing the secret', () => {
+    const valid = parseVault([
+      {
+        ...good,
+        name: 'API_KEY',
+        file: { kind: 'dotenv', projectId: 'dashboard', path: '.env.local' },
+      },
+    ]);
+    expect(valid[0]?.card.file).toEqual({
+      kind: 'dotenv',
+      projectId: 'dashboard',
+      path: '.env.local',
+    });
+
+    const recovered = parseVault([
+      {
+        ...good,
+        name: 'Readable legacy label',
+        file: { kind: 'dotenv', projectId: 'dashboard', path: '../.env' },
+      },
+    ]);
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]?.card.file).toBeNull();
+  });
+});
+
+describe('sanitizeHttpCapability', () => {
+  const good = {
+    kind: 'http',
+    baseUrl: 'https://api.example.com',
+    auth: 'header',
+    headerName: 'X-API-Key',
+    methods: ['GET', 'POST'],
+    pathPrefixes: ['/v1/issues', '/v1/projects/'],
+    projectIds: ['dashboard'],
+  };
+
+  it('keeps a constrained HTTPS capability and normalizes its origin and paths', () => {
+    expect(sanitizeHttpCapability(good)).toEqual({
+      ...good,
+      baseUrl: 'https://api.example.com',
+      pathPrefixes: ['/v1/issues', '/v1/projects'],
+    });
+  });
+
+  it('allows plain HTTP only for a loopback service', () => {
+    expect(sanitizeHttpCapability({ ...good, baseUrl: 'http://127.0.0.1:4312' })).not.toBeNull();
+    expect(sanitizeHttpCapability({ ...good, baseUrl: 'http://api.example.com' })).toBeNull();
+  });
+
+  it('rejects credentials in the origin and traversal in an allowed path', () => {
+    expect(
+      sanitizeHttpCapability({ ...good, baseUrl: 'https://user:secret@api.example.com' }),
+    ).toBeNull();
+    expect(sanitizeHttpCapability({ ...good, pathPrefixes: ['/v1/../admin'] })).toBeNull();
+  });
+
+  it('rejects an unrestricted or malformed project scope', () => {
+    expect(sanitizeHttpCapability({ ...good, projectIds: [] })).toBeNull();
+    expect(sanitizeHttpCapability({ ...good, methods: [] })).toBeNull();
   });
 });
 

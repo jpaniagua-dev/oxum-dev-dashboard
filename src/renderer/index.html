@@ -37,153 +37,157 @@
       -->
       <div class="app__body">
         <div class="workspace">
-      <!--
+          <!--
         The strip has two views behind two tabs. Only its content changes: the terminal below keeps its
         own space whatever is selected, which is the point of the whole window.
       -->
-      <section class="projects" id="projects-pane">
-        <!-- Double-clicking this row folds the strip, the way a title bar maximises a window. -->
-        <div class="projects__header" id="projects-header" title="Double-click: fold or unfold">
-          <div class="strip__tabs" role="tablist">
-            <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
-              Projects
-            </button>
-            <button type="button" id="strip-tab-pulls" class="strip__tab" role="tab">
-              Pull requests
-            </button>
-            <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">Jira</button>
-            <button type="button" id="strip-tab-git" class="strip__tab" role="tab">Git</button>
-            <button type="button" id="strip-tab-triage" class="strip__tab" role="tab">Triage</button>
-            <!--
+          <section class="projects" id="projects-pane">
+            <!-- Double-clicking this row folds the strip, the way a title bar maximises a window. -->
+            <div class="projects__header" id="projects-header" title="Double-click: fold or unfold">
+              <div class="strip__tabs" role="tablist">
+                <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
+                  Projects
+                </button>
+                <button type="button" id="strip-tab-pulls" class="strip__tab" role="tab">
+                  Pull requests
+                </button>
+                <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">
+                  Jira
+                </button>
+                <button type="button" id="strip-tab-git" class="strip__tab" role="tab">Git</button>
+                <button type="button" id="strip-tab-triage" class="strip__tab" role="tab">
+                  Triage
+                </button>
+                <!--
               Appended after the existing tabs rather than slotted next to Git, which is where it
               belongs by subject: inserting it there would shift Triage under a cursor that has learnt
               where to find it. A tab row is read by position long before it is read by label.
             -->
-            <button type="button" id="strip-tab-worktrees" class="strip__tab" role="tab">
-              Worktrees
-            </button>
-            <!--
+                <button type="button" id="strip-tab-worktrees" class="strip__tab" role="tab">
+                  Worktrees
+                </button>
+                <!--
               Last, because it is the newest and because a tab row is read by position: every other
               tab keeps the place it has had, which is what stops a habit from breaking on an update.
             -->
-            <button type="button" id="strip-tab-agents" class="strip__tab" role="tab">
-              Agents
-            </button>
-            <button type="button" id="strip-tab-usage" class="strip__tab" role="tab">
-              Usage
-            </button>
-            <button type="button" id="strip-tab-automations" class="strip__tab" role="tab">
-              Rules
-            </button>
-            <button type="button" id="strip-tab-vault" class="strip__tab" role="tab">
-              Vault
-            </button>
-          </div>
-          <div class="projects__header-actions">
-            <!--
+                <button type="button" id="strip-tab-agents" class="strip__tab" role="tab">
+                  Agents
+                </button>
+                <button type="button" id="strip-tab-usage" class="strip__tab" role="tab">
+                  Usage
+                </button>
+                <button type="button" id="strip-tab-automations" class="strip__tab" role="tab">
+                  Rules
+                </button>
+                <button type="button" id="strip-tab-vault" class="strip__tab" role="tab">
+                  Vault
+                </button>
+              </div>
+              <div class="projects__header-actions">
+                <!--
               The running build's version, filled from the bootstrap.
 
               First in the cluster, and it is the one label here that never changes: the refresh stamp
               beside it belongs to the `Refresh` button it sits against, and is also overwritten by
               transient messages, which is exactly why the version cannot share that element.
             -->
-            <span id="app-version" class="strip__meta"></span>
-            <span id="last-refresh" class="strip__meta"></span>
-            <button type="button" id="refresh-button" class="button">Refresh</button>
-            <button type="button" id="add-project" class="button" title="Add a project folder">
-              + Project
-            </button>
-            <button
-              type="button"
-              id="servers-button"
-              class="icon-button"
-              title="Show the dev servers in their own window"
-              aria-label="Detach the dev servers"
-              aria-pressed="false"
-            >
-              <!--
+                <span id="app-version" class="strip__meta"></span>
+                <span id="last-refresh" class="strip__meta"></span>
+                <button type="button" id="refresh-button" class="button">Refresh</button>
+                <button type="button" id="add-project" class="button" title="Add a project folder">
+                  + Project
+                </button>
+                <button
+                  type="button"
+                  id="servers-button"
+                  class="icon-button"
+                  title="Show the dev servers in their own window"
+                  aria-label="Detach the dev servers"
+                  aria-pressed="false"
+                >
+                  <!--
                 Two stacked bays with a status dot each: a rack, which is what this window shows.
                 Stroked like the terminal icon, and `aria-pressed` because it toggles a
                 state rather than performing an action.
               -->
-              <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
-                <path d="M2.6 3.2h10.8v4H2.6zM2.6 8.8h10.8v4H2.6zM4.6 5.2h.01M4.6 10.8h.01" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              id="settings-button"
-              class="icon-button"
-              title="Settings"
-              aria-label="Open the settings"
-            >
-              <!--
+                  <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                    <path d="M2.6 3.2h10.8v4H2.6zM2.6 8.8h10.8v4H2.6zM4.6 5.2h.01M4.6 10.8h.01" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  id="settings-button"
+                  class="icon-button"
+                  title="Settings"
+                  aria-label="Open the settings"
+                >
+                  <!--
                 A solid eight-tooth gear with the hub punched out by `evenodd`.
                 The previous icon drew its teeth at 28% opacity, which at 14px read as a faint smudge
                 rather than a gear. One shape at full contrast is what makes it legible at this size.
               -->
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  fill="currentColor"
-                  fill-rule="evenodd"
-                  d="M6.53 2.7L6.91 0.73L9.09 0.73L9.47 2.7L10.71 3.21L12.37 2.09L13.91 3.63L12.79 5.29L13.3 6.53L15.27 6.91L15.27 9.09L13.3 9.47L12.79 10.71L13.91 12.37L12.37 13.91L10.71 12.79L9.47 13.3L9.09 15.27L6.91 15.27L6.53 13.3L5.29 12.79L3.63 13.91L2.09 12.37L3.21 10.71L2.7 9.47L0.73 9.09L0.73 6.91L2.7 6.53L3.21 5.29L2.09 3.63L3.63 2.09L5.29 3.21ZM8 5.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0 -4.5Z"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              id="theme-button"
-              class="icon-button"
-              title="Theme"
-              aria-label="Switch theme"
-            >
-              <svg id="theme-icon" viewBox="0 0 16 16" aria-hidden="true"></svg>
-            </button>
-            <!--
+                  <svg viewBox="0 0 16 16" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      fill-rule="evenodd"
+                      d="M6.53 2.7L6.91 0.73L9.09 0.73L9.47 2.7L10.71 3.21L12.37 2.09L13.91 3.63L12.79 5.29L13.3 6.53L15.27 6.91L15.27 9.09L13.3 9.47L12.79 10.71L13.91 12.37L12.37 13.91L10.71 12.79L9.47 13.3L9.09 15.27L6.91 15.27L6.53 13.3L5.29 12.79L3.63 13.91L2.09 12.37L3.21 10.71L2.7 9.47L0.73 9.09L0.73 6.91L2.7 6.53L3.21 5.29L2.09 3.63L3.63 2.09L5.29 3.21ZM8 5.75a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0 -4.5Z"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  id="theme-button"
+                  class="icon-button"
+                  title="Theme"
+                  aria-label="Switch theme"
+                >
+                  <svg id="theme-icon" viewBox="0 0 16 16" aria-hidden="true"></svg>
+                </button>
+                <!--
               Folds the strip down to this tab row. The row itself never folds: a control that hides
               itself leaves no way back, and the tabs double as the gesture to bring the content back.
             -->
-            <button
-              type="button"
-              id="strip-collapse"
-              class="icon-button"
-              title="Fold the strip (Alt+Shift+A)"
-              aria-label="Fold the strip"
-              aria-expanded="true"
-              aria-controls="projects-pane"
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
-                <path
-                  d="M3.5 10l4.5-4.5 4.5 4.5"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.6"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
+                <button
+                  type="button"
+                  id="strip-collapse"
+                  class="icon-button"
+                  title="Fold the strip (Alt+Shift+A)"
+                  aria-label="Fold the strip"
+                  aria-expanded="true"
+                  aria-controls="projects-pane"
+                >
+                  <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                    <path
+                      d="M3.5 10l4.5-4.5 4.5 4.5"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.6"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
 
-        <div class="projects__scroll" id="strip-panel-projects" role="tabpanel">
-          <table class="table" id="project-table">
-            <thead>
-              <tr>
-                <th scope="col">Project</th>
-                <th scope="col">Server</th>
-                <th scope="col">Files</th>
-                <th scope="col">Branch</th>
-                <th scope="col">Checks</th>
-                <th scope="col">Workflows</th>
-                <th scope="col" class="table__actions-head">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="project-tbody"></tbody>
-          </table>
-        </div>
+            <div class="projects__scroll" id="strip-panel-projects" role="tabpanel">
+              <table class="table" id="project-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Project</th>
+                    <th scope="col">Server</th>
+                    <th scope="col">Files</th>
+                    <th scope="col">Branch</th>
+                    <th scope="col">Checks</th>
+                    <th scope="col">Workflows</th>
+                    <th scope="col" class="table__actions-head">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="project-tbody"></tbody>
+              </table>
+            </div>
 
-        <!--
+            <!--
           Repositories on the left, then a column of its own: the two scope sub-tabs above the list.
 
           The sub-tabs are a row inside the detail column rather than more entries in the repository
@@ -191,35 +195,35 @@
           whichever repository is selected, not two more things to select. Same grammar as the Git
           tab's own sub-tabs, and the same `.subtab` rule paints both.
         -->
-        <!--
+            <!--
           `pulls--detail` and not a change to `.pulls`: the Jira panel below reuses that class for
           the same master-detail grammar, so widening the grid there would move a column nobody
           touched. The modifier is on this panel alone.
         -->
-        <div class="pulls pulls--detail" id="strip-panel-pulls" role="tabpanel" hidden>
-          <div class="pulls__repos" id="pulls-repos"></div>
-          <div class="pulls__main">
-            <div class="pulls__views" id="pulls-views" role="tablist"></div>
-            <div class="pulls__bar" id="pulls-bar"></div>
-            <div class="pulls__list" id="pulls-list"></div>
-          </div>
-          <div class="pulls__overview" id="pulls-overview"></div>
-        </div>
+            <div class="pulls pulls--detail" id="strip-panel-pulls" role="tabpanel" hidden>
+              <div class="pulls__repos" id="pulls-repos"></div>
+              <div class="pulls__main">
+                <div class="pulls__views" id="pulls-views" role="tablist"></div>
+                <div class="pulls__bar" id="pulls-bar"></div>
+                <div class="pulls__list" id="pulls-list"></div>
+              </div>
+              <div class="pulls__overview" id="pulls-overview"></div>
+            </div>
 
-        <!--
+            <!--
           Same master-detail grammar as the pull requests, so there is nothing new to learn. The bar
           above the list holds the assignee filter; the sortable column headers live *inside* the list,
           stuck to its top, so they cannot drift out of line with the rows they name.
         -->
-        <div class="pulls" id="strip-panel-jira" role="tabpanel" hidden>
-          <div class="pulls__repos" id="jira-views"></div>
-          <div class="pulls__main">
-            <div class="pulls__bar" id="jira-filter"></div>
-            <div class="pulls__list" id="jira-list"></div>
-          </div>
-        </div>
+            <div class="pulls" id="strip-panel-jira" role="tabpanel" hidden>
+              <div class="pulls__repos" id="jira-views"></div>
+              <div class="pulls__main">
+                <div class="pulls__bar" id="jira-filter"></div>
+                <div class="pulls__list" id="jira-list"></div>
+              </div>
+            </div>
 
-        <!--
+            <!--
           Triage: the sprints on the left, the last analysis of the selected one on the right.
           Master-detail again, deliberately: the gesture is the same as the two panels above it, and
           the only new idea in the tab is the `Analyse` button on a sprint row.
@@ -227,56 +231,56 @@
           Every child is filled by `triage-panel.ts` with `textContent`: sprint names, ticket
           summaries and model output all come from outside.
         -->
-        <!--
+            <!--
           Agents: the sessions running a coding agent on the left, what that agent reads on the right.
 
           Master-detail with the same three boxes as the pull request and Jira tabs, and reusing their
           classes rather than inventing a fourth layout for the same shape. Every child is filled from
           `agents-panel.ts` with `textContent`: these are file paths and descriptions read off disk.
         -->
-        <div class="pulls" id="strip-panel-agents" role="tabpanel" hidden>
-          <div class="pulls__repos" id="agents-list"></div>
-          <div class="pulls__main">
-            <!--
+            <div class="pulls" id="strip-panel-agents" role="tabpanel" hidden>
+              <div class="pulls__repos" id="agents-list"></div>
+              <div class="pulls__main">
+                <!--
               No filter bar here, unlike the pull request and Jira tabs: what sat in it was three
               facts about the selected agent, and facts belong with the rest of them in the detail
               rather than in a row of chrome above it.
             -->
-            <div class="pulls__list" id="agents-detail"></div>
-          </div>
-        </div>
+                <div class="pulls__list" id="agents-detail"></div>
+              </div>
+            </div>
 
-        <!--
+            <!--
           Two columns and not the master-detail of its neighbours: nothing here is selected. The
           left is live (a log appended on every prompt), the right is a cache Claude Code rebuilds
           on its own schedule and can be weeks behind, which is why the two are drawn apart with the
           cache's age stated over the figures it applies to.
         -->
-        <div class="usage" id="strip-panel-usage" role="tabpanel" hidden></div>
+            <div class="usage" id="strip-panel-usage" role="tabpanel" hidden></div>
 
-        <!--
+            <!--
           One column, no master-detail: a rule is six fields and fits beside its neighbours, so a
           third column for something readable in a line would be the Git tab's grammar applied where
           it buys nothing.
         -->
-        <div class="automations" id="strip-panel-automations" role="tabpanel" hidden></div>
+            <div class="automations" id="strip-panel-automations" role="tabpanel" hidden></div>
 
-        <!--
+            <!--
           One column: a card is a name, a mask and four buttons, and nothing here is selected. The
           warning at the top is permanent by design, not a dismissible banner.
         -->
-        <div class="vault" id="strip-panel-vault" role="tabpanel" hidden></div>
+            <div class="vault" id="strip-panel-vault" role="tabpanel" hidden></div>
 
-        <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
-          <div class="pulls__repos" id="triage-sprints"></div>
-          <div class="pulls__main">
-            <div class="pulls__bar" id="triage-bar"></div>
-            <div class="pulls__list" id="triage-list"></div>
-          </div>
-          <div class="triage__overview" id="triage-overview"></div>
-        </div>
+            <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
+              <div class="pulls__repos" id="triage-sprints"></div>
+              <div class="pulls__main">
+                <div class="pulls__bar" id="triage-bar"></div>
+                <div class="pulls__list" id="triage-list"></div>
+              </div>
+              <div class="triage__overview" id="triage-overview"></div>
+            </div>
 
-        <!--
+            <!--
           Worktrees: one flat list across every project, and no master-detail.
 
           The one tab of this strip that deliberately does not select a repository first. Its whole
@@ -289,12 +293,12 @@
           Filled by `worktree-list.ts` with `textContent`: folder names and branch names are text from
           outside the app.
         -->
-        <div class="worktrees" id="strip-panel-worktrees" role="tabpanel" hidden>
-          <div class="pulls__bar" id="worktrees-bar"></div>
-          <div class="pulls__list" id="worktrees-list"></div>
-        </div>
+            <div class="worktrees" id="strip-panel-worktrees" role="tabpanel" hidden>
+              <div class="pulls__bar" id="worktrees-bar"></div>
+              <div class="pulls__list" id="worktrees-list"></div>
+            </div>
 
-        <!--
+            <!--
           The same master-detail grammar again, with one column more: repositories, then the working
           area (changes, branches or history), then the diff. Three columns rather than two because
           the third one is a diff, and a diff read in the width left over by a list is not read at all.
@@ -302,45 +306,45 @@
           Every child is filled by `git-panel.ts` with `textContent`: branch names, commit subjects and
           diff bodies are all text from outside the app.
         -->
-        <div class="git" id="strip-panel-git" role="tabpanel" hidden>
-          <div class="pulls__repos" id="git-repos"></div>
-          <div class="git__main" id="git-main">
-            <div class="git__header" id="git-header"></div>
-            <div class="git__views" id="git-views" role="tablist"></div>
-            <div class="git__list" id="git-list"></div>
-            <div class="git__commit" id="git-commit"></div>
-          </div>
-          <!--
+            <div class="git" id="strip-panel-git" role="tabpanel" hidden>
+              <div class="pulls__repos" id="git-repos"></div>
+              <div class="git__main" id="git-main">
+                <div class="git__header" id="git-header"></div>
+                <div class="git__views" id="git-views" role="tablist"></div>
+                <div class="git__list" id="git-list"></div>
+                <div class="git__commit" id="git-commit"></div>
+              </div>
+              <!--
             The share between the working column and the diff. Its own element rather than a border on
             a column: a grid track cannot be dragged, and the width it drives is a property of the grid.
           -->
+              <div
+                class="git__resizer"
+                id="git-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize the diff"
+                tabindex="0"
+              ></div>
+              <div class="git__diff" id="git-diff"></div>
+            </div>
+          </section>
+
           <div
-            class="git__resizer"
-            id="git-resizer"
+            class="resizer"
+            id="projects-resizer"
             role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize the diff"
+            aria-orientation="horizontal"
+            aria-label="Resize the project list"
             tabindex="0"
           ></div>
-          <div class="git__diff" id="git-diff"></div>
-        </div>
-      </section>
 
-      <div
-        class="resizer"
-        id="projects-resizer"
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize the project list"
-        tabindex="0"
-      ></div>
-
-      <!--
+          <!--
         No header above the surface any more: each pane draws its own tab strip inside the grid, so a
         split gives a complete terminal rather than a second window onto one shared strip.
       -->
-      <section class="terminal" id="terminal-pane">
-        <!--
+          <section class="terminal" id="terminal-pane">
+            <!--
           The two controls that act on the terminal surface as a whole.
 
           Declared here, next to the surface they command, and then MOVED by `TerminalPane` into the
@@ -352,50 +356,59 @@
           The element is moved and never copied, so the listeners bound in `main.ts` survive every
           repaint. It falls back to sitting here, on its own line, only while no pane exists.
         -->
-        <div class="terminal__controls" id="terminal-controls">
-          <button
-            type="button"
-            id="terminal-grid-button"
-            class="icon-button"
-            title="Arrange the terminal panes"
-            aria-label="Arrange the terminal panes"
-            aria-haspopup="menu"
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
-              <path d="M2.5 2.5h11v11h-11zM8 2.5v11M2.5 8h11" />
-            </svg>
-          </button>
-          <!--
+            <div class="terminal__controls" id="terminal-controls">
+              <button
+                type="button"
+                id="terminal-grid-button"
+                class="icon-button"
+                title="Arrange the terminal panes"
+                aria-label="Arrange the terminal panes"
+                aria-haspopup="menu"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                  <path d="M2.5 2.5h11v11h-11zM8 2.5v11M2.5 8h11" />
+                </svg>
+              </button>
+              <!--
             Swaps the terminal surface for the board of session cards. `aria-pressed` and not a
             second menu entry: it toggles a state rather than choosing among shapes, which is what
             the grid button next to it does.
           -->
-          <button
-            type="button"
-            id="terminal-board-button"
-            class="icon-button"
-            title="Show the sessions as cards"
-            aria-label="Show the sessions as cards"
-            aria-pressed="false"
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
-              <path d="M2.5 3.5h5v4h-5zM9.5 2.5h4v6h-4zM2.5 9.5h5v3h-5zM9.5 10.5h4v2h-4z" />
-            </svg>
-          </button>
-        </div>
-        <div class="terminal__surface" id="terminal-surface"></div>
-        <!--
+              <button
+                type="button"
+                id="terminal-board-button"
+                class="icon-button"
+                title="Show the sessions as cards (Ctrl+G)"
+                aria-label="Show the sessions as cards"
+                aria-pressed="false"
+              >
+                <svg viewBox="0 0 16 16" aria-hidden="true" class="icon-stroke">
+                  <path d="M2.5 3.5h5v4h-5zM9.5 2.5h4v6h-4zM2.5 9.5h5v3h-5zM9.5 10.5h4v2h-4z" />
+                </svg>
+              </button>
+            </div>
+            <!--
           The board: the same sessions as cards on a pannable plane, instead of as terminals.
 
-          A sibling of the surface and not a child, toggled with `hidden`. The two never share the
-          space: board mode hides the surface wholesale, which is the only arrangement that keeps
-          every xterm on the element it was opened on. Anything that moved a terminal into a card
-          would kill it, `open()` refusing to re-attach one that already has an element.
+          A sibling of the surface and not a child. The board fills the pane until a card is selected;
+          it then shares the pane with the existing terminal surface as a resizable right sidebar.
+          Only xterm is shown there: tabs, pane actions and notes stay out because the board already
+          owns those controls. The terminal is isolated by grid placement and never moved into a
+          card, because `open()` refuses to re-attach an xterm that already has an element.
         -->
-        <div class="terminal__board" id="terminal-board" hidden></div>
-      </section>
+            <div class="terminal__board" id="terminal-board" hidden></div>
+            <div
+              class="terminal__board-resizer"
+              id="terminal-board-resizer"
+              role="separator"
+              aria-label="Resize the terminal preview"
+              aria-orientation="vertical"
+              tabindex="0"
+              hidden
+            ></div>
+            <div class="terminal__surface" id="terminal-surface"></div>
+          </section>
         </div>
-
       </div>
     </div>
 

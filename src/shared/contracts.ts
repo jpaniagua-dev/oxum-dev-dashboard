@@ -1,7 +1,7 @@
 import type { AgentProfile } from './agent-profile.js';
 import type { AutomationRule } from './automation.js';
 import type { UsageActivity, UsageStats } from './usage.js';
-import type { VaultCard, VaultState } from './vault.js';
+import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
  *
@@ -2389,8 +2389,9 @@ export const IpcChannel = {
   VaultSave: 'vault:save',
   VaultDelete: 'vault:delete',
   VaultReveal: 'vault:reveal',
-  VaultSend: 'vault:send',
   VaultCopy: 'vault:copy',
+  VaultGenerateFile: 'vault:generate-file',
+  VaultRemoveFile: 'vault:remove-file',
   VaultChanged: 'vault:changed',
   VaultReset: 'vault:reset',
   AutomationsChanged: 'automations:changed',
@@ -2716,10 +2717,12 @@ export interface RendererApi {
    * gesture, on their own screen.
    */
   revealVaultCard(id: string): Promise<string>;
-  /** Types the value into a session's stdin. Nothing is submitted: see the channel's note. */
-  sendVaultCard(id: string, terminalId: TerminalId): Promise<VaultResult>;
   /** Puts the value on the clipboard without it passing through the renderer. */
   copyVaultCard(id: string): Promise<VaultResult>;
+  /** Materializes all live variables bound to one project dotenv file. */
+  generateVaultFile(binding: VaultFileBinding): Promise<VaultResult>;
+  /** Removes a generated file, but only when it carries the Oxum Vault marker. */
+  removeVaultFile(binding: VaultFileBinding): Promise<VaultResult>;
   /** Throws away a vault this account cannot read, after a confirmation in the main process. */
   resetVault(): Promise<VaultState>;
   onVaultChanged(listener: (state: VaultState) => void): () => void;

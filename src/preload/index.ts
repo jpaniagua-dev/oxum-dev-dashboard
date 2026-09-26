@@ -2,7 +2,7 @@ import type { AgentContext } from '@shared/agent-context.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AgentProfile } from '@shared/agent-profile.js';
 import type { AutomationRule } from '@shared/automation.js';
-import type { VaultCard, VaultState } from '@shared/vault.js';
+import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
 import {
   IpcChannel,
   type AgentOpenResult,
@@ -325,11 +325,14 @@ const api: RendererApi = {
   revealVaultCard: (id: string): Promise<string> =>
     ipcRenderer.invoke(IpcChannel.VaultReveal, id),
 
-  sendVaultCard: (id: string, terminalId: TerminalId): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultSend, id, terminalId),
-
   copyVaultCard: (id: string): Promise<VaultResult> =>
     ipcRenderer.invoke(IpcChannel.VaultCopy, id),
+
+  generateVaultFile: (binding: VaultFileBinding): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultGenerateFile, binding),
+
+  removeVaultFile: (binding: VaultFileBinding): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultRemoveFile, binding),
 
   resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
 

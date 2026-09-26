@@ -120,11 +120,15 @@ exceptions:
   `sortIssues`, `nextSort` and the clickable column headers were removed rather than ported. What
   survived is what was never about the table: `boardUrl`, `presentStage`, `assigneesOf`,
   `filterByAssignee`, the views rail and the assignee filter.
-- **The terminal pane has two surfaces, and they are never both on screen.** `.terminal__surface`
-  (the grid) and `.terminal__board` (session cards) are siblings, toggled with `hidden`. Board mode
-  hides the grid **wholesale** rather than emptying it: every xterm keeps the element it was opened
-  on, so coming back costs a `refit()` and nothing else. A board that embedded live terminals, or
-  that emptied the surface, would detach xterms that `open()` then refuses to re-attach.
+- **The terminal pane has two sibling surfaces, and a card may show them side by side.**
+  `.terminal__surface` is the grid and `.terminal__board` the session canvas. Board mode hides the
+  grid until a card is selected; that click keeps the board in place and shows the selected live
+  terminal in a resizable right sidebar. That sidebar contains only xterm: its tab strip, pane actions
+  and note are hidden because the board already exposes those controls. Its separator keeps at least
+  280 px for the terminal and 360 px for the canvas, supports pointer capture and Left/Right keys,
+  and remembers its width for the renderer session. The pane isolates its existing container with
+  the same grid placement as zoom, so no xterm is moved or reopened. Leaving Cards restores the grid
+  and its earlier zoom.
 - **A session'''s activity is derived from WHEN it last spoke, never from what it said.** `activityOf`
   reads `running` plus the time since the last chunk: `working` under `QUIET_AFTER_MS` (2.5 s),
   `quiet` past it, `exited` when the pty is gone. Matching output strings would let a card claim
@@ -161,12 +165,12 @@ exceptions:
   rather than folded into the sessions' one. A job card is the only thing on this board that has to
   repaint on the tick with nothing having happened, and a signature holding `Date.now()` would
   defeat the repaint guard entirely by never matching itself.
-- **A card no longer unfolds to a preview of its output, and it did for one version.** The unfolded
+- **A card no longer unfolds to a text preview of its output, and it did for one version.** The unfolded
   session card tailed the last fifteen lines through `readPtyBuffer`, which is text a terminal
   emulator was going to render: a coding agent redraws a framed box in place with carriage returns
   and cursor moves, so a `<pre>` showed every frame of that redraw stacked on itself. Honouring them
-  is implementing a terminal, which is what the grid one click away already is. `tailLines` went
-  with it rather than being left as a dead export.
+  is implementing a terminal, which is what the live sidebar one click away already is. `tailLines`
+  went with it rather than being left as a dead export.
 ### Notes on a session
 
 Added on 2026-09-25, because a board past a dozen cards answers "what have I got running" and not
@@ -486,8 +490,9 @@ row. None of it can say what a session was opened FOR.
 - **Every visible pane needs its own `fit`.** With a split, each pty has its own geometry: adjusting
   only one would leave the others wrapping their output at the wrong width.
 - **Shortcuts are bound on `document` in the capture phase**, otherwise the focused xterm swallows
-  them. `Ctrl+Alt` plus a letter, never a digit (Swiss French keyboard), and a guard on `event.repeat`:
-  without it, holding the shortcut down opens one shell per repeat.
+  them. Pane gestures use `Alt+Shift` plus a letter, never a digit (Swiss French keyboard), and every
+  repeated keydown is refused. The app-wide additions follow the same rule: `Ctrl+N` opens the
+  default terminal, `Ctrl+G` switches Tabs/Cards, and `Ctrl+Shift+N` opens the configured agent.
 - **Copy and paste: returning `false` from `attachCustomKeyEventHandler` is not enough.** It only
   prevents xterm's own handling of the key, not the browser's default action: without
   `event.preventDefault()`, the `Ctrl+V` keydown still fires the native `paste` event on xterm's hidden
@@ -1045,22 +1050,42 @@ its design choices are deliberately not copied, and each is a rule here.
 Added on 2026-09-26. Somewhere to keep an API key so it does not end up in a `.env` that gets
 committed or pasted into a chat.
 
-- ⚠️ **What it protects: the value at rest, its lifetime, and the moment it moves. What it does NOT
-  protect: the value after delivery.** An agent handed a secret holds it in its context, which is
-  written to that agent's own transcript in clear text and sent to its model provider. No code here
-  can undo that. The panel carries that sentence permanently, first, and undismissable, because a
-  vault its owner trusts for something it cannot do is worse than no vault.
-- **Delivery is a gesture, never an API.** Three designs were considered and two are closed by
-  facts: the app holds a single-instance lock, so there is no `dashboard.exe --vault-get`, and
-  `safeStorage` is an Electron API no standalone script can call. The third, a plaintext file with a
-  timer, was refused: a plaintext file with a timer is still a plaintext file.
+- ⚠️ **What it protects: the value at rest and from accidental chat disclosure. What it does NOT
+  protect: a generated file from processes in that project.** The file is plaintext by design, but
+  its path must be ignored by Git before the app writes it. The panel explains that boundary in the
+  compact `How it works` disclosure instead of repeating it as a permanent banner.
+- **The file is the unit of the Vault interface.** Each project/path is one box: its variables are
+  read and edited in place, and `+ Variable`, `Generate file` and `Remove file` live together in the
+  box footer. A global add opens a new prospective file box instead of a detached form at the top.
+- **Agents request operations, never values.** Project terminals receive a random, process-lifetime
+  token and the address of a loopback-only broker in `OXUM_VAULT_TOKEN` and `OXUM_VAULT_URL`;
+  `OXUM_VAULT_HELP` gives the discovery request. The token identifies the project;
+  `GET /v1/capabilities` exposes metadata only, and
+  `POST /v1/execute` performs one constrained HTTP request after a native approval dialog. There is
+  no get-secret route, CLI output or plaintext handoff file.
+- **An HTTP capability fixes the origin, methods, path prefixes and project.** The agent supplies a
+  relative path, scalar query parameters and an optional JSON body. It cannot supply an absolute
+  URL or request headers, redirects are refused, remote plain HTTP is refused, and only loopback
+  origins may use HTTP. Those are boundaries, not form hints: the shared parser and broker both
+  enforce them.
+- **Every operation asks once.** There is deliberately no remember/always-allow choice in the first
+  version. The native dialog names the project, card, method and complete target URL; Cancel is both
+  the default and escape action. Only after approval does main read the value and inject it as a
+  bearer token or configured header.
+- **Results are bounded and scrubbed.** The broker returns status, content type and at most 256 KiB
+  of body, never response headers. An exact occurrence of the credential in the response is
+  replaced before the agent sees it. Redirects are errors so a custom authentication header cannot
+  travel to a second origin.
+- **The audit is metadata and process-local.** The last thirty attempts shown in the panel contain
+  card name, project, method, path, outcome and status, never query values, request bodies, response
+  bodies or credentials. Restarting clears it; it is operational feedback, not a durable log.
 - **One encrypted blob, `vault.bin`, not a file per card.** `safeStorage` encrypts a string; N files
   would be N atomic writes to keep consistent, with a half-written vault as the failure mode, and
   the metadata would have to live either in a plaintext index (a name like `prod-db-root` is most of
   the secret's value) or inside each ciphertext, which makes listing mean decrypting everything.
 - **The pure half is `shared/vault.ts` and holds no secret**; `main/vault/vault-store.ts` is the
-  only place a value is in memory as plain text. That split is the one `secret-store.ts` never made,
-  which is why it has no test at all.
+  authority that may release one inside main. The main-process broker necessarily holds the value
+  while constructing its outbound request, but it never crosses to the renderer or agent.
 - ⚠️ **`VaultState` carries no value, and a test asserts it on the object rather than on the type.**
   A type stops a mistake at compile time and says nothing about an object built with a spread. The
   leak would be invisible: the renderer simply would not draw the extra field.
@@ -1069,29 +1094,22 @@ committed or pasted into a chat.
   on its owner's behalf, so the renderer never needs it; a vault card is one the OWNER uses, and a
   vault whose values can never be read back is a write-only hole. It crosses once, on an `invoke`,
   in answer to a click, and never in a list, a broadcast or the bootstrap.
-- **`Copy` is the primary and `Reveal` the secondary.** Copying happens entirely in the main
-  process, so the value never enters the window; revealing paints it on a screen that gets shared
-  and screenshotted. Same intent, strictly less exposure. The reveal re-masks after 20 s and on
-  `window.blur`, which also covers the quit dialog.
+- **Copy and reveal are controls inside the Secret field.** Copying happens entirely in the main
+  process, so the value never enters the window; the eye icon reveals it on a screen that gets
+  shared and screenshotted. The reveal re-masks after 20 s and on `window.blur`, which also covers
+  the quit dialog. There is no `Send` action: agents use generated files or approved operations.
 - **The mask is a constant twelve dots.** One sized from the value would say whether it is a
   six-digit PIN or a sixty-four character key, which is a third of the answer given away by a
   decoration. No last-four preview either.
-- **Sending types the value and does NOT submit it.** `TerminalManager.write` is raw pty input, so a
-  `` would submit: the worst case without it is one keypress, the worst case with it is a
-  production key submitted to a prompt nobody read.
-- ⚠️ **`TerminalManager.write` now returns a boolean, and that was added for this.** It was a silent
-  no-op for an exited pty, which is right for a keystroke and wrong for a secret: somebody who
-  believes a key went into a prompt and it did not will paste it somewhere worse. The manager is the
-  side that knows, so it is the side that answers; re-deriving liveness in `ipc.ts` would be the
-  second authority `stopProjectServer` already records as a mistake.
-- **Sending and deleting are both confirmed by a dialog in the main process**, naming the card and
-  the tab. The `Approve` button refuses a dialog because a box answered twenty times a day is a
-  reflex; that argument cuts the other way here, since neither of these is a daily gesture and a key
-  typed into the wrong terminal is not undoable.
-- ⚠️ **A card's value and expiry cannot be edited, only its name.** A lifetime runs from creation, so
-  a new secret under an old card would either inherit the remaining life of the one it replaced or
-  silently restart the clock. Rotating a key is delete and add, said on screen rather than
-  discovered.
+- **Direct terminal sending is not exposed by the Vault.** Agents instead use a generated dotenv file
+  or an approved broker operation; the UI never types a credential into a terminal, where prompts
+  and scrollback could expose it.
+- **Deleting is confirmed by a dialog in the main process.** It is intentionally harder than
+  editing because it removes the encrypted value and cannot be undone from the app.
+- ⚠️ **A card's value and expiry cannot be edited; its name, note and capability can.** A lifetime
+  runs from creation, so a new secret under an old card would either inherit the remaining life of
+  the one it replaced or silently restart the clock. Rotating a key is delete and add, said on
+  screen rather than discovered.
 - ⚠️ **The sweep runs at start-up, on a one-minute timer, AND inside `valueOf`.** None is redundant:
   a timer cannot fire while the app is closed, so the start-up pass is what honours a card that died
   overnight; and a laptop asleep for six hours runs no interval and does not catch up, so the lazy
@@ -1111,10 +1129,9 @@ committed or pasted into a chat.
   out, behind a confirmation, because a refusal with no exit is a dead feature.
 - **`VaultChanged` is routed to the dashboard, never broadcast.** The servers window has no business
   receiving a payload about secrets even when it carries none.
-- **Sending is typing, and most prompts echo**, so the value lands in the xterm and in the 200 000
-  character scrollback. That scrollback is memory-only and is never written to disk, which is what
-  makes this acceptable. No scrubber: it would have to hold the value to compare, would miss it the
-  moment it wraps or is coloured, and would be a security promise that fails silently.
+- **A saved Vault tab is loaded explicitly during bootstrap.** `StripTabs.adopt` restores the tab
+  without firing `onChange`, so relying on the click-time loader leaves the restored panel empty
+  until the user visits another tab and comes back.
 
 ## Jira tab
 

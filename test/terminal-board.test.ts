@@ -7,7 +7,10 @@ import {
   activityOf,
   clampZoom,
   defaultPoint,
+  projectSubtitle,
+  sessionCardKind,
 } from '../src/renderer/ui/terminal-board.js';
+import type { TerminalSession } from '../src/shared/contracts.js';
 
 /**
  * A session's activity is derived from **when it last spoke**, never from what it said.
@@ -85,5 +88,21 @@ describe('clampZoom', () => {
     expect(clampZoom(Number.NaN)).toBe(1);
     expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(1);
     expect(clampZoom(Number.NEGATIVE_INFINITY)).toBe(1);
+  });
+});
+
+describe('session card presentation', () => {
+  it('distinguishes agents, servers and build watchers', () => {
+    const agent = {} as NonNullable<TerminalSession['agent']>;
+    expect(sessionCardKind({ agent, role: null }, null)).toBe('agent');
+    expect(sessionCardKind({ agent: null, role: 'server' }, 'server')).toBe('server');
+    expect(sessionCardKind({ agent: null, role: 'server' }, 'watch')).toBe('build');
+    expect(sessionCardKind({ agent: null, role: null }, null)).toBe('terminal');
+  });
+
+  it('drops a project subtitle only when the action title already names it', () => {
+    expect(projectSubtitle('Design system · run', 'Design system')).toBeNull();
+    expect(projectSubtitle('Design system', 'Design system')).toBeNull();
+    expect(projectSubtitle('Docs build', 'Design system')).toBe('Design system');
   });
 });

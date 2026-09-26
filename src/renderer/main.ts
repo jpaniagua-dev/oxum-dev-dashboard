@@ -34,23 +34,19 @@ import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
 import type { AutomationState, UsageState } from '@shared/contracts.js';
-import type { VaultCard, VaultState } from '@shared/vault.js';
+import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
 import { renderUsagePanel } from './ui/usage-panel.js';
 import { renderAutomationPanel } from './ui/automation-panel.js';
 import {
   bindVaultHost,
+  hideCurrentReveal,
   hideReveal,
   isRevealing,
   renderVaultPanel,
 } from './ui/vault-panel.js';
 import { moveProject } from '@shared/project-order.js';
 import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
-import {
-  addTag,
-  removeTag,
-  tagVocabulary,
-  withTagColor,
-} from '@shared/project-tags.js';
+import { addTag, removeTag, tagVocabulary, withTagColor } from '@shared/project-tags.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
@@ -79,6 +75,11 @@ import { TriagePanel } from './ui/triage-panel.js';
 import { StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
 import { applyUiFontSize } from './ui/ui-font.js';
+import { appShortcut } from './ui/app-shortcuts.js';
+import {
+  attachBoardPreviewResizer,
+  BOARD_PREVIEW_DEFAULT_WIDTH,
+} from './ui/board-preview-resizer.js';
 
 /**
  * Application shell.
@@ -108,6 +109,10 @@ class App {
    * lands on is, and the board is the one that shows every session at once.
    */
   private boardMode = false;
+  /** Session shown in the board's right terminal sidebar, or null before a card is selected. */
+  private boardPreviewId: TerminalId | null = null;
+  /** The separator keeps its session-local width when cards are switched or the preview is hidden. */
+  private boardPreviewResizer: { refresh: () => void } | null = null;
   /** Which agent session the Agents tab is looking at. Null means "the newest one". */
   private selectedAgent: TerminalId | null = null;
   /**
@@ -285,7 +290,7 @@ class App {
       {
         onInput: (terminalId, data) => window.api.sendPtyInput(terminalId, data),
         onResize: (terminalId, cols, rows) => window.api.resizePty(terminalId, { cols, rows }),
-          onClose: (terminalId) => void window.api.closeTerminal(terminalId),
+        onClose: (terminalId) => void window.api.closeTerminal(terminalId),
         onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
         onMoveToServers: (terminalId) => void window.api.moveTerminalToServers(terminalId, true),
         // The same callback the board is given: two surfaces drawing one session must not grow two
@@ -350,10 +355,12 @@ class App {
         // and its result only ever lands in the tab that started it.
         this.strip?.select(kind === 'triage' ? 'triage' : 'pulls');
       },
-      // Showing a session is the only thing a card does that the grid cannot: it leaves the board.
+      // A card keeps the board on screen and puts its live terminal in the sidebar beside it.
       onOpen: (terminalId) => {
-        this.setBoardMode(false);
-        this.terminal?.select(terminalId);
+        this.showBoardPreview(terminalId).catch((error: unknown) => {
+          console.error('[terminal] could not preview a session:', error);
+          this.stampMessage('Could not show the terminal, see the console');
+        });
       },
       onMenu: (session, x, y) => this.openSessionMenu(session, x, y),
       // The very callback the tab strip is given, so the board cannot grow its own idea of what
@@ -385,6 +392,12 @@ class App {
      * which is the part worth knowing.
      */
     this.setBoardMode(true);
+    this.boardPreviewResizer = attachBoardPreviewResizer({
+      handle: requireElement('terminal-board-resizer'),
+      pane: requireElement('terminal-pane'),
+      initialWidth: BOARD_PREVIEW_DEFAULT_WIDTH,
+      onResize: () => this.terminal?.refit(),
+    });
 
     this.pulls = bootstrap.pulls;
     this.pullScope = bootstrap.settings.pullScope;
@@ -406,6 +419,13 @@ class App {
     this.renderWorktrees();
     if (bootstrap.settings.activeStrip === 'worktrees') {
       void this.loadWorktrees();
+    }
+    // `adopt` restores the active tab without firing the user's `onChange` callback. Paint the
+    // Vault once during bootstrap and start its on-demand read here when it was the saved tab;
+    // otherwise an app reopened on Vault stays empty until somebody leaves and comes back.
+    this.renderVault();
+    if (bootstrap.settings.activeStrip === 'vault') {
+      void this.loadVault();
     }
 
     window.api.onRowsChanged((rows) => {
@@ -493,7 +513,7 @@ class App {
      */
     window.addEventListener('blur', () => {
       if (isRevealing()) {
-        this.renderVault();
+        hideCurrentReveal();
       }
     });
     window.api.onAutomationsChanged((state) => {
@@ -523,6 +543,9 @@ class App {
         }
       }
       this.sessions = sessions;
+      if (this.boardPreviewId !== null && !live.has(this.boardPreviewId)) {
+        this.clearBoardPreview();
+      }
       for (const id of this.lastOutputAt.keys()) {
         if (!live.has(id)) {
           this.lastOutputAt.delete(id);
@@ -592,8 +615,16 @@ class App {
       return;
     }
     this.boardMode = on;
-    requireElement('terminal-surface').hidden = on;
-    requireElement('terminal-board').hidden = !on;
+    const pane = requireElement('terminal-pane');
+    const surface = requireElement('terminal-surface');
+    const board = requireElement('terminal-board');
+    const previewResizer = requireElement('terminal-board-resizer');
+    this.boardPreviewId = null;
+    this.terminal?.preview(null);
+    pane.classList.remove('terminal--board-preview');
+    previewResizer.hidden = true;
+    surface.hidden = on;
+    board.hidden = !on;
     /*
      * The controls move with the surface that is on screen.
      *
@@ -605,7 +636,9 @@ class App {
 
     const button = requireElement<HTMLButtonElement>('terminal-board-button');
     button.setAttribute('aria-pressed', String(on));
-    button.title = on ? 'Back to the terminals' : 'Show the sessions as cards';
+    button.title = on
+      ? 'Back to the terminal tabs (Ctrl+G)'
+      : 'Show the sessions as cards (Ctrl+G)';
 
     /*
      * The grid picker is meaningless while the board is up, and now that the two sit side by side it
@@ -632,6 +665,45 @@ class App {
     // The panes were hidden and therefore unmeasurable, so every one of them needs its geometry
     // announced again. Same trap as unfolding the project strip.
     this.terminal?.refit();
+  }
+
+  /**
+   * Keeps the card canvas visible while isolating the selected live terminal in the right sidebar.
+   *
+   * The terminal pane performs the isolation with grid placement and `hidden`; the xterm itself is
+   * never moved or re-opened, so its scrollback and renderer survive switching between cards.
+   */
+  private async showBoardPreview(terminalId: TerminalId): Promise<void> {
+    if (!this.boardMode) {
+      await this.focusTerminal(terminalId);
+      return;
+    }
+
+    this.boardPreviewId = terminalId;
+    const pane = requireElement('terminal-pane');
+    pane.classList.add('terminal--board-preview');
+    requireElement('terminal-surface').hidden = false;
+    requireElement('terminal-board').hidden = false;
+    requireElement('terminal-board-resizer').hidden = false;
+    this.boardPreviewResizer?.refresh();
+    this.terminal?.preview(terminalId);
+    await this.replayBuffer(terminalId);
+    this.renderBoard();
+    // The surface was hidden and then given a narrower box. Fit after layout has painted that box.
+    window.requestAnimationFrame(() => this.terminal?.refit());
+  }
+
+  /** Removes a stale or deliberately closed board preview without leaving card mode. */
+  private clearBoardPreview(): void {
+    this.boardPreviewId = null;
+    this.terminal?.preview(null);
+    requireElement('terminal-pane').classList.remove('terminal--board-preview');
+    requireElement('terminal-board-resizer').hidden = true;
+    if (this.boardMode) {
+      requireElement('terminal-surface').hidden = true;
+      requireElement('terminal-board').hidden = false;
+    }
+    this.renderBoard();
   }
 
   /**
@@ -725,8 +797,8 @@ class App {
     const target = this.terminal?.activeId ?? null;
     const view = {
       state: this.vault,
-      target,
-      targetTitle: this.sessions.find((entry) => entry.id === target)?.title ?? '',
+      targetProjectId: this.sessions.find((entry) => entry.id === target)?.projectId ?? null,
+      projects: this.projects.map((project) => ({ id: project.id, label: project.label })),
     };
     const actions = {
       onSave: (card: VaultCard, value: string) => {
@@ -742,13 +814,19 @@ class App {
         });
       },
       onReveal: (id: string) => window.api.revealVaultCard(id),
-      onSend: (id: string, terminalId: TerminalId) => {
-        void window.api.sendVaultCard(id, terminalId).then((result) => {
+      onCopy: (id: string) => {
+        void window.api.copyVaultCard(id).then((result) => {
           this.stampMessage(result.message);
         });
       },
-      onCopy: (id: string) => {
-        void window.api.copyVaultCard(id).then((result) => {
+      onGenerateFile: (binding: VaultFileBinding) => {
+        void window.api.generateVaultFile(binding).then((result) => {
+          this.stampMessage(result.message);
+          void this.loadVault();
+        });
+      },
+      onRemoveFile: (binding: VaultFileBinding) => {
+        void window.api.removeVaultFile(binding).then((result) => {
           this.stampMessage(result.message);
         });
       },
@@ -814,6 +892,7 @@ class App {
       rows: this.rows,
       lastOutputAt: this.lastOutputAt,
       profiles: this.profiles,
+      selectedId: this.boardPreviewId,
     });
   }
 
@@ -904,28 +983,30 @@ class App {
       this.settings?.tagColors ?? {},
       this.pullsByProject(),
       {
-      onRunAction: (projectId, actionId) => void this.runAction(projectId, actionId),
-      onRename: (projectId, label) => void this.renameProject(projectId, label),
-      onEditingChange: (editing) => {
-        this.editingRow = editing;
+        onRunAction: (projectId, actionId) => void this.runAction(projectId, actionId),
+        onRename: (projectId, label) => void this.renameProject(projectId, label),
+        onEditingChange: (editing) => {
+          this.editingRow = editing;
+        },
+        onStop: (projectId) => void this.stopProject(projectId),
+        onOpenFolder: (projectId) => void window.api.openFolder(projectId),
+        onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
+        onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
+        onReorder: (moved, before) => void this.reorderProjects(moved, before),
+        onDraggingChange: (dragging) => {
+          this.draggingRow = dragging;
+        },
+        onAddTag: (projectId, tag) =>
+          void this.retagProject(projectId, (tags) => addTag(tags, tag)),
+        onRemoveTag: (projectId, tag) =>
+          void this.retagProject(projectId, (tags) => removeTag(tags, tag)),
+        onRecolorTag: (tag, color) => void this.recolorTag(tag, color),
+        // The same two gestures the header offers, handed to the empty state so a fresh install has
+        // somewhere to go without reading the README first.
+        onAddProject: () => void this.addProject(),
+        onOpenSettings: () => void window.api.openSettings(),
       },
-      onStop: (projectId) => void this.stopProject(projectId),
-      onOpenFolder: (projectId) => void window.api.openFolder(projectId),
-      onOpenTerminal: (projectId) => void this.openShellInProject(projectId),
-      onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
-      onReorder: (moved, before) => void this.reorderProjects(moved, before),
-      onDraggingChange: (dragging) => {
-        this.draggingRow = dragging;
-      },
-      onAddTag: (projectId, tag) => void this.retagProject(projectId, (tags) => addTag(tags, tag)),
-      onRemoveTag: (projectId, tag) =>
-        void this.retagProject(projectId, (tags) => removeTag(tags, tag)),
-      onRecolorTag: (tag, color) => void this.recolorTag(tag, color),
-      // The same two gestures the header offers, handed to the empty state so a fresh install has
-      // somewhere to go without reading the README first.
-      onAddProject: () => void this.addProject(),
-      onOpenSettings: () => void window.api.openSettings(),
-    });
+    );
   }
 
   /**
@@ -1106,9 +1187,7 @@ class App {
     const ordered = this.projectsByLastBranch();
 
     if (ordered.length === 0) {
-      showContextMenu(x, y, [
-        { label: 'No project configured', disabled: true, run: () => {} },
-      ]);
+      showContextMenu(x, y, [{ label: 'No project configured', disabled: true, run: () => {} }]);
       return;
     }
 
@@ -1116,8 +1195,7 @@ class App {
       x,
       y,
       ordered.map((project) => ({
-        label:
-          project.id === this.lastBranchProject ? `${project.label} (last)` : project.label,
+        label: project.id === this.lastBranchProject ? `${project.label} (last)` : project.label,
         // The branch is named before it is created, which is the rule every write in this app follows.
         // `branchNameFor` is shared with the main process precisely so this promise cannot drift from
         // what the checkout actually does.
@@ -1275,7 +1353,9 @@ class App {
   }
 
   /** Runs a Jira write and reports its outcome where the user is looking. */
-  private async runJiraWrite(write: () => Promise<{ ok: boolean; message: string }>): Promise<void> {
+  private async runJiraWrite(
+    write: () => Promise<{ ok: boolean; message: string }>,
+  ): Promise<void> {
     const result = await write();
     this.stampMessage(result.message);
     if (!result.ok) {
@@ -1475,7 +1555,10 @@ class App {
       // Git tab used to badge the selected repository alone, so finding where work was waiting meant
       // clicking each one in turn.
       changedByProject: Object.fromEntries(
-        this.rows.map((row) => [row.project.id, row.git?.error === null ? row.git.changed : undefined]),
+        this.rows.map((row) => [
+          row.project.id,
+          row.git?.error === null ? row.git.changed : undefined,
+        ]),
       ),
       notice: this.gitNotice,
     };
@@ -1483,151 +1566,149 @@ class App {
 
   private gitPanelActions(): GitPanelActions {
     return {
-        onSelectProject: (projectId) => {
-          if (projectId === this.gitProject) {
-            return;
+      onSelectProject: (projectId) => {
+        if (projectId === this.gitProject) {
+          return;
+        }
+        this.gitProject = projectId;
+        // The diff and the drafts belong to the repository that was open, not to this one: keeping
+        // a message typed for another project is how a commit ends up in the wrong place.
+        this.gitRepo = null;
+        this.gitTarget = null;
+        this.gitDiff = null;
+        this.gitMessage = '';
+        this.gitAmend = false;
+        this.gitBranchDraft = '';
+        this.gitStashDraft = '';
+        this.renderGit();
+        void this.loadGit();
+      },
+      onSelectView: (view) => {
+        this.gitView = view;
+        this.renderGit();
+      },
+      onSelectTarget: (target) => {
+        this.gitTarget = target;
+        this.gitDiff = null;
+        this.renderGit();
+        void this.loadGitDiff();
+      },
+      onStage: (paths, staged) =>
+        void this.runGitWrite(() => window.api.gitStage(this.requireGitProject(), paths, staged)),
+      /*
+       * The confirmation is **not** here.
+       *
+       * It is raised by the main process, on the window, before a single file is touched: a page
+       * under this CSP has no dialog worth the name, and a modal of our own is the pattern that got
+       * the settings modal removed. A cancel comes back as an ordinary failed write, which is what
+       * it is from here.
+       */
+      onDiscard: (paths) =>
+        void this.runGitWrite(() => window.api.gitDiscard(this.requireGitProject(), paths)),
+      onCheckout: (name) =>
+        void this.runGitWrite(() => window.api.gitCheckout(this.requireGitProject(), name)),
+      onCreateBranch: (name) => {
+        void this.runGitWrite(async () => {
+          const result = await window.api.gitCreateBranch(this.requireGitProject(), name, true);
+          if (result.ok) {
+            this.gitBranchDraft = '';
           }
-          this.gitProject = projectId;
-          // The diff and the drafts belong to the repository that was open, not to this one: keeping
-          // a message typed for another project is how a commit ends up in the wrong place.
-          this.gitRepo = null;
-          this.gitTarget = null;
-          this.gitDiff = null;
+          return result;
+        });
+      },
+      onCommit: (push) => void this.commitGit(push),
+      onMessage: (value) => {
+        // Stored without a re-render: the textarea already shows it, and rebuilding the panel on
+        // every keystroke would move the caret.
+        this.gitMessage = value;
+      },
+      onGenerateMessage: () => void this.generateCommitMessage(),
+      onAmend: (amend) => {
+        // Arming the amend puts the message being replaced in the form, since that is the text
+        // the gesture edits — but never over a draft already typed. Disarming takes the pre-fill
+        // back out, and only the pre-fill: an untouched old message left behind would otherwise
+        // become a brand-new commit that *looks* like the previous one.
+        const head = this.gitRepo?.headMessage ?? '';
+        if (amend && this.gitMessage.trim().length === 0) {
+          this.gitMessage = head;
+        } else if (!amend && this.gitMessage === head) {
           this.gitMessage = '';
-          this.gitAmend = false;
-          this.gitBranchDraft = '';
-          this.gitStashDraft = '';
-          this.renderGit();
-          void this.loadGit();
-        },
-        onSelectView: (view) => {
-          this.gitView = view;
-          this.renderGit();
-        },
-        onSelectTarget: (target) => {
-          this.gitTarget = target;
-          this.gitDiff = null;
-          this.renderGit();
-          void this.loadGitDiff();
-        },
-        onStage: (paths, staged) =>
-          void this.runGitWrite(() => window.api.gitStage(this.requireGitProject(), paths, staged)),
-        /*
-         * The confirmation is **not** here.
-         *
-         * It is raised by the main process, on the window, before a single file is touched: a page
-         * under this CSP has no dialog worth the name, and a modal of our own is the pattern that got
-         * the settings modal removed. A cancel comes back as an ordinary failed write, which is what
-         * it is from here.
-         */
-        onDiscard: (paths) =>
-          void this.runGitWrite(() => window.api.gitDiscard(this.requireGitProject(), paths)),
-        onCheckout: (name) =>
-          void this.runGitWrite(() => window.api.gitCheckout(this.requireGitProject(), name)),
-        onCreateBranch: (name) => {
-          void this.runGitWrite(async () => {
-            const result = await window.api.gitCreateBranch(this.requireGitProject(), name, true);
-            if (result.ok) {
-              this.gitBranchDraft = '';
-            }
-            return result;
-          });
-        },
-        onCommit: (push) => void this.commitGit(push),
-        onMessage: (value) => {
-          // Stored without a re-render: the textarea already shows it, and rebuilding the panel on
-          // every keystroke would move the caret.
-          this.gitMessage = value;
-        },
-        onGenerateMessage: () => void this.generateCommitMessage(),
-        onAmend: (amend) => {
-          // Arming the amend puts the message being replaced in the form, since that is the text
-          // the gesture edits — but never over a draft already typed. Disarming takes the pre-fill
-          // back out, and only the pre-fill: an untouched old message left behind would otherwise
-          // become a brand-new commit that *looks* like the previous one.
-          const head = this.gitRepo?.headMessage ?? '';
-          if (amend && this.gitMessage.trim().length === 0) {
-            this.gitMessage = head;
-          } else if (!amend && this.gitMessage === head) {
-            this.gitMessage = '';
-          }
-          this.gitAmend = amend;
-          this.renderGit();
-        },
-        onBranchDraft: (value) => {
-          this.gitBranchDraft = value;
-        },
-        onSync: (op) => void this.syncGit(op),
-        onCherryPick: (sha, noCommit) =>
-          void this.runGitWrite(() =>
-            window.api.gitCherryPick(this.requireGitProject(), sha, noCommit),
-          ),
-        onSequencer: (op) =>
-          void this.runGitWrite(() => window.api.gitSequencer(this.requireGitProject(), op)),
-        onStashDraft: (value) => {
-          this.gitStashDraft = value;
-        },
-        onStashUntracked: (include) => {
-          this.gitStashUntracked = include;
-          // Re-rendered, unlike a text draft: the switch changes the button's own label and enablement,
-          // so the panel has to be repainted for the checkbox to mean anything.
-          this.renderGit();
-        },
-        onStashPush: () => {
-          void this.runGitWrite(async () => {
-            const result = await window.api.gitStashPush(
-              this.requireGitProject(),
-              this.gitStashDraft,
-              this.gitStashUntracked,
-            );
-            if (result.ok) {
-              this.gitStashDraft = '';
-            }
-            return result;
-          });
-        },
-        onStash: (stash, op) =>
-          void this.runGitWrite(() =>
-            window.api.gitStash(this.requireGitProject(), stash.sha, op),
-          ),
-        onCopy: (text) => void window.api.writeClipboard(text),
-        onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
-        onMenu: (x, y) => this.openGitMenu(x, y),
-        onCommitMenu: (commit, x, y) => {
-          if (this.gitRepo === null || this.gitRepo.error !== null) {
-            return;
-          }
-          showContextMenu(
-            x,
-            y,
-            buildCommitMenuItems(commit, this.gitRepo, this.gitPanelState(), this.gitPanelActions()),
+        }
+        this.gitAmend = amend;
+        this.renderGit();
+      },
+      onBranchDraft: (value) => {
+        this.gitBranchDraft = value;
+      },
+      onSync: (op) => void this.syncGit(op),
+      onCherryPick: (sha, noCommit) =>
+        void this.runGitWrite(() =>
+          window.api.gitCherryPick(this.requireGitProject(), sha, noCommit),
+        ),
+      onSequencer: (op) =>
+        void this.runGitWrite(() => window.api.gitSequencer(this.requireGitProject(), op)),
+      onStashDraft: (value) => {
+        this.gitStashDraft = value;
+      },
+      onStashUntracked: (include) => {
+        this.gitStashUntracked = include;
+        // Re-rendered, unlike a text draft: the switch changes the button's own label and enablement,
+        // so the panel has to be repainted for the checkbox to mean anything.
+        this.renderGit();
+      },
+      onStashPush: () => {
+        void this.runGitWrite(async () => {
+          const result = await window.api.gitStashPush(
+            this.requireGitProject(),
+            this.gitStashDraft,
+            this.gitStashUntracked,
           );
-        },
-        onStashMenu: (stash, x, y) => {
-          showContextMenu(
-            x,
-            y,
-            buildStashMenuItems(stash, this.gitPanelState(), this.gitPanelActions()),
-          );
-        },
-        onChangeMenu: (change, x, y) => {
-          showContextMenu(
-            x,
-            y,
-            buildChangeMenuItems(change, this.gitPanelState(), this.gitPanelActions()),
-          );
-        },
-        onDismissNotice: () => {
-          this.gitNotice = null;
-          if (this.gitNoticeTimer !== null) {
-            window.clearTimeout(this.gitNoticeTimer);
-            this.gitNoticeTimer = null;
+          if (result.ok) {
+            this.gitStashDraft = '';
           }
-          this.renderGit();
-        },
-        onEditing: (editing) => {
-          this.gitEditing = editing;
-        },
+          return result;
+        });
+      },
+      onStash: (stash, op) =>
+        void this.runGitWrite(() => window.api.gitStash(this.requireGitProject(), stash.sha, op)),
+      onCopy: (text) => void window.api.writeClipboard(text),
+      onNewTerminal: (projectId) => void this.openNewShellInProject(projectId),
+      onMenu: (x, y) => this.openGitMenu(x, y),
+      onCommitMenu: (commit, x, y) => {
+        if (this.gitRepo === null || this.gitRepo.error !== null) {
+          return;
+        }
+        showContextMenu(
+          x,
+          y,
+          buildCommitMenuItems(commit, this.gitRepo, this.gitPanelState(), this.gitPanelActions()),
+        );
+      },
+      onStashMenu: (stash, x, y) => {
+        showContextMenu(
+          x,
+          y,
+          buildStashMenuItems(stash, this.gitPanelState(), this.gitPanelActions()),
+        );
+      },
+      onChangeMenu: (change, x, y) => {
+        showContextMenu(
+          x,
+          y,
+          buildChangeMenuItems(change, this.gitPanelState(), this.gitPanelActions()),
+        );
+      },
+      onDismissNotice: () => {
+        this.gitNotice = null;
+        if (this.gitNoticeTimer !== null) {
+          window.clearTimeout(this.gitNoticeTimer);
+          this.gitNoticeTimer = null;
+        }
+        this.renderGit();
+      },
+      onEditing: (editing) => {
+        this.gitEditing = editing;
+      },
     };
   }
 
@@ -1642,7 +1723,11 @@ class App {
     if (this.gitRepo === null || this.gitRepo.error !== null) {
       return;
     }
-    showContextMenu(x, y, buildRepoMenuItems(this.gitRepo, this.gitPanelState(), this.gitPanelActions()));
+    showContextMenu(
+      x,
+      y,
+      buildRepoMenuItems(this.gitRepo, this.gitPanelState(), this.gitPanelActions()),
+    );
   }
 
   /**
@@ -1766,10 +1851,7 @@ class App {
    * it finished. The git poll a few seconds later is what settles the row, and inventing a completion
    * signal here would mean this app deciding when a command it did not run is done.
    */
-  private async runWorktreeCommand(
-    projectId: ProjectId,
-    command: WorktreeCommand,
-  ): Promise<void> {
+  private async runWorktreeCommand(projectId: ProjectId, command: WorktreeCommand): Promise<void> {
     const { terminalId, result } = await window.api.runWorktreeCommand(projectId, command);
     this.stampMessage(result.message);
     if (terminalId === null) {
@@ -2264,6 +2346,10 @@ class App {
   }
 
   private async focusTerminal(terminalId: string): Promise<void> {
+    if (this.boardMode) {
+      await this.showBoardPreview(terminalId);
+      return;
+    }
     this.terminal?.select(terminalId);
     await this.replayBuffer(terminalId);
   }
@@ -2328,6 +2414,39 @@ class App {
     requireElement<HTMLButtonElement>('terminal-board-button').addEventListener('click', () => {
       this.setBoardMode(!this.boardMode);
     });
+
+    /*
+     * App-wide shortcuts are captured before xterm can turn them into terminal input.
+     *
+     * The resolver is pure and tested; this listener only performs the three resulting gestures.
+     * Holding a chord never repeats an action because `appShortcut` refuses repeated keydowns.
+     */
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        const shortcut = appShortcut(event);
+        if (shortcut === null) {
+          return;
+        }
+        event.preventDefault();
+        if (shortcut === 'new-terminal') {
+          this.openDefaultShell().catch((error: unknown) => {
+            console.error('[terminal] could not open the default shell:', error);
+            this.stampMessage('Could not open a terminal, see the console');
+          });
+          return;
+        }
+        if (shortcut === 'toggle-terminal-view') {
+          this.setBoardMode(!this.boardMode);
+          return;
+        }
+        this.openAgent().catch((error: unknown) => {
+          console.error('[agent] could not open a session:', error);
+          this.stampMessage('Could not start the agent, see the console');
+        });
+      },
+      true,
+    );
 
     const gridButton = requireElement<HTMLButtonElement>('terminal-grid-button');
     gridButton.addEventListener('click', () => {
@@ -2488,7 +2607,7 @@ class App {
         // Leaving the Vault tab takes any revealed value off the screen with it: the risk a reveal
         // carries is not the click, it is the value still being there afterwards.
         if (tab !== 'vault' && isRevealing()) {
-          this.renderVault();
+          hideCurrentReveal();
         }
         if (tab === 'git') {
           this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);

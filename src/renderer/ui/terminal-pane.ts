@@ -88,7 +88,11 @@ export const PANE_COLUMN_CHOICES: readonly {
     hint: 'One row, one column per pane. What splitting right has always done.',
   },
   { columns: 1, label: 'Stacked', hint: 'One column, the panes under one another.' },
-  { columns: 2, label: 'Two columns', hint: 'Four panes make a 2x2. Fold the strip for the height.' },
+  {
+    columns: 2,
+    label: 'Two columns',
+    hint: 'Four panes make a 2x2. Fold the strip for the height.',
+  },
   { columns: 3, label: 'Three columns', hint: 'Wide window only: a third of the width per pane.' },
 ];
 
@@ -301,6 +305,13 @@ export class TerminalPane {
    * buy is already on a button and on `Alt+Shift+Z`.
    */
   private zoomed: TerminalId | null = null;
+  /**
+   * Session isolated in the board's right preview, or `null` outside that surface.
+   *
+   * Separate from `zoomed`: opening a card is a temporary view owned by the board and must not
+   * overwrite the grid zoom the user chose before switching surfaces.
+   */
+  private previewed: TerminalId | null = null;
 
   constructor(
     private readonly surface: HTMLElement,
@@ -557,6 +568,35 @@ export class TerminalPane {
     this.views.get(terminalId)?.term.focus();
   }
 
+  /**
+   * Shows one existing session in the board sidebar without changing the grid's zoom preference.
+   *
+   * The xterm stays in the permanent container it was opened on. Isolation is only grid placement
+   * and `hidden` state, exactly like pane zoom, so switching cards cannot detach a live terminal.
+   */
+  preview(terminalId: TerminalId | null): void {
+    if (terminalId === null) {
+      if (this.previewed === null) {
+        return;
+      }
+      this.previewed = null;
+      this.render();
+      return;
+    }
+
+    this.ensure(terminalId);
+    const at = groupIndexOf(this.layout.groups, terminalId);
+    if (at === -1) {
+      this.applyLayout(addTab(this.layout.groups, this.focused, terminalId), this.layout.columns);
+    } else {
+      this.focused = at;
+      this.applyLayout(activateTab(this.layout.groups, terminalId), this.layout.columns);
+    }
+    this.previewed = terminalId;
+    this.render();
+    this.views.get(terminalId)?.term.focus();
+  }
+
   /** Puts a session in a brand new pane beside the focused one, which is what a split does. */
   addPane(terminalId: TerminalId, direction: PaneDirection): void {
     this.ensure(terminalId);
@@ -600,6 +640,19 @@ export class TerminalPane {
     return at === -1 ? null : at;
   }
 
+  /** The group isolated by the board preview, or `null` when that session has gone. */
+  private previewedIndex(): number | null {
+    if (this.previewed === null) {
+      return null;
+    }
+    const at = groupIndexOf(this.layout.groups, this.previewed);
+    if (at === -1) {
+      this.previewed = null;
+      return null;
+    }
+    return at;
+  }
+
   /**
    * Blows the focused pane up to the whole surface, or puts it back.
    *
@@ -607,6 +660,9 @@ export class TerminalPane {
    * that appears to do nothing is worse than one that is not offered.
    */
   private toggleZoom(): void {
+    if (this.previewedIndex() !== null) {
+      return;
+    }
     if (this.zoomedIndex() !== null) {
       this.zoomed = null;
     } else if (this.layout.groups.length > 1) {
@@ -681,12 +737,12 @@ export class TerminalPane {
    */
   private visiblePanes(): { group: TerminalGroup; index: number }[] {
     const { groups } = this.layout;
-    const zoomAt = this.zoomedIndex();
-    if (zoomAt === null) {
+    const isolatedAt = this.previewedIndex() ?? this.zoomedIndex();
+    if (isolatedAt === null) {
       return groups.map((group, index) => ({ group, index }));
     }
-    const group = groups[zoomAt];
-    return group === undefined ? [] : [{ group, index: zoomAt }];
+    const group = groups[isolatedAt];
+    return group === undefined ? [] : [{ group, index: isolatedAt }];
   }
 
   /**
@@ -694,8 +750,9 @@ export class TerminalPane {
    *
    * **No terminal is ever moved in the DOM.** Each keeps the permanent container it was opened on, and
    * placement is done by assigning explicit grid lines: detaching an xterm element to reorder it would
-   * leave the terminal alive but blank forever. A pane is two cells of that grid, the strip above its
-   * view, so both are direct children of the surface and neither wraps the other.
+   * leave the terminal alive but blank forever. A pane is normally two cells of that grid, the strip
+   * above its view, so both are direct children of the surface and neither wraps the other. A board
+   * preview is deliberately the exception: its strip is hidden and the view occupies the only row.
    *
    * The grid runs on two axes now, and the track pattern differs between them, which is the piece of
    * arithmetic worth stating here. A column is a single `fr` track, so pane column `c` sits on line
@@ -707,7 +764,8 @@ export class TerminalPane {
   private renderSurface(): void {
     const { groups } = this.layout;
     const panes = this.visiblePanes();
-    const zoomed = this.zoomedIndex() !== null;
+    const previewed = this.previewedIndex() !== null;
+    const isolated = previewed || this.zoomedIndex() !== null;
 
     // The sizes are keyed to the real shape and not to the drawn one: zooming must not reset the
     // fractions the user dragged, being a temporary look at one pane rather than a new layout.
@@ -719,20 +777,24 @@ export class TerminalPane {
       this.rowSizes = Array.from({ length: shape.rows }, () => 1);
     }
 
-    const grid: PaneGrid = zoomed ? { columns: 1, rows: 1 } : shape;
+    const grid: PaneGrid = isolated ? { columns: 1, rows: 1 } : shape;
     const columnTracks: string[] = [];
     for (let column = 0; column < grid.columns; column += 1) {
       if (column > 0) {
         columnTracks.push('var(--pane-splitter)');
       }
-      columnTracks.push(`${zoomed ? 1 : (this.colSizes[column] ?? 1)}fr`);
+      columnTracks.push(`${isolated ? 1 : (this.colSizes[column] ?? 1)}fr`);
     }
     const rowTracks: string[] = [];
     for (let row = 0; row < grid.rows; row += 1) {
       if (row > 0) {
         rowTracks.push('var(--pane-splitter)');
       }
-      rowTracks.push('auto', `${zoomed ? 1 : (this.rowSizes[row] ?? 1)}fr`);
+      if (previewed) {
+        rowTracks.push('1fr');
+      } else {
+        rowTracks.push('auto', `${isolated ? 1 : (this.rowSizes[row] ?? 1)}fr`);
+      }
     }
 
     this.surface.style.gridTemplateColumns = columnTracks.join(' ');
@@ -749,15 +811,15 @@ export class TerminalPane {
       const columnLines = `${paneColumnLine(column)} / ${paneColumnLine(column + span - 1) + 1}`;
       cells.set(pane.index, {
         columnLines,
-        stripRow: String(stripRowLine(row)),
-        viewRow: String(viewRowLine(row)),
+        stripRow: String(previewed ? 1 : stripRowLine(row)),
+        viewRow: String(previewed ? 1 : viewRowLine(row)),
       });
     });
 
     this.stripOwner = panes.map((pane) => pane.index);
     this.strips.forEach((strip, position) => {
       const pane = panes[position];
-      strip.hidden = pane === undefined;
+      strip.hidden = previewed || pane === undefined;
       const cell = pane === undefined ? undefined : cells.get(pane.index);
       if (cell !== undefined) {
         strip.style.gridColumn = cell.columnLines;
@@ -1189,7 +1251,10 @@ export class TerminalPane {
       : session.note === null
         ? 'Add a note saying what this session is for'
         : `${session.note.text}\n(click to show this note)`;
-    button.setAttribute('aria-label', session.note === null ? 'Add a note' : 'Show or hide the note');
+    button.setAttribute(
+      'aria-label',
+      session.note === null ? 'Add a note' : 'Show or hide the note',
+    );
     button.setAttribute('aria-pressed', String(shown));
     // A folded page corner: the one glyph that reads as "a note" without a label, and nothing else
     // in this app uses it, so it cannot be confused with an action.
@@ -1322,7 +1387,8 @@ export class TerminalPane {
    * drift the first time an entry was added to only one of them.
    */
   openSessionMenu(session: TerminalSession, x: number, y: number): void {
-    const alone = (this.layout.groups[groupIndexOf(this.layout.groups, session.id)]?.tabs.length ?? 0) <= 1;
+    const alone =
+      (this.layout.groups[groupIndexOf(this.layout.groups, session.id)]?.tabs.length ?? 0) <= 1;
 
     /*
      * "Close the tabs to the right" resolves to sessions here rather than in `tabsAfter`, because the
@@ -1463,6 +1529,7 @@ export class TerminalPane {
     }
     const panes = this.visiblePanes();
     const zoomed = this.zoomedIndex() !== null;
+    const previewed = this.previewedIndex() !== null;
     panes.forEach(({ group, index }, position) => {
       const strip = this.strips[position];
       if (strip === undefined) {
@@ -1511,7 +1578,7 @@ export class TerminalPane {
 
       // Offered only when there is something to hide: with one pane the button would toggle a state
       // nothing on screen distinguishes from the other.
-      if (this.layout.groups.length > 1) {
+      if (this.layout.groups.length > 1 && !previewed) {
         const zoom = createElement('button', { className: 'icon-button terminal__strip-zoom' });
         zoom.type = 'button';
         zoom.title = zoomed
@@ -1533,7 +1600,7 @@ export class TerminalPane {
         text: 'Clear',
       });
       clear.type = 'button';
-      clear.title = 'Erase this tab\'s output';
+      clear.title = "Erase this tab's output";
       clear.addEventListener('click', (event) => {
         event.stopPropagation();
         this.clear(group.active);
@@ -1560,7 +1627,11 @@ export class TerminalPane {
    *
    * A free shell belongs to no project and gets neither, which is itself the useful statement.
    */
-  private buildTab(session: TerminalSession, group: TerminalGroup, groupIndex: number): HTMLElement {
+  private buildTab(
+    session: TerminalSession,
+    group: TerminalGroup,
+    groupIndex: number,
+  ): HTMLElement {
     // Two levels of highlight: `visible` says "this is what its pane is showing", `active` says "the
     // keyboard goes here", which with several panes on screen are genuinely different things.
     const classes = ['terminal__tab'];
@@ -1861,7 +1932,7 @@ export class TerminalPane {
 
     const agent = createElement('button', { className: 'terminal__new-button' });
     agent.type = 'button';
-    agent.title = 'Start the configured coding agent, in the workspace root';
+    agent.title = 'Start the configured coding agent, in the workspace root (Ctrl+Shift+N)';
     agent.setAttribute('aria-label', 'Start the coding agent');
     agent.append(createIcon(AGENT_ICON, { paint: 'stroke' }));
     agent.addEventListener('click', (event) => {
@@ -1884,7 +1955,7 @@ export class TerminalPane {
     // A drawn chevron rather than the `⌄` character: as text it renders at whatever size and
     // baseline the font decides, which is why it looked like a stray mark next to the `+`.
     caret.append(chevronDown());
-    caret.title = 'New terminal in this pane';
+    caret.title = 'New terminal in this pane (Ctrl+N opens the default profile)';
     caret.setAttribute('aria-label', 'New terminal');
     caret.addEventListener('click', (event) => {
       event.stopPropagation();

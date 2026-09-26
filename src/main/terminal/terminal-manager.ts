@@ -158,6 +158,8 @@ export class TerminalManager {
      * reporting the wrong shape at boot is a grid that visibly snaps into place a moment later.
      */
     initialColumns: number = PANE_COLUMNS_AUTO,
+    /** Ephemeral capabilities added according to the project that owns a new process. */
+    private readonly environmentFor: (projectId: ProjectId | null) => NodeJS.ProcessEnv = () => ({}),
   ) {
     this.columns = sanitizeColumns(initialColumns);
   }
@@ -795,7 +797,7 @@ export class TerminalManager {
         cwd: options.cwd,
         cols: options.size.cols,
         rows: options.size.rows,
-        env: { ...process.env, FORCE_COLOR: '1' },
+        env: { ...process.env, ...this.environmentFor(options.projectId), FORCE_COLOR: '1' },
       });
     } catch (error) {
       // A profile pointing at a missing executable must surface in the tab rather than crash the
