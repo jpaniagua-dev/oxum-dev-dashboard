@@ -34,8 +34,15 @@ import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
 import type { AutomationState, UsageState } from '@shared/contracts.js';
+import type { VaultCard, VaultState } from '@shared/vault.js';
 import { renderUsagePanel } from './ui/usage-panel.js';
 import { renderAutomationPanel } from './ui/automation-panel.js';
+import {
+  bindVaultHost,
+  hideReveal,
+  isRevealing,
+  renderVaultPanel,
+} from './ui/vault-panel.js';
 import { moveProject } from '@shared/project-order.js';
 import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
 import {
@@ -187,6 +194,7 @@ class App {
   /** The last usage read, kept only so a re-show paints something before the files are read again. */
   private usage: UsageState | null = null;
   private automations: AutomationState | null = null;
+  private vault: VaultState | null = null;
   /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
   private autoRuns: AutoRunRecord[] = [];
   private triagePanel: TriagePanel | null = null;
@@ -471,6 +479,23 @@ class App {
       this.renderBoard();
     });
 
+    window.api.onVaultChanged((state) => {
+      this.vault = state;
+      if (this.strip?.active === 'vault') {
+        this.renderVault();
+      }
+    });
+    /*
+     * A revealed secret leaves the screen when the window does.
+     *
+     * The quit confirmation blurs the window too, so a value cannot sit behind a dialog. No new
+     * channel: `blur` is a fact the renderer already has.
+     */
+    window.addEventListener('blur', () => {
+      if (isRevealing()) {
+        this.renderVault();
+      }
+    });
     window.api.onAutomationsChanged((state) => {
       this.automations = state;
       if (this.strip?.active === 'automations') {
@@ -686,6 +711,59 @@ class App {
         },
       },
     );
+  }
+
+  /** Reads the vault once on show; the broadcast keeps it current, and a sweep repaints it. */
+  private async loadVault(): Promise<void> {
+    this.vault = await window.api.readVault();
+    this.renderVault();
+  }
+
+  private renderVault(): void {
+    const host = requireElement('strip-panel-vault');
+    bindVaultHost(host);
+    const target = this.terminal?.activeId ?? null;
+    const view = {
+      state: this.vault,
+      target,
+      targetTitle: this.sessions.find((entry) => entry.id === target)?.title ?? '',
+    };
+    const actions = {
+      onSave: (card: VaultCard, value: string) => {
+        void window.api.saveVaultCard(card, value).then((result) => {
+          this.stampMessage(result.message);
+          void this.loadVault();
+        });
+      },
+      onDelete: (id: string) => {
+        void window.api.deleteVaultCard(id).then((result) => {
+          this.stampMessage(result.message);
+          void this.loadVault();
+        });
+      },
+      onReveal: (id: string) => window.api.revealVaultCard(id),
+      onSend: (id: string, terminalId: TerminalId) => {
+        void window.api.sendVaultCard(id, terminalId).then((result) => {
+          this.stampMessage(result.message);
+        });
+      },
+      onCopy: (id: string) => {
+        void window.api.copyVaultCard(id).then((result) => {
+          this.stampMessage(result.message);
+        });
+      },
+      onReset: () => {
+        void window.api.resetVault().then((state) => {
+          this.vault = state;
+          this.renderVault();
+        });
+      },
+    };
+    if (this.strip?.active !== 'vault' && isRevealing()) {
+      hideReveal(view, actions, host);
+      return;
+    }
+    renderVaultPanel(host, view, actions);
   }
 
   private renderAgents(): void {
@@ -2404,6 +2482,14 @@ class App {
         if (tab === 'automations') {
           void this.loadAutomations();
         }
+        if (tab === 'vault') {
+          void this.loadVault();
+        }
+        // Leaving the Vault tab takes any revealed value off the screen with it: the risk a reveal
+        // carries is not the click, it is the value still being there afterwards.
+        if (tab !== 'vault' && isRevealing()) {
+          this.renderVault();
+        }
         if (tab === 'git') {
           this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);
           void this.loadGit();
@@ -2645,6 +2731,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.usageHeight;
     case 'automations':
       return settings.automationsHeight;
+    case 'vault':
+      return settings.vaultHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -2662,7 +2750,8 @@ function heightKeyOf(
   | 'worktreesHeight'
   | 'agentsHeight'
   | 'usageHeight'
-  | 'automationsHeight' {
+  | 'automationsHeight'
+  | 'vaultHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -2680,6 +2769,8 @@ function heightKeyOf(
       return 'usageHeight';
     case 'automations':
       return 'automationsHeight';
+    case 'vault':
+      return 'vaultHeight';
     case 'projects':
       return 'projectsHeight';
   }

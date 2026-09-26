@@ -546,8 +546,23 @@ export class TerminalManager {
     });
   }
 
-  write(terminalId: TerminalId, data: string): void {
-    this.entries.get(terminalId)?.pty?.write(data);
+  /**
+   * Types bytes into a session's stdin, and says whether anything took them.
+   *
+   * The boolean was added for the vault and it is not a nicety. This was a silent no-op for an
+   * unknown id and for an exited pty, which is right for a keystroke (the tab is gone, so is the
+   * key) and wrong for a secret: somebody who believes a key went into a prompt and it did not will
+   * paste it somewhere else, probably somewhere worse. The one side that knows whether a pty is
+   * alive is this one, so it is the side that answers; re-deriving it from `sessions()` in `ipc.ts`
+   * would be the second authority `stopProjectServer` already records as a mistake.
+   */
+  write(terminalId: TerminalId, data: string): boolean {
+    const pty = this.entries.get(terminalId)?.pty;
+    if (pty === undefined || pty === null) {
+      return false;
+    }
+    pty.write(data);
+    return true;
   }
 
   resize(terminalId: TerminalId, size: TerminalSize): void {

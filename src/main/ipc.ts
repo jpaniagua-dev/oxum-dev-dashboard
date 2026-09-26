@@ -115,6 +115,10 @@ import { readUsage } from './usage/usage-reader.js';
 import type { AutomationRule } from '@shared/automation.js';
 import type { AutomationState } from '@shared/contracts.js';
 import { parseRule } from './automation/automation-store.js';
+import type { VaultResult } from '@shared/contracts.js';
+import type { VaultCard, VaultState } from '@shared/vault.js';
+import { sanitizeHint, sanitizeName } from '@shared/vault.js';
+import type { VaultStore } from './vault/vault-store.js';
 
 export interface IpcDependencies {
   /** Live project list, re-read on every call since settings can change it at any time. */
@@ -127,6 +131,9 @@ export interface IpcDependencies {
   readonly saveAutomationRules: (rules: readonly AutomationRule[]) => Promise<AutomationState>;
   readonly forgetAutomation: (ruleId: string, targetId: string | null) => Promise<AutomationState>;
   readonly clearAutomationLog: () => AutomationState;
+  readonly vault: () => VaultStore;
+  /** Pushes the vault to the dashboard after a change. Routed, never broadcast: see the channel. */
+  readonly pushVault: () => VaultState;
   readonly pullReview: () => PullReviewService;
   readonly autoRuns: () => AutoRunRecords;
   /** Starts a feedback pass by hand, through the same gate the watcher uses. */
@@ -1449,6 +1456,208 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     IpcChannel.AutomationsClearLog,
     async (): Promise<AutomationState> => deps.clearAutomationLog(),
   );
+
+  /**
+   * Reads a card off the channel, sanitised, or `null` when it cannot be used.
+   *
+   * The renderer builds a form; what arrives is whatever reached this channel. A card decides what
+   * a `Send` types into a terminal, so it goes through the same functions a hand-edited file goes
+   * through, the rule `tagColors` and the automation rules already follow.
+   */
+  function readCard(payload: unknown): VaultCard | null {
+    if (typeof payload !== 'object' || payload === null) {
+      return null;
+    }
+    const row = payload as Record<string, unknown>;
+    const id = typeof row['id'] === 'string' ? row['id'] : '';
+    const name = sanitizeName(row['name']);
+    if (id.length === 0 || name.length === 0) {
+      return null;
+    }
+    const createdAt = typeof row['createdAt'] === 'string' ? row['createdAt'] : '';
+    return {
+      id,
+      name,
+      hint: sanitizeHint(row['hint']),
+      createdAt: Number.isNaN(new Date(createdAt).getTime())
+        ? new Date().toISOString()
+        : createdAt,
+      expiresAt: typeof row['expiresAt'] === 'string' ? row['expiresAt'] : null,
+    };
+  }
+
+  /**
+   * Asks the question on the window, and answers false unless the reader said yes.
+   *
+   * In the main process for the reason every other question in this app is: a page under this CSP
+   * has no dialog worth the name, and a modal of our own is the pattern that got the settings modal
+   * removed. `defaultId` and `cancelId` both on Cancel, so a stray Enter or Escape does nothing.
+   */
+  async function confirm(
+    event: Electron.IpcMainInvokeEvent,
+    ask: { title: string; message: string; detail: string; confirmLabel: string },
+  ): Promise<boolean> {
+    const options: Electron.MessageBoxOptions = {
+      type: 'warning',
+      buttons: [ask.confirmLabel, 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      title: ask.title,
+      message: ask.message,
+      detail: ask.detail,
+    };
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const { response } =
+      window === null
+        ? await dialog.showMessageBox(options)
+        : await dialog.showMessageBox(window, options);
+    return response === 0;
+  }
+
+  ipcMain.handle(IpcChannel.VaultRead, async (): Promise<VaultState> => {
+    // Swept before it answers, so a card that died while the app was closed is never listed.
+    await deps.vault().sweep(new Date());
+    return deps.vault().state();
+  });
+
+  ipcMain.handle(
+    IpcChannel.VaultSave,
+    async (_event, card: unknown, value: unknown): Promise<VaultResult> => {
+      const parsed = readCard(card);
+      if (parsed === null || typeof value !== 'string') {
+        return { ok: false, message: 'That card could not be read' };
+      }
+      const result = await deps.vault().save(parsed, value);
+      deps.pushVault();
+      return result;
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.VaultDelete,
+    async (event, id: unknown): Promise<VaultResult> => {
+      if (typeof id !== 'string') {
+        return { ok: false, message: 'No card named' };
+      }
+      const card = deps.vault().state().cards.find((entry) => entry.id === id);
+      if (card === undefined) {
+        return { ok: false, message: 'That card no longer exists' };
+      }
+      /*
+       * Confirmed in the main process, before a byte is touched.
+       *
+       * The gesture discarding changes already goes through, and for the same reason: a page under
+       * this CSP has no dialog worth the name, and this one cannot be undone. `defaultId` on Cancel
+       * so a stray Enter destroys nothing.
+       */
+      const ok = await confirm(event, {
+        title: 'Delete this secret',
+        message: `Delete "${card.name}"?`,
+        detail: 'The value is removed from the vault. Nothing here can bring it back.',
+        confirmLabel: 'Delete',
+      });
+      if (!ok) {
+        return { ok: false, message: 'Nothing was deleted' };
+      }
+      const removed = await deps.vault().remove(id);
+      deps.pushVault();
+      return removed
+        ? { ok: true, message: `Deleted ${card.name}` }
+        : { ok: false, message: 'That card could not be deleted' };
+    },
+  );
+
+  /*
+   * The one channel that hands a secret to the renderer, against the rule the Jira token sets.
+   *
+   * Deliberate, and the difference is whose credential it is: the Jira token is one the APP uses on
+   * its owner's behalf, so the renderer never needs it. A vault card is one the OWNER uses, in
+   * places this app knows nothing about, and a vault whose values can never be read back is a
+   * write-only hole. It crosses once, on an `invoke`, in answer to a click, and never in a list,
+   * never in a broadcast, never in the bootstrap.
+   */
+  ipcMain.handle(IpcChannel.VaultReveal, async (_event, id: unknown): Promise<string> =>
+    typeof id === 'string' ? ((await deps.vault().valueOf(id, new Date())) ?? '') : '',
+  );
+
+  ipcMain.handle(
+    IpcChannel.VaultSend,
+    async (event, id: unknown, terminalId: unknown): Promise<VaultResult> => {
+      if (typeof id !== 'string' || typeof terminalId !== 'string') {
+        return { ok: false, message: 'No card or no session named' };
+      }
+      const card = deps.vault().state().cards.find((entry) => entry.id === id);
+      const session = deps.terminals.sessions().find((entry) => entry.id === terminalId);
+      if (card === undefined || session === undefined) {
+        return { ok: false, message: 'That card or that session no longer exists' };
+      }
+      /*
+       * Confirmed, and naming BOTH the card and the tab.
+       *
+       * The `Approve` button refuses a dialog on the grounds that a box answered twenty times a day
+       * is a reflex rather than a decision. That argument cuts the other way here: this is not a
+       * twenty-times-a-day gesture, and a production key typed into the wrong terminal, possibly a
+       * shared screen, is not undoable by anything.
+       */
+      const ok = await confirm(event, {
+        title: 'Send a secret to a session',
+        message: `Type "${card.name}" into ${session.title}?`,
+        detail:
+          'The value is typed at the prompt and NOT submitted, so you can read it before pressing ' +
+          'Enter. Whatever receives it keeps it: an agent holds it in its context and writes it to ' +
+          'its own transcript.',
+        confirmLabel: 'Send',
+      });
+      if (!ok) {
+        return { ok: false, message: 'Nothing was sent' };
+      }
+      const value = await deps.vault().valueOf(id, new Date());
+      if (value === null) {
+        deps.pushVault();
+        return { ok: false, message: 'That card has expired' };
+      }
+      /*
+       * No trailing carriage return, and that is the decision.
+       *
+       * `write` is raw pty input, so a `\r` submits. The worst case without it is one keypress; the
+       * worst case with it is a production key submitted to a prompt nobody read.
+       */
+      return deps.terminals.write(terminalId, value)
+        ? { ok: true, message: `Typed ${card.name} into ${session.title}` }
+        : { ok: false, message: 'That session is no longer running, so nothing was typed' };
+    },
+  );
+
+  ipcMain.handle(IpcChannel.VaultCopy, async (_event, id: unknown): Promise<VaultResult> => {
+    if (typeof id !== 'string') {
+      return { ok: false, message: 'No card named' };
+    }
+    const value = await deps.vault().valueOf(id, new Date());
+    if (value === null) {
+      deps.pushVault();
+      return { ok: false, message: 'That card no longer exists' };
+    }
+    // Copied in the main process, so the value never enters the renderer at all. Strictly less
+    // exposure than revealing it for the same intent.
+    clipboard.writeText(value);
+    return { ok: true, message: 'Copied. Windows keeps a clipboard history, so paste it soon.' };
+  });
+
+  ipcMain.handle(IpcChannel.VaultReset, async (event): Promise<VaultState> => {
+    const ok = await confirm(event, {
+      title: 'Start a new vault',
+      message: 'Throw away the vault this account cannot read?',
+      detail:
+        'It was encrypted by another Windows account and may still be readable by signing back in ' +
+        'as that account. Starting over deletes it here for good.',
+      confirmLabel: 'Start over',
+    });
+    if (ok) {
+      await deps.vault().reset();
+    }
+    return deps.pushVault();
+  });
 
   ipcMain.handle(
     IpcChannel.AutomationsForget,

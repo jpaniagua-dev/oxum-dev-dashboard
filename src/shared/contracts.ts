@@ -1,6 +1,7 @@
 import type { AgentProfile } from './agent-profile.js';
 import type { AutomationRule } from './automation.js';
 import type { UsageActivity, UsageStats } from './usage.js';
+import type { VaultCard, VaultState } from './vault.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
  *
@@ -1284,7 +1285,43 @@ export type StripTab =
   | 'worktrees'
   | 'agents'
   | 'usage'
-  | 'automations';
+  | 'automations'
+  | 'vault';
+
+/**
+ * Every tab, in display order, as a value.
+ *
+ * ⚠️ **The list exists because two gates kept drifting from it.** A tab has to be accepted by
+ * `asPatch` on its way out of the renderer AND by `asStrip` on its way into the store, and each was
+ * a hand-written chain of `||`. `triage` was missing from the second for a version; `usage` and
+ * `automations` were missing from the first until 2026-09-26, so quitting on either reopened on
+ * `projects`. Both times the symptom was silence, and both times a comment warning about it was
+ * sitting directly above the chain that was wrong.
+ *
+ * Adding a tab is now one entry here. The same rule `TRIAGE_VERDICTS` and `TRIGGER_KINDS` already
+ * follow: a union that something has to test at runtime needs its members as a value, or the test
+ * is a copy that ages.
+ *
+ * The order is the display order, and a new tab goes at the END whatever its subject: inserting one
+ * in the middle moves the others under a cursor that has learnt where they are.
+ */
+export const STRIP_TABS: readonly StripTab[] = [
+  'projects',
+  'pulls',
+  'jira',
+  'git',
+  'triage',
+  'worktrees',
+  'agents',
+  'usage',
+  'automations',
+  'vault',
+];
+
+/** Whether an unknown value names a tab. The one test both gates run. */
+export function isStripTab(value: unknown): value is StripTab {
+  return STRIP_TABS.some((tab) => tab === value);
+}
 
 /**
  * What the coding agent on this machine has been doing, read from its own files.
@@ -1310,6 +1347,12 @@ export interface AutomationState {
   readonly recent: readonly string[];
   /** Why something did not run. Cleared by the next tick that runs cleanly. */
   readonly refusals: readonly string[];
+}
+
+/** What a vault gesture answers: whether it happened, and one sentence about it. */
+export interface VaultResult {
+  readonly ok: boolean;
+  readonly message: string;
 }
 
 export interface UsageState {
@@ -1795,6 +1838,7 @@ export interface AppSettings {
   agentsHeight: number;
   usageHeight: number;
   automationsHeight: number;
+  vaultHeight: number;
   /**
    * Whether rules may act at all. **False by default.**
    *
@@ -2341,6 +2385,14 @@ export const IpcChannel = {
   AutomationsSave: 'automations:save',
   AutomationsForget: 'automations:forget',
   AutomationsClearLog: 'automations:clear-log',
+  VaultRead: 'vault:read',
+  VaultSave: 'vault:save',
+  VaultDelete: 'vault:delete',
+  VaultReveal: 'vault:reveal',
+  VaultSend: 'vault:send',
+  VaultCopy: 'vault:copy',
+  VaultChanged: 'vault:changed',
+  VaultReset: 'vault:reset',
   AutomationsChanged: 'automations:changed',
   /** send: (terminalId, data) => void, keystrokes from xterm to the pty */
   PtyInput: 'pty:input',
@@ -2649,6 +2701,28 @@ export interface RendererApi {
    * only this one is a cross.
    */
   clearAutomationLog(): Promise<AutomationState>;
+
+  /** The cards, never their values. */
+  readVault(): Promise<VaultState>;
+  /** Adds or replaces a card. An empty value on an existing card keeps the stored one. */
+  saveVaultCard(card: VaultCard, value: string): Promise<VaultResult>;
+  /** Destroys a card. The main process asks for confirmation before anything is touched. */
+  deleteVaultCard(id: string): Promise<VaultResult>;
+  /**
+   * The value of one card, for the reader's own eyes.
+   *
+   * ⚠️ The one place a secret travels towards the renderer, against the rule the Jira token sets.
+   * A deliberate exception: the owner asked to be able to see what is stored, on an explicit
+   * gesture, on their own screen.
+   */
+  revealVaultCard(id: string): Promise<string>;
+  /** Types the value into a session's stdin. Nothing is submitted: see the channel's note. */
+  sendVaultCard(id: string, terminalId: TerminalId): Promise<VaultResult>;
+  /** Puts the value on the clipboard without it passing through the renderer. */
+  copyVaultCard(id: string): Promise<VaultResult>;
+  /** Throws away a vault this account cannot read, after a confirmation in the main process. */
+  resetVault(): Promise<VaultState>;
+  onVaultChanged(listener: (state: VaultState) => void): () => void;
   onAutomationsChanged(listener: (state: AutomationState) => void): () => void;
   /**
    * Replaces the layout, panes and tab order together.

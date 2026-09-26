@@ -1040,6 +1040,82 @@ its design choices are deliberately not copied, and each is a rule here.
 - **The one guess this feature makes is stated**: an action with no project falls back to the first
   configured one, because a tab needs a folder and a rule can watch something with no repository.
 
+## Vault tab: secrets, and what it does not protect
+
+Added on 2026-09-26. Somewhere to keep an API key so it does not end up in a `.env` that gets
+committed or pasted into a chat.
+
+- ⚠️ **What it protects: the value at rest, its lifetime, and the moment it moves. What it does NOT
+  protect: the value after delivery.** An agent handed a secret holds it in its context, which is
+  written to that agent's own transcript in clear text and sent to its model provider. No code here
+  can undo that. The panel carries that sentence permanently, first, and undismissable, because a
+  vault its owner trusts for something it cannot do is worse than no vault.
+- **Delivery is a gesture, never an API.** Three designs were considered and two are closed by
+  facts: the app holds a single-instance lock, so there is no `dashboard.exe --vault-get`, and
+  `safeStorage` is an Electron API no standalone script can call. The third, a plaintext file with a
+  timer, was refused: a plaintext file with a timer is still a plaintext file.
+- **One encrypted blob, `vault.bin`, not a file per card.** `safeStorage` encrypts a string; N files
+  would be N atomic writes to keep consistent, with a half-written vault as the failure mode, and
+  the metadata would have to live either in a plaintext index (a name like `prod-db-root` is most of
+  the secret's value) or inside each ciphertext, which makes listing mean decrypting everything.
+- **The pure half is `shared/vault.ts` and holds no secret**; `main/vault/vault-store.ts` is the
+  only place a value is in memory as plain text. That split is the one `secret-store.ts` never made,
+  which is why it has no test at all.
+- ⚠️ **`VaultState` carries no value, and a test asserts it on the object rather than on the type.**
+  A type stops a mistake at compile time and says nothing about an object built with a spread. The
+  leak would be invisible: the renderer simply would not draw the extra field.
+- **`VaultReveal` is the one channel that hands a secret to the renderer**, against the rule the
+  Jira token sets, and the difference is whose credential it is. The Jira token is one the APP uses
+  on its owner's behalf, so the renderer never needs it; a vault card is one the OWNER uses, and a
+  vault whose values can never be read back is a write-only hole. It crosses once, on an `invoke`,
+  in answer to a click, and never in a list, a broadcast or the bootstrap.
+- **`Copy` is the primary and `Reveal` the secondary.** Copying happens entirely in the main
+  process, so the value never enters the window; revealing paints it on a screen that gets shared
+  and screenshotted. Same intent, strictly less exposure. The reveal re-masks after 20 s and on
+  `window.blur`, which also covers the quit dialog.
+- **The mask is a constant twelve dots.** One sized from the value would say whether it is a
+  six-digit PIN or a sixty-four character key, which is a third of the answer given away by a
+  decoration. No last-four preview either.
+- **Sending types the value and does NOT submit it.** `TerminalManager.write` is raw pty input, so a
+  `` would submit: the worst case without it is one keypress, the worst case with it is a
+  production key submitted to a prompt nobody read.
+- ⚠️ **`TerminalManager.write` now returns a boolean, and that was added for this.** It was a silent
+  no-op for an exited pty, which is right for a keystroke and wrong for a secret: somebody who
+  believes a key went into a prompt and it did not will paste it somewhere worse. The manager is the
+  side that knows, so it is the side that answers; re-deriving liveness in `ipc.ts` would be the
+  second authority `stopProjectServer` already records as a mistake.
+- **Sending and deleting are both confirmed by a dialog in the main process**, naming the card and
+  the tab. The `Approve` button refuses a dialog because a box answered twenty times a day is a
+  reflex; that argument cuts the other way here, since neither of these is a daily gesture and a key
+  typed into the wrong terminal is not undoable.
+- ⚠️ **A card's value and expiry cannot be edited, only its name.** A lifetime runs from creation, so
+  a new secret under an old card would either inherit the remaining life of the one it replaced or
+  silently restart the clock. Rotating a key is delete and add, said on screen rather than
+  discovered.
+- ⚠️ **The sweep runs at start-up, on a one-minute timer, AND inside `valueOf`.** None is redundant:
+  a timer cannot fire while the app is closed, so the start-up pass is what honours a card that died
+  overnight; and a laptop asleep for six hours runs no interval and does not catch up, so the lazy
+  check in `valueOf` is what stops a click handing out a secret whose time was up. The timer keeps
+  the display honest, the lazy check keeps the answer honest.
+- **A quiet sweep writes nothing**, the rule `advanceRun` and `setNote` already follow: otherwise the
+  vault is re-encrypted, rewritten and broadcast 1440 times a day.
+- ⚠️ **"Destroyed" means this app has no record and will never show or send it again.** It does not
+  mean the bytes are gone from the disk: `atomicWriteFile` renames a new file over the old, so the
+  previous ciphertext can survive in unreferenced blocks, and an in-place overwrite would not fix
+  that on an SSD either.
+- ⚠️ **Expiry is hygiene, not a boundary.** This app is its sole enforcer, and DPAPI will decrypt the
+  file for anything run by the same Windows account. "After an hour this key is unrecoverable" is
+  not what it provides.
+- **A blob that will not decrypt is KEPT, never replaced**, and every write is refused while it is
+  there: it may be readable again on the account that wrote it. `Start a new vault` is the one way
+  out, behind a confirmation, because a refusal with no exit is a dead feature.
+- **`VaultChanged` is routed to the dashboard, never broadcast.** The servers window has no business
+  receiving a payload about secrets even when it carries none.
+- **Sending is typing, and most prompts echo**, so the value lands in the xterm and in the 200 000
+  character scrollback. That scrollback is memory-only and is never written to disk, which is what
+  makes this acceptable. No scrubber: it would have to hold the value to compare, would miss it the
+  moment it wraps or is coloured, and would be a security promise that fails silently.
+
 ## Jira tab
 
 - **The API token never goes into `settings.json`.** It lives encrypted by `safeStorage` (DPAPI on

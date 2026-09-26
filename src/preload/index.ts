@@ -2,10 +2,12 @@ import type { AgentContext } from '@shared/agent-context.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AgentProfile } from '@shared/agent-profile.js';
 import type { AutomationRule } from '@shared/automation.js';
+import type { VaultCard, VaultState } from '@shared/vault.js';
 import {
   IpcChannel,
   type AgentOpenResult,
   type AutomationState,
+  type VaultResult,
   type UsageState,
   type AppSettings,
   type BootstrapState,
@@ -311,6 +313,31 @@ const api: RendererApi = {
 
   clearAutomationLog: (): Promise<AutomationState> =>
     ipcRenderer.invoke(IpcChannel.AutomationsClearLog),
+
+  readVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultRead),
+
+  saveVaultCard: (card: VaultCard, value: string): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultSave, card, value),
+
+  deleteVaultCard: (id: string): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultDelete, id),
+
+  revealVaultCard: (id: string): Promise<string> =>
+    ipcRenderer.invoke(IpcChannel.VaultReveal, id),
+
+  sendVaultCard: (id: string, terminalId: TerminalId): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultSend, id, terminalId),
+
+  copyVaultCard: (id: string): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultCopy, id),
+
+  resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
+
+  onVaultChanged: (listener: (state: VaultState) => void): (() => void) => {
+    const handler = (_event: unknown, state: VaultState): void => { listener(state); };
+    ipcRenderer.on(IpcChannel.VaultChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.VaultChanged, handler);
+  },
 
   onAutomationsChanged: (listener: (state: AutomationState) => void): (() => void) => {
     const handler = (_event: unknown, state: AutomationState): void => { listener(state); };

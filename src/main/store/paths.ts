@@ -57,6 +57,15 @@ export const AppPaths = {
    */
   automations: (): string => join(app.getPath('userData'), 'automations.json'),
   /**
+   * The vault: names, lifetimes and the secrets themselves, encrypted as one blob.
+   *
+   * Its own file for the reason `jira-token.bin` has one, and `.bin` for the same reason: the
+   * content is base64 ciphertext, so that the text-only atomic write can be reused as it is. It is
+   * the one file this app writes that would matter if it were copied off the machine, and DPAPI is
+   * what makes that copy useless.
+   */
+  vault: (): string => join(app.getPath('userData'), 'vault.bin'),
+  /**
    * Bodies posted to pull requests, one file per review.
    *
    * Written before the post and **kept after it**, exactly like a commit message and for the same

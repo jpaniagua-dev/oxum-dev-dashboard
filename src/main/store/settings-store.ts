@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { normalizeModel } from '@shared/agent-model.js';
+import { isStripTab } from '@shared/contracts.js';
 import {
   sanitizeTagColors,
   sanitizeTags,
@@ -62,6 +63,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentsHeight: 460,
   usageHeight: 460,
   automationsHeight: 460,
+  vaultHeight: 460,
   automationsEnabled: false,
   automationShellEnabled: false,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
@@ -195,6 +197,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       90,
       1200,
     ),
+    vaultHeight: clamp(asNumber(input.vaultHeight, DEFAULT_SETTINGS.vaultHeight), 90, 1200),
     // `=== true` and never a truthy read: a hand-edited file must not be able to switch on a
     // feature that starts agents by itself with the string "false".
     automationsEnabled: input.automationsEnabled === true,
@@ -407,16 +410,7 @@ function asJira(value: unknown): AppSettings['jira'] {
  * `test/settings-store.test.ts` and `test/settings-patch.test.ts` for that reason.
  */
 function asStrip(value: unknown): StripTab {
-  return value === 'pulls' ||
-    value === 'jira' ||
-    value === 'git' ||
-    value === 'triage' ||
-    value === 'worktrees' ||
-    value === 'agents' ||
-    value === 'usage' ||
-    value === 'automations'
-    ? value
-    : 'projects';
+  return isStripTab(value) ? value : 'projects';
 }
 
 /** Drops malformed profiles instead of letting one reach `pty.spawn`. */

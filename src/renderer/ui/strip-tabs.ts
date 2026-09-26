@@ -1,4 +1,4 @@
-import type { StripTab } from '@shared/contracts.js';
+import { STRIP_TABS, type StripTab } from '@shared/contracts.js';
 import { requireElement } from './dom.js';
 
 export interface StripTabsActions {
@@ -12,19 +12,6 @@ export interface StripTabsActions {
  * Only the strip's content switches. The terminal below is untouched by design: it is the centre of this
  * window, and a tab that stole its space would defeat the point of having it always there.
  */
-/** Every tab, in display order. One list, so adding a view is one entry and two elements. */
-export const STRIP_TABS: readonly StripTab[] = [
-  'projects',
-  'pulls',
-  'jira',
-  'git',
-  'triage',
-  'worktrees',
-  'agents',
-  'usage',
-  'automations',
-];
-
 export class StripTabs {
   private current: StripTab = 'projects';
 
@@ -38,6 +25,7 @@ export class StripTabs {
     agents: requireElement<HTMLButtonElement>('strip-tab-agents'),
     usage: requireElement<HTMLButtonElement>('strip-tab-usage'),
     automations: requireElement<HTMLButtonElement>('strip-tab-automations'),
+    vault: requireElement<HTMLButtonElement>('strip-tab-vault'),
   };
 
   private readonly panels: Record<StripTab, HTMLElement> = {
@@ -50,6 +38,7 @@ export class StripTabs {
     agents: requireElement('strip-panel-agents'),
     usage: requireElement('strip-panel-usage'),
     automations: requireElement('strip-panel-automations'),
+    vault: requireElement('strip-panel-vault'),
   };
 
   constructor(private readonly actions: StripTabsActions) {

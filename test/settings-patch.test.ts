@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { STRIP_TABS, isStripTab } from '../src/shared/contracts.js';
 import { LOCAL_ONLY_KEYS, asPatch } from '../src/main/store/settings-patch.js';
 
 describe('asPatch', () => {
@@ -143,6 +144,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       'terminalColumns',
       'triageHeight',
       'usageHeight',
+      'vaultHeight',
       'worktreesHeight',
     ]);
   });
@@ -232,5 +234,36 @@ describe('LOCAL_ONLY_KEYS', () => {
     ]) {
       expect(LOCAL_ONLY_KEYS.has(key)).toBe(false);
     }
+  });
+});
+
+describe('the two tab gates', () => {
+  it('lets EVERY tab through, which is the test that was missing', () => {
+    /*
+     * The bug this replaces a hardcoded value for.
+     *
+     * `asPatch` tested `activeStrip` against a hand-written chain of `||` that stopped at `agents`,
+     * so `usage` and `automations` were dropped on their way out of the renderer and the app
+     * reopened on `projects`. The old test passed `activeStrip: 'jira'` and nothing else, so a tab
+     * missing from the chain was invisible to it. Both gates now test `STRIP_TABS`, and this loops
+     * over it so a tab added to the list without being accepted cannot ship.
+     */
+    for (const tab of STRIP_TABS) {
+      expect(asPatch({ activeStrip: tab })).toEqual({ activeStrip: tab });
+    }
+  });
+
+  it('refuses a value that is not a tab', () => {
+    expect(asPatch({ activeStrip: 'nope' })).toEqual({});
+    expect(asPatch({ activeStrip: 42 })).toEqual({});
+  });
+
+  it('agrees with the store, tab for tab', () => {
+    // The two gates are the pair that drifted. Asserting the membership test both now use is what
+    // makes "kept in step" a fact rather than a comment.
+    for (const tab of STRIP_TABS) {
+      expect(isStripTab(tab)).toBe(true);
+    }
+    expect(isStripTab('projects ')).toBe(false);
   });
 });

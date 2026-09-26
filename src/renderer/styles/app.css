@@ -1600,6 +1600,179 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
+ * The Vault tab
+ * ------------------------------------------------------------------ */
+
+.vault {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px 10px;
+  overflow-y: auto;
+}
+
+.vault[hidden] {
+  display: none;
+}
+
+/*
+ * The limit, permanently and first.
+ *
+ * Not a dismissible banner and not a tooltip: it is the sentence that stops this feature being
+ * trusted for something it cannot do, and a reader who dismissed it once would never see it again.
+ * Painted in the warning colour, which in this app means "not yet true" and here means "not true
+ * after this point".
+ */
+.vault__warning {
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+}
+
+.vault__blocked {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--warning);
+  font-size: var(--font-sm);
+}
+
+.vault__blocked-text {
+  margin: 0;
+}
+
+.vault__empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.vault__form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.vault__form-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.vault__field,
+.vault__value,
+.vault__select {
+  flex: 1 1 160px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+/* The secret itself is a value something else reads back exactly, which is this app's one rule for
+   reaching for the monospace face. */
+.vault__value {
+  flex: 1 1 100%;
+  font-family: var(--font-mono);
+}
+
+.vault__hint {
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+}
+
+/* The same track as the Rules list, so the two tabs read at one rhythm. */
+.vault__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 8px;
+  align-items: start;
+}
+
+.vault__card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.vault__card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vault__card-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.vault__card-expiry {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+}
+
+/*
+ * The mask, and it is a constant twelve dots.
+ *
+ * Never sized from the value: a mask as long as the secret says whether it is a six-digit PIN or a
+ * sixty-four character key, which is a third of the answer given away by a decoration.
+ */
+.vault__secret {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  /* Clipped on one line: a card's height must not depend on the length of what it holds, which is
+     the same thing the constant mask exists to hide. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault__secret--shown {
+  border-color: var(--warning);
+  color: var(--text);
+}
+
+.vault__card-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* ------------------------------------------------------------------ *
  * The Jira board
  *
  * One column per workflow stage, one card per issue. It replaced a sortable table, and it took the

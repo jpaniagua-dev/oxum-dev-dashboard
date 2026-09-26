@@ -75,6 +75,9 @@
             <button type="button" id="strip-tab-automations" class="strip__tab" role="tab">
               Rules
             </button>
+            <button type="button" id="strip-tab-vault" class="strip__tab" role="tab">
+              Vault
+            </button>
           </div>
           <div class="projects__header-actions">
             <!--
@@ -257,6 +260,12 @@
           it buys nothing.
         -->
         <div class="automations" id="strip-panel-automations" role="tabpanel" hidden></div>
+
+        <!--
+          One column: a card is a name, a mask and four buttons, and nothing here is selected. The
+          warning at the top is permanent by design, not a dismissible banner.
+        -->
+        <div class="vault" id="strip-panel-vault" role="tabpanel" hidden></div>
 
         <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
           <div class="pulls__repos" id="triage-sprints"></div>

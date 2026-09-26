@@ -1,5 +1,5 @@
 import { readProfile } from '@shared/agent-profile.js';
-import type { AppSettings } from '@shared/contracts.js';
+import { isStripTab, type AppSettings } from '@shared/contracts.js';
 import { sanitizeTagColors } from '@shared/project-tags.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
 
@@ -19,6 +19,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'agentsHeight',
   'usageHeight',
   'automationsHeight',
+  'vaultHeight',
   'gitListWidth',
   'activeStrip',
   'pullScope',
@@ -60,6 +61,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.usageHeight === 'number') patch.usageHeight = input.usageHeight;
   if (typeof input.automationsHeight === 'number')
     patch.automationsHeight = input.automationsHeight;
+  if (typeof input.vaultHeight === 'number') patch.vaultHeight = input.vaultHeight;
   // Broadcast, unlike the heights: both are written by the settings window and have to reach the
   // dashboard, which is the window whose runner reads them.
   if (typeof input.automationsEnabled === 'boolean')
@@ -70,15 +72,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   // Kept in step with `asStrip` in `settings-store.ts`: a tab this list accepts and that one drops is
   // saved as `projects` on its way to disk, which is how the Triage tab spent a version not being
   // remembered. Two gates, one list of tabs.
-  if (
-    input.activeStrip === 'projects' ||
-    input.activeStrip === 'pulls' ||
-    input.activeStrip === 'jira' ||
-    input.activeStrip === 'git' ||
-    input.activeStrip === 'triage' ||
-    input.activeStrip === 'worktrees' ||
-    input.activeStrip === 'agents'
-  ) {
+  if (isStripTab(input.activeStrip)) {
     patch.activeStrip = input.activeStrip;
   }
   if (input.pullScope === 'mine' || input.pullScope === 'all') patch.pullScope = input.pullScope;

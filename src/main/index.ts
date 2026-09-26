@@ -55,6 +55,8 @@ import { quotePrompt } from '@shared/automation.js';
 import { AutomationRunner, forgetRule, forgetTarget } from './automation/automation-runner.js';
 import { AutomationStore } from './automation/automation-store.js';
 import { buildInteractiveCommand } from './triage/work-command.js';
+import type { VaultState } from '@shared/vault.js';
+import { VaultStore } from './vault/vault-store.js';
 
 /**
  * Development runs get their own data directory.
@@ -417,6 +419,45 @@ async function bootstrap(): Promise<void> {
     clearInterval(scheduleTimer);
   });
 
+  /*
+   * The vault, loaded and swept before anything can read it.
+   *
+   * The sweep at start-up is the one that matters: a timer cannot fire while the app is closed, so
+   * a card whose hour passed overnight would otherwise be sitting there readable in the morning,
+   * which is the opposite of what its owner asked for.
+   */
+  const vaultStore = new VaultStore(AppPaths.vault());
+  await vaultStore.load();
+  await vaultStore.sweep(new Date());
+
+  /**
+   * Pushes the vault to the DASHBOARD only, never broadcast.
+   *
+   * The servers window has no business receiving a payload about secrets, even one that carries
+   * none: the rule that routes pty output rather than broadcasting it, applied to the one shape in
+   * this app where the cost of being wrong is not a wasted xterm.
+   */
+  const pushVault = (): VaultState => {
+    const state = vaultStore.state();
+    dashboardWindow.send(IpcChannel.VaultChanged, state);
+    return state;
+  };
+
+  /** A minute, which is finer than the shortest lifetime the form offers. */
+  const VAULT_SWEEP_MS = 60_000;
+  const vaultTimer = setInterval(() => {
+    void vaultStore.sweep(new Date()).then((dropped) => {
+      // Only when something died: a quiet minute must not re-encrypt and rewrite the file 1440
+      // times a day, the rule `advanceRun` and `setNote` already follow.
+      if (dropped.length > 0) {
+        pushVault();
+      }
+    });
+  }, VAULT_SWEEP_MS);
+  app.on('will-quit', () => {
+    clearInterval(vaultTimer);
+  });
+
   // Triage shares the Jira credentials and nothing else: it is pulled, never polled.
   const triageService = new TriageService(
     () => settingsStore.get(),
@@ -690,6 +731,8 @@ async function bootstrap(): Promise<void> {
     pulls: () => pullMonitor,
     jira: () => jiraMonitor,
     triage: () => triageService,
+    vault: () => vaultStore,
+    pushVault,
     automations: automationState,
     clearAutomationLog: () => {
       /*
