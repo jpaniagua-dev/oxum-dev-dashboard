@@ -173,6 +173,11 @@ exceptions:
   went with it rather than being left as a dead export.
 ### Notes on a session
 
+**Card renaming stays on the card.** The shared session menu accepts a rename handler from the
+board; without it, Rename opens the tab-strip editor, which Cards mode hides. The title input
+shares the note editor's repaint guard and pointer isolation. Enter or blur commits, Escape
+cancels. The ordinary tab menu retains its own inline editor.
+
 Added on 2026-09-25, because a board past a dozen cards answers "what have I got running" and not
 "which of these is the one about the fiscal year dropdown". Everything else on a card is derived: a
 title built from a project and an action, an activity read off timing, a phase read off a project

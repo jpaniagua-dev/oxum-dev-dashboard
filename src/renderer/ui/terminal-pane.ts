@@ -1386,7 +1386,7 @@ export class TerminalPane {
    * One list and not two: a card and a tab are two drawings of one session, and a second menu would
    * drift the first time an entry was added to only one of them.
    */
-  openSessionMenu(session: TerminalSession, x: number, y: number): void {
+  openSessionMenu(session: TerminalSession, x: number, y: number, onRename?: () => void): void {
     const alone =
       (this.layout.groups[groupIndexOf(this.layout.groups, session.id)]?.tabs.length ?? 0) <= 1;
 
@@ -1429,22 +1429,17 @@ export class TerminalPane {
       {
         label: 'Rename',
         run: () => {
+          // Cards must edit their visible title, not an input in a hidden tab strip.
+          if (onRename !== undefined) {
+            onRename();
+            return;
+          }
           this.renaming = session.id;
           this.renderStrips();
         },
       },
       {
-        /*
-         * One menu for a tab and for its card, which is why this entry lives here and acts over
-         * there.
-         *
-         * A rename is a title, one line, and this strip has room for its input. A note is three
-         * lines about what a session is FOR, which is the question a board of forty cards makes
-         * unanswerable and which no twenty-four pixel strip can host an editor for. So the editor is
-         * the board's, and this entry says so in its hint rather than switching surfaces under the
-         * reader: a menu that moves you somewhere you did not ask to go is worse than one that tells
-         * you where to go.
-         */
+        // The app routes editing to the visible surface, as it does for a card's title.
         label: session.note === null ? 'Add a note' : 'Edit the note',
         hint: 'What this session is for, shown on its card and at the head of its pane',
         run: () => {

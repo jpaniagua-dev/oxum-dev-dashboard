@@ -4232,6 +4232,13 @@ body {
   white-space: nowrap;
 }
 
+.board-card__rename {
+  min-width: 0;
+  width: 100%;
+  font: inherit;
+  font-weight: 600;
+}
+
 .board-card__activity,
 .board-card__project {
   color: var(--text-dim);

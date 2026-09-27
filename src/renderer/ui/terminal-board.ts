@@ -192,6 +192,7 @@ export interface TerminalBoardActions {
    * shows the note as a tab tooltip. One editor, in the one place with room for it.
    */
   onNote: (terminalId: TerminalId, text: string) => void;
+  onRename: (terminalId: TerminalId, title: string) => void;
 }
 
 /** What the board needs to know about the world, handed in on every render. */
@@ -244,7 +245,7 @@ export class TerminalBoard {
   /** Set while the plane itself is being dragged, so a click on the background opens no card. */
   private panning = false;
   /**
-   * The card whose note is being written, or `null`.
+   * The card whose title or note is being written, or `null`.
    *
    * It is also what holds the repaint off. A note editor destroyed under the caret by the one-second
    * tick is the failure this app has already paid for three times, on the tab rename, the table's
@@ -443,7 +444,7 @@ export class TerminalBoard {
   }
 
   private paint(force = false): void {
-    // Never under a pointer that is carrying a card, and never under an open note editor: the first
+    // Never under a pointer that is carrying a card, and never under an open editor: the first
     // drops the pointer capture mid-gesture, the second throws away what is being typed.
     if (this.carrying || this.editing !== null) {
       return;
@@ -787,6 +788,15 @@ export class TerminalBoard {
    * outright, so the caller is what decides whether to offer it.
    */
   editNote(id: TerminalId): void {
+    this.beginEdit(id, 'note');
+  }
+
+  /** Edits the visible card title while the tab strips are hidden in Cards mode. */
+  rename(id: TerminalId): void {
+    this.beginEdit(id, 'title');
+  }
+
+  private beginEdit(id: TerminalId, kind: 'note' | 'title'): void {
     if (!this.state.sessions.some((session) => session.id === id)) {
       return;
     }
@@ -795,31 +805,28 @@ export class TerminalBoard {
     this.editing = null;
     this.paint(true);
     this.editing = id;
-    this.openEditor(id);
+    this.openEditor(id, kind);
   }
 
   /**
-   * Puts a textarea over the card's note and hands it the caret.
-   *
-   * A textarea and not a prompt dialog, for the reason this app has no modals at all: under this CSP
-   * a page dialog is not worth the name, and a modal of our own is the pattern that got the settings
-   * modal removed. It commits on blur and on `Enter`, and abandons on `Escape`, which is the rename
-   * input's own grammar, except that `Shift+Enter` breaks a line here because a note has more than
-   * one.
+   * Edits the title or note in place, sharing the repaint and pointer guards.
+   * Enter and blur commit, Escape cancels; only notes accept Shift+Enter for a new line.
    */
-  private openEditor(id: TerminalId): void {
+  private openEditor(id: TerminalId, kind: 'note' | 'title'): void {
     const card = this.content.querySelector<HTMLElement>(`[data-card="${id}"]`);
     if (card === null) {
       this.editing = null;
       return;
     }
     const session = this.state.sessions.find((entry) => entry.id === id);
-    const field = document.createElement('textarea');
-    field.className = 'board-card__editor';
-    field.value = session?.note?.text ?? '';
-    field.maxLength = NOTE_LIMIT;
-    field.rows = 3;
-    field.setAttribute('aria-label', 'Note about this session');
+    const field = document.createElement(kind === 'note' ? 'textarea' : 'input');
+    field.className = kind === 'note' ? 'board-card__editor' : 'board-card__rename';
+    field.value = (kind === 'note' ? session?.note?.text : session?.title) ?? '';
+    if (field instanceof HTMLTextAreaElement) {
+      field.maxLength = NOTE_LIMIT;
+      field.rows = 3;
+    }
+    field.setAttribute('aria-label', kind === 'note' ? 'Note about this session' : 'Rename this card');
     // Stops the card's own drag from starting on a press inside the field, which would otherwise
     // capture the pointer and make selecting text move the card.
     field.addEventListener('pointerdown', (event) => {
@@ -835,7 +842,11 @@ export class TerminalBoard {
       const text = field.value;
       this.editing = null;
       if (commit) {
-        this.actions.onNote(id, text);
+        if (kind === 'note') {
+          this.actions.onNote(id, text);
+        } else {
+          this.actions.onRename(id, text);
+        }
       }
       // Forced, because the session list may come back identical: clearing a note that was already
       // empty changes nothing in the main process, so nothing is broadcast, and without this the
@@ -844,12 +855,15 @@ export class TerminalBoard {
     };
 
     field.addEventListener('keydown', (event) => {
+      if (!(event instanceof KeyboardEvent)) {
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         finish(false);
         return;
       }
-      if (event.key === 'Enter' && !event.shiftKey) {
+      if (event.key === 'Enter' && (kind === 'title' || !event.shiftKey)) {
         event.preventDefault();
         finish(true);
       }
@@ -858,8 +872,12 @@ export class TerminalBoard {
       finish(true);
     });
 
-    card.querySelector('.board-card__note')?.remove();
-    card.querySelector('.board-card__body')?.append(field);
+    if (kind === 'note') {
+      card.querySelector('.board-card__note')?.remove();
+      card.querySelector('.board-card__body')?.append(field);
+    } else {
+      card.querySelector('.board-card__title')?.replaceWith(field);
+    }
     // A microtask and not an animation frame, the correction the tab rename already carries: a frame
     // is throttled in an occluded window and loses the race against the next broadcast.
     void Promise.resolve().then(() => {

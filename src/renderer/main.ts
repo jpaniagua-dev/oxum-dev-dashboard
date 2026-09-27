@@ -363,6 +363,7 @@ class App {
         });
       },
       onMenu: (session, x, y) => this.openSessionMenu(session, x, y),
+      onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
       // The very callback the tab strip is given, so the board cannot grow its own idea of what
       // opening a shell means. Staying on the board is deliberate: setting up three sessions should
       // not bounce through the grid three times, and the new card appears at once.
@@ -907,7 +908,7 @@ class App {
    * session, and two menus would drift the first time an entry was added to one of them.
    */
   private openSessionMenu(session: TerminalSession, x: number, y: number): void {
-    this.terminal?.openSessionMenu(session, x, y);
+    this.terminal?.openSessionMenu(session, x, y, () => this.board?.rename(session.id));
   }
 
   /**
