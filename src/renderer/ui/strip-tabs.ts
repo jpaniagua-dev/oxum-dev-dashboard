@@ -7,7 +7,6 @@ export interface StripTabsActions {
 }
 
 export interface RestoredStripLoaders {
-  readonly usage: () => void;
   readonly automations: () => void;
   readonly vault: () => void;
   readonly triage: () => void;
@@ -18,9 +17,6 @@ export interface RestoredStripLoaders {
 /** Runs the on-demand read that `adopt` deliberately does not report as a user tab change. */
 export function loadRestoredStrip(tab: StripTab, loaders: RestoredStripLoaders): void {
   switch (tab) {
-    case 'usage':
-      loaders.usage();
-      break;
     case 'automations':
       loaders.automations();
       break;
@@ -61,7 +57,6 @@ export class StripTabs {
     triage: requireElement<HTMLButtonElement>('strip-tab-triage'),
     worktrees: requireElement<HTMLButtonElement>('strip-tab-worktrees'),
     agents: requireElement<HTMLButtonElement>('strip-tab-agents'),
-    usage: requireElement<HTMLButtonElement>('strip-tab-usage'),
     automations: requireElement<HTMLButtonElement>('strip-tab-automations'),
     vault: requireElement<HTMLButtonElement>('strip-tab-vault'),
   };
@@ -74,7 +69,6 @@ export class StripTabs {
     triage: requireElement('strip-panel-triage'),
     worktrees: requireElement('strip-panel-worktrees'),
     agents: requireElement('strip-panel-agents'),
-    usage: requireElement('strip-panel-usage'),
     automations: requireElement('strip-panel-automations'),
     vault: requireElement('strip-panel-vault'),
   };

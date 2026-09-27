@@ -7,7 +7,6 @@ import {
 
 function loaders(): Record<keyof RestoredStripLoaders, ReturnType<typeof vi.fn>> {
   return {
-    usage: vi.fn(),
     automations: vi.fn(),
     vault: vi.fn(),
     triage: vi.fn(),
@@ -18,7 +17,6 @@ function loaders(): Record<keyof RestoredStripLoaders, ReturnType<typeof vi.fn>>
 
 describe('loadRestoredStrip', () => {
   const onDemand: Readonly<Partial<Record<StripTab, keyof RestoredStripLoaders>>> = {
-    usage: 'usage',
     automations: 'automations',
     vault: 'vault',
     triage: 'triage',

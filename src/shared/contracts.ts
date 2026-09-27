@@ -1,6 +1,5 @@
 import type { AgentProfile } from './agent-profile.js';
 import type { AutomationRule } from './automation.js';
-import type { UsageActivity, UsageStats } from './usage.js';
 import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
@@ -1284,7 +1283,6 @@ export type StripTab =
   | 'triage'
   | 'worktrees'
   | 'agents'
-  | 'usage'
   | 'automations'
   | 'vault';
 
@@ -1293,8 +1291,8 @@ export type StripTab =
  *
  * ⚠️ **The list exists because two gates kept drifting from it.** A tab has to be accepted by
  * `asPatch` on its way out of the renderer AND by `asStrip` on its way into the store, and each was
- * a hand-written chain of `||`. `triage` was missing from the second for a version; `usage` and
- * `automations` were missing from the first until 2026-09-26, so quitting on either reopened on
+ * a hand-written chain of `||`. `triage` was missing from the second for a version; two later tabs
+ * were missing from the first until 2026-09-26, so quitting on either reopened on
  * `projects`. Both times the symptom was silence, and both times a comment warning about it was
  * sitting directly above the chain that was wrong.
  *
@@ -1313,7 +1311,6 @@ export const STRIP_TABS: readonly StripTab[] = [
   'triage',
   'worktrees',
   'agents',
-  'usage',
   'automations',
   'vault',
 ];
@@ -1353,13 +1350,6 @@ export interface AutomationState {
 export interface VaultResult {
   readonly ok: boolean;
   readonly message: string;
-}
-
-export interface UsageState {
-  readonly activity: UsageActivity | null;
-  readonly stats: UsageStats | null;
-  /** When this app read them, so the panel can say how fresh its own answer is. */
-  readonly readAt: string;
 }
 
 /**
@@ -1836,7 +1826,6 @@ export interface AppSettings {
   defaultShellProfileId: string;
   /** Height of the Agents strip, in pixels. */
   agentsHeight: number;
-  usageHeight: number;
   automationsHeight: number;
   vaultHeight: number;
   /**
@@ -2380,7 +2369,6 @@ export const IpcChannel = {
   /** invoke: (terminalId, title) => void, renames a tab */
   TerminalRename: 'terminal:rename',
   TerminalNote: 'terminal:note',
-  UsageRead: 'usage:read',
   AutomationsRead: 'automations:read',
   AutomationsSave: 'automations:save',
   AutomationsForget: 'automations:forget',
@@ -2686,8 +2674,6 @@ export interface RendererApi {
   renameTerminal(terminalId: TerminalId, title: string): Promise<void>;
   /** Writes what a session is for, or clears it: an empty string IS the delete. */
   setTerminalNote(terminalId: TerminalId, text: string): Promise<void>;
-  /** Reads Claude Code's own usage files. Pulled when the tab is shown, never polled. */
-  readUsage(): Promise<UsageState>;
   readAutomations(): Promise<AutomationState>;
   /** Replaces the whole rule list. The main process sanitises it, as it does every settings write. */
   saveAutomations(rules: readonly AutomationRule[]): Promise<AutomationState>;

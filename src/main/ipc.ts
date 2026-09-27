@@ -110,8 +110,6 @@ import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-prof
 import { resolveShellCommand, type TerminalManager } from './terminal/terminal-manager.js';
 import type { ThemeController } from './theme.js';
 import { noteFromTicket } from '@shared/session-note.js';
-import type { UsageState } from '@shared/contracts.js';
-import { readUsage } from './usage/usage-reader.js';
 import type { AutomationRule } from '@shared/automation.js';
 import type { AutomationState } from '@shared/contracts.js';
 import { parseRule } from './automation/automation-store.js';
@@ -1428,16 +1426,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       }
     },
   );
-
-  /*
-   * Pulled when the tab is shown, never polled.
-   *
-   * Same judgement as the Git and Worktrees tabs: these are two files on disk that change when an
-   * agent runs, and reading them for a tab nobody is looking at is work for nobody. The renderer
-   * asks when it shows the tab and when the refresh button is pressed, which is exactly when the
-   * answer can have changed and somebody is there to read it.
-   */
-  ipcMain.handle(IpcChannel.UsageRead, async (): Promise<UsageState> => readUsage());
 
   ipcMain.handle(
     IpcChannel.AutomationsRead,

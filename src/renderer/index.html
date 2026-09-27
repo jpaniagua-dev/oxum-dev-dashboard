@@ -73,9 +73,6 @@
                 <button type="button" id="strip-tab-agents" class="strip__tab" role="tab">
                   Agents
                 </button>
-                <button type="button" id="strip-tab-usage" class="strip__tab" role="tab">
-                  Usage
-                </button>
                 <button type="button" id="strip-tab-automations" class="strip__tab" role="tab">
                   Rules
                 </button>
@@ -249,14 +246,6 @@
                 <div class="pulls__list" id="agents-detail"></div>
               </div>
             </div>
-
-            <!--
-          Two columns and not the master-detail of its neighbours: nothing here is selected. The
-          left is live (a log appended on every prompt), the right is a cache Claude Code rebuilds
-          on its own schedule and can be weeks behind, which is why the two are drawn apart with the
-          cache's age stated over the figures it applies to.
-        -->
-            <div class="usage" id="strip-panel-usage" role="tabpanel" hidden></div>
 
             <!--
           One column, no master-detail: a rule is six fields and fits beside its neighbours, so a

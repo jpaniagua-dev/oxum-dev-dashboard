@@ -8,7 +8,6 @@ import {
   type AgentOpenResult,
   type AutomationState,
   type VaultResult,
-  type UsageState,
   type AppSettings,
   type BootstrapState,
   type GeneratedCommit,
@@ -299,8 +298,6 @@ const api: RendererApi = {
 
   setTerminalNote: (terminalId: TerminalId, text: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.TerminalNote, terminalId, text),
-
-  readUsage: (): Promise<UsageState> => ipcRenderer.invoke(IpcChannel.UsageRead),
 
   readAutomations: (): Promise<AutomationState> =>
     ipcRenderer.invoke(IpcChannel.AutomationsRead),

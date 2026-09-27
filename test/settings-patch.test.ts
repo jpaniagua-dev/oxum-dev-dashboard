@@ -143,7 +143,6 @@ describe('LOCAL_ONLY_KEYS', () => {
       // would re-adopt the layout in the middle of the click that changed it.
       'terminalColumns',
       'triageHeight',
-      'usageHeight',
       'vaultHeight',
       'worktreesHeight',
     ]);
@@ -243,7 +242,7 @@ describe('the two tab gates', () => {
      * The bug this replaces a hardcoded value for.
      *
      * `asPatch` tested `activeStrip` against a hand-written chain of `||` that stopped at `agents`,
-     * so `usage` and `automations` were dropped on their way out of the renderer and the app
+     * so two later tabs were dropped on their way out of the renderer and the app
      * reopened on `projects`. The old test passed `activeStrip: 'jira'` and nothing else, so a tab
      * missing from the chain was invisible to it. Both gates now test `STRIP_TABS`, and this loops
      * over it so a tab added to the list without being accepted cannot ship.

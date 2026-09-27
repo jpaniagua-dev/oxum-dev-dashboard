@@ -168,6 +168,10 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings({ activeStrip: 'mails' }).activeStrip).toBe('projects');
   });
 
+  it('falls back to projects when the saved tab was the removed Usage tab', () => {
+    expect(sanitizeSettings({ activeStrip: 'usage' }).activeStrip).toBe('projects');
+  });
+
   it('clamps the Worktrees tab height like every other strip height', () => {
     expect(sanitizeSettings({ worktreesHeight: 4 }).worktreesHeight).toBe(90);
     expect(sanitizeSettings({ worktreesHeight: 5000 }).worktreesHeight).toBe(1200);

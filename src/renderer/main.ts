@@ -33,9 +33,8 @@ import type { AgentContext } from '@shared/agent-context.js';
 import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
-import type { AutomationState, UsageState } from '@shared/contracts.js';
+import type { AutomationState } from '@shared/contracts.js';
 import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
-import { renderUsagePanel } from './ui/usage-panel.js';
 import { renderAutomationPanel } from './ui/automation-panel.js';
 import {
   bindVaultHost,
@@ -196,8 +195,6 @@ class App {
   /** Single-flight state for the worktree read. See {@link singleFlight}. */
   private readonly worktreesFlight: Flight = idleFlight();
   private triage: TriageState | null = null;
-  /** The last usage read, kept only so a re-show paints something before the files are read again. */
-  private usage: UsageState | null = null;
   private automations: AutomationState | null = null;
   private vault: VaultState | null = null;
   /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
@@ -422,7 +419,6 @@ class App {
     // whose state is read only when shown therefore needs the same bootstrap path as a click, or an
     // app reopened on that tab stays empty until somebody leaves and comes back.
     loadRestoredStrip(bootstrap.settings.activeStrip, {
-      usage: () => void this.loadUsage(),
       automations: () => void this.loadAutomations(),
       vault: () => void this.loadVault(),
       triage: () => void this.loadTriage(),
@@ -735,20 +731,6 @@ class App {
    * draws "Reading..." rather than waiting. A tab that blocked on the disk would be a tab that
    * freezes the window on a network drive that went away.
    */
-  /**
-   * Reads Claude Code's usage files and paints the tab.
-   *
-   * Nothing is cached between shows. The whole read is two `readFile` calls answered off the main
-   * thread, and a cache here would only be able to be wrong about a file another program owns.
-   */
-  private async loadUsage(): Promise<void> {
-    renderUsagePanel(requireElement('strip-panel-usage'), this.usage);
-    this.usage = await window.api.readUsage();
-    // Re-read on the way back rather than held: the tab may have been left while this was in flight,
-    // and painting then is harmless, the panel being hidden.
-    renderUsagePanel(requireElement('strip-panel-usage'), this.usage);
-  }
-
   /** Reads the rules once, then paints. The broadcast keeps it current afterwards. */
   private async loadAutomations(): Promise<void> {
     // Unlike the structured tabs, this panel starts as an empty host. Paint its loading state before
@@ -2598,11 +2580,7 @@ class App {
         // Two files on disk that change when an agent runs, so the tab being shown is exactly
         // when the answer can have changed and somebody is there to read it. No monitor, the
         // rule the Git and Worktrees tabs already follow.
-        if (tab === 'usage') {
-          void this.loadUsage();
-        }
-        // Read once on show, then kept current by the broadcast: unlike Usage, this state changes
-        // because the main process changed it, and it says so on its own channel when it does.
+        // Read once on show, then kept current by the main process broadcast.
         if (tab === 'automations') {
           void this.loadAutomations();
         }
@@ -2851,8 +2829,6 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.worktreesHeight;
     case 'agents':
       return settings.agentsHeight;
-    case 'usage':
-      return settings.usageHeight;
     case 'automations':
       return settings.automationsHeight;
     case 'vault':
@@ -2873,7 +2849,6 @@ function heightKeyOf(
   | 'triageHeight'
   | 'worktreesHeight'
   | 'agentsHeight'
-  | 'usageHeight'
   | 'automationsHeight'
   | 'vaultHeight' {
   switch (tab) {
@@ -2889,8 +2864,6 @@ function heightKeyOf(
       return 'worktreesHeight';
     case 'agents':
       return 'agentsHeight';
-    case 'usage':
-      return 'usageHeight';
     case 'automations':
       return 'automationsHeight';
     case 'vault':

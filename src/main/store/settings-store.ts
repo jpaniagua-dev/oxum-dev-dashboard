@@ -61,7 +61,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Master-detail with a list of instruction files and a list of memory cards on the right, so it
   // wants the room the Git tab wants rather than the room a status table wants.
   agentsHeight: 460,
-  usageHeight: 460,
   automationsHeight: 460,
   vaultHeight: 460,
   automationsEnabled: false,
@@ -191,7 +190,6 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       1200,
     ),
     agentsHeight: clamp(asNumber(input.agentsHeight, DEFAULT_SETTINGS.agentsHeight), 90, 1200),
-    usageHeight: clamp(asNumber(input.usageHeight, DEFAULT_SETTINGS.usageHeight), 90, 1200),
     automationsHeight: clamp(
       asNumber(input.automationsHeight, DEFAULT_SETTINGS.automationsHeight),
       90,
