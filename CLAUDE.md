@@ -180,6 +180,10 @@ exceptions:
 board; without it, Rename opens the tab-strip editor, which Cards mode hides. The title input
 shares the note editor's repaint guard and pointer isolation. Enter or blur commits, Escape
 cancels. The ordinary tab menu retains its own inline editor.
+A double click on the title opens the same editor. It is detected on the board, from two
+pointerups on the same card title under 400 ms, and not by the native `dblclick`: the first click
+opens the sidebar and repaints the board, so the second lands on a card element the first never
+saw. The first click still opens the card, so the gesture shows the terminal and renames it.
 
 Added on 2026-09-25, because a board past a dozen cards answers "what have I got running" and not
 "which of these is the one about the fiscal year dropdown". Everything else on a card is derived: a

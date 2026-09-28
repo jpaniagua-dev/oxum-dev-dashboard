@@ -253,6 +253,13 @@ export class TerminalBoard {
    * typed since the last poll.
    */
   private editing: TerminalId | null = null;
+  /**
+   * The last plain click on a card title, which is how a double click is recognised.
+   *
+   * Held on the board and not left to the native `dblclick`: the first click opens the sidebar,
+   * which repaints the board, so the second click lands on a card element the first never saw.
+   */
+  private lastTitleClick: { id: CardId; at: number } | null = null;
 
   /** The separator drawn before the surface controls, built once and relocated with them. */
   private readonly controlsRule: HTMLElement;
@@ -665,9 +672,17 @@ export class TerminalBoard {
       event.stopPropagation();
       this.actions.onMenu(session, event.clientX, event.clientY);
     });
-    this.attachCardDrag(card, session.id, point, () => {
-      this.actions.onOpen(session.id);
-    });
+    this.attachCardDrag(
+      card,
+      session.id,
+      point,
+      () => {
+        this.actions.onOpen(session.id);
+      },
+      () => {
+        this.rename(session.id);
+      },
+    );
     return card;
   }
 
@@ -685,16 +700,23 @@ export class TerminalBoard {
    * `onClick` is handed in rather than decided here, because a click means two different things on
    * this board: unfold a session, or show the tab that owns a headless run. Branching inside on
    * which kind of card it is would put the two cards' behaviour in a third place.
+   *
+   * `onTitleDoubleClick` is the same idea: only a session card has a title that can be renamed.
+   * The first click of the pair still opens the card, so a double click shows the terminal and
+   * puts the caret in its title.
    */
   private attachCardDrag(
     card: HTMLElement,
     id: CardId,
     from: CardPoint,
     onClick: () => void,
+    onTitleDoubleClick?: () => void,
   ): void {
     const THRESHOLD = 4;
+    const DOUBLE_CLICK_MS = 400;
     let origin: CardPoint | null = null;
     let moved = false;
+    let onTitle = false;
 
     card.addEventListener('pointerdown', (event) => {
       /*
@@ -725,6 +747,8 @@ export class TerminalBoard {
       }
       origin = { x: event.clientX, y: event.clientY };
       moved = false;
+      // Read here because the capture below retargets `pointerup` to the card itself.
+      onTitle = (event.target as HTMLElement).closest('.board-card__title') !== null;
       card.setPointerCapture(event.pointerId);
       // Stops the canvas underneath from panning at the same time.
       event.stopPropagation();
@@ -764,6 +788,20 @@ export class TerminalBoard {
         card.releasePointerCapture(event.pointerId);
       }
       if (!moved) {
+        const now = event.timeStamp;
+        const last = this.lastTitleClick;
+        if (
+          onTitleDoubleClick !== undefined &&
+          onTitle &&
+          last !== null &&
+          last.id === id &&
+          now - last.at < DOUBLE_CLICK_MS
+        ) {
+          this.lastTitleClick = null;
+          onTitleDoubleClick();
+          return;
+        }
+        this.lastTitleClick = onTitle ? { id, at: now } : null;
         onClick();
         return;
       }
