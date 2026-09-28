@@ -807,6 +807,14 @@ body {
   min-height: 22px;
 }
 
+/*
+ * A repository never reviewed has nothing to say here, and the empty line still took its 22px plus
+ * the column's gap: a blank band between the sub-tabs and the list that read as an invisible row.
+ */
+.pulls__bar:empty {
+  display: none;
+}
+
 /* A verdict about a head that has moved keeps its place and loses its colour. */
 .pull__verdict--stale {
   opacity: 0.55;
