@@ -32,16 +32,16 @@ function key(
 }
 
 describe('appShortcut', () => {
-  it('opens a default terminal with Ctrl+N', () => {
-    expect(appShortcut(key('KeyN', { ctrlKey: true }))).toBe('new-terminal');
+  it('opens the configured agent with Ctrl+N', () => {
+    expect(appShortcut(key('KeyN', { ctrlKey: true }))).toBe('new-agent');
   });
 
   it('switches Cards and Tabs with Ctrl+G', () => {
     expect(appShortcut(key('KeyG', { ctrlKey: true }))).toBe('toggle-terminal-view');
   });
 
-  it('opens the configured agent with Ctrl+Shift+N', () => {
-    expect(appShortcut(key('KeyN', { ctrlKey: true, shiftKey: true }))).toBe('new-agent');
+  it('opens a default terminal with Ctrl+Shift+N', () => {
+    expect(appShortcut(key('KeyN', { ctrlKey: true, shiftKey: true }))).toBe('new-terminal');
   });
 
   it('does not mask nearby terminal chords or repeat a held shortcut', () => {

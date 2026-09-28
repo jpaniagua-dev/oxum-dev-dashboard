@@ -8,7 +8,7 @@ type ShortcutEvent = Pick<
 /**
  * Resolves the application-wide shortcuts before a focused xterm can consume them.
  *
- * The three chords intentionally form a compact Ctrl-based family: new terminal, new agent, and
+ * The three chords intentionally form a compact Ctrl-based family: new agent, new terminal, and
  * Cards/Tabs toggle. Exact modifier checks keep nearby terminal shortcuts available.
  */
 export function appShortcut(event: ShortcutEvent): AppShortcut | null {
@@ -17,11 +17,11 @@ export function appShortcut(event: ShortcutEvent): AppShortcut | null {
   }
 
   if (event.ctrlKey && !event.altKey && !event.shiftKey && event.code === 'KeyN') {
-    return 'new-terminal';
+    return 'new-agent';
   }
 
   if (event.ctrlKey && !event.altKey && event.shiftKey && event.code === 'KeyN') {
-    return 'new-agent';
+    return 'new-terminal';
   }
 
   if (event.ctrlKey && !event.altKey && !event.shiftKey && event.code === 'KeyG') {

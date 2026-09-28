@@ -306,13 +306,13 @@ export class TerminalBoard {
      * added in the settings appear here without the board being rebuilt.
      */
     toolbar.append(
-      this.toolbarButton('Start the configured coding agent (Ctrl+Shift+N)', AGENT_ICON, () => {
+      this.toolbarButton('Start the configured coding agent (Ctrl+N)', AGENT_ICON, () => {
         this.actions.onNewAgent();
       }),
     );
 
     const pick = this.toolbarButton(
-      'New terminal (Ctrl+N opens the default profile)',
+      'New terminal (Ctrl+Shift+N opens the default profile)',
       'M2.5 3.5h11v9h-11zM5 6.6l1.7 1.4L5 9.4M8.6 9.8h3.2',
       (event) => {
         const box = (event.currentTarget as HTMLElement).getBoundingClientRect();

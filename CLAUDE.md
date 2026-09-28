@@ -504,7 +504,8 @@ row. None of it can say what a session was opened FOR.
 - **Shortcuts are bound on `document` in the capture phase**, otherwise the focused xterm swallows
   them. Pane gestures use `Alt+Shift` plus a letter, never a digit (Swiss French keyboard), and every
   repeated keydown is refused. The app-wide additions follow the same rule: `Ctrl+N` opens the
-  default terminal, `Ctrl+G` switches Tabs/Cards, and `Ctrl+Shift+N` opens the configured agent.
+  configured agent, `Ctrl+G` switches Tabs/Cards, and `Ctrl+Shift+N` opens the default terminal
+  (swapped on 2026-09-28, on request: the agent is what gets opened most).
 - **Copy and paste: returning `false` from `attachCustomKeyEventHandler` is not enough.** It only
   prevents xterm's own handling of the key, not the browser's default action: without
   `event.preventDefault()`, the `Ctrl+V` keydown still fires the native `paste` event on xterm's hidden

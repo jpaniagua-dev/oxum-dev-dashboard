@@ -1936,7 +1936,7 @@ export class TerminalPane {
 
     const agent = createElement('button', { className: 'terminal__new-button' });
     agent.type = 'button';
-    agent.title = 'Start the configured coding agent, in the workspace root (Ctrl+Shift+N)';
+    agent.title = 'Start the configured coding agent, in the workspace root (Ctrl+N)';
     agent.setAttribute('aria-label', 'Start the coding agent');
     agent.append(createIcon(AGENT_ICON, { paint: 'stroke' }));
     agent.addEventListener('click', (event) => {
@@ -1959,7 +1959,7 @@ export class TerminalPane {
     // A drawn chevron rather than the `⌄` character: as text it renders at whatever size and
     // baseline the font decides, which is why it looked like a stray mark next to the `+`.
     caret.append(chevronDown());
-    caret.title = 'New terminal in this pane (Ctrl+N opens the default profile)';
+    caret.title = 'New terminal in this pane (Ctrl+Shift+N opens the default profile)';
     caret.setAttribute('aria-label', 'New terminal');
     caret.addEventListener('click', (event) => {
       event.stopPropagation();
