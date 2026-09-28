@@ -123,8 +123,11 @@ exceptions:
 - **The terminal pane has two sibling surfaces, and a card may show them side by side.**
   `.terminal__surface` is the grid and `.terminal__board` the session canvas. Board mode hides the
   grid until a card is selected; that click keeps the board in place and shows the selected live
-  terminal in a resizable right sidebar. That sidebar contains only xterm: its tab strip, pane actions
-  and note are hidden because the board already exposes those controls. Its separator keeps at least
+  terminal in a resizable right sidebar. That sidebar keeps a reduced strip holding the note button
+  alone, and its box hangs top right over the terminal exactly as in a grid pane, sharing
+  `notesHidden` with it; the tabs, zoom and `Clear` stay hidden because the card already exposes
+  them. The note came back on 2026-09-28, on request: the sidebar is one terminal read on its own,
+  which is the moment the grid's box was built for. Its separator keeps at least
   280 px for the terminal and 360 px for the canvas, supports pointer capture and Left/Right keys,
   and remembers its width for the renderer session. The pane isolates its existing container with
   the same grid placement as zoom, so no xterm is moved or reopened. Leaving Cards restores the grid

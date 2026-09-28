@@ -752,7 +752,7 @@ export class TerminalPane {
    * placement is done by assigning explicit grid lines: detaching an xterm element to reorder it would
    * leave the terminal alive but blank forever. A pane is normally two cells of that grid, the strip
    * above its view, so both are direct children of the surface and neither wraps the other. A board
-   * preview is deliberately the exception: its strip is hidden and the view occupies the only row.
+   * preview keeps that shape with a reduced strip, which holds the note control and nothing else.
    *
    * The grid runs on two axes now, and the track pattern differs between them, which is the piece of
    * arithmetic worth stating here. A column is a single `fr` track, so pane column `c` sits on line
@@ -790,11 +790,7 @@ export class TerminalPane {
       if (row > 0) {
         rowTracks.push('var(--pane-splitter)');
       }
-      if (previewed) {
-        rowTracks.push('1fr');
-      } else {
-        rowTracks.push('auto', `${isolated ? 1 : (this.rowSizes[row] ?? 1)}fr`);
-      }
+      rowTracks.push('auto', `${isolated ? 1 : (this.rowSizes[row] ?? 1)}fr`);
     }
 
     this.surface.style.gridTemplateColumns = columnTracks.join(' ');
@@ -811,15 +807,15 @@ export class TerminalPane {
       const columnLines = `${paneColumnLine(column)} / ${paneColumnLine(column + span - 1) + 1}`;
       cells.set(pane.index, {
         columnLines,
-        stripRow: String(previewed ? 1 : stripRowLine(row)),
-        viewRow: String(previewed ? 1 : viewRowLine(row)),
+        stripRow: String(stripRowLine(row)),
+        viewRow: String(viewRowLine(row)),
       });
     });
 
     this.stripOwner = panes.map((pane) => pane.index);
     this.strips.forEach((strip, position) => {
       const pane = panes[position];
-      strip.hidden = previewed || pane === undefined;
+      strip.hidden = pane === undefined;
       const cell = pane === undefined ? undefined : cells.get(pane.index);
       if (cell !== undefined) {
         strip.style.gridColumn = cell.columnLines;
@@ -1531,7 +1527,20 @@ export class TerminalPane {
         return;
       }
       clearChildren(strip);
-      strip.classList.toggle('terminal__strip--focused', index === this.focused);
+      strip.classList.toggle('terminal__strip--focused', index === this.focused && !previewed);
+      strip.classList.toggle('terminal__strip--preview', previewed);
+
+      /*
+       * The board sidebar keeps the note and nothing else. The card already carries the tab's
+       * identity and its menu, but a terminal read on its own is exactly when the reader wants to
+       * know what it was for, the argument that gave the grid its box in the first place.
+       */
+      if (previewed) {
+        const actions = createElement('div', { className: 'terminal__strip-actions' });
+        actions.append(this.buildNoteControl(group));
+        strip.append(actions);
+        return;
+      }
 
       const tabs = createElement('div', { className: 'terminal__tabs' });
       for (const id of group.tabs) {
@@ -1573,7 +1582,7 @@ export class TerminalPane {
 
       // Offered only when there is something to hide: with one pane the button would toggle a state
       // nothing on screen distinguishes from the other.
-      if (this.layout.groups.length > 1 && !previewed) {
+      if (this.layout.groups.length > 1) {
         const zoom = createElement('button', { className: 'icon-button terminal__strip-zoom' });
         zoom.type = 'button';
         zoom.title = zoomed

@@ -3128,8 +3128,8 @@ body {
  * A selected card opens the existing terminal view as a fixed-width sidebar beside the board.
  *
  * Both children keep their original DOM nodes. In particular, no xterm is moved into a card: the
- * pane isolates one session inside its own permanent container, removes the grid-only tab strip,
- * and lets the terminal occupy the whole sidebar. This rule only divides that space from the canvas.
+ * pane isolates one session inside its own permanent container and reduces its strip to the note
+ * control, the rest of the strip being on the card. This rule only divides that space from the canvas.
  */
 .terminal--board-preview {
   display: grid;
@@ -3143,8 +3143,9 @@ body {
   min-width: 0;
 }
 
-.terminal--board-preview .terminal__strip {
-  display: none;
+/* Only the note button is left, so it sits hard right, above the box it anchors. */
+.terminal__strip--preview {
+  justify-content: flex-end;
 }
 
 .terminal__board-resizer {
