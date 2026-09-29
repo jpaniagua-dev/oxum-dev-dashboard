@@ -148,6 +148,56 @@ export function defaultPoint(index: number): CardPoint {
   };
 }
 
+/** A rectangle, in canvas units for cards and in screen pixels for the viewport. */
+export interface BoardRect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The pan and zoom that bring every card on screen.
+ *
+ * Never above 100%: fitting three cards would otherwise blow them up to the maximum, which reads as
+ * a different board rather than the same one found again. When even the minimum zoom cannot hold
+ * them, the top left of the cards is kept in view, where the first sessions sit.
+ */
+export function fitView(
+  cards: BoardRect,
+  viewport: BoardRect,
+): { pan: CardPoint; zoom: number } {
+  const zoom = clampZoom(
+    Math.min(1, viewport.width / Math.max(cards.width, 1), viewport.height / Math.max(cards.height, 1)),
+  );
+  const offset = (room: number, size: number): number => Math.max(0, (room - size * zoom) / 2);
+  return {
+    zoom,
+    pan: {
+      x: viewport.x + offset(viewport.width, cards.width) - cards.x * zoom,
+      y: viewport.y + offset(viewport.height, cards.height) - cards.y * zoom,
+    },
+  };
+}
+
+/**
+ * The pan that keeps the canvas point under `anchor` where it is when the zoom changes.
+ *
+ * What makes a wheel zoom feel like pointing at something: zooming about the plane's origin instead
+ * slides the card under the cursor away from it.
+ */
+export function zoomAbout(
+  anchor: CardPoint,
+  pan: CardPoint,
+  from: number,
+  to: number,
+): CardPoint {
+  return {
+    x: anchor.x - ((anchor.x - pan.x) / from) * to,
+    y: anchor.y - ((anchor.y - pan.y) / from) * to,
+  };
+}
+
 /** Keeps a zoom inside the range the buttons offer, wherever it came from. */
 export function clampZoom(zoom: number): number {
   if (!Number.isFinite(zoom)) {
@@ -344,8 +394,10 @@ export class TerminalBoard {
       this.toolbarButton('Zoom out', 'M3 8h10', () => this.setZoom(this.zoom - 0.1)),
       this.zoomLabel,
       this.toolbarButton('Zoom in', 'M8 3v10M3 8h10', () => this.setZoom(this.zoom + 0.1)),
-      this.toolbarButton('Recentre the board', 'M8 3v10M3 8h10M4.5 4.5l7 7M11.5 4.5l-7 7', () =>
-        this.resetView(),
+      this.toolbarButton(
+        'Bring every card into view',
+        'M2.5 5.5v-3h3M10.5 2.5h3v3M13.5 10.5v3h-3M5.5 13.5h-3v-3M6 6h4v4H6z',
+        () => this.fitCards(),
       ),
     );
     this.host.append(toolbar);
@@ -980,36 +1032,90 @@ export class TerminalBoard {
     this.host.addEventListener('pointerup', end);
     this.host.addEventListener('pointercancel', end);
 
-    // Ctrl and the wheel, the gesture every canvas in every application already answers. A bare
-    // wheel is left alone: it is how a trackpad scrolls, and hijacking it would make the board
-    // impossible to leave alone.
+    /*
+     * The wheel zooms, with or without Ctrl, about the point under the cursor.
+     *
+     * A bare wheel used to be left alone for the trackpad's sake, but nothing on this plane scrolls:
+     * it pans by dragging, so the wheel had no meaning to protect. Proportional to `deltaY` rather
+     * than a fixed step per event, because a trackpad sends dozens of small deltas where a mouse
+     * sends one notch of about 100, and a fixed step made the trackpad zoom uncontrollably fast.
+     */
     this.host.addEventListener(
       'wheel',
       (event) => {
-        if (!event.ctrlKey) {
+        // A note being written scrolls its own text.
+        if ((event.target as HTMLElement).closest('textarea') !== null) {
           return;
         }
         event.preventDefault();
-        this.setZoom(this.zoom - Math.sign(event.deltaY) * 0.1);
+        const box = this.host.getBoundingClientRect();
+        this.zoomTo(this.zoom * Math.exp(-event.deltaY * 0.0015), {
+          x: event.clientX - box.left,
+          y: event.clientY - box.top,
+        });
       },
       { passive: false },
     );
   }
 
+  /** The buttons' zoom, about the centre of the visible plane and on round percentages. */
   private setZoom(next: number): void {
-    this.zoom = clampZoom(Math.round(next * 100) / 100);
+    this.zoomTo(Math.round(next * 100) / 100, {
+      x: this.host.clientWidth / 2,
+      y: this.host.clientHeight / 2,
+    });
+  }
+
+  private zoomTo(next: number, anchor: CardPoint): void {
+    const zoom = clampZoom(next);
+    this.pan = zoomAbout(anchor, this.pan, this.zoom, zoom);
+    this.zoom = zoom;
     this.applyTransform();
   }
 
   /**
-   * Puts the plane back where it started.
+   * Frames every card in the visible part of the plane.
    *
-   * Pan and zoom only: the cards keep where they were put. A "recentre" that also tidied the cards
-   * would be two gestures on one button, and the one nobody asked for is the destructive one.
+   * Pan and zoom only: the cards keep where they were put. Tidying them as well would be two
+   * gestures on one button, and the one nobody asked for is the destructive one. Measured from the
+   * DOM because a card's height depends on its note, and the host's size because the sidebar takes
+   * a share of the width that changes as it is dragged.
    */
-  private resetView(): void {
-    this.pan = { x: 0, y: 0 };
-    this.zoom = 1;
+  private fitCards(): void {
+    // The class and not `data-card`, which only session cards carry: a running job is a card too.
+    const cards = [...this.content.querySelectorAll<HTMLElement>('.board-card')];
+    if (cards.length === 0) {
+      this.pan = { x: 0, y: 0 };
+      this.zoom = 1;
+      this.applyTransform();
+      return;
+    }
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const card of cards) {
+      // `offsetLeft` and `offsetWidth` are layout values, untouched by the plane's transform, so
+      // they are already in canvas units.
+      left = Math.min(left, card.offsetLeft);
+      top = Math.min(top, card.offsetTop);
+      right = Math.max(right, card.offsetLeft + card.offsetWidth);
+      bottom = Math.max(bottom, card.offsetTop + card.offsetHeight);
+    }
+    const margin = 24;
+    // The toolbar floats over the top of the plane, so the frame starts below it.
+    const head = this.toolbar.offsetTop + this.toolbar.offsetHeight + 12;
+    const view = fitView(
+      { x: left, y: top, width: right - left, height: bottom - top },
+      {
+        x: margin,
+        y: head,
+        width: Math.max(1, this.host.clientWidth - 2 * margin),
+        height: Math.max(1, this.host.clientHeight - head - margin),
+      },
+    );
+    this.pan = view.pan;
+    this.zoom = view.zoom;
     this.applyTransform();
   }
 

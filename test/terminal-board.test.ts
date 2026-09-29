@@ -7,8 +7,10 @@ import {
   activityOf,
   clampZoom,
   defaultPoint,
+  fitView,
   projectSubtitle,
   sessionCardKind,
+  zoomAbout,
 } from '../src/renderer/ui/terminal-board.js';
 import type { TerminalSession } from '../src/shared/contracts.js';
 
@@ -88,6 +90,39 @@ describe('clampZoom', () => {
     expect(clampZoom(Number.NaN)).toBe(1);
     expect(clampZoom(Number.POSITIVE_INFINITY)).toBe(1);
     expect(clampZoom(Number.NEGATIVE_INFINITY)).toBe(1);
+  });
+});
+
+describe('fitView', () => {
+  const viewport = { x: 24, y: 48, width: 800, height: 600 };
+
+  it('centres cards that fit, without enlarging them past 100%', () => {
+    const view = fitView({ x: 100, y: 100, width: 200, height: 100 }, viewport);
+    expect(view.zoom).toBe(1);
+    expect(view.pan).toEqual({ x: 24 + 300 - 100, y: 48 + 250 - 100 });
+  });
+
+  it('zooms out until the widest side fits', () => {
+    const view = fitView({ x: 0, y: 0, width: 1600, height: 300 }, viewport);
+    expect(view.zoom).toBe(0.5);
+    expect(view.pan.x).toBe(24);
+  });
+
+  it('keeps the top left in view when even the minimum zoom is too large', () => {
+    const view = fitView({ x: 50, y: 70, width: 10_000, height: 10_000 }, viewport);
+    expect(view.zoom).toBe(ZOOM_MIN);
+    expect(view.pan).toEqual({ x: 24 - 50 * ZOOM_MIN, y: 48 - 70 * ZOOM_MIN });
+  });
+});
+
+describe('zoomAbout', () => {
+  it('keeps the canvas point under the anchor in place', () => {
+    const anchor = { x: 300, y: 200 };
+    const pan = { x: 40, y: -20 };
+    const before = { x: (anchor.x - pan.x) / 1, y: (anchor.y - pan.y) / 1 };
+    const next = zoomAbout(anchor, pan, 1, 1.5);
+    expect(next.x + before.x * 1.5).toBeCloseTo(anchor.x);
+    expect(next.y + before.y * 1.5).toBeCloseTo(anchor.y);
   });
 });
 

@@ -132,6 +132,18 @@ exceptions:
   and remembers its width for the renderer session. The pane isolates its existing container with
   the same grid placement as zoom, so no xterm is moved or reopened. Leaving Cards restores the grid
   and its earlier zoom.
+- **The wheel zooms the board, bare or with Ctrl, about the cursor.** A bare wheel was left alone
+  at first for the trackpad, but nothing on the plane scrolls (it pans by dragging), so there was no
+  meaning to protect. The step is proportional to `deltaY`, not fixed per event: a trackpad sends
+  dozens of small deltas where a mouse sends one notch, and a fixed step made it zoom far too fast.
+  `zoomAbout` keeps the point under the cursor still; the buttons zoom about the plane's centre.
+- **The frame button fits every card in the visible plane, it does not reset to the origin.** Cards
+  are easily dragged under the sidebar and lost, and a reset to `(0, 0)` at 100% does not find them.
+  `fitView` never enlarges past 100%, and when even `ZOOM_MIN` is too large it keeps the top left in
+  view. Measured from the DOM (a note changes a card's height) and on `.board-card`, since a job card
+  has no `data-card`. The grid picker is **hidden** in Cards mode, no longer disabled: a greyed
+  icon beside the board's own controls was noise. `.icon-button[hidden]` is what makes that work,
+  `display: grid` outranking the user agent's `[hidden]`.
 - **A session'''s activity is derived from WHEN it last spoke, never from what it said.** `activityOf`
   reads `running` plus the time since the last chunk: `working` under `QUIET_AFTER_MS` (2.5 s),
   `quiet` past it, `exited` when the pty is gone. Matching output strings would let a card claim

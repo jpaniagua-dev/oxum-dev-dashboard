@@ -655,6 +655,11 @@ body {
   cursor: pointer;
 }
 
+/* `display: grid` above outranks the user agent's `[hidden]`, so the attribute needs its own rule. */
+.icon-button[hidden] {
+  display: none;
+}
+
 /*
  * `:not(:disabled)` like `.button` above, and for the same reason: Chromium still matches `:hover`
  * on a disabled control, so without the guard a button that cannot be pressed still lights up under

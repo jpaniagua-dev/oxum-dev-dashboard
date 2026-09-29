@@ -639,15 +639,11 @@ class App {
       : 'Show the sessions as cards (Ctrl+G)';
 
     /*
-     * The grid picker is meaningless while the board is up, and now that the two sit side by side it
-     * is obvious rather than merely true: rearranging panes nobody can see is a control that appears
-     * to do nothing. Disabled and saying why, instead of silently rearranging a hidden surface.
+     * The grid picker is meaningless while the board is up: rearranging panes nobody can see is a
+     * control that appears to do nothing. It was disabled with a reason for a few versions, and is
+     * hidden now, on request, since a greyed icon beside the board's own controls was pure noise.
      */
-    const grid = requireElement<HTMLButtonElement>('terminal-grid-button');
-    grid.disabled = on;
-    grid.title = on
-      ? 'Arrange the terminal panes (back to the terminals first)'
-      : 'Arrange the terminal panes';
+    requireElement<HTMLButtonElement>('terminal-grid-button').hidden = on;
 
     if (this.boardTimer !== null) {
       window.clearInterval(this.boardTimer);
