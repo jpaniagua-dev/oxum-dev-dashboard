@@ -124,6 +124,13 @@ import {
 } from '@shared/vault.js';
 import type { VaultFiles } from './vault/vault-files.js';
 import type { VaultStore } from './vault/vault-store.js';
+import type { ExtensionsService } from './extensions/extensions-service.js';
+import {
+  readExtensionAction,
+  shellSafeText,
+  type ExtensionsResult,
+  type ExtensionsView,
+} from '@shared/extensions.js';
 
 export interface IpcDependencies {
   /** Live project list, re-read on every call since settings can change it at any time. */
@@ -142,6 +149,7 @@ export interface IpcDependencies {
   readonly vaultState: () => VaultState;
   /** Pushes the vault to the dashboard after a change. Routed, never broadcast: see the channel. */
   readonly pushVault: () => VaultState;
+  readonly extensions: () => ExtensionsService;
   readonly pullReview: () => PullReviewService;
   readonly autoRuns: () => AutoRunRecords;
   /** Starts a feedback pass by hand, through the same gate the watcher uses. */
@@ -1529,6 +1537,73 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         : await dialog.showMessageBox(window, options);
     return response === 0;
   }
+
+  /**
+   * Opens Claude Code on `/schedule` in a terminal tab, to create a routine or to change one.
+   *
+   * A conversation and not a form: a routine is a prompt, a repository, connectors and a schedule,
+   * and `/schedule` is the surface that knows how to ask for each. It runs in a tab like every other
+   * agent here, through the default shell profile, so it can be watched and stopped.
+   */
+  function openScheduleSession(routineName: string | null): string {
+    const settings = deps.settings.get();
+    const shell = resolveDefaultProfile(deps.profiles(), settings.defaultShellProfileId);
+    if (shell === undefined) {
+      return 'No shell profile available to run Claude Code in';
+    }
+    const executable = /\s/.test(settings.claudeCommand) ? `"${settings.claudeCommand}"` : settings.claudeCommand;
+    const prompt =
+      routineName === null ? '/schedule' : `/schedule change the routine named ${shellSafeText(routineName)}`;
+    const resolved = resolveShellCommand(shell, `${executable} "${prompt}"`);
+    const terminalId = deps.terminals.openAgent({
+      title: routineName === null ? 'New routine' : `Routine: ${routineName}`,
+      file: resolved.file,
+      args: resolved.args,
+      cwd: resolveWorkspaceRoot(settings.workspaceRoot, settings.projectsRoot),
+      size: deps.terminalSize(),
+      profileId: shell.id,
+      agent: {
+        label: 'Claude Code',
+        model: '',
+        instructionFile: 'CLAUDE.md',
+        startedAt: new Date().toISOString(),
+      },
+    });
+    return terminalId === null ? 'Claude Code could not be started' : '';
+  }
+
+  ipcMain.handle(IpcChannel.ExtensionsRead, async (): Promise<ExtensionsView> =>
+    deps.extensions().read(),
+  );
+
+  ipcMain.handle(IpcChannel.ExtensionsCheck, async (): Promise<ExtensionsResult> =>
+    deps.extensions().check(),
+  );
+
+  ipcMain.handle(IpcChannel.ExtensionsAvailable, async () => deps.extensions().available());
+
+  ipcMain.handle(IpcChannel.ExtensionsRoutines, async (): Promise<ExtensionsResult> =>
+    deps.extensions().readRoutines(),
+  );
+
+  ipcMain.handle(
+    IpcChannel.ExtensionsAct,
+    async (event, raw: unknown): Promise<ExtensionsResult> => {
+      const action = readExtensionAction(raw);
+      if (action === null) {
+        return { ok: false, message: 'That change could not be read', view: await deps.extensions().read() };
+      }
+      if (action.type === 'schedule-session') {
+        const message = openScheduleSession(
+          action.id === null ? null : deps.extensions().routineName(action.id),
+        );
+        return { ok: message.length === 0, message, view: await deps.extensions().read() };
+      }
+      // The question is asked here, on the window that sent the gesture, for the reason `confirm`
+      // gives: the page has no dialog of its own worth the name.
+      return deps.extensions().act(action, (ask) => confirm(event, ask));
+    },
+  );
 
   ipcMain.handle(IpcChannel.VaultRead, async (): Promise<VaultState> => {
     // Swept before it answers, so a card that died while the app was closed is never listed.

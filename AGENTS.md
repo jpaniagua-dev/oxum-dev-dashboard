@@ -123,12 +123,27 @@ exceptions:
 - **The terminal pane has two sibling surfaces, and a card may show them side by side.**
   `.terminal__surface` is the grid and `.terminal__board` the session canvas. Board mode hides the
   grid until a card is selected; that click keeps the board in place and shows the selected live
-  terminal in a resizable right sidebar. That sidebar contains only xterm: its tab strip, pane actions
-  and note are hidden because the board already exposes those controls. Its separator keeps at least
+  terminal in a resizable right sidebar. That sidebar keeps a reduced strip holding the note button
+  alone, and its box hangs top right over the terminal exactly as in a grid pane, sharing
+  `notesHidden` with it; the tabs, zoom and `Clear` stay hidden because the card already exposes
+  them. The note came back on 2026-09-28, on request: the sidebar is one terminal read on its own,
+  which is the moment the grid's box was built for. Its separator keeps at least
   280 px for the terminal and 360 px for the canvas, supports pointer capture and Left/Right keys,
   and remembers its width for the renderer session. The pane isolates its existing container with
   the same grid placement as zoom, so no xterm is moved or reopened. Leaving Cards restores the grid
   and its earlier zoom.
+- **The wheel zooms the board, bare or with Ctrl, about the cursor.** A bare wheel was left alone
+  at first for the trackpad, but nothing on the plane scrolls (it pans by dragging), so there was no
+  meaning to protect. The step is proportional to `deltaY`, not fixed per event: a trackpad sends
+  dozens of small deltas where a mouse sends one notch, and a fixed step made it zoom far too fast.
+  `zoomAbout` keeps the point under the cursor still; the buttons zoom about the plane's centre.
+- **The frame button fits every card in the visible plane, it does not reset to the origin.** Cards
+  are easily dragged under the sidebar and lost, and a reset to `(0, 0)` at 100% does not find them.
+  `fitView` never enlarges past 100%, and when even `ZOOM_MIN` is too large it keeps the top left in
+  view. Measured from the DOM (a note changes a card's height) and on `.board-card`, since a job card
+  has no `data-card`. The grid picker is **hidden** in Cards mode, no longer disabled: a greyed
+  icon beside the board's own controls was noise. `.icon-button[hidden]` is what makes that work,
+  `display: grid` outranking the user agent's `[hidden]`.
 - **A session'''s activity is derived from WHEN it last spoke, never from what it said.** `activityOf`
   reads `running` plus the time since the last chunk: `working` under `QUIET_AFTER_MS` (2.5 s),
   `quiet` past it, `exited` when the pty is gone. Matching output strings would let a card claim
@@ -177,6 +192,10 @@ exceptions:
 board; without it, Rename opens the tab-strip editor, which Cards mode hides. The title input
 shares the note editor's repaint guard and pointer isolation. Enter or blur commits, Escape
 cancels. The ordinary tab menu retains its own inline editor.
+A double click on the title opens the same editor. It is detected on the board, from two
+pointerups on the same card title under 400 ms, and not by the native `dblclick`: the first click
+opens the sidebar and repaints the board, so the second lands on a card element the first never
+saw. The first click still opens the card, so the gesture shows the terminal and renames it.
 
 Added on 2026-09-25, because a board past a dozen cards answers "what have I got running" and not
 "which of these is the one about the fiscal year dropdown". Everything else on a card is derived: a
@@ -497,7 +516,8 @@ row. None of it can say what a session was opened FOR.
 - **Shortcuts are bound on `document` in the capture phase**, otherwise the focused xterm swallows
   them. Pane gestures use `Alt+Shift` plus a letter, never a digit (Swiss French keyboard), and every
   repeated keydown is refused. The app-wide additions follow the same rule: `Ctrl+N` opens the
-  default terminal, `Ctrl+G` switches Tabs/Cards, and `Ctrl+Shift+N` opens the configured agent.
+  configured agent, `Ctrl+G` switches Tabs/Cards, and `Ctrl+Shift+N` opens the default terminal
+  (swapped on 2026-09-28, on request: the agent is what gets opened most).
 - **Copy and paste: returning `false` from `attachCustomKeyEventHandler` is not enough.** It only
   prevents xterm's own handling of the key, not the browser's default action: without
   `event.preventDefault()`, the `Ctrl+V` keydown still fires the native `paste` event on xterm's hidden
@@ -1079,6 +1099,76 @@ committed or pasted into a chat.
   tab without firing `onChange`, so `Rules`, `Vault` and `Triage` all take the same read path
   during startup as they do after a click. Otherwise their empty hosts stay empty until the user
   visits another tab and comes back. Rules also paints its loading state before crossing IPC.
+
+## Extensions tab: what Claude Code and Codex have installed
+
+Added on 2026-10-02. Hooks, skills, plugins and MCP servers of **both** agents, read off their own
+files, with the changes they allow, and the Claude Code routines kept on claude.ai. `shared/extensions.ts` holds the types and every pure function
+(parsers, hook edits, the TOML reader, the action validator), `main/extensions/` the reader, the
+service and the CLI runner, `renderer/ui/extensions-panel.ts` the tab.
+
+- **Both agents, not the configured one.** The rest of the app drives whichever CLI the profile
+  names; this tab is an inventory of the machine, and Claude Code and Codex each read their own
+  files whatever the profile says. Hence `claudeCommand` and `codexCommand`, two settings outside
+  the profile: a bare name is looked up on PATH, a full path reaches an install that is not on it
+  (Codex under one nvm Node while another is active is the case that motivated it).
+- **Read from files, written through the CLIs.** A read is a dozen small files; `claude mcp list`
+  health-checks every server and takes seconds, so it runs only on `Check status`, which is also
+  the only way the claude.ai connectors become visible (they exist nowhere on disk). Writes go
+  through `claude plugin`, `claude mcp add-json/remove` and `codex mcp add/remove`, which are the
+  authority on their own formats. The two exceptions have no CLI at all: Claude Code hooks (JSON
+  read-modify-write of a settings file) and the Codex `enabled` switch (`setTomlKey`, one line).
+- ⚠️ **`~/.claude.json` is never written.** Every running session rewrites it, so a write from here
+  would race them and lose. Its MCP servers change through `claude mcp` only.
+- **The renderer sends an id, never a path.** The service keeps the last read and resolves every
+  action against it, so what is removed or rewritten is what this process found on disk.
+  `readExtensionAction` validates the shape at the IPC boundary.
+- **A settings write refuses a file that moved since the read.** The mtime recorded by the reader
+  is the version on screen; a change computed on an older content is refused with "read again",
+  and the write goes to a sibling then `rename`, so a crash never leaves half a file.
+- ⚠️ **A skill reached through a junction is unlinked, never deleted.** The user skills are
+  junctions into the folder that versions them, and a recursive delete through one empties the
+  source. `unlink` removes the link; a real folder goes to the Recycle Bin (`shell.trashItem`).
+- **Values never reach the renderer.** An MCP server is sent with its variable and header NAMES;
+  an edit sends blanks for what it left alone and `resolveDraft` fills them from the stored server.
+  A test asserts no stored value appears in the serialised items.
+- **Plugin contributions are read only, and only for an enabled plugin.** Skills, hooks and MCP
+  servers from `installPath` (never the cache's orphaned versions) are listed under `plugin: <name>`
+  with "disable or uninstall the plugin instead". Synced claude.ai skills (`org`) and the skills
+  Codex bundles (`system`) are read only for the same reason: something else restores them.
+- **Duplicates are shown where they are, and named.** The same hook in two settings files, the same
+  skill through a junction and its project folder, the same server name in two scopes: one row per
+  declaration with `also in <scope>`, because each one is real and removing one does not remove the
+  other.
+- **A `.cmd` runs through `cmd.exe`, with what it cannot carry refused.** `execFile` will not run a
+  batch file without a shell, and Codex on Windows is `codex.cmd`. `agent-cli.ts` resolves the
+  command with `where.exe` (an `.exe` wins), and for a shim builds the `/c` line itself with
+  `windowsVerbatimArguments`, the one option added to the spawn pool for it. `%`, `!`, `^`, `&`,
+  `|`, `<`, `>` and `"` are refused on that route: `"` was measured, a quoted argument reached Codex
+  cut at its first inner quote. Spaces survive.
+- **Codex hooks are listed, not edited.** They are array-of-tables TOML with no CLI, and whether a
+  given Codex version runs them is not checked here, which the row says instead of guessing.
+- **Plugins uninstall with `--keep-data`.** The data folder is the one thing a reinstall cannot
+  bring back.
+
+- **Routines are read through Claude Code, one tool, on request.** They live on claude.ai behind an
+  API whose OAuth token Claude Code adds in-process and never exposes, and no CLI subcommand lists
+  them. `main/extensions/routines.ts` runs `claude -p` allowed only `RemoteTrigger`, with
+  `--restricted` (no settings file, so no user hook fires and no plugin loads),
+  `--strict-mcp-config`, `--disable-slash-commands` and `haiku`. Measured: 78 s and $0.10 with the
+  model copying the JSON out, about 5 s and $0.01 once the data is taken from the transcript's tool
+  result (`toolResults`) and the model only says OK. Calling the API with the token from Claude
+  Code's credentials file was refused: the app would hold the account's token, on an undocumented
+  endpoint.
+- ⚠️ **A routine is kept as a whitelist, never with its prompt.** The API returns the routine's
+  instructions verbatim, and a real one was found carrying a webhook URL in clear. `readRoutine`
+  keeps name, schedule, state, dates, last result and model; `routines.json` stores that and is
+  re-read through the same function, so a hand-edited file cannot add a field.
+- **A routine change is verified on the server's answer.** A model sits between the click and the
+  call, so pause and resume check the `enabled` the update returned, and a call that ran more than
+  once is reported (for `run`, it may mean two fires). Creating or changing a routine opens a
+  terminal tab on `/schedule`: a routine is a prompt, a repository and connectors, which is a
+  conversation, not a form. The API has no delete.
 
 ## Jira tab
 

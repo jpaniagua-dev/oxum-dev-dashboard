@@ -1100,6 +1100,76 @@ committed or pasted into a chat.
   during startup as they do after a click. Otherwise their empty hosts stay empty until the user
   visits another tab and comes back. Rules also paints its loading state before crossing IPC.
 
+## Extensions tab: what Claude Code and Codex have installed
+
+Added on 2026-10-02. Hooks, skills, plugins and MCP servers of **both** agents, read off their own
+files, with the changes they allow, and the Claude Code routines kept on claude.ai. `shared/extensions.ts` holds the types and every pure function
+(parsers, hook edits, the TOML reader, the action validator), `main/extensions/` the reader, the
+service and the CLI runner, `renderer/ui/extensions-panel.ts` the tab.
+
+- **Both agents, not the configured one.** The rest of the app drives whichever CLI the profile
+  names; this tab is an inventory of the machine, and Claude Code and Codex each read their own
+  files whatever the profile says. Hence `claudeCommand` and `codexCommand`, two settings outside
+  the profile: a bare name is looked up on PATH, a full path reaches an install that is not on it
+  (Codex under one nvm Node while another is active is the case that motivated it).
+- **Read from files, written through the CLIs.** A read is a dozen small files; `claude mcp list`
+  health-checks every server and takes seconds, so it runs only on `Check status`, which is also
+  the only way the claude.ai connectors become visible (they exist nowhere on disk). Writes go
+  through `claude plugin`, `claude mcp add-json/remove` and `codex mcp add/remove`, which are the
+  authority on their own formats. The two exceptions have no CLI at all: Claude Code hooks (JSON
+  read-modify-write of a settings file) and the Codex `enabled` switch (`setTomlKey`, one line).
+- ⚠️ **`~/.claude.json` is never written.** Every running session rewrites it, so a write from here
+  would race them and lose. Its MCP servers change through `claude mcp` only.
+- **The renderer sends an id, never a path.** The service keeps the last read and resolves every
+  action against it, so what is removed or rewritten is what this process found on disk.
+  `readExtensionAction` validates the shape at the IPC boundary.
+- **A settings write refuses a file that moved since the read.** The mtime recorded by the reader
+  is the version on screen; a change computed on an older content is refused with "read again",
+  and the write goes to a sibling then `rename`, so a crash never leaves half a file.
+- ⚠️ **A skill reached through a junction is unlinked, never deleted.** The user skills are
+  junctions into the folder that versions them, and a recursive delete through one empties the
+  source. `unlink` removes the link; a real folder goes to the Recycle Bin (`shell.trashItem`).
+- **Values never reach the renderer.** An MCP server is sent with its variable and header NAMES;
+  an edit sends blanks for what it left alone and `resolveDraft` fills them from the stored server.
+  A test asserts no stored value appears in the serialised items.
+- **Plugin contributions are read only, and only for an enabled plugin.** Skills, hooks and MCP
+  servers from `installPath` (never the cache's orphaned versions) are listed under `plugin: <name>`
+  with "disable or uninstall the plugin instead". Synced claude.ai skills (`org`) and the skills
+  Codex bundles (`system`) are read only for the same reason: something else restores them.
+- **Duplicates are shown where they are, and named.** The same hook in two settings files, the same
+  skill through a junction and its project folder, the same server name in two scopes: one row per
+  declaration with `also in <scope>`, because each one is real and removing one does not remove the
+  other.
+- **A `.cmd` runs through `cmd.exe`, with what it cannot carry refused.** `execFile` will not run a
+  batch file without a shell, and Codex on Windows is `codex.cmd`. `agent-cli.ts` resolves the
+  command with `where.exe` (an `.exe` wins), and for a shim builds the `/c` line itself with
+  `windowsVerbatimArguments`, the one option added to the spawn pool for it. `%`, `!`, `^`, `&`,
+  `|`, `<`, `>` and `"` are refused on that route: `"` was measured, a quoted argument reached Codex
+  cut at its first inner quote. Spaces survive.
+- **Codex hooks are listed, not edited.** They are array-of-tables TOML with no CLI, and whether a
+  given Codex version runs them is not checked here, which the row says instead of guessing.
+- **Plugins uninstall with `--keep-data`.** The data folder is the one thing a reinstall cannot
+  bring back.
+
+- **Routines are read through Claude Code, one tool, on request.** They live on claude.ai behind an
+  API whose OAuth token Claude Code adds in-process and never exposes, and no CLI subcommand lists
+  them. `main/extensions/routines.ts` runs `claude -p` allowed only `RemoteTrigger`, with
+  `--restricted` (no settings file, so no user hook fires and no plugin loads),
+  `--strict-mcp-config`, `--disable-slash-commands` and `haiku`. Measured: 78 s and $0.10 with the
+  model copying the JSON out, about 5 s and $0.01 once the data is taken from the transcript's tool
+  result (`toolResults`) and the model only says OK. Calling the API with the token from Claude
+  Code's credentials file was refused: the app would hold the account's token, on an undocumented
+  endpoint.
+- ⚠️ **A routine is kept as a whitelist, never with its prompt.** The API returns the routine's
+  instructions verbatim, and a real one was found carrying a webhook URL in clear. `readRoutine`
+  keeps name, schedule, state, dates, last result and model; `routines.json` stores that and is
+  re-read through the same function, so a hand-edited file cannot add a field.
+- **A routine change is verified on the server's answer.** A model sits between the click and the
+  call, so pause and resume check the `enabled` the update returned, and a call that ran more than
+  once is reported (for `run`, it may mean two fires). Creating or changing a routine opens a
+  terminal tab on `/schedule`: a routine is a prompt, a repository and connectors, which is a
+  conversation, not a form. The API has no delete.
+
 ## Jira tab
 
 - **The API token never goes into `settings.json`.** It lives encrypted by `safeStorage` (DPAPI on

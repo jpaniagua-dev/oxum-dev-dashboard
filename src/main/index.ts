@@ -1,4 +1,6 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { homedir } from 'node:os';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { ExtensionsService } from './extensions/extensions-service.js';
 import {
   IpcChannel,
   RESERVED_ACTION_PREFIX,
@@ -431,6 +433,19 @@ async function bootstrap(): Promise<void> {
   const vaultStore = new VaultStore(AppPaths.vault());
   await vaultStore.load();
   const vaultFiles = new VaultFiles({ vault: vaultStore, projects: () => projects });
+  const extensionsService = new ExtensionsService({
+    home: homedir(),
+    projects: () => projects,
+    commands: () => {
+      const current = settingsStore.get();
+      return { claude: current.claudeCommand, codex: current.codexCommand };
+    },
+    openPath: (path) => shell.openPath(path),
+    showItemInFolder: (path) => shell.showItemInFolder(path),
+    trashItem: (path) => shell.trashItem(path),
+    openExternal: (url) => shell.openExternal(url),
+    routinesFile: AppPaths.routines(),
+  });
   const startupDropped = await vaultStore.sweep(new Date());
   await vaultFiles.sync(
     startupDropped.flatMap((card) => (card.file === null ? [] : [card.file])),
@@ -778,6 +793,7 @@ async function bootstrap(): Promise<void> {
     vaultFiles: () => vaultFiles,
     vaultState,
     pushVault,
+    extensions: () => extensionsService,
     automations: automationState,
     clearAutomationLog: () => {
       /*

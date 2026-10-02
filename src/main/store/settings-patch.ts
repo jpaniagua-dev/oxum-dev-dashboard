@@ -19,6 +19,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'agentsHeight',
   'automationsHeight',
   'vaultHeight',
+  'extensionsHeight',
   'gitListWidth',
   'activeStrip',
   'pullScope',
@@ -60,6 +61,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.automationsHeight === 'number')
     patch.automationsHeight = input.automationsHeight;
   if (typeof input.vaultHeight === 'number') patch.vaultHeight = input.vaultHeight;
+  if (typeof input.extensionsHeight === 'number') patch.extensionsHeight = input.extensionsHeight;
   // Broadcast, unlike the heights: both are written by the settings window and have to reach the
   // dashboard, which is the window whose runner reads them.
   if (typeof input.automationsEnabled === 'boolean')
@@ -107,6 +109,8 @@ export function asPatch(value: unknown): Partial<AppSettings> {
     patch.feedbackPassEnabled = input.feedbackPassEnabled;
   }
   if (typeof input.geminiBotLogin === 'string') patch.geminiBotLogin = input.geminiBotLogin;
+  if (typeof input.claudeCommand === 'string') patch.claudeCommand = input.claudeCommand;
+  if (typeof input.codexCommand === 'string') patch.codexCommand = input.codexCommand;
   // Validated by the store, which is the single place that decides what a profile is. Accepted here
   // as typed, like the model names above and for the same reason: two answers to "is this valid" is
   // how one of them silently drops a value the other accepted.

@@ -2,6 +2,7 @@ import type { AgentContext } from '@shared/agent-context.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AgentProfile } from '@shared/agent-profile.js';
 import type { AutomationRule } from '@shared/automation.js';
+import type { ExtensionAction, ExtensionsResult, ExtensionsView } from '@shared/extensions.js';
 import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
 import {
   IpcChannel,
@@ -332,6 +333,14 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.VaultRemoveFile, binding),
 
   resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
+
+  readExtensions: (): Promise<ExtensionsView> => ipcRenderer.invoke(IpcChannel.ExtensionsRead),
+  checkExtensions: (): Promise<ExtensionsResult> => ipcRenderer.invoke(IpcChannel.ExtensionsCheck),
+  actOnExtension: (action: ExtensionAction): Promise<ExtensionsResult> =>
+    ipcRenderer.invoke(IpcChannel.ExtensionsAct, action),
+  availablePlugins: (): Promise<{ id: string; description: string }[]> =>
+    ipcRenderer.invoke(IpcChannel.ExtensionsAvailable),
+  readRoutines: (): Promise<ExtensionsResult> => ipcRenderer.invoke(IpcChannel.ExtensionsRoutines),
 
   onVaultChanged: (listener: (state: VaultState) => void): (() => void) => {
     const handler = (_event: unknown, state: VaultState): void => { listener(state); };

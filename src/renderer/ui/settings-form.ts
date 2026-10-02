@@ -197,6 +197,8 @@ export class SettingsForm {
   /** Empty means "the default folder", so it is never coerced to the resolved path. */
   /** The four model drafts. Empty is a real value: it means "let the agent decide". */
   private agentModels: AgentModelDrafts = { analysis: '', work: '', commit: '', review: '' };
+  /** The two executables the Extensions tab runs. */
+  private commands = { claude: 'claude', codex: 'codex' };
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
   private feedbackPass = false;
@@ -260,6 +262,7 @@ export class SettingsForm {
     this.automationShell = settings.automationShellEnabled;
     this.botLogin = settings.geminiBotLogin;
     this.agent = { ...settings.agentProfile };
+    this.commands = { claude: settings.claudeCommand, codex: settings.codexCommand };
     this.agentStatus = '';
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
@@ -688,6 +691,39 @@ export class SettingsForm {
       grid.append(field);
     }
     this.hosts.claude.append(grid);
+
+    /*
+     * The two executables of the Extensions tab, after the profile and its models.
+     *
+     * Not part of the profile: that tab lists both agents whichever one the profile runs. A bare
+     * name is looked up on PATH, and a full path reaches an install that is not on it.
+     */
+    const cli = createElement('div', { className: 'settings-entry__grid' });
+    const claudeCli = this.field(
+      'Claude Code executable',
+      this.commands.claude,
+      (value) => {
+        this.commands = { ...this.commands, claude: value };
+        this.touch();
+      },
+      'claude',
+      true,
+    );
+    claudeCli.title = 'Run by the Extensions tab to change plugins and MCP servers.';
+    const codexCli = this.field(
+      'Codex executable',
+      this.commands.codex,
+      (value) => {
+        this.commands = { ...this.commands, codex: value };
+        this.touch();
+      },
+      'codex',
+      true,
+    );
+    codexCli.title =
+      'Run by the Extensions tab to change MCP servers. A full path to codex.cmd when Codex is not on PATH.';
+    cli.append(claudeCli, codexCli);
+    this.hosts.claude.append(cli);
   }
 
   /**
@@ -1703,6 +1739,8 @@ export class SettingsForm {
       automationShellEnabled: this.automationShell,
       geminiBotLogin: this.botLogin,
       agentProfile: this.agent,
+      claudeCommand: this.commands.claude,
+      codexCommand: this.commands.codex,
       tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
@@ -1724,6 +1762,7 @@ export class SettingsForm {
     // so leaving the empty string on screen would show a setting that is not the one in force.
     this.botLogin = saved.geminiBotLogin;
     this.agent = { ...saved.agentProfile };
+    this.commands = { claude: saved.claudeCommand, codex: saved.codexCommand };
     // Read back like the sizes and the models, and here it matters more than for either: the store
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would
     // otherwise stay short of what was stored and the signature would never match the echo.

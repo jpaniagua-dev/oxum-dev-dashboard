@@ -50,6 +50,7 @@ import { showContextMenu } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
 import { agentSessions, renderAgentsPanel } from './ui/agents-panel.js';
+import { ExtensionsPanel } from './ui/extensions-panel.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import {
   buildChangeMenuItems,
@@ -108,6 +109,8 @@ class App {
    * lands on is, and the board is the one that shows every session at once.
    */
   private boardMode = false;
+  /** The Extensions tab, which keeps its own selection and forms. */
+  private extensions: ExtensionsPanel | null = null;
   /** Session shown in the board's right terminal sidebar, or null before a card is selected. */
   private boardPreviewId: TerminalId | null = null;
   /** The separator keeps its session-local width when cards are switched or the preview is hidden. */
@@ -415,6 +418,9 @@ class App {
     // Paint the Vault even while hidden so a future reveal never flashes an empty panel. Its
     // on-demand read follows the restored-tab rule above.
     this.renderVault();
+    this.extensions = new ExtensionsPanel(requireElement('strip-panel-extensions'), (message) =>
+      this.stampMessage(message),
+    );
     // `adopt` restores the saved tab without firing the user's `onChange` callback. Every panel
     // whose state is read only when shown therefore needs the same bootstrap path as a click, or an
     // app reopened on that tab stays empty until somebody leaves and comes back.
@@ -424,6 +430,7 @@ class App {
       triage: () => void this.loadTriage(),
       worktrees: () => void this.loadWorktrees(),
       git: () => void this.loadGit(),
+      extensions: () => void this.extensions?.load(),
     });
 
     window.api.onRowsChanged((rows) => {
@@ -2583,6 +2590,11 @@ class App {
         if (tab === 'vault') {
           void this.loadVault();
         }
+        // Read off disk when shown and after every change, never polled: these files change when
+        // somebody edits them, and the tab being opened is when the answer is wanted.
+        if (tab === 'extensions') {
+          void this.extensions?.load();
+        }
         // Leaving the Vault tab takes any revealed value off the screen with it: the risk a reveal
         // carries is not the click, it is the value still being there afterwards.
         if (tab !== 'vault' && isRevealing()) {
@@ -2829,6 +2841,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.automationsHeight;
     case 'vault':
       return settings.vaultHeight;
+    case 'extensions':
+      return settings.extensionsHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -2846,7 +2860,8 @@ function heightKeyOf(
   | 'worktreesHeight'
   | 'agentsHeight'
   | 'automationsHeight'
-  | 'vaultHeight' {
+  | 'vaultHeight'
+  | 'extensionsHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -2864,6 +2879,8 @@ function heightKeyOf(
       return 'automationsHeight';
     case 'vault':
       return 'vaultHeight';
+    case 'extensions':
+      return 'extensionsHeight';
     case 'projects':
       return 'projectsHeight';
   }

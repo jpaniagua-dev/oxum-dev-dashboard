@@ -1,5 +1,6 @@
 import type { AgentProfile } from './agent-profile.js';
 import type { AutomationRule } from './automation.js';
+import type { ExtensionAction, ExtensionsResult, ExtensionsView } from './extensions.js';
 import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
@@ -1284,7 +1285,8 @@ export type StripTab =
   | 'worktrees'
   | 'agents'
   | 'automations'
-  | 'vault';
+  | 'vault'
+  | 'extensions';
 
 /**
  * Every tab, in display order, as a value.
@@ -1313,6 +1315,7 @@ export const STRIP_TABS: readonly StripTab[] = [
   'agents',
   'automations',
   'vault',
+  'extensions',
 ];
 
 /** Whether an unknown value names a tab. The one test both gates run. */
@@ -1828,6 +1831,7 @@ export interface AppSettings {
   agentsHeight: number;
   automationsHeight: number;
   vaultHeight: number;
+  extensionsHeight: number;
   /**
    * Whether rules may act at all. **False by default.**
    *
@@ -1916,6 +1920,15 @@ export interface AppSettings {
    * `shared/agent-profile.ts`.
    */
   agentProfile: AgentProfile;
+  /**
+   * The Claude Code and Codex executables the Extensions tab runs for its writes.
+   *
+   * Their own two settings and not the profile's binary: that tab inventories both agents whichever
+   * one the profile drives. A bare name is looked up on PATH; a full path is how an install that is
+   * not on it (Codex under one nvm Node while another is active) is reached.
+   */
+  claudeCommand: string;
+  codexCommand: string;
   /**
    * Master switch for writing to GitHub, off by default.
    *
@@ -2382,6 +2395,16 @@ export const IpcChannel = {
   VaultRemoveFile: 'vault:remove-file',
   VaultChanged: 'vault:changed',
   VaultReset: 'vault:reset',
+  /** invoke: () => ExtensionsView, both agents read off disk */
+  ExtensionsRead: 'extensions:read',
+  /** invoke: () => ExtensionsResult, runs `claude mcp list` for the servers' status */
+  ExtensionsCheck: 'extensions:check',
+  /** invoke: (action: ExtensionAction) => ExtensionsResult */
+  ExtensionsAct: 'extensions:act',
+  /** invoke: () => ExtensionsResult, reads the routines from claude.ai through Claude Code */
+  ExtensionsRoutines: 'extensions:routines',
+  /** invoke: () => { id, description }[], the plugins the marketplaces offer */
+  ExtensionsAvailable: 'extensions:available',
   AutomationsChanged: 'automations:changed',
   /** send: (terminalId, data) => void, keystrokes from xterm to the pty */
   PtyInput: 'pty:input',
@@ -2712,6 +2735,15 @@ export interface RendererApi {
   /** Throws away a vault this account cannot read, after a confirmation in the main process. */
   resetVault(): Promise<VaultState>;
   onVaultChanged(listener: (state: VaultState) => void): () => void;
+  /** What both coding agents have installed. Read on demand, never polled. */
+  readExtensions(): Promise<ExtensionsView>;
+  /** Asks Claude Code for every server's status, claude.ai connectors included. Slow. */
+  checkExtensions(): Promise<ExtensionsResult>;
+  /** One change. Anything destructive is confirmed in the main process first. */
+  actOnExtension(action: ExtensionAction): Promise<ExtensionsResult>;
+  availablePlugins(): Promise<{ id: string; description: string }[]>;
+  /** Reads the Claude Code routines from claude.ai. A few seconds and one model call. */
+  readRoutines(): Promise<ExtensionsResult>;
   onAutomationsChanged(listener: (state: AutomationState) => void): () => void;
   /**
    * Replaces the layout, panes and tab order together.

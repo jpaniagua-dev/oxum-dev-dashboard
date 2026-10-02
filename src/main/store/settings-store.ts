@@ -63,6 +63,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentsHeight: 460,
   automationsHeight: 460,
   vaultHeight: 460,
+  extensionsHeight: 460,
   automationsEnabled: false,
   automationShellEnabled: false,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
@@ -88,6 +89,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // skills that live there. Empty would mean "start in the repository", which is what it used to do.
   workspaceRoot: DEFAULT_CLAUDE_CONTEXT_ROOT,
   agentProfile: CLAUDE_CODE_PROFILE,
+  claudeCommand: 'claude',
+  codexCommand: 'codex',
   // Empty means "whatever Claude Code itself is set to", for all three. A default named here would be
   // this app deciding which model a user's own CLI runs on, which is not its call to make.
   // Closed on a fresh install: a window nobody asked for, opening on first launch, is the wrong
@@ -196,6 +199,11 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       1200,
     ),
     vaultHeight: clamp(asNumber(input.vaultHeight, DEFAULT_SETTINGS.vaultHeight), 90, 1200),
+    extensionsHeight: clamp(
+      asNumber(input.extensionsHeight, DEFAULT_SETTINGS.extensionsHeight),
+      90,
+      1200,
+    ),
     // `=== true` and never a truthy read: a hand-edited file must not be able to switch on a
     // feature that starts agents by itself with the string "false".
     automationsEnabled: input.automationsEnabled === true,
@@ -247,6 +255,9 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     agentCommitModel: asModel(input.agentCommitModel ?? input.claudeCommitModel),
     agentReviewModel: asModel(input.agentReviewModel ?? input.claudeReviewModel),
     agentProfile: readProfile(input.agentProfile),
+    // Blank falls back to the bare name, which PATH resolves: an empty command is no command at all.
+    claudeCommand: asCommand(input.claudeCommand, DEFAULT_SETTINGS.claudeCommand),
+    codexCommand: asCommand(input.codexCommand, DEFAULT_SETTINGS.codexCommand),
     // Anything but an explicit `true` is off. A file hand-edited to `"yes"` must not turn on
     // the one setting that lets this app write to somebody else's pull request.
     reviewWritesEnabled: input.reviewWritesEnabled === true,
@@ -419,6 +430,10 @@ function asProfiles(value: unknown): ShellProfile[] {
   return value
     .map((entry) => sanitizeProfile(entry))
     .filter((profile): profile is ShellProfile => profile !== null);
+}
+
+function asCommand(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : fallback;
 }
 
 function asString(value: unknown, fallback: string): string {

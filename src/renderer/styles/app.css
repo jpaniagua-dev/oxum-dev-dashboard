@@ -5668,3 +5668,224 @@ body {
 .servers__tile .terminal__view {
   padding: 4px 6px;
 }
+
+/*
+ * The Extensions tab.
+ *
+ * The pull request tab's three columns, reused as they are: a rail of agents and kinds, the list,
+ * and the detail. What is new here is only what that grid does not have, the agent headings in the
+ * rail, a two-line row, and the forms.
+ */
+.extensions__rail {
+  overflow-y: auto;
+}
+
+.extensions__agent {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 8px 2px;
+  font-weight: 600;
+  font-size: var(--font-sm);
+  color: var(--text);
+}
+
+.extensions__agent:first-child {
+  margin-top: 0;
+}
+
+.extensions__agent-version {
+  color: var(--text-faint);
+  font-weight: 400;
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+.extensions__agent-problem {
+  margin: 0 8px 2px;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  line-height: 1.4;
+}
+
+.extensions__filter {
+  flex: 1;
+  min-width: 120px;
+  max-width: 260px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+.extensions__row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.extensions__row:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.extensions__row--active {
+  background: var(--surface-inset);
+  border-color: var(--border);
+}
+
+.extensions__row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The name absorbs the slack and truncates at the end, so the chips keep the row's right side. */
+.extensions__row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extensions__row-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+/* On or off, for the kinds that have a switch. Hollow when off, so it reads without colour. */
+.extensions__dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--text-faint);
+  border-radius: 50%;
+}
+
+.extensions__dot--on {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.extensions__description {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.extensions__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+  font-size: var(--font-sm);
+}
+
+.extensions__facts dt {
+  color: var(--text-faint);
+}
+
+.extensions__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.extensions__mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+.extensions__note,
+.extensions__footer {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+  line-height: 1.5;
+}
+
+.extensions__footer {
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.extensions__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* The one action that cannot be taken back from here reads as such, without shouting. */
+.button.extensions__remove {
+  color: var(--danger);
+}
+
+.extensions__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.extensions__field,
+.extensions__pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.extensions__label {
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+.extensions__input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+.extensions__input.extensions__mono {
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+}
+
+textarea.extensions__input {
+  resize: vertical;
+}
+
+.extensions__input:focus-visible,
+.extensions__filter:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.extensions__pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 4px;
+}

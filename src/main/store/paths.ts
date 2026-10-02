@@ -56,6 +56,8 @@ export const AppPaths = {
    * morning's worth of notifications and re-arm every rule.
    */
   automations: (): string => join(app.getPath('userData'), 'automations.json'),
+  /** The last routine list read from claude.ai: a whitelist of fields, never a routine's prompt. */
+  routines: (): string => join(app.getPath('userData'), 'routines.json'),
   /**
    * The vault: names, lifetimes and the secrets themselves, encrypted as one blob.
    *

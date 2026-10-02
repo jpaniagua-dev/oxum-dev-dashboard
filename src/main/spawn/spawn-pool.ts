@@ -57,6 +57,13 @@ export interface SpawnRequest {
   readonly maxBuffer: number;
   /** Added on top of the worker's environment, never replacing it. */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Windows only: hands the arguments to the process unquoted.
+   *
+   * For `cmd.exe /d /s /c "<line>"`, the one way to run a `.cmd` shim without a shell option: the
+   * caller has quoted the line for cmd itself, and `execFile` quoting it a second time breaks it.
+   */
+  readonly verbatim?: boolean;
 }
 
 /** What a caller gets back on success. */
@@ -128,6 +135,9 @@ parentPort.on('message', (job) => {
   }
   if (job.env) {
     options.env = { ...process.env, ...job.env };
+  }
+  if (job.verbatim === true) {
+    options.windowsVerbatimArguments = true;
   }
 
   const reply = (fields) => {
@@ -299,6 +309,7 @@ export async function spawnOffThread(request: SpawnRequest): Promise<SpawnResult
       timeout: request.timeout,
       maxBuffer: request.maxBuffer,
       env: request.env,
+      verbatim: request.verbatim,
     });
   });
 }

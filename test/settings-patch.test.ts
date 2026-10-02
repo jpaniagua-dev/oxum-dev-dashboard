@@ -129,6 +129,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       'activeStrip',
       'agentsHeight',
       'automationsHeight',
+      'extensionsHeight',
       'gitHeight',
       'gitListWidth',
       'jiraHeight',
