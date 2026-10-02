@@ -51,6 +51,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   jiraHeight: 360,
   // "Mine" is the question the tab was built for; "all" is one click away when it is not the question.
   pullScope: 'mine',
+  ticketsLayout: 'list',
+  localTicketsDir: '',
   // Taller still, and on purpose: three columns ending in a diff is the one tab of this strip where
   // the user stops glancing and starts working. 250 pixels would show four lines of a diff.
   gitHeight: 460,
@@ -180,6 +182,8 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     jira: asJira(input.jira),
     activeStrip: asStrip(input.activeStrip),
     pullScope: input.pullScope === 'all' ? 'all' : 'mine',
+    ticketsLayout: input.ticketsLayout === 'board' ? 'board' : 'list',
+    localTicketsDir: typeof input.localTicketsDir === 'string' ? input.localTicketsDir.trim() : '',
     stripCollapsed: input.stripCollapsed === true,
     // Clamped so a hand-edited value cannot hide the strip or swallow the terminal.
     projectsHeight: clamp(asNumber(input.projectsHeight, DEFAULT_SETTINGS.projectsHeight), 90, 1200),

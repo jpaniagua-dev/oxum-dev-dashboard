@@ -3,6 +3,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { AgentProfile } from '@shared/agent-profile.js';
 import type { AutomationRule } from '@shared/automation.js';
 import type { ExtensionAction, ExtensionsResult, ExtensionsView } from '@shared/extensions.js';
+import type {
+  LocalTicketDraft,
+  LocalTicketResult,
+  LocalTicketsState,
+} from '@shared/local-tickets.js';
 import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
 import {
   IpcChannel,
@@ -20,6 +25,7 @@ import {
   type GitSequencerOp,
   type GitStashOp,
   type GitSyncOp,
+  type IssueStage,
   type IssueTransition,
   type JiraConfig,
   type JiraState,
@@ -335,6 +341,15 @@ const api: RendererApi = {
   resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
 
   readExtensions: (): Promise<ExtensionsView> => ipcRenderer.invoke(IpcChannel.ExtensionsRead),
+  readLocalTickets: (): Promise<LocalTicketsState> => ipcRenderer.invoke(IpcChannel.TicketsRead),
+  createLocalTicket: (draft: LocalTicketDraft): Promise<LocalTicketResult> =>
+    ipcRenderer.invoke(IpcChannel.TicketsCreate, draft),
+  moveLocalTicket: (key: string, stage: IssueStage): Promise<LocalTicketResult> =>
+    ipcRenderer.invoke(IpcChannel.TicketsMove, key, stage),
+  deleteLocalTicket: (key: string): Promise<LocalTicketResult> =>
+    ipcRenderer.invoke(IpcChannel.TicketsDelete, key),
+  openLocalTicket: (key: string, reveal: boolean): Promise<string> =>
+    ipcRenderer.invoke(IpcChannel.TicketsOpen, key, reveal),
   checkExtensions: (): Promise<ExtensionsResult> => ipcRenderer.invoke(IpcChannel.ExtensionsCheck),
   actOnExtension: (action: ExtensionAction): Promise<ExtensionsResult> =>
     ipcRenderer.invoke(IpcChannel.ExtensionsAct, action),

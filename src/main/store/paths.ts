@@ -58,6 +58,8 @@ export const AppPaths = {
   automations: (): string => join(app.getPath('userData'), 'automations.json'),
   /** The last routine list read from claude.ai: a whitelist of fields, never a routine's prompt. */
   routines: (): string => join(app.getPath('userData'), 'routines.json'),
+  /** The default folder of the local tickets, one Markdown file each. */
+  tickets: (): string => join(app.getPath('userData'), 'tickets'),
   /**
    * The vault: names, lifetimes and the secrets themselves, encrypted as one blob.
    *

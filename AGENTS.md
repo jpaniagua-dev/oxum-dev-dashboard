@@ -1174,8 +1174,38 @@ service and the CLI runner, `renderer/ui/extensions-panel.ts` the tab.
 
 - **Labelled `Tickets` on screen since 2026-10-02, and still `jira` everywhere else.** The id is the
   value `activeStrip` stores and the prefix of `jiraHeight`, so renaming it would reopen every
-  install on `projects` once and drop the height somebody set. The settings section keeps `Jira`:
-  it configures the connection, not the tab.
+  install on `projects` once and drop the height somebody set. The settings section is `Tickets`
+  too, since it holds the local tickets folder beside the Jira connection; its id stays
+  `section-jira`.
+- **Local tickets sit beside the Jira ones, one Markdown file each** (since 2026-10-02). A folder
+  of `LOC-<n>-<slug>.md` files, set in the settings and the app's own `tickets` folder when empty.
+  A file and not an app store, chosen over a JSON file and over a folder per repository: readable
+  and editable by hand, versionable, and readable by an agent handed the ticket, without writing
+  into the team's repositories. The frontmatter (`key`, `summary`, `type`, `stage`, `status`,
+  `created`, `updated`) is what the board reads; the body is the description and is never parsed,
+  and a move rewrites the header only, in the file's own line endings.
+- **The key is the identity, and a number is never handed out twice.** `nextTicketKey` takes the
+  highest in the folder, plus the highest issued this session, so a ticket deleted a minute ago
+  cannot lend its key to the next one. A file without a `LOC-<n>` key, or claiming a key another
+  file already has, is listed as a problem and not shown: two cards claiming one ticket is worse
+  than one missing.
+- **Merged in the renderer only, and into every view.** `withLocalTickets` appends them to each
+  Jira view, the choice made over a view of their own: a local ticket is the reader's own, so it
+  belongs in `My issues` and beside the sprint. The main process, and therefore the rules reading
+  Jira, never see one, which is what keeps a rule from firing on a local ticket. Without Jira the
+  tab draws one view of local tickets instead of refusing to draw.
+- **`source` on `JiraIssue` is what every gesture branches on.** A local card opens its file, its
+  menu offers its columns, its branch, its file and a delete (to the Recycle Bin, confirmed in the
+  main process), and a drop moves it without asking Jira for a transition. `branchNameFor` and the
+  branch path are shared as they are: `LOC-12` passes `ISSUE_KEY_PATTERN`.
+- **New ticket creates a LOCAL ticket, never a Jira one.** Decided: Jira creation stays where it
+  is done today. The form is inline, its draft lives in the app, and the tab does not repaint while
+  a text field of the form holds the caret (`typingTicket`), since the Jira poll would otherwise
+  rebuild the field mid-sentence.
+- **Board or List is a preference, kept like `pullScope`** (`ticketsLayout`, local-only), and List
+  is the default, on request. The list
+  is a grid, ordered in progress first then to do then done, stable inside each group, with the
+  same right click as a card and no drag.
 - **The API token never goes into `settings.json`.** It lives encrypted by `safeStorage` (DPAPI on
   Windows, tied to the account) in `jira-token.bin`. If encryption is unavailable, `SecretStore.write`
   **refuses** to write rather than falling back to plain text: a secret written in the clear because the

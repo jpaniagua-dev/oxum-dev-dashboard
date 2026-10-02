@@ -175,6 +175,7 @@ export function parseIssues(body: unknown, siteUrl: string, myEmail: string): Ji
       isMine: myEmail.length > 0 && email.toLowerCase() === myEmail.toLowerCase(),
       url: `${siteUrl.replace(/\/+$/, '')}/browse/${key}`,
       updatedAt: typeof fields.updated === 'string' ? fields.updated : '',
+      source: 'jira',
     });
   }
   return issues;

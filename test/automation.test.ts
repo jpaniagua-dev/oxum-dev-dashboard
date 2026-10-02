@@ -95,6 +95,7 @@ function issue(key: string, isMine: boolean): JiraIssue {
     isMine,
     url: `https://example.atlassian.net/browse/${key}`,
     updatedAt: '2026-09-25T08:00:00.000Z',
+    source: 'jira',
   };
 }
 

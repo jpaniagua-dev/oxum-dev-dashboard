@@ -125,6 +125,13 @@ import {
 import type { VaultFiles } from './vault/vault-files.js';
 import type { VaultStore } from './vault/vault-store.js';
 import type { ExtensionsService } from './extensions/extensions-service.js';
+import type { LocalTicketStore } from './tickets/local-ticket-store.js';
+import {
+  LOCAL_KEY_PREFIX,
+  readDraft,
+  type LocalTicketResult,
+  type LocalTicketsState,
+} from '@shared/local-tickets.js';
 import {
   readExtensionAction,
   shellSafeText,
@@ -150,6 +157,7 @@ export interface IpcDependencies {
   /** Pushes the vault to the dashboard after a change. Routed, never broadcast: see the channel. */
   readonly pushVault: () => VaultState;
   readonly extensions: () => ExtensionsService;
+  readonly localTickets: () => LocalTicketStore;
   readonly pullReview: () => PullReviewService;
   readonly autoRuns: () => AutoRunRecords;
   /** Starts a feedback pass by hand, through the same gate the watcher uses. */
@@ -1571,6 +1579,94 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     });
     return terminalId === null ? 'Claude Code could not be started' : '';
   }
+
+  /*
+   * The local tickets. The renderer names a ticket by its key and nothing else, so a file is only
+   * ever touched after this process found it in the folder under that key.
+   */
+  const localKey = (value: unknown): string | null =>
+    typeof value === 'string' && new RegExp(`^${LOCAL_KEY_PREFIX}-\\d+$`).test(value) ? value : null;
+
+  const ticketResult = async (
+    work: () => Promise<string>,
+  ): Promise<LocalTicketResult> => {
+    let ok = true;
+    let message: string;
+    try {
+      message = await work();
+    } catch (error) {
+      ok = false;
+      message = error instanceof Error ? error.message : String(error);
+    }
+    return { ok, message, state: await deps.localTickets().read() };
+  };
+
+  ipcMain.handle(IpcChannel.TicketsRead, async (): Promise<LocalTicketsState> => deps.localTickets().read());
+
+  ipcMain.handle(IpcChannel.TicketsCreate, async (_event, raw: unknown): Promise<LocalTicketResult> =>
+    ticketResult(async () => {
+      const draft = readDraft(raw);
+      if (draft === null) {
+        throw new Error('That ticket could not be read');
+      }
+      const ticket = await deps.localTickets().create(draft);
+      return `Created ${ticket.key}`;
+    }),
+  );
+
+  ipcMain.handle(
+    IpcChannel.TicketsMove,
+    async (_event, rawKey: unknown, stage: unknown): Promise<LocalTicketResult> =>
+      ticketResult(async () => {
+        const key = localKey(rawKey);
+        if (key === null || (stage !== 'todo' && stage !== 'in-progress' && stage !== 'done')) {
+          throw new Error('That move could not be read');
+        }
+        const ticket = await deps.localTickets().move(key, stage);
+        return `${ticket.key} moved`;
+      }),
+  );
+
+  ipcMain.handle(IpcChannel.TicketsDelete, async (event, rawKey: unknown): Promise<LocalTicketResult> =>
+    ticketResult(async () => {
+      const key = localKey(rawKey);
+      if (key === null) {
+        throw new Error('No local ticket named');
+      }
+      const ticket = await deps.localTickets().find(key);
+      const ok = await confirm(event, {
+        title: 'Delete this ticket',
+        message: `Delete ${ticket.key}, "${ticket.summary}"?`,
+        detail: `${ticket.file} goes to the Recycle Bin, where it can be restored from.`,
+        confirmLabel: 'Delete',
+      });
+      if (!ok) {
+        return 'Nothing was deleted';
+      }
+      await shell.trashItem(ticket.file);
+      return `Deleted ${ticket.key}`;
+    }),
+  );
+
+  ipcMain.handle(
+    IpcChannel.TicketsOpen,
+    async (_event, rawKey: unknown, reveal: unknown): Promise<string> => {
+      const key = localKey(rawKey);
+      if (key === null) {
+        return 'No local ticket named';
+      }
+      try {
+        const ticket = await deps.localTickets().find(key);
+        if (reveal === true) {
+          shell.showItemInFolder(ticket.file);
+          return '';
+        }
+        return await shell.openPath(ticket.file);
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    },
+  );
 
   ipcMain.handle(IpcChannel.ExtensionsRead, async (): Promise<ExtensionsView> =>
     deps.extensions().read(),

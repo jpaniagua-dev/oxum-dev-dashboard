@@ -1,6 +1,7 @@
 import type { AgentProfile } from './agent-profile.js';
 import type { AutomationRule } from './automation.js';
 import type { ExtensionAction, ExtensionsResult, ExtensionsView } from './extensions.js';
+import type { LocalTicketDraft, LocalTicketResult, LocalTicketsState } from './local-tickets.js';
 import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
@@ -934,7 +935,17 @@ export interface JiraIssue {
   readonly isMine: boolean;
   readonly url: string;
   readonly updatedAt: string;
+  /**
+   * Where the ticket lives. `local` is a Markdown file on this machine, merged into the Tickets tab
+   * by the renderer only: the main process, and the rules that read Jira, never see one.
+   */
+  readonly source: TicketSource;
 }
+
+export type TicketSource = 'jira' | 'local';
+
+/** How the Tickets tab draws its tickets. */
+export type TicketsLayout = 'board' | 'list';
 
 /**
  * A move an issue can make right now, as Jira reports it.
@@ -1795,6 +1806,10 @@ export interface AppSettings {
   jiraHeight: number;
   /** Sub-tab the pull request view reopens on, so the app comes back where it was left. */
   pullScope: PullScope;
+  /** Board or list in the Tickets tab. A preference, so it is kept like `pullScope`. */
+  ticketsLayout: TicketsLayout;
+  /** Folder of the local tickets. Empty means the app's own `tickets` folder. */
+  localTicketsDir: string;
   /**
    * Height of the Git tab, and the tallest default of the four.
    *
@@ -2384,6 +2399,16 @@ export const IpcChannel = {
   /** invoke: (terminalId, title) => void, renames a tab */
   TerminalRename: 'terminal:rename',
   TerminalNote: 'terminal:note',
+  /** invoke: () => LocalTicketsState */
+  TicketsRead: 'tickets:read',
+  /** invoke: (draft: LocalTicketDraft) => LocalTicketResult */
+  TicketsCreate: 'tickets:create',
+  /** invoke: (key, stage) => LocalTicketResult */
+  TicketsMove: 'tickets:move',
+  /** invoke: (key) => LocalTicketResult, after a confirmation in the main process */
+  TicketsDelete: 'tickets:delete',
+  /** invoke: (key, reveal: boolean) => string, opens the ticket's file or shows it in its folder */
+  TicketsOpen: 'tickets:open',
   AutomationsRead: 'automations:read',
   AutomationsSave: 'automations:save',
   AutomationsForget: 'automations:forget',
@@ -2532,6 +2557,14 @@ export interface RendererApi {
   testJira(): Promise<{ ok: boolean; message: string }>;
   /** The moves an issue can make, asked at the moment the menu opens rather than cached. */
   jiraTransitions(key: string): Promise<IssueTransition[]>;
+  /** The local tickets, read from their folder. */
+  readLocalTickets(): Promise<LocalTicketsState>;
+  createLocalTicket(draft: LocalTicketDraft): Promise<LocalTicketResult>;
+  moveLocalTicket(key: string, stage: IssueStage): Promise<LocalTicketResult>;
+  /** Sends the file to the Recycle Bin, after a confirmation in the main process. */
+  deleteLocalTicket(key: string): Promise<LocalTicketResult>;
+  /** Opens the ticket's file in the editor, or shows it in its folder. Answers why not, or ''. */
+  openLocalTicket(key: string, reveal: boolean): Promise<string>;
   /**
    * The instruction files and memory the agent of one session reads.
    *

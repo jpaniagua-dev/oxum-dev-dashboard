@@ -58,6 +58,7 @@ describe('parseIssues', () => {
       assignee: 'Julio P.',
       isMine: true,
       url: 'https://example.atlassian.net/browse/PROJ-1674',
+      source: 'jira',
     });
   });
 
@@ -218,6 +219,7 @@ describe('boardColumns', () => {
       isMine: false,
       url: '',
       updatedAt: '',
+      source: 'jira',
     };
   }
 
@@ -311,6 +313,7 @@ describe('filtering the board', () => {
       isMine: false,
       url: '',
       updatedAt: '',
+      source: 'jira',
       ...fields,
     };
   }

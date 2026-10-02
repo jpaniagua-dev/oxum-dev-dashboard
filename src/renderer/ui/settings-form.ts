@@ -199,6 +199,8 @@ export class SettingsForm {
   private agentModels: AgentModelDrafts = { analysis: '', work: '', commit: '', review: '' };
   /** The two executables the Extensions tab runs. */
   private commands = { claude: 'claude', codex: 'codex' };
+  /** The local tickets folder. Empty means the app's own. */
+  private ticketsDir = '';
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
   private feedbackPass = false;
@@ -263,6 +265,7 @@ export class SettingsForm {
     this.botLogin = settings.geminiBotLogin;
     this.agent = { ...settings.agentProfile };
     this.commands = { claude: settings.claudeCommand, codex: settings.codexCommand };
+    this.ticketsDir = settings.localTicketsDir;
     this.agentStatus = '';
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
@@ -458,11 +461,11 @@ export class SettingsForm {
       },
       {
         id: 'section-jira',
-        name: 'Jira',
+        name: 'Tickets',
         // A connected site is stated, not coloured: naming the host already says it is configured, and
         // green at this size does not hold its contrast against the rail.
         state:
-          host.length === 0 ? 'not configured' : this.jira.hasToken ? host : `${host} · no token`,
+          host.length === 0 ? 'local tickets only' : this.jira.hasToken ? host : `${host} · no token`,
         tone: host.length === 0 || this.jira.hasToken ? 'neutral' : 'warn',
       },
     ];
@@ -981,6 +984,24 @@ export class SettingsForm {
         createElement('p', { className: 'settings-entry__hint', text: this.jiraStatus }),
       );
     }
+
+    /*
+     * The local tickets, which need no connection at all. Here because they share the Tickets tab
+     * with Jira, and the Tickets tab's settings are found under this heading.
+     */
+    const tickets = this.field(
+      'Local tickets folder',
+      this.ticketsDir,
+      (value) => {
+        this.ticketsDir = value;
+        this.touch();
+      },
+      'the app folder',
+      true,
+    );
+    tickets.title =
+      'One Markdown file per local ticket. Empty keeps them in the app folder; a folder under git versions them.';
+    this.hosts.jira.append(tickets);
   }
 
   private renderProjects(): void {
@@ -1741,6 +1762,7 @@ export class SettingsForm {
       agentProfile: this.agent,
       claudeCommand: this.commands.claude,
       codexCommand: this.commands.codex,
+      localTicketsDir: this.ticketsDir,
       tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
@@ -1763,6 +1785,7 @@ export class SettingsForm {
     this.botLogin = saved.geminiBotLogin;
     this.agent = { ...saved.agentProfile };
     this.commands = { claude: saved.claudeCommand, codex: saved.codexCommand };
+    this.ticketsDir = saved.localTicketsDir;
     // Read back like the sizes and the models, and here it matters more than for either: the store
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would
     // otherwise stay short of what was stored and the signature would never match the echo.

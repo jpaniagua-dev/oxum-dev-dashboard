@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { ExtensionsService } from './extensions/extensions-service.js';
+import { LocalTicketStore } from './tickets/local-ticket-store.js';
 import {
   IpcChannel,
   RESERVED_ACTION_PREFIX,
@@ -433,6 +434,10 @@ async function bootstrap(): Promise<void> {
   const vaultStore = new VaultStore(AppPaths.vault());
   await vaultStore.load();
   const vaultFiles = new VaultFiles({ vault: vaultStore, projects: () => projects });
+  // Re-read on every call, so a folder changed in the settings applies without a restart.
+  const localTickets = new LocalTicketStore(
+    () => settingsStore.get().localTicketsDir || AppPaths.tickets(),
+  );
   const extensionsService = new ExtensionsService({
     home: homedir(),
     projects: () => projects,
@@ -794,6 +799,7 @@ async function bootstrap(): Promise<void> {
     vaultState,
     pushVault,
     extensions: () => extensionsService,
+    localTickets: () => localTickets,
     automations: automationState,
     clearAutomationLog: () => {
       /*

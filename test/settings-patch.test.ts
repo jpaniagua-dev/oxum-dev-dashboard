@@ -143,6 +143,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       // Local for the same reason: the grid is picked from the dashboard's own header, so an echo
       // would re-adopt the layout in the middle of the click that changed it.
       'terminalColumns',
+      'ticketsLayout',
       'triageHeight',
       'vaultHeight',
       'worktreesHeight',

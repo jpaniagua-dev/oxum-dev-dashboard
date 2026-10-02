@@ -23,6 +23,8 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'gitListWidth',
   'activeStrip',
   'pullScope',
+  // Switched from the Tickets tab itself, like the pull request scope.
+  'ticketsLayout',
   'stripCollapsed',
   // Picked from the dashboard's own header, so broadcasting it back would re-adopt the layout in the
   // middle of the click that changed it.
@@ -76,6 +78,10 @@ export function asPatch(value: unknown): Partial<AppSettings> {
     patch.activeStrip = input.activeStrip;
   }
   if (input.pullScope === 'mine' || input.pullScope === 'all') patch.pullScope = input.pullScope;
+  if (input.ticketsLayout === 'board' || input.ticketsLayout === 'list') {
+    patch.ticketsLayout = input.ticketsLayout;
+  }
+  if (typeof input.localTicketsDir === 'string') patch.localTicketsDir = input.localTicketsDir;
   if (typeof input.stripCollapsed === 'boolean') patch.stripCollapsed = input.stripCollapsed;
   if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
   // Coerced rather than merely type-checked, unlike its neighbours: the store clamps every other

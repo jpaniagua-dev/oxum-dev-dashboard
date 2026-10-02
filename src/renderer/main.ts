@@ -1,4 +1,5 @@
 import type {
+  TicketsLayout,
   AppSettings,
   GitDiff,
   GitDiffTarget,
@@ -64,7 +65,14 @@ import {
   type GitViewId,
 } from './ui/git-panel.js';
 import { attachGitSplitter } from './ui/git-split.js';
-import { boardUrl, renderJiraBoard, transitionTo } from './ui/jira-board.js';
+import { boardUrl, renderJiraBoard, transitionTo, withLocalTickets } from './ui/jira-board.js';
+import {
+  LOCAL_STAGES,
+  localAsIssue,
+  localStatus,
+  type LocalTicketDraft,
+  type LocalTicketsState,
+} from '@shared/local-tickets.js';
 import { attachPaneResizer } from './ui/pane-resizer.js';
 import { renderProjectTable } from './ui/project-table.js';
 import { findRun, renderPullList } from './ui/pull-list.js';
@@ -213,6 +221,12 @@ class App {
    * question you asked once.
    */
   private jiraAssignee = '';
+  /** The local tickets, read from their folder when the Tickets tab is shown and after each write. */
+  private localTickets: LocalTicketsState | null = null;
+  private ticketsLayout: TicketsLayout = 'list';
+  /** The new ticket being written, kept here so a repaint rebuilds the form with what was typed. */
+  private ticketDraft: LocalTicketDraft | null = null;
+  private ticketDraftError = '';
   /**
    * Project the last branch was created in, offered first the next time.
    *
@@ -403,6 +417,10 @@ class App {
     this.pulls = bootstrap.pulls;
     this.pullScope = bootstrap.settings.pullScope;
     this.jira = bootstrap.jira;
+    this.ticketsLayout = bootstrap.settings.ticketsLayout;
+    // Read at startup whatever tab is shown: a folder of a few files, and the Tickets tab must not
+    // open on a board missing half its cards until it is left and shown again.
+    void this.loadLocalTickets();
     this.bindChrome();
     this.bindStrip(bootstrap.settings);
     this.renderTable();
@@ -1050,20 +1068,93 @@ class App {
     this.triagePanel.render(this.triage);
   }
 
+  private async loadLocalTickets(): Promise<void> {
+    this.localTickets = await window.api.readLocalTickets();
+    this.renderJira();
+  }
+
+  /**
+   * Whether a field of the new ticket form holds the caret.
+   *
+   * The Jira poll repaints this tab every few minutes, and a repaint rebuilds the form: typed text
+   * is synced to the draft on `change`, so a rebuild between two keystrokes would lose what was
+   * typed since. The tab waits instead, and repaints when the field gives the caret back.
+   */
+  private typingTicket(): boolean {
+    const focused = document.activeElement;
+    return (
+      focused !== null &&
+      (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA') &&
+      focused.closest('[data-ticket-form]') !== null
+    );
+  }
+
+  private releaseTicketForm(): void {
+    if (this.typingTicket()) {
+      (document.activeElement as HTMLElement).blur();
+    }
+  }
+
   private renderJira(): void {
-    if (this.jira === null) {
+    if (this.jira === null || this.typingTicket()) {
       return;
     }
+    const merged = withLocalTickets(this.jira, (this.localTickets?.tickets ?? []).map(localAsIssue));
     renderJiraBoard(
       {
         views: requireElement('jira-views'),
         filter: requireElement('jira-filter'),
         list: requireElement('jira-list'),
       },
-      this.jira,
-      { selected: this.selectedJiraView, assignee: this.jiraAssignee },
+      merged.state,
+      {
+        selected: this.selectedJiraView,
+        assignee: this.jiraAssignee,
+        layout: this.ticketsLayout,
+        draft: this.ticketDraft,
+        draftError: this.ticketDraftError,
+      },
       {
         onOpen: (url) => void window.api.openExternal(url),
+        onOpenIssue: (issue) => {
+          if (issue.source === 'local') {
+            void window.api.openLocalTicket(issue.key, false).then((problem) => {
+              if (problem.length > 0) {
+                this.stampMessage(problem);
+              }
+            });
+          } else {
+            void window.api.openExternal(issue.url);
+          }
+        },
+        onLayout: (layout) => {
+          this.ticketsLayout = layout;
+          void window.api.updateSettings({ ticketsLayout: layout });
+          this.renderJira();
+        },
+        onDraft: (draft) => {
+          if (draft === null) {
+            this.releaseTicketForm();
+            this.ticketDraftError = '';
+          }
+          this.ticketDraft = draft;
+          this.renderJira();
+        },
+        onCreate: (draft) => {
+          this.releaseTicketForm();
+          this.ticketDraft = draft;
+          void window.api.createLocalTicket(draft).then((result) => {
+            this.localTickets = result.state;
+            if (result.ok) {
+              this.ticketDraft = null;
+              this.ticketDraftError = '';
+              this.stampMessage(result.message);
+            } else {
+              this.ticketDraftError = result.message;
+            }
+            this.renderJira();
+          });
+        },
         onSelect: (view) => {
           this.selectedJiraView = view;
           // The filter belongs to the list it was applied to: "Mes tickets" has no assignee column, so
@@ -1082,7 +1173,51 @@ class App {
         siteUrl: this.settings?.jira.siteUrl ?? '',
         projectKeys: this.settings?.jira.projectKeys ?? [],
       },
+      merged.jiraConfigured,
     );
+  }
+
+  /** Runs one change to the local tickets, then repaints from the folder as it now is. */
+  private async runLocalTicketWrite(
+    work: () => Promise<{ ok: boolean; message: string; state: LocalTicketsState }>,
+  ): Promise<void> {
+    const result = await work();
+    this.localTickets = result.state;
+    if (result.message.length > 0) {
+      this.stampMessage(result.message);
+    }
+    this.renderJira();
+  }
+
+  /**
+   * The menu of a local ticket: its columns, its branch, its file.
+   *
+   * The same order as a Jira ticket's where they share a gesture: the branch first, then the moves.
+   * No assignment, a local ticket being the reader's own, and a delete, which Jira tickets do not
+   * offer from here.
+   */
+  private openLocalTicketMenu(issue: JiraIssue, x: number, y: number): void {
+    showContextMenu(x, y, [
+      {
+        label: 'Create a branch...',
+        hint: `${branchNameFor(issue.key, issue.summary)}, in the chosen project`,
+        run: () => this.openBranchProjectMenu(issue, x, y),
+      },
+      ...LOCAL_STAGES.filter((stage) => stage !== issue.stage).map((stage) => ({
+        label: `Move to "${localStatus(stage)}"`,
+        run: () => void this.runLocalTicketWrite(() => window.api.moveLocalTicket(issue.key, stage)),
+      })),
+      {
+        label: 'Edit the ticket file',
+        hint: 'Title, type and description live in its Markdown file',
+        run: () => void window.api.openLocalTicket(issue.key, false),
+      },
+      { label: 'Show in folder', run: () => void window.api.openLocalTicket(issue.key, true) },
+      {
+        label: 'Delete...',
+        run: () => void this.runLocalTicketWrite(() => window.api.deleteLocalTicket(issue.key)),
+      },
+    ]);
   }
 
   /**
@@ -1093,6 +1228,10 @@ class App {
    * one request per right-click, which is the right trade for never lying about what is possible.
    */
   private async openIssueMenu(issue: JiraIssue, x: number, y: number): Promise<void> {
+    if (issue.source === 'local') {
+      this.openLocalTicketMenu(issue, x, y);
+      return;
+    }
     const transitions = await window.api.jiraTransitions(issue.key);
     const items = [
       {
@@ -1147,6 +1286,10 @@ class App {
    * snapped back to where it was.
    */
   private async moveIssue(issue: JiraIssue, stage: IssueStage): Promise<void> {
+    if (issue.source === 'local') {
+      await this.runLocalTicketWrite(() => window.api.moveLocalTicket(issue.key, stage));
+      return;
+    }
     const transitions = await window.api.jiraTransitions(issue.key);
     const target = transitionTo(transitions, stage);
     if (target === null) {
@@ -2488,8 +2631,13 @@ class App {
      * they drift apart.
      */
     window.api.onSettingsChanged((settings) => {
+      const folderMoved = settings.localTicketsDir !== this.settings?.localTicketsDir;
       this.settings = settings;
       void this.reloadAfterSettings();
+      // A folder changed in the settings window is a different set of tickets.
+      if (folderMoved) {
+        void this.loadLocalTickets();
+      }
     });
   }
 
@@ -2577,6 +2725,10 @@ class App {
         // panel, so this is the first instant its value can actually be honoured.
         // The context of an agent is read from the disk, so it is read when the tab is shown rather
         // than kept warm behind it. Same reasoning as Git and Triage below.
+        // The local tickets are files anybody may have edited since: shown is when to read them.
+        if (tab === 'jira') {
+          void this.loadLocalTickets();
+        }
         if (tab === 'agents') {
           this.renderAgents();
         }

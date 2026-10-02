@@ -5889,3 +5889,127 @@ textarea.extensions__input {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 4px;
 }
+
+/*
+ * The Tickets tab's additions: the Board/List switch, the new ticket form, the list, and the badge
+ * that says where a ticket lives.
+ */
+.tickets__layouts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tickets__form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+}
+
+.tickets__form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.tickets__input {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+textarea.tickets__input {
+  resize: vertical;
+}
+
+.tickets__input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.tickets__summary {
+  flex: 1;
+  min-width: 200px;
+}
+
+/*
+ * One row per ticket, on a grid so the columns line up whatever a row carries: source, key,
+ * summary, type, assignee, status. `My issues` drops the assignee column.
+ */
+.tickets__list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tickets__row {
+  display: grid;
+  grid-template-columns: 48px 92px minmax(0, 1fr) 64px 130px max-content;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+
+.tickets__list--mine .tickets__row {
+  grid-template-columns: 48px 92px minmax(0, 1fr) 64px max-content;
+}
+
+.tickets__row:hover {
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.tickets__row-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickets__row-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.tickets__row .card__assignee {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickets__row-status {
+  justify-self: end;
+}
+
+/* Quiet for Jira, the ordinary case; the local badge carries the one accent, being the new fact. */
+.tickets__source {
+  justify-self: start;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  line-height: 1.6;
+}
+
+.tickets__source--local {
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
