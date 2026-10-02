@@ -30,7 +30,7 @@ import { feedbackRefusal } from './feedback-gate.js';
  * Matched on the **ticket key plus its separator**, and on the author being us. It cannot be an exact
  * branch comparison: the app never learns the branch, the skill invents the kebab half of it, so the
  * key is the only part of the name this side knows. The trailing dash is what makes the prefix safe,
- * `TEC-12-` not being a prefix of `TEC-123-`; without it one ticket's watcher would attach itself to
+ * `PROJ-12-` not being a prefix of `PROJ-123-`; without it one ticket's watcher would attach itself to
  * another ticket's pull request. The branch is then **learned** from the match and stored, which is
  * what the merge watcher needs later.
  */

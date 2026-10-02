@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import {
   buildHeadlessCommand,
   describeCommand,
   type AgentProfile,
 } from '@shared/agent-profile.js';
 import { splitLines } from './agent-progress.js';
+import { cmdLine, resolveCommand } from '../spawn/command-resolve.js';
 
 /**
  * A headless Claude Code run: the Triage tab's sprint analysis, and the Git tab's commit message.
@@ -162,8 +164,51 @@ export async function runAgent(options: AgentRunOptions): Promise<AgentRunResult
     return { ok: false, answer: '', error: `${agent} has no command configured` };
   }
 
+  /*
+   * The folder first, because Node reports a missing working directory as ENOENT, the very code a
+   * missing binary gets, and the message below would then blame the agent for a path. That is what
+   * a fresh install showed for every run, pointed at a workspace folder that only exists on the
+   * machine the defaults were written on.
+   */
+  if (options.cwd !== undefined && !existsSync(options.cwd)) {
+    return {
+      ok: false,
+      answer: '',
+      error: `${label} cannot start: the folder ${options.cwd} does not exist. Set it in the settings`,
+    };
+  }
+
+  /*
+   * An npm install of the agent is a `.cmd` shim, which `spawn` refuses without a shell. It runs
+   * through `cmd.exe` with a line quoted by `cmdLine`, which refuses what cmd would expand rather
+   * than guessing at an escape. A command that resolves to nothing is spawned as written, so the
+   * ENOENT below still names it.
+   */
+  const target = await resolveCommand(file);
+  let spawnFile = target?.file ?? file;
+  let spawnArgs: readonly string[] = args;
+  let verbatim = false;
+  if (target?.viaCmd === true) {
+    const line = cmdLine(target.file, args);
+    if (line === null) {
+      return {
+        ok: false,
+        answer: '',
+        error: `${agent} is a .cmd shim, and an argument holds a character cmd.exe would expand  ·  ${commandLine}`,
+      };
+    }
+    spawnFile = process.env['ComSpec'] ?? 'cmd.exe';
+    spawnArgs = ['/d', '/s', '/c', line];
+    verbatim = true;
+  }
+
   return new Promise((resolve) => {
-    const child = spawn(file, args, { cwd: options.cwd, shell: false, windowsHide: true });
+    const child = spawn(spawnFile, spawnArgs, {
+      cwd: options.cwd,
+      shell: false,
+      windowsHide: true,
+      windowsVerbatimArguments: verbatim,
+    });
 
     let pending = '';
     /** Everything printed, for a profile whose answer is its plain output. */

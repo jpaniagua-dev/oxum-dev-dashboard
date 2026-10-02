@@ -76,14 +76,9 @@ export function buildWorkCommand(
   model = '',
   profile: AgentProfile = CLAUDE_CODE_PROFILE,
   handoff: TriageHandoff = 'ask',
+  options: HandoffOptions = { skill: '', notes: '' },
 ): string {
-  const repo = safeRepoName(folder);
-  const where = repo === null ? '' : ` in the ${repo} repository`;
-  const skill = handoff === 'auto' ? 'ticket-auto' : 'ticket';
-  const prompt =
-    keys.length === 1
-      ? `/${skill} ${keys[0]}${where}`
-      : `Work these tickets one after another${where}, using the ${skill} skill for each: ${keys.join(', ')}`;
+  const prompt = handoffPrompt(keys, folder, handoff, options);
 
   /*
    * The interactive template, with the prompt appended as a quoted argument.
@@ -95,6 +90,65 @@ export function buildWorkCommand(
    * line.
    */
   return `${buildInteractiveCommand(profile, model)} "${prompt}"`;
+}
+
+/** What a handoff names instead of the built-in prompt, and where the triage notes are. */
+export interface HandoffOptions {
+  /** A slash command such as `/ticket`, or empty for the built-in prompt. */
+  readonly skill: string;
+  /** The triage file, named in the built-in prompt so the session can read the notes. */
+  readonly notes: string;
+}
+
+/**
+ * A skill name safe inside the prompt's double quotes, with its slash, or null.
+ *
+ * Letters, digits, dash, underscore and the colon of a plugin skill (`plugin:skill`): what a skill
+ * is named, and nothing a shell reads as syntax.
+ */
+export function safeSkill(value: string): string | null {
+  const name = value.trim().replace(/^\//, '');
+  return /^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(name) ? `/${name}` : null;
+}
+
+/** A path safe inside the prompt's double quotes, or null. */
+function safePath(path: string): string | null {
+  return /^[A-Za-z0-9 :\\/._-]+$/.test(path) ? path : null;
+}
+
+/**
+ * The words a ticket is handed over with.
+ *
+ * A configured skill keeps the exact sentence the handoffs always had: `/ticket PROJ-1 in the web
+ * repository`. Without one, the app's own prompt says what to do, and where the triage notes are,
+ * so a machine with no skill installed still hands over a ticket the agent can work. It holds
+ * only this app's text, keys already vetted and a vetted repository name, because it lands inside
+ * a double-quoted shell argument; the ticket's own description is read from the notes, never put
+ * on the command line.
+ */
+export function handoffPrompt(
+  keys: readonly string[],
+  folder: string,
+  handoff: TriageHandoff,
+  options: HandoffOptions,
+): string {
+  const repo = safeRepoName(folder);
+  const where = repo === null ? '' : ` in the ${repo} repository`;
+  const skill = safeSkill(options.skill);
+  if (skill !== null) {
+    return keys.length === 1
+      ? `${skill} ${keys[0]}${where}`
+      : `Work these tickets one after another${where}, using ${skill} for each: ${keys.join(', ')}`;
+  }
+  const subject =
+    keys.length === 1 ? `Work on ticket ${keys[0]}${where}.` : `Work on these tickets one after another${where}: ${keys.join(', ')}.`;
+  const notes = safePath(options.notes);
+  const read = notes === null ? '' : ` The triage notes about it are in ${notes}.`;
+  const how =
+    handoff === 'auto'
+      ? ' Work without stopping for approval: create a branch named after the ticket from the default branch, implement the change, run the checks, commit, push the branch and open a draft pull request with gh. Stop only when something blocks you.'
+      : ' Create a branch named after the ticket from the default branch, implement the change and run the checks. Ask before pushing, and before anything that cannot be undone.';
+  return `${subject}${read}${how}`;
 }
 
 /**

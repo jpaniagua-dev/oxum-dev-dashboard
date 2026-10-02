@@ -3,12 +3,12 @@ import { parsePullPayload } from '../src/main/github/pulls-service.js';
 import { parseRemoteSlug } from '../src/main/git/git-service.js';
 import { describeAge, ownPulls, scopedPulls } from '../src/renderer/ui/pull-list.js';
 
-const ME = 'jpaniagua-dev';
+const ME = 'example-dev';
 
 /** Real payload captured from `gh pr list` on web-app, trimmed to the fields used. */
 const REAL = JSON.stringify([
   {
-    author: { login: 'jpaniagua-dev', name: 'Julio P.' },
+    author: { login: 'example-dev', name: 'Sam R.' },
     headRefName: 'PROJ-1674-user-profile-detail-page',
     isDraft: false,
     number: 580,
@@ -33,7 +33,7 @@ describe('parsePullPayload', () => {
     expect(pr).toMatchObject({
       number: 580,
       branch: 'PROJ-1674-user-profile-detail-page',
-      authorLogin: 'jpaniagua-dev',
+      authorLogin: 'example-dev',
       review: 'review-required',
       isAuthor: true,
       isReviewer: false,
@@ -108,8 +108,8 @@ describe('parseRemoteSlug', () => {
   });
 
   it('reads the SSH form', () => {
-    expect(parseRemoteSlug('git@github.com:jpaniagua-dev/oxum-dev-dashboard.git')).toBe(
-      'jpaniagua-dev/oxum-dev-dashboard',
+    expect(parseRemoteSlug('git@github.com:example-dev/oxum-dev-dashboard.git')).toBe(
+      'example-dev/oxum-dev-dashboard',
     );
   });
 

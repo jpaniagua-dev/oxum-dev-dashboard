@@ -20,6 +20,7 @@ import { readProgress } from '../agent/agent-progress.js';
 import { buildTriagePrompt, trimDescription } from './triage-prompt.js';
 import { selectIssues } from './triage-select.js';
 import { TriageStore } from './triage-store.js';
+import { runFolder } from '../projects/run-folder.js';
 
 /**
  * The Triage tab's whole behaviour: list the sprints, analyse one on request, remember the answer.
@@ -327,7 +328,7 @@ export class TriageService {
 
     const answer = await runAgent({
       profile: this.settings().agentProfile,
-      cwd: this.settings().projectsRoot,
+      cwd: runFolder(this.settings().projectsRoot),
       prompt: buildTriagePrompt(sprint.name, asked),
       model: this.settings().agentAnalysisModel,
       label: 'The analysis',

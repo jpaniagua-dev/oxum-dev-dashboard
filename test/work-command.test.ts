@@ -2,13 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   SKIP_PERMISSIONS_FLAG,
   buildWorkCommand,
+  handoffPrompt,
   resolveWorkspaceRoot,
+  safeSkill,
   safeRepoName,
 } from '../src/main/triage/work-command.js';
 
+/** The handoff as it ran before it became a setting: the `/ticket` skill. */
+const SKILL = { skill: '/ticket', notes: '' };
+
 describe('buildWorkCommand, model', () => {
   it('omits the flag when no model is pinned, which is the default', () => {
-    expect(buildWorkCommand(['PROJ-123'], 'web-app')).toBe(
+    expect(buildWorkCommand(['PROJ-123'], 'web-app', '', undefined, 'ask', SKILL)).toBe(
       'claude --dangerously-skip-permissions "/ticket PROJ-123 in the web-app repository"',
     );
   });
@@ -39,26 +44,54 @@ describe('buildWorkCommand', () => {
   it('names the repository in the prompt, since the session no longer starts inside it', () => {
     // The pairing with `resolveWorkspaceRoot`: the working directory is the workspace, so the only way
     // the session can know which repository the ticket is about is for the prompt to say so.
-    expect(buildWorkCommand(['PROJ-123'], 'web-app')).toBe(
+    expect(buildWorkCommand(['PROJ-123'], 'web-app', '', undefined, 'ask', SKILL)).toBe(
       'claude --dangerously-skip-permissions "/ticket PROJ-123 in the web-app repository"',
     );
   });
 
   it('lists a batch in order and lets the skill run once per ticket', () => {
-    const command = buildWorkCommand(['PROJ-1', 'PROJ-2'], 'admin-front');
+    const command = buildWorkCommand(['PROJ-1', 'PROJ-2'], 'admin-front', '', undefined, 'ask', SKILL);
     expect(command).toContain('in the admin-front repository');
     expect(command).toContain('PROJ-1, PROJ-2');
     // Not a slash command for a batch: `/ticket` takes one ticket, and handing it two would leave the
     // second one to be inferred from a sentence the skill never reads.
-    expect(command).not.toContain('/ticket');
+    expect(command).not.toContain('/ticket PROJ');
   });
 
   it('drops the repository clause rather than writing an empty one', () => {
     // A folder name that sanitises to nothing is unlikely, but "in the  repository" would be worse than
     // saying nothing: it reads as a repository whose name the tab lost.
-    expect(buildWorkCommand(['PROJ-1'], '???')).toBe(
+    expect(buildWorkCommand(['PROJ-1'], '???', '', undefined, 'ask', SKILL)).toBe(
       'claude --dangerously-skip-permissions "/ticket PROJ-1"',
     );
+  });
+});
+
+describe('handoffPrompt, without a skill', () => {
+  const notes = 'C:/Users/dev/AppData/Roaming/app/triage.json';
+
+  it('says what to do and where the notes are, needing nothing installed', () => {
+    const ask = handoffPrompt(['PROJ-7'], 'web-app', 'ask', { skill: '', notes });
+    expect(ask).toMatch(/^Work on ticket PROJ-7 in the web-app repository\./);
+    expect(ask).toContain(`The triage notes about it are in ${notes}.`);
+    expect(ask).toContain('Ask before pushing');
+    const auto = handoffPrompt(['PROJ-7'], 'web-app', 'auto', { skill: '', notes });
+    expect(auto).toContain('open a draft pull request with gh');
+  });
+
+  it('holds nothing a shell would expand inside its double quotes', () => {
+    for (const handoff of ['ask', 'auto'] as const) {
+      expect(handoffPrompt(['PROJ-1', 'PROJ-2'], 'web', handoff, { skill: '', notes })).not.toMatch(/["`$%!]/);
+    }
+    // A notes path that is not safe is left out rather than quoted.
+    expect(handoffPrompt(['PROJ-1'], 'web', 'ask', { skill: '', notes: 'C:/$(x)/t.json' })).not.toContain('notes');
+  });
+
+  it('accepts a skill name and nothing else', () => {
+    expect(safeSkill('ticket')).toBe('/ticket');
+    expect(safeSkill('/plugin:ticket-auto')).toBe('/plugin:ticket-auto');
+    expect(safeSkill('ticket; rm')).toBeNull();
+    expect(safeSkill('')).toBeNull();
   });
 });
 

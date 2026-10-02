@@ -27,7 +27,7 @@ const BODY = {
       fields: {
         summary: 'User profile detail page',
         status: { name: 'In progress', statusCategory: { key: 'indeterminate' } },
-        assignee: { displayName: 'Julio P.', emailAddress: 'dev@example.com' },
+        assignee: { displayName: 'Sam R.', emailAddress: 'dev@example.com' },
         issuetype: { name: 'Story' },
         updated: '2026-08-04T15:00:00.000+0200',
       },
@@ -55,7 +55,7 @@ describe('parseIssues', () => {
       status: 'In progress',
       stage: 'in-progress',
       type: 'Story',
-      assignee: 'Julio P.',
+      assignee: 'Sam R.',
       isMine: true,
       url: 'https://example.atlassian.net/browse/PROJ-1674',
       source: 'jira',
@@ -321,14 +321,14 @@ describe('filtering the board', () => {
   const sprint = [
     issue({ key: 'PROJ-999', assignee: 'Alex Martin', status: 'In review', stage: 'in-progress' }),
     issue({ key: 'PROJ-1000', assignee: '', status: 'To do' }),
-    issue({ key: 'PROJ-12', assignee: 'Julio Paniagua', status: 'In progress', stage: 'in-progress' }),
+    issue({ key: 'PROJ-12', assignee: 'Sam Rivera', status: 'In progress', stage: 'in-progress' }),
     issue({ key: 'PROJ-1001', assignee: 'Alex Martin', status: 'To do' }),
   ];
 
   it('lists the assignees present, and only them', () => {
     // Read off the issues rather than from a user directory: the question is who is on this sprint.
     // The unassigned issue contributes no name, its option being a state and not a person.
-    expect(assigneesOf(sprint)).toEqual(['Alex Martin', 'Julio Paniagua']);
+    expect(assigneesOf(sprint)).toEqual(['Alex Martin', 'Sam Rivera']);
   });
 
   it('filters on a person, on nobody, and on everybody', () => {

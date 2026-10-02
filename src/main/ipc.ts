@@ -41,6 +41,7 @@ import {
   type ShellProfile,
   type TerminalGroup,
   type TerminalId,
+  type WorktreeCommand,
   type ThemeMode,
   type ThemeState,
 } from '@shared/contracts.js';
@@ -71,7 +72,6 @@ import { readAllWorktrees } from './git/git-worktrees.js';
 import {
   buildWorktreeCommand,
   parseWorktreeCommand,
-  WORKTREE_HELPER,
 } from './git/worktree-command.js';
 import {
   configFromPath,
@@ -126,6 +126,14 @@ import type { VaultFiles } from './vault/vault-files.js';
 import type { VaultStore } from './vault/vault-store.js';
 import type { ExtensionsService } from './extensions/extensions-service.js';
 import type { LocalTicketStore } from './tickets/local-ticket-store.js';
+import { existingFolder, runFolder } from './projects/run-folder.js';
+import {
+  createWorktree,
+  pullWorktree,
+  removeWorktree,
+  renameWorktree,
+  worktreesRootFor,
+} from './git/native-worktree.js';
 import {
   LOCAL_KEY_PREFIX,
   readDraft,
@@ -158,6 +166,8 @@ export interface IpcDependencies {
   readonly pushVault: () => VaultState;
   readonly extensions: () => ExtensionsService;
   readonly localTickets: () => LocalTicketStore;
+  /** The triage file, named in the built-in handoff prompt so a session can read the notes. */
+  readonly triageFile: string;
   readonly pullReview: () => PullReviewService;
   readonly autoRuns: () => AutoRunRecords;
   /** Starts a feedback pass by hand, through the same gate the watcher uses. */
@@ -280,16 +290,30 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return { terminalId: null, result: { ok: false, message: 'Unknown pull request' } };
       }
 
+      const helper = deps.settings.get().worktreeHelper.trim();
+      const repoFolder = basename(project.path);
+      if (helper.length === 0) {
+        // The app's own checkout, then the server, the same two steps without a terminal tab.
+        const pulled = await pullWorktree(
+          project.path,
+          worktreesRootFor(deps.settings.get().worktreesRoot, project.path),
+          pullNumber,
+        );
+        if (pulled.ok) {
+          void startWorkspaceServer(deps, project, `pr-${pullNumber}-${repoFolder}`, pullNumber);
+        }
+        return { terminalId: null, result: { ok: pulled.ok, message: pulled.message } };
+      }
+
       const profile = resolveBashProfile(deps.profiles(), deps.settings.get().defaultShellProfileId);
       if (profile === undefined) {
         return {
           terminalId: null,
-          result: { ok: false, message: `No bash profile: "${WORKTREE_HELPER}" cannot be launched` },
+          result: { ok: false, message: `No bash profile: "${helper}" cannot be launched` },
         };
       }
 
-      const repoFolder = basename(project.path);
-      const built = buildWorktreeCommand({ kind: 'pull', number: pullNumber }, repoFolder);
+      const built = buildWorktreeCommand({ kind: 'pull', number: pullNumber }, repoFolder, helper);
       if (built.command === undefined) {
         return { terminalId: null, result: { ok: false, message: built.error } };
       }
@@ -299,7 +323,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       const terminalId = deps.terminals.runProjectCommand({
         project,
         actionId: WORKTREE_ACTION_ID,
-        title: `${project.label} · ${WORKTREE_HELPER} pr ${pullNumber}`,
+        title: `${project.label} · ${helper} pr ${pullNumber}`,
         file: resolved.file,
         args: resolved.args,
         size: deps.terminalSize(),
@@ -393,7 +417,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
 
       const run = await runAgent({
         profile,
-        cwd: deps.settings.get().projectsRoot,
+        cwd: runFolder(deps.settings.get().projectsRoot),
         prompt: 'Reply with the single word READY and nothing else.',
         timeoutMs: AGENT_TEST_TIMEOUT_MS,
         label: profile.label,
@@ -555,6 +579,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return { terminalId: null, result: { ok: false, message: 'Invalid worktree command' } };
       }
 
+      const helper = deps.settings.get().worktreeHelper.trim();
+      if (helper.length === 0) {
+        return { terminalId: null, result: await runNativeWorktree(deps, project, command) };
+      }
+
       const profile = resolveBashProfile(
         deps.profiles(),
         deps.settings.get().defaultShellProfileId,
@@ -564,12 +593,12 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           terminalId: null,
           result: {
             ok: false,
-            message: `No bash profile: "${WORKTREE_HELPER}" cannot be launched`,
+            message: `No bash profile: "${helper}" cannot be launched`,
           },
         };
       }
 
-      const built = buildWorktreeCommand(command, basename(project.path));
+      const built = buildWorktreeCommand(command, basename(project.path), helper);
       if (built.command === undefined) {
         return { terminalId: null, result: { ok: false, message: built.error } };
       }
@@ -578,7 +607,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       const terminalId = deps.terminals.runProjectCommand({
         project,
         actionId: WORKTREE_ACTION_ID,
-        title: `${project.label} · ${WORKTREE_HELPER}`,
+        title: `${project.label} · ${helper}`,
         file: resolved.file,
         args: resolved.args,
         size: deps.terminalSize(),
@@ -1021,6 +1050,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         settings.agentWorkModel,
         settings.agentProfile,
         mode,
+        {
+          skill: mode === 'auto' ? settings.handoffAuto : settings.handoffAsk,
+          notes: deps.triageFile,
+        },
       );
       const resolved = resolveShellCommand(profile, command);
 
@@ -1259,7 +1292,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       args: resolved.args,
       // The workspace root, never a repository: memory and instructions are indexed by working
       // directory, so a session started in a repository begins with neither.
-      cwd: resolveWorkspaceRoot(settings.workspaceRoot, settings.projectsRoot),
+      cwd: resolveWorkspaceRoot(settings.workspaceRoot, runFolder(settings.projectsRoot)),
       size: deps.terminalSize(),
       profileId: shell.id,
       agent: {
@@ -1567,7 +1600,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       title: routineName === null ? 'New routine' : `Routine: ${routineName}`,
       file: resolved.file,
       args: resolved.args,
-      cwd: resolveWorkspaceRoot(settings.workspaceRoot, settings.projectsRoot),
+      cwd: resolveWorkspaceRoot(settings.workspaceRoot, runFolder(settings.projectsRoot)),
       size: deps.terminalSize(),
       profileId: shell.id,
       agent: {
@@ -1961,7 +1994,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     async (_event, root: unknown): Promise<ProjectCandidate[]> => {
       const settings = deps.settings.get();
       const target = typeof root === 'string' && root.length > 0 ? root : settings.projectsRoot;
-      return detectCandidates(target, settings.projects);
+      // No folder set is no candidate rather than a scan of the app's own working directory.
+      return existingFolder(target).length === 0 ? [] : detectCandidates(target, settings.projects);
     },
   );
 
@@ -2143,6 +2177,38 @@ function asDiffTarget(value: unknown): GitDiffTarget | null {
  * Everything it has to say arrives on `GitNotice`, the channel built for an outcome that lands after
  * the invoke that started it has already answered.
  */
+/**
+ * One worktree gesture done by the app itself, for a machine without the helper.
+ *
+ * The worktree a rename or a removal acts on is found by its folder name in what git lists for the
+ * configured project, never taken from the payload as a path.
+ */
+async function runNativeWorktree(
+  deps: IpcDependencies,
+  project: Project,
+  command: WorktreeCommand,
+): Promise<GitResult> {
+  const root = worktreesRootFor(deps.settings.get().worktreesRoot, project.path);
+  if (command.kind === 'create') {
+    return createWorktree(project.path, root, command.label, command.description);
+  }
+  if (command.kind === 'pull') {
+    return pullWorktree(project.path, root, command.number);
+  }
+  const entries = await readRepoWorktrees(project);
+  const worktree = entries.worktrees.find((entry) => entry.name === command.label);
+  if (worktree === undefined) {
+    return { ok: false, message: `No worktree named ${command.label} in ${project.label}` };
+  }
+  if (command.kind === 'rename') {
+    return renameWorktree(project.path, worktree, root, command.newLabel);
+  }
+  return removeWorktree(project.path, worktree, {
+    discardChanges: command.discardChanges,
+    deleteBranch: command.deleteBranch,
+  });
+}
+
 async function startWorkspaceServer(
   deps: IpcDependencies,
   project: Project,

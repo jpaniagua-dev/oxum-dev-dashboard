@@ -48,10 +48,10 @@ const comment = (id: number, authorLogin: string): ReviewComment =>
   parseReviewComments([raw({ id, user: { login: authorLogin } })])[0]!;
 
 const record = (over: Partial<AutoRunRecord> = {}): AutoRunRecord => ({
-  ticketKey: 'TEC-1801',
+  ticketKey: 'PROJ-1801',
   projectId: 'neos',
   slug: 'Ethos-Services-SA/neos-shared-front',
-  branch: 'TEC-1801-add-a-column',
+  branch: 'PROJ-1801-add-a-column',
   port: 1801,
   prNumber: 42,
   prMatchedAt: '2026-09-21T09:00:00.000Z',
@@ -82,9 +82,9 @@ const gate = (over: Partial<FeedbackGateInput> = {}): FeedbackGateInput => ({
 const pull = (over: Partial<PullRequest> = {}): PullRequest =>
   ({
     number: 42,
-    title: 'TEC-1801: Add a column',
+    title: 'PROJ-1801: Add a column',
     url: 'https://github.com/x/y/pull/42',
-    branch: 'TEC-1801-add-a-column',
+    branch: 'PROJ-1801-add-a-column',
     authorLogin: 'julphi127',
     isDraft: false,
     review: 'none',
@@ -172,7 +172,7 @@ describe('newFeedback', () => {
   });
 
   it('never counts a comment we wrote ourselves, whatever its id', () => {
-    // The test this whole design turns on. The gh token is Julio's, so every reply the pass posts
+    // The test this whole design turns on. The gh token is the owner's, so every reply the pass posts
     // comes back authored by the viewer; without this the pass relaunches on its own output.
     expect(newFeedback([comment(9999, 'julphi127')], 0, 'julphi127')).toEqual([]);
     expect(newFeedback([comment(9999, 'JULPHI127')], 0, 'julphi127')).toEqual([]);
@@ -205,16 +205,16 @@ describe('matchRunPull', () => {
   it('matches on the ticket key whatever the skill called the rest of the branch', () => {
     // The app never learns the branch, the skill invents the kebab half, so the key is the only part
     // of the name this side knows.
-    const other = pull({ branch: 'TEC-1801-something-else-entirely' });
+    const other = pull({ branch: 'PROJ-1801-something-else-entirely' });
 
     expect(matchRunPull(record({ branch: '' }), [other], 'julphi127')?.number).toBe(42);
   });
 
   it('does not let one ticket match another whose number starts the same way', () => {
-    // The trailing dash is what makes the prefix safe: TEC-12- is not a prefix of TEC-123-.
-    const neighbour = pull({ branch: 'TEC-18010-other-ticket' });
+    // The trailing dash is what makes the prefix safe: PROJ-12- is not a prefix of PROJ-123-.
+    const neighbour = pull({ branch: 'PROJ-18010-other-ticket' });
 
-    expect(matchRunPull(record({ ticketKey: 'TEC-1801' }), [neighbour], 'julphi127')).toBeNull();
+    expect(matchRunPull(record({ ticketKey: 'PROJ-1801' }), [neighbour], 'julphi127')).toBeNull();
   });
 
   it('yields null rather than a guess when nothing matches', () => {
@@ -375,16 +375,16 @@ describe('feedbackActionId', () => {
     // runProjectCommand hands back a running tab of the same id instead of spawning.
     expect(feedbackActionId('a/b', 42)).toBe(feedbackActionId('a/b', 42));
     expect(feedbackActionId('a/b', 42)).not.toBe(feedbackActionId('a/b', 43));
-    expect(feedbackActionId('a/b', 42)).not.toBe(workActionId(['TEC-1801']));
+    expect(feedbackActionId('a/b', 42)).not.toBe(workActionId(['PROJ-1801']));
   });
 });
 
 describe('readRecord', () => {
   const stored = (over: Record<string, unknown> = {}): unknown => ({
-    ticketKey: 'TEC-1801',
+    ticketKey: 'PROJ-1801',
     projectId: 'neos',
     slug: 'a/b',
-    branch: 'TEC-1801-x',
+    branch: 'PROJ-1801-x',
     feedbackPhase: 'watching',
     lastSeenCommentId: 7,
     ...over,
@@ -475,7 +475,7 @@ describe('FeedbackWatcher', () => {
         return 't1' as never;
       },
       readState: async () => 'MERGED',
-      closeTicket: async () => ({ ok: true, message: 'TEC-1801 moved to Done' }),
+      closeTicket: async () => ({ ok: true, message: 'PROJ-1801 moved to Done' }),
       stopServer: () => true,
       notify: () => {},
       now: () => NOW,
@@ -490,7 +490,7 @@ describe('FeedbackWatcher', () => {
 
     expect(port.spawned).toHaveLength(1);
     expect(port.spawned[0]).toContain('/pr-feedback 42');
-    expect(store.get('TEC-1801')?.feedbackPhase).toBe('passing');
+    expect(store.get('PROJ-1801')?.feedbackPhase).toBe('passing');
   });
 
   it('writes the record BEFORE it spawns, so a crash cannot leave two agents on one worktree', async () => {
@@ -514,7 +514,7 @@ describe('FeedbackWatcher', () => {
     await new FeedbackWatcher(store, settings, () => [project], port).tick(repos([pull()]));
 
     expect(port.spawned).toEqual([]);
-    expect(store.get('TEC-1801')?.pendingCount).toBe(1);
+    expect(store.get('PROJ-1801')?.pendingCount).toBe(1);
   });
 
   it('launches nothing while the feature is off', async () => {
@@ -547,9 +547,9 @@ describe('FeedbackWatcher', () => {
     const store = records([record({ prNumber: null, prMatchedAt: null })]);
     await new FeedbackWatcher(store, settings, () => [project], ports()).tick(repos([pull()]));
 
-    expect(store.get('TEC-1801')?.prNumber).toBe(42);
-    expect(store.get('TEC-1801')?.branch).toBe('TEC-1801-add-a-column');
-    expect(store.get('TEC-1801')?.prMatchedAt).toBe(NOW.toISOString());
+    expect(store.get('PROJ-1801')?.prNumber).toBe(42);
+    expect(store.get('PROJ-1801')?.branch).toBe('PROJ-1801-add-a-column');
+    expect(store.get('PROJ-1801')?.prMatchedAt).toBe(NOW.toISOString());
   });
 
   it('stops writing once it has said what it had to say', async () => {
@@ -575,7 +575,7 @@ describe('FeedbackWatcher', () => {
     await new FeedbackWatcher(store, settings, () => [project], port).tick(repos([pull()]));
 
     expect(port.spawned).toEqual([]);
-    expect(store.get('TEC-1801')?.lastRefusal).toBeNull();
+    expect(store.get('PROJ-1801')?.lastRefusal).toBeNull();
   });
 
   it('does nothing for a pull request that has left the open list', async () => {
@@ -584,13 +584,13 @@ describe('FeedbackWatcher', () => {
     await new FeedbackWatcher(store, settings, () => [project], port).tick(repos([]));
 
     expect(port.spawned).toEqual([]);
-    expect(store.get('TEC-1801')?.feedbackPhase).toBe('watching');
+    expect(store.get('PROJ-1801')?.feedbackPhase).toBe('watching');
   });
 });
 
 describe('findRun', () => {
   it('matches the record filed under this repository and number', () => {
-    expect(findRun([record()], 'Ethos-Services-SA/neos-shared-front', 42)?.ticketKey).toBe('TEC-1801');
+    expect(findRun([record()], 'Ethos-Services-SA/neos-shared-front', 42)?.ticketKey).toBe('PROJ-1801');
   });
 
   it('finds nothing for a pull request nobody ran unattended', () => {
@@ -766,13 +766,13 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     const port = ports();
     await new FeedbackWatcher(store, settings, () => [project], port).tick(empty());
 
-    expect(port.closed).toEqual(['TEC-1801']);
+    expect(port.closed).toEqual(['PROJ-1801']);
     expect(port.stopped).toEqual(['neos']);
-    expect(store.get('TEC-1801')?.mergedAt).toBe(NOW.toISOString());
-    expect(store.get('TEC-1801')?.notice).toContain('Merged');
+    expect(store.get('PROJ-1801')?.mergedAt).toBe(NOW.toISOString());
+    expect(store.get('PROJ-1801')?.notice).toContain('Merged');
     // The one moment where there is nothing left to do and nobody has been told: the pull request
     // left the list minutes ago and the tab may not have been open since.
-    expect(port.said).toEqual(['TEC-1801 is merged']);
+    expect(port.said).toEqual(['PROJ-1801 is merged']);
   });
 
   it('says nothing when it decided nothing', async () => {
@@ -790,7 +790,7 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     await watcher.tick(empty());
     await watcher.tick(empty());
 
-    expect(port.said).toEqual(['TEC-1801 is merged']);
+    expect(port.said).toEqual(['PROJ-1801 is merged']);
   });
 
   it('leaves the board alone when the pull request was closed rather than merged', async () => {
@@ -799,8 +799,8 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     await new FeedbackWatcher(store, settings, () => [project], port).tick(empty());
 
     expect(port.closed).toEqual([]);
-    expect(store.get('TEC-1801')?.mergedAt).toBe(NOW.toISOString());
-    expect(store.get('TEC-1801')?.notice).toContain('closed');
+    expect(store.get('PROJ-1801')?.mergedAt).toBe(NOW.toISOString());
+    expect(store.get('PROJ-1801')?.notice).toContain('closed');
   });
 
   it('does nothing at all when GitHub could not be asked', async () => {
@@ -810,7 +810,7 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     await new FeedbackWatcher(store, settings, () => [project], port).tick(empty());
 
     expect(port.closed).toEqual([]);
-    expect(store.get('TEC-1801')?.mergedAt).toBeNull();
+    expect(store.get('PROJ-1801')?.mergedAt).toBeNull();
     expect(store.writes).toBe(0);
   });
 
@@ -820,7 +820,7 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     await new FeedbackWatcher(store, settings, () => [project], port).tick(empty('gh exploded'));
 
     expect(port.closed).toEqual([]);
-    expect(store.get('TEC-1801')?.mergedAt).toBeNull();
+    expect(store.get('PROJ-1801')?.mergedAt).toBeNull();
   });
 
   it('closes a ticket once and never again', async () => {
@@ -832,7 +832,7 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     await watcher.tick(empty());
     await watcher.tick(empty());
 
-    expect(port.closed).toEqual(['TEC-1801']);
+    expect(port.closed).toEqual(['PROJ-1801']);
   });
 
   it('says the worktree is still there, rather than removing it', async () => {
@@ -841,6 +841,6 @@ describe('FeedbackWatcher: closing a merged ticket', () => {
     const store = records([record()]);
     await new FeedbackWatcher(store, settings, () => [project], ports()).tick(empty());
 
-    expect(store.get('TEC-1801')?.notice).toContain('worktree TEC-1801-add-a-column left to remove');
+    expect(store.get('PROJ-1801')?.notice).toContain('worktree PROJ-1801-add-a-column left to remove');
   });
 });

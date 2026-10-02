@@ -3012,6 +3012,41 @@ by word, and the word `backend` existing in both.
   whose minimum width is the sum of its fixed columns. The truncation moved from `.worktree__project`
   onto `.worktree__project-label`, the cell now being the row rather than the text.
 
+## Running on a machine that is not the author's
+
+Added on 2026-10-02, to hand the app to colleagues. Every rule here exists because the app worked
+on exactly one machine: the defaults, two helpers and three skills were the author's own.
+
+- **No default names a folder.** `projectsRoot` and `workspaceRoot` default to empty, editable in
+  the settings (Repositories folder, Agent workspace folder). They were `~/oxum/projects` and
+  `~/oxum`, a layout no other machine has: Detect scanned a missing folder and every headless run
+  was spawned in it. A stored value is kept, so an install that had the old defaults explicitly
+  moves nothing. Detect scans the folder in the field, saved or not, and asks for one when empty.
+- **A headless run starts in a folder that exists** (`runFolder`: the configured one, else the
+  home folder), and `runAgent` checks its working directory first. Node reports a missing cwd as
+  ENOENT, the code a missing binary gets, so a fresh install used to blame Claude Code for a path.
+- **`runAgent` runs a `.cmd` shim** through `cmd.exe`, with `main/spawn/command-resolve.ts`, the
+  resolver the Extensions tab already used (`where.exe`, an `.exe` wins, the line quoted by
+  `cmdLine`). An npm-installed Claude Code is a `claude.cmd`, which `spawn` refuses without a shell.
+- **Worktrees are the app's own by default** (`git/native-worktree.ts`). The author's `wt` shell
+  function did it, and on Windows 11 `wt` without it is Windows Terminal, so a colleague's click
+  opened a terminal window instead of failing. Its rules are ported, not reinvented: a branch from
+  `origin/HEAD`, `<KEY>-<repo>` or `wip-<slug>-<repo>` folders with `<KEY>-<slug>` or `wip/<slug>`
+  branches, a `node_modules` junction to the main checkout, the junction taken out **before**
+  `git worktree remove`, a fork's pull request fetched from `refs/pull/<n>/head` and checked out
+  detached, a locked folder told apart from a dirty one. `worktreesRoot` (empty = a `worktrees`
+  folder beside the repository) says where; `worktreeHelper` set to a name keeps a helper doing it
+  in a terminal tab, as before. Pinned by a test on a real repository with a real origin.
+- **Handoffs have a built-in prompt, and a skill as an override.** `handoffAsk`, `handoffAuto` and
+  `handoffFeedback` name a slash command (`/ticket`); empty is the app's own sentence, which says
+  what to do and where `triage.json` is, so the session reads the notes from it. It holds only
+  this app's text, because it lands in a double-quoted shell argument. `migrateHandoffs` fills a
+  key that was never stored with the skill of the old name when one is installed, once, so an
+  install that used `/ticket` keeps it; an empty key that was saved stays empty.
+- **Git Bash is also found in a per-user install** (`%LOCALAPPDATA%\Programs\Git`).
+- **`appId` and `APP_USER_MODEL_ID` keep the author's identity on purpose.** Changing them would
+  install a second app beside the first and orphan the Start Menu shortcut toasts depend on.
+
 ## Performance: a spawn is cheap nine times out of ten and catastrophic the tenth
 
 Measured on 2026-09-02 after visible micro-freezes while typing, and **re-measured on 2026-09-09

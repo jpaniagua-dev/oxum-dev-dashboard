@@ -92,14 +92,14 @@ describe('parseBranchLines', () => {
 describe('parseLogLines', () => {
   it('reads the fields of a commit', () => {
     const [commit] = parseLogLines(
-      ['abc1234', 'Julio', '2026-08-07T10:00:00+02:00', 'HEAD -> main', 'feat: add the Git tab'].join(
+      ['abc1234', 'Sam', '2026-08-07T10:00:00+02:00', 'HEAD -> main', 'feat: add the Git tab'].join(
         SEP,
       ),
     );
 
     expect(commit).toEqual({
       sha: 'abc1234',
-      author: 'Julio',
+      author: 'Sam',
       date: '2026-08-07T10:00:00+02:00',
       refs: 'HEAD -> main',
       subject: 'feat: add the Git tab',
@@ -109,7 +109,7 @@ describe('parseLogLines', () => {
   it('keeps a subject containing the separator whole', () => {
     // Why the subject is the last field and is rejoined rather than taken as `rest[0]`.
     const [commit] = parseLogLines(
-      ['abc1234', 'Julio', '', '', `fix: remove one${SEP}character`].join(SEP),
+      ['abc1234', 'Sam', '', '', `fix: remove one${SEP}character`].join(SEP),
     );
 
     expect(commit?.subject).toBe(`fix: remove one${SEP}character`);

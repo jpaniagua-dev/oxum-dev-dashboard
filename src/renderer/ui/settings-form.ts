@@ -201,6 +201,10 @@ export class SettingsForm {
   private commands = { claude: 'claude', codex: 'codex' };
   /** The local tickets folder. Empty means the app's own. */
   private ticketsDir = '';
+  /** The folder Detect scans, and the one an agent session starts in. Empty means not set. */
+  private roots = { projects: '', workspace: '' };
+  private worktrees = { helper: '', root: '' };
+  private handoffs = { ask: '', auto: '', feedback: '' };
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
   private feedbackPass = false;
@@ -266,6 +270,13 @@ export class SettingsForm {
     this.agent = { ...settings.agentProfile };
     this.commands = { claude: settings.claudeCommand, codex: settings.codexCommand };
     this.ticketsDir = settings.localTicketsDir;
+    this.roots = { projects: settings.projectsRoot, workspace: settings.workspaceRoot };
+    this.worktrees = { helper: settings.worktreeHelper, root: settings.worktreesRoot };
+    this.handoffs = {
+      ask: settings.handoffAsk,
+      auto: settings.handoffAuto,
+      feedback: settings.handoffFeedback,
+    };
     this.agentStatus = '';
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
@@ -727,6 +738,41 @@ export class SettingsForm {
       'Run by the Extensions tab to change MCP servers. A full path to codex.cmd when Codex is not on PATH.';
     cli.append(claudeCli, codexCli);
     this.hosts.claude.append(cli);
+
+    const workspace = this.field(
+      'Agent workspace folder',
+      this.roots.workspace,
+      (value) => {
+        this.roots = { ...this.roots, workspace: value };
+        this.touch();
+      },
+      'the repository itself',
+      true,
+    );
+    workspace.title =
+      'Where Work on this and the agent button start a session, so it reads the instructions shared by several repositories. Empty starts in the repository.';
+    this.hosts.claude.append(workspace);
+
+    const handoffGrid = createElement('div', { className: 'settings-entry__grid' });
+    for (const [key, label, hint] of [
+      ['ask', 'Work on this skill', 'The skill a ticket is handed to, such as /ticket. Empty uses the app prompt.'],
+      ['auto', 'Unattended run skill', 'The skill of a run that goes to a pull request on its own. Empty uses the app prompt.'],
+      ['feedback', 'Feedback pass skill', 'The skill that treats review comments. Empty uses the app prompt.'],
+    ] as const) {
+      const field = this.field(
+        label,
+        this.handoffs[key],
+        (value) => {
+          this.handoffs = { ...this.handoffs, [key]: value };
+          this.touch();
+        },
+        'the app prompt',
+        true,
+      );
+      field.title = hint;
+      handoffGrid.append(field);
+    }
+    this.hosts.claude.append(handoffGrid);
   }
 
   /**
@@ -1006,6 +1052,67 @@ export class SettingsForm {
 
   private renderProjects(): void {
     clearChildren(this.hosts.projects);
+
+    /*
+     * The folder Detect scans, first in the section because it is what makes Detect useful.
+     *
+     * It had no field at all, and its default was the author's own layout, so on any other machine
+     * Detect scanned a folder that did not exist and found nothing, with the empty table pointing
+     * here for a setting that was not here.
+     */
+    const rootRow = createElement('div', { className: 'settings-inline' });
+    const rootField = this.field(
+      'Repositories folder',
+      this.roots.projects,
+      (value) => {
+        this.roots = { ...this.roots, projects: value };
+        this.touch();
+      },
+      'the folder holding your clones',
+      true,
+    );
+    rootField.title = 'Detect repositories looks for git repositories directly inside this folder.';
+    const pickRoot = createElement('button', { className: 'button', text: '…' });
+    pickRoot.type = 'button';
+    pickRoot.title = 'Choose the folder';
+    pickRoot.addEventListener('click', () => {
+      void window.api.pickFolder('Repositories folder').then((picked) => {
+        if (picked !== null) {
+          this.roots = { ...this.roots, projects: picked };
+          this.touch();
+          this.renderProjects();
+        }
+      });
+    });
+    rootRow.append(rootField, pickRoot);
+    this.hosts.projects.append(rootRow);
+
+    const worktreeGrid = createElement('div', { className: 'settings-entry__grid' });
+    const worktreeRoot = this.field(
+      'Worktrees folder',
+      this.worktrees.root,
+      (value) => {
+        this.worktrees = { ...this.worktrees, root: value };
+        this.touch();
+      },
+      'a worktrees folder beside each repository',
+      true,
+    );
+    worktreeRoot.title = 'Where the Worktrees tab creates the worktrees it makes itself.';
+    const worktreeHelper = this.field(
+      'Worktree helper',
+      this.worktrees.helper,
+      (value) => {
+        this.worktrees = { ...this.worktrees, helper: value };
+        this.touch();
+      },
+      'none, the app does it',
+      true,
+    );
+    worktreeHelper.title =
+      'A shell function that creates and removes worktrees in a terminal tab instead of the app. Leave empty unless you have one.';
+    worktreeGrid.append(worktreeRoot, worktreeHelper);
+    this.hosts.projects.append(worktreeGrid);
 
     if (this.projects.length === 0) {
       this.hosts.projects.append(
@@ -1535,7 +1642,7 @@ export class SettingsForm {
       box.append(
         createElement('p', {
           className: 'settings__empty',
-          text: 'No candidate repository found.',
+          text: `No git repository found directly inside ${this.roots.projects || 'that folder'}.`,
         }),
       );
       return box;
@@ -1733,8 +1840,17 @@ export class SettingsForm {
     this.render();
   }
 
+  /** Scans the folder in the field, saved or not: what is on screen is what Detect means. */
   private async detect(): Promise<void> {
-    this.candidates = await window.api.detectProjects();
+    if (this.roots.projects.trim().length === 0) {
+      const picked = await window.api.pickFolder('Repositories folder');
+      if (picked === null) {
+        return;
+      }
+      this.roots = { ...this.roots, projects: picked };
+      this.touch();
+    }
+    this.candidates = await window.api.detectProjects(this.roots.projects.trim());
     this.showCandidates = true;
     this.render();
   }
@@ -1763,6 +1879,13 @@ export class SettingsForm {
       claudeCommand: this.commands.claude,
       codexCommand: this.commands.codex,
       localTicketsDir: this.ticketsDir,
+      projectsRoot: this.roots.projects,
+      workspaceRoot: this.roots.workspace,
+      worktreeHelper: this.worktrees.helper,
+      worktreesRoot: this.worktrees.root,
+      handoffAsk: this.handoffs.ask,
+      handoffAuto: this.handoffs.auto,
+      handoffFeedback: this.handoffs.feedback,
       tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
@@ -1786,6 +1909,9 @@ export class SettingsForm {
     this.agent = { ...saved.agentProfile };
     this.commands = { claude: saved.claudeCommand, codex: saved.codexCommand };
     this.ticketsDir = saved.localTicketsDir;
+    this.roots = { projects: saved.projectsRoot, workspace: saved.workspaceRoot };
+    this.worktrees = { helper: saved.worktreeHelper, root: saved.worktreesRoot };
+    this.handoffs = { ask: saved.handoffAsk, auto: saved.handoffAuto, feedback: saved.handoffFeedback };
     // Read back like the sizes and the models, and here it matters more than for either: the store
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would
     // otherwise stay short of what was stored and the signature would never match the echo.

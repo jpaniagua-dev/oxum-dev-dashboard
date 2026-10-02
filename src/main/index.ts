@@ -800,6 +800,7 @@ async function bootstrap(): Promise<void> {
     pushVault,
     extensions: () => extensionsService,
     localTickets: () => localTickets,
+    triageFile: AppPaths.triage(),
     automations: automationState,
     clearAutomationLog: () => {
       /*
@@ -873,6 +874,7 @@ async function bootstrap(): Promise<void> {
         basename(project.path),
         settings.agentWorkModel,
         settings.agentProfile,
+        settings.handoffFeedback,
       );
       if (command.length === 0) {
         return { terminalId: null, result: { ok: false, message: 'That pull request number is not one' } };

@@ -1,5 +1,3 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import type { ProjectAction, ProjectId } from '@shared/contracts.js';
 
 /**
@@ -12,8 +10,14 @@ import type { ProjectAction, ProjectId } from '@shared/contracts.js';
  * no error anywhere. Keeping these constants free of imports removes the ordering question entirely.
  */
 
-/** Default place to look for repositories. */
-export const DEFAULT_PROJECTS_ROOT = join(homedir(), 'oxum', 'projects');
+/**
+ * Default place to look for repositories: none.
+ *
+ * It was `~/oxum/projects`, the author's own layout, which exists on no other machine: detection
+ * scanned a missing folder and every headless run was spawned in it. Empty now, and set in the
+ * settings; a stored value is kept, so an install that had the old default explicitly keeps it.
+ */
+export const DEFAULT_PROJECTS_ROOT = '';
 
 /**
  * Default folder a `Work on this` session starts in: the workspace holding the repositories.
@@ -24,7 +28,7 @@ export const DEFAULT_PROJECTS_ROOT = join(homedir(), 'oxum', 'projects');
  * whose ancestors nobody chose. A default is allowed to assume the layout it ships with; a computation
  * would silently claim to work for every other one.
  */
-export const DEFAULT_CLAUDE_CONTEXT_ROOT = join(homedir(), 'oxum');
+export const DEFAULT_CLAUDE_CONTEXT_ROOT = '';
 
 /** Stable id derived from a folder name, kept distinct from the editable label. */
 export function makeId(folder: string): ProjectId {

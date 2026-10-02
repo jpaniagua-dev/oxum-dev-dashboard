@@ -1667,7 +1667,7 @@ export interface AutoRunRecord {
  */
 export interface Worktree {
   /**
-   * Folder name, which the naming convention makes the useful label (`TEC-1482-<repo>`).
+   * Folder name, which the naming convention makes the useful label (`PROJ-1482-<repo>`).
    *
    * Derived from the path rather than stored by git, so it is exactly what a `cd` would show.
    */
@@ -1946,6 +1946,24 @@ export interface AppSettings {
    */
   claudeCommand: string;
   codexCommand: string;
+  /**
+   * The shell helper that manages worktrees, run in a terminal tab, or empty for the app's own.
+   *
+   * Empty by default: the app creates, checks out, renames and removes worktrees itself with git
+   * (`native-worktree.ts`). A name (`wt`) keeps a personal helper doing it instead.
+   */
+  worktreeHelper: string;
+  /** Where the app's own worktrees go. Empty means a `worktrees` folder beside the repository. */
+  worktreesRoot: string;
+  /**
+   * The skills a handoff names instead of the app's own prompt: `/ticket` and the like.
+   *
+   * Empty means the built-in prompt, which needs nothing installed. An install that has skills by
+   * those names gets them filled in once, on the first launch that knows these keys.
+   */
+  handoffAsk: string;
+  handoffAuto: string;
+  handoffFeedback: string;
   /**
    * Master switch for writing to GitHub, off by default.
    *

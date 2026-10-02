@@ -1248,7 +1248,7 @@ class App {
        */
       {
         label: 'Create a branch...',
-        hint: `Runs the "dev ${issue.key}" alias in a terminal tab, on the chosen project`,
+        hint: `${branchNameFor(issue.key, issue.summary)}, in the chosen project`,
         run: () => this.openBranchProjectMenu(issue, x, y),
       },
       ...transitions.map((transition) => ({

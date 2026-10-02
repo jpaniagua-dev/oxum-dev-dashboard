@@ -244,6 +244,7 @@ export class FeedbackWatcher {
       basename(project.path),
       settings.agentWorkModel,
       settings.agentProfile,
+      settings.handoffFeedback,
     );
     if (command.length === 0) {
       return;

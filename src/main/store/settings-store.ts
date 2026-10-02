@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { normalizeModel } from '@shared/agent-model.js';
 import { isStripTab } from '@shared/contracts.js';
 import {
@@ -93,6 +95,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentProfile: CLAUDE_CODE_PROFILE,
   claudeCommand: 'claude',
   codexCommand: 'codex',
+  worktreeHelper: '',
+  worktreesRoot: '',
+  handoffAsk: '',
+  handoffAuto: '',
+  handoffFeedback: '',
   // Empty means "whatever Claude Code itself is set to", for all three. A default named here would be
   // this app deciding which model a user's own CLI runs on, which is not its call to make.
   // Closed on a fresh install: a window nobody asked for, opening on first launch, is the wrong
@@ -124,7 +131,11 @@ export const DEFAULT_BOUNDS: WindowBounds = { x: -1, y: -1, width: 1180, height:
 export class SettingsStore {
   private cache: AppSettings = { ...DEFAULT_SETTINGS };
 
-  constructor(private readonly filePath: string) {}
+  constructor(
+    private readonly filePath: string,
+    private readonly hasSkill: (name: string) => boolean = (name) =>
+      fileExists(join(homedir(), '.claude', 'skills', name, 'SKILL.md')),
+  ) {}
 
   async load(): Promise<AppSettings> {
     if (!fileExists(this.filePath)) {
@@ -132,7 +143,7 @@ export class SettingsStore {
     }
     try {
       const raw: unknown = JSON.parse(await readFile(this.filePath, 'utf8'));
-      this.cache = sanitizeSettings(raw);
+      this.cache = migrateHandoffs(raw, sanitizeSettings(raw), this.hasSkill);
     } catch (error) {
       console.error('[settings] unreadable file, using defaults', error);
     }
@@ -148,6 +159,36 @@ export class SettingsStore {
     await atomicWriteFile(this.filePath, `${JSON.stringify(this.cache, null, 2)}\n`);
     return this.cache;
   }
+}
+
+/** The skills the handoffs named before they became settings, and the setting each one fills. */
+const HANDOFF_SKILLS: readonly { key: 'handoffAsk' | 'handoffAuto' | 'handoffFeedback'; skill: string }[] = [
+  { key: 'handoffAsk', skill: 'ticket' },
+  { key: 'handoffAuto', skill: 'ticket-auto' },
+  { key: 'handoffFeedback', skill: 'pr-feedback' },
+];
+
+/**
+ * Fills the handoff skills once, for an install that used them before they were settings.
+ *
+ * Every handoff named `/ticket`, `/ticket-auto` or `/pr-feedback` until these keys existed. A
+ * settings file written before them has none of the three, and an install that has the skills on
+ * disk keeps naming them; one without gets the built-in prompts. Only a missing key is filled: an
+ * empty one was chosen in the settings and stays empty.
+ */
+export function migrateHandoffs(
+  raw: unknown,
+  settings: AppSettings,
+  hasSkill: (name: string) => boolean,
+): AppSettings {
+  const stored = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  let next = settings;
+  for (const { key, skill } of HANDOFF_SKILLS) {
+    if (!(key in stored) && hasSkill(skill)) {
+      next = { ...next, [key]: `/${skill}` };
+    }
+  }
+  return next;
 }
 
 /**
@@ -262,6 +303,12 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     // Blank falls back to the bare name, which PATH resolves: an empty command is no command at all.
     claudeCommand: asCommand(input.claudeCommand, DEFAULT_SETTINGS.claudeCommand),
     codexCommand: asCommand(input.codexCommand, DEFAULT_SETTINGS.codexCommand),
+    // Empty is a real value for both: the app's own worktrees, beside the repository.
+    worktreeHelper: typeof input.worktreeHelper === 'string' ? input.worktreeHelper.trim() : '',
+    worktreesRoot: typeof input.worktreesRoot === 'string' ? input.worktreesRoot.trim() : '',
+    handoffAsk: typeof input.handoffAsk === 'string' ? input.handoffAsk.trim() : '',
+    handoffAuto: typeof input.handoffAuto === 'string' ? input.handoffAuto.trim() : '',
+    handoffFeedback: typeof input.handoffFeedback === 'string' ? input.handoffFeedback.trim() : '',
     // Anything but an explicit `true` is off. A file hand-edited to `"yes"` must not turn on
     // the one setting that lets this app write to somebody else's pull request.
     reviewWritesEnabled: input.reviewWritesEnabled === true,

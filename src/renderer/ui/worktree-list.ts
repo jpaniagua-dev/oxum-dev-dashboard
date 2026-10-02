@@ -221,8 +221,8 @@ export function worktreeMenuEntries(worktree: Worktree): WorktreeMenuEntry[] {
  * Project order is the **configured** one, so the tab reads in the same order as the projects table
  * and the pull request column: a list that sorts its own repositories would be the only place in the
  * app where they move. Inside a project, worktrees are sorted by folder name with **numeric
- * collation**, and that is not decoration: plain text ordering puts `TEC-1000-web-app` before
- * `TEC-999-web-app`, because a bare comparison reads the counter as a string. The names of this
+ * collation**, and that is not decoration: plain text ordering puts `PROJ-1000-web-app` before
+ * `PROJ-999-web-app`, because a bare comparison reads the counter as a string. The names of this
  * workspace's worktrees are ticket keys followed by a repository, so the digits are never at the end
  * and the issue-key comparison the Jira tab uses does not apply here.
  *
@@ -371,7 +371,7 @@ function buildCreateButton(
       event.clientY === 0 ? box.bottom : event.clientY,
       repos.map((repo) => ({
         label: repo.label,
-        hint: `wt new in ${repo.path}`,
+        hint: `A worktree of ${repo.path}`,
         run: () => openCreateField(bar, repo, actions),
       })),
     );
@@ -408,7 +408,7 @@ function openCreateField(
   input.type = 'text';
   // The two arguments the helper takes, spelled the way they are typed at a prompt. A ticket key needs
   // the description, a slug is its own; the placeholder says both rather than a form asking twice.
-  input.placeholder = 'TEC-1482 documents list   ·   or   toast-zone-escape';
+  input.placeholder = 'PROJ-1482 documents list   ·   or   toast-zone-escape';
   input.setAttribute('aria-label', `Label and description of the new worktree in ${repo.label}`);
   form.append(input);
   bar.append(form);
@@ -695,8 +695,8 @@ function buildMenuButton(
  * Swaps the row's name for the field that renames it.
  *
  * Empty and not pre-filled with the folder name, which is the detail that makes the gesture readable:
- * the helper takes the **new label** and appends the repository itself, so `TEC-1482` turns
- * `wip-toast-web-app` into `TEC-1482-web-app` and brings the branch along. Pre-filling the full folder
+ * the helper takes the **new label** and appends the repository itself, so `PROJ-1482` turns
+ * `wip-toast-web-app` into `PROJ-1482-web-app` and brings the branch along. Pre-filling the full folder
  * name would invite editing it by hand, and a hand-edited name is how the folder and the branch stop
  * agreeing.
  */
@@ -709,7 +709,7 @@ function openRenameField(
 
   const input = createElement('input', { className: 'worktrees__input worktree__rename' });
   input.type = 'text';
-  input.placeholder = 'TEC-1482';
+  input.placeholder = 'PROJ-1482';
   input.setAttribute('aria-label', `New label for ${row.worktree.name}`);
 
   let settled = false;

@@ -55,7 +55,7 @@ const MAX_DESCRIPTION = 80;
  * Anchors a folder name so the helper matches that worktree and no other.
  *
  * The helper takes a **pattern**, matched unanchored against the label, the repository and the branch of
- * every worktree it knows. Handing it a bare `TEC-175` would match `TEC-1750` too, and the helper would
+ * every worktree it knows. Handing it a bare `PROJ-175` would match `PROJ-1750` too, and the helper would
  * refuse on the ambiguity: safe, but it turns a click into a trip to the terminal. Anchored, the name
  * matches itself and stops.
  *
@@ -187,10 +187,14 @@ export type BuiltCommand =
  * says so rather than forcing it. Neither is implied by a bare removal, which is why they are separate
  * menu entries and not one "remove" that guesses.
  */
-export function buildWorktreeCommand(command: WorktreeCommand, repoFolder: string): BuiltCommand {
+export function buildWorktreeCommand(
+  command: WorktreeCommand,
+  repoFolder: string,
+  helper: string = WORKTREE_HELPER,
+): BuiltCommand {
   if (command.kind === 'create') {
     if (!SAFE_NAME.test(repoFolder)) {
-      return { error: `Repository folder "${repoFolder}" cannot be passed to ${WORKTREE_HELPER}` };
+      return { error: `Repository folder "${repoFolder}" cannot be passed to ${helper}` };
     }
     const label = command.label.trim();
     if (!SAFE_NAME.test(label)) {
@@ -202,7 +206,7 @@ export function buildWorktreeCommand(command: WorktreeCommand, repoFolder: strin
       // refusal on the field being typed, rather than in a tab that opens only to complain.
       return { error: `A ticket worktree needs a description: ${label} <what it is about>` };
     }
-    const parts = [WORKTREE_HELPER, 'new', repoFolder, label];
+    const parts = [helper, 'new', repoFolder, label];
     if (description.length > 0) {
       parts.push(shellQuote(description));
     }
@@ -211,18 +215,18 @@ export function buildWorktreeCommand(command: WorktreeCommand, repoFolder: strin
 
   if (command.kind === 'pull') {
     if (!SAFE_NAME.test(repoFolder)) {
-      return { error: `Repository folder "${repoFolder}" cannot be passed to ${WORKTREE_HELPER}` };
+      return { error: `Repository folder "${repoFolder}" cannot be passed to ${helper}` };
     }
     // A pull request number and nothing else. It is the only part of this line that is not a
     // whitelisted name, so it is checked as a number rather than escaped as a string.
     if (!Number.isInteger(command.number) || command.number <= 0) {
       return { error: 'A pull request number is a positive whole number' };
     }
-    return { command: `${WORKTREE_HELPER} pr ${repoFolder} ${command.number}` };
+    return { command: `${helper} pr ${repoFolder} ${command.number}` };
   }
 
   if (!SAFE_NAME.test(command.label)) {
-    return { error: `"${command.label}" is not a name this can pass to ${WORKTREE_HELPER}` };
+    return { error: `"${command.label}" is not a name this can pass to ${helper}` };
   }
   const pattern = shellQuote(anchorPattern(command.label));
 
@@ -231,12 +235,12 @@ export function buildWorktreeCommand(command: WorktreeCommand, repoFolder: strin
     if (!SAFE_NAME.test(target)) {
       return { error: 'A new label is letters, digits, dots, dashes or underscores' };
     }
-    return { command: `${WORKTREE_HELPER} mv ${pattern} ${target}` };
+    return { command: `${helper} mv ${pattern} ${target}` };
   }
 
   const flags = [
     ...(command.discardChanges ? ['-f'] : []),
     ...(command.deleteBranch ? ['-d'] : []),
   ];
-  return { command: [WORKTREE_HELPER, 'rm', pattern, ...flags].join(' ') };
+  return { command: [helper, 'rm', pattern, ...flags].join(' ') };
 }

@@ -20,6 +20,7 @@ import { selectPulls, type PullTarget } from './review-select.js';
 import { PullReviewStore } from './review-store.js';
 import type { ExistingReview, PullDetail } from '../github/gh-review-read.js';
 import type { WriteOutcome } from '../github/gh-write.js';
+import { existingFolder } from '../projects/run-folder.js';
 
 /**
  * The Pull Requests tab's review agent: read a pull request, judge it, remember the verdict.
@@ -311,7 +312,8 @@ export class PullReviewService {
      */
     const profile = this.settings().agentProfile;
     const canOpenTwo = profile.extraDirFlag.trim().length > 0;
-    const workspace = this.settings().workspaceRoot;
+    // A workspace that is not on disk is treated as none: the review then runs in the repository.
+    const workspace = existingFolder(this.settings().workspaceRoot);
     const answer = await this.ports.runAgent({
       profile,
       cwd: canOpenTwo && workspace.length > 0 ? workspace : repoPath || workspace,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asActions, sanitizeSettings } from '../src/main/store/settings-store.js';
+import { asActions, migrateHandoffs, sanitizeSettings } from '../src/main/store/settings-store.js';
 
 describe('asActions', () => {
   it('gives the one default action when a project declares none', () => {
@@ -185,7 +185,30 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings({ workspaceRoot: '  C:/workspace  ' }).workspaceRoot).toBe(
       'C:/workspace',
     );
-    // Absent is a different statement from empty, and falls back to the workspace default.
-    expect(sanitizeSettings({}).workspaceRoot.length).toBeGreaterThan(0);
+    // Absent takes the default, which is now empty too: the old one named the author's own layout,
+    // and a value that is only right on one machine is no default.
+    expect(sanitizeSettings({}).workspaceRoot).toBe('');
+    expect(sanitizeSettings({}).projectsRoot).toBe('');
+  });
+});
+
+describe('migrateHandoffs', () => {
+  const has = (names: string[]) => (name: string) => names.includes(name);
+
+  it('fills a missing handoff with the skill of that name, once', () => {
+    const settings = sanitizeSettings({});
+    const migrated = migrateHandoffs({}, settings, has(['ticket', 'pr-feedback']));
+    expect([migrated.handoffAsk, migrated.handoffAuto, migrated.handoffFeedback]).toEqual([
+      '/ticket',
+      '',
+      '/pr-feedback',
+    ]);
+  });
+
+  it('leaves a handoff that was stored, even empty', () => {
+    const raw = { handoffAsk: '', handoffAuto: '/custom' };
+    const migrated = migrateHandoffs(raw, sanitizeSettings(raw), has(['ticket', 'ticket-auto']));
+    expect(migrated.handoffAsk).toBe('');
+    expect(migrated.handoffAuto).toBe('/custom');
   });
 });

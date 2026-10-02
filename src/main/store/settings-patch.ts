@@ -116,6 +116,13 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   }
   if (typeof input.geminiBotLogin === 'string') patch.geminiBotLogin = input.geminiBotLogin;
   if (typeof input.claudeCommand === 'string') patch.claudeCommand = input.claudeCommand;
+  if (typeof input.projectsRoot === 'string') patch.projectsRoot = input.projectsRoot.trim();
+  if (typeof input.worktreeHelper === 'string') patch.worktreeHelper = input.worktreeHelper.trim();
+  if (typeof input.worktreesRoot === 'string') patch.worktreesRoot = input.worktreesRoot.trim();
+  if (typeof input.handoffAsk === 'string') patch.handoffAsk = input.handoffAsk.trim();
+  if (typeof input.handoffAuto === 'string') patch.handoffAuto = input.handoffAuto.trim();
+  if (typeof input.handoffFeedback === 'string') patch.handoffFeedback = input.handoffFeedback.trim();
+  if (typeof input.workspaceRoot === 'string') patch.workspaceRoot = input.workspaceRoot.trim();
   if (typeof input.codexCommand === 'string') patch.codexCommand = input.codexCommand;
   // Validated by the store, which is the single place that decides what a profile is. Accepted here
   // as typed, like the model names above and for the same reason: two answers to "is this valid" is

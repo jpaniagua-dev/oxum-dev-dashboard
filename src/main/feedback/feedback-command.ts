@@ -1,6 +1,6 @@
 import { CLAUDE_CODE_PROFILE, type AgentProfile } from '@shared/agent-profile.js';
 import { modelFlag } from '@shared/agent-model.js';
-import { safeRepoName } from '../triage/work-command.js';
+import { safeRepoName, safeSkill } from '../triage/work-command.js';
 
 /**
  * The command line a feedback pass is handed over with.
@@ -40,13 +40,19 @@ export function buildFeedbackCommand(
   folder: string,
   model = '',
   profile: AgentProfile = CLAUDE_CODE_PROFILE,
+  skill = `/${FEEDBACK_SKILL}`,
 ): string {
   if (!Number.isInteger(number) || number <= 0) {
     return '';
   }
   const repo = safeRepoName(folder);
   const where = repo === null ? '' : ` in the ${repo} repository`;
-  const prompt = `/${FEEDBACK_SKILL} ${number}${where}`;
+  const named = safeSkill(skill);
+  // Without a skill, the app's own sentence: the same steps, read from GitHub by the session.
+  const prompt =
+    named === null
+      ? `Treat the review feedback on pull request ${number}${where}: read its comments with gh, fix what should be fixed on its branch, reply in each thread with what was done or why not, then push.`
+      : `${named} ${number}${where}`;
   const command = profile.interactive.replace(
     '{model}',
     model.trim().length === 0 ? '' : modelFlag(model).trim(),

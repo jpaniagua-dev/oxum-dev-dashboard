@@ -6,7 +6,7 @@
  * follows (a control that did not say what it was about to do is one whose consequences you discover
  * afterwards). Two implementations would let the menu promise a name the checkout does not use.
  *
- * The shape, `TEC-1482-migrate-to-angular-22`, is not invented here: it is the convention the team
+ * The shape, `PROJ-1482-migrate-to-angular-22`, is not invented here: it is the convention the team
  * already writes by hand, and it is what the shell helper this replaces produced. Keeping it means a
  * branch created from the dashboard is indistinguishable from one created in a terminal, which is the
  * only version of "native" worth having.

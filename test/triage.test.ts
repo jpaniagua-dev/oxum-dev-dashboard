@@ -816,11 +816,11 @@ describe('applyLiveToTickets', () => {
   it('updates the status and the assignee without touching the verdict', () => {
     const tickets = applyLiveToTickets(
       [ticketWith('ready', { key: 'PROJ-1', status: 'To Do' })],
-      live({ 'PROJ-1': { status: 'In Progress', assignee: 'Julio', stage: 'in-progress' } }),
+      live({ 'PROJ-1': { status: 'In Progress', assignee: 'Sam', stage: 'in-progress' } }),
     );
 
     expect(tickets?.[0]?.status).toBe('In Progress');
-    expect(tickets?.[0]?.assignee).toBe('Julio');
+    expect(tickets?.[0]?.assignee).toBe('Sam');
     expect(tickets?.[0]?.verdict).toBe('ready');
   });
 

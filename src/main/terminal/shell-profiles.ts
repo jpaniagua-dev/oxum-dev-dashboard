@@ -22,12 +22,18 @@ function candidates(): Candidate[] {
   const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
   const programFilesX86 = process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)';
   const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+  // Git's installer offers a per-user install too, which lands here and not under Program Files.
+  const localPrograms = join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Programs');
 
   return [
     {
       id: 'git-bash',
       label: 'Git Bash',
-      files: [join(programFiles, 'Git', 'bin', 'bash.exe'), join(programFilesX86, 'Git', 'bin', 'bash.exe')],
+      files: [
+        join(programFiles, 'Git', 'bin', 'bash.exe'),
+        join(programFilesX86, 'Git', 'bin', 'bash.exe'),
+        join(localPrograms, 'Git', 'bin', 'bash.exe'),
+      ],
       // `-i` so the profile and its aliases are loaded: this is the shell that has to feel like the
       // one in a normal terminal, aliases included.
       args: ['-i'],
