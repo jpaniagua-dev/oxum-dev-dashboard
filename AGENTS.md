@@ -3044,6 +3044,22 @@ on exactly one machine: the defaults, two helpers and three skills were the auth
   key that was never stored with the skill of the old name when one is installed, once, so an
   install that used `/ticket` keeps it; an empty key that was saved stays empty.
 - **Git Bash is also found in a per-user install** (`%LOCALAPPDATA%\Programs\Git`).
+- **A notice, never a silent update.** `updates/update-check.ts` asks the public releases API
+  (`net.fetch`, no `gh`, which a colleague may not have signed in) 15 s after launch and every six
+  hours, and the header shows **Version X is available**, downloading the installer. An unsigned
+  build replacing itself is what antivirus and IT policies stop; a button leaves the reader in
+  charge. Any failure is no notice and a log line. `updateCheck` turns it off.
+- **A team configuration is a file one person exports and another imports** (`shared/team-config.ts`).
+  It carries what a team shares: projects with paths written `~/...`, actions, tags and colours, the
+  Jira site and keys, the agent profile and models. Never a secret, an email, a window size, a
+  personal skill or `enabled`, which is one person's choice of what to watch. An import **adds**
+  projects whose folder exists here, lists the missing ones, skips what is already configured,
+  replaces the agent and Jira site after a confirmation in main that lists all of it, and is
+  refused while the settings form holds unsaved changes.
+- **The README is written for a colleague**: the installer and not the zip (only the installer
+  gives notifications), the SmartScreen step for an unsigned build, what each missing tool looks
+  like, the first launch in three steps.
+
 - **`appId` and `APP_USER_MODEL_ID` keep the author's identity on purpose.** Changing them would
   install a second app beside the first and orphan the Start Menu shortcut toasts depend on.
 

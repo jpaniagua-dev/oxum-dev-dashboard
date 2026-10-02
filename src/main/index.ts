@@ -1,5 +1,7 @@
 import { homedir } from 'node:os';
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron';
+import type { UpdateNotice } from '@shared/contracts.js';
+import { checkForUpdate, UPDATE_INTERVAL_MS } from './updates/update-check.js';
 import { ExtensionsService } from './extensions/extensions-service.js';
 import { LocalTicketStore } from './tickets/local-ticket-store.js';
 import {
@@ -470,6 +472,21 @@ async function bootstrap(): Promise<void> {
    * none: the rule that routes pty output rather than broadcasting it, applied to the one shape in
    * this app where the cost of being wrong is not a wasted xterm.
    */
+  /*
+   * The newer release, if any. Looked at a little after launch, so the first paint never waits on
+   * the network, then every six hours for an app that is never closed. Dashboard only.
+   */
+  let update: UpdateNotice | null = null;
+  const lookForUpdate = async (): Promise<void> => {
+    if (!settingsStore.get().updateCheck) {
+      return;
+    }
+    update = await checkForUpdate(app.getVersion(), (url, init) => net.fetch(url, init));
+    dashboardWindow.send(IpcChannel.UpdateChanged, update);
+  };
+  setTimeout(() => void lookForUpdate(), 15_000);
+  setInterval(() => void lookForUpdate(), UPDATE_INTERVAL_MS);
+
   const pushVault = (): VaultState => {
     const state = vaultState();
     dashboardWindow.send(IpcChannel.VaultChanged, state);
@@ -801,6 +818,7 @@ async function bootstrap(): Promise<void> {
     extensions: () => extensionsService,
     localTickets: () => localTickets,
     triageFile: AppPaths.triage(),
+    update: () => update,
     automations: automationState,
     clearAutomationLog: () => {
       /*

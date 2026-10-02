@@ -1,5 +1,6 @@
 import type {
   TicketsLayout,
+  UpdateNotice,
   AppSettings,
   GitDiff,
   GitDiffTarget,
@@ -295,6 +296,8 @@ class App {
     this.profiles = bootstrap.shellProfiles;
     this.applyTheme(bootstrap.theme);
     applyVersion(bootstrap.appVersion);
+    void window.api.readUpdate().then(applyUpdate);
+    window.api.onUpdateChanged(applyUpdate);
     // Before anything is measured: the strip resizer and the terminal's fit both read pixel sizes that
     // the text size decides, so applying it afterwards would fit them to a layout already gone.
     applyUiFontSize(bootstrap.settings.uiFontSize);
@@ -2968,6 +2971,23 @@ const GIT_NOTICE_MS = 8000;
  * The label says `v5.5.0` and the tooltip spells out the product name with it: the strip is read at a
  * glance, and a bare number in a corner is only ambiguous until you hover it.
  */
+/**
+ * The newer release, as a button that downloads its installer, or nothing.
+ *
+ * The installer and not the zip: it is the one that also installs the Start Menu shortcut Windows
+ * toasts need, and it updates in place.
+ */
+function applyUpdate(notice: UpdateNotice | null): void {
+  const button = requireElement<HTMLButtonElement>('update-button');
+  button.hidden = notice === null;
+  if (notice === null) {
+    return;
+  }
+  button.textContent = `Version ${notice.version} is available`;
+  button.title = `Downloads the installer of ${notice.version}. Run it to update in place.`;
+  button.onclick = () => void window.api.openExternal(notice.download);
+}
+
 function applyVersion(version: string): void {
   const label = requireElement('app-version');
   label.textContent = `v${version}`;

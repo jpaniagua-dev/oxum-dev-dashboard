@@ -6,100 +6,78 @@ nothing ever sends you to an external console.
 
 ![Dashboard](docs/screenshot.png)
 
+## Install
+
+**[Download the installer](https://github.com/jpaniagua-dev/oxum-dev-dashboard/releases/latest/download/oxum-dev-dashboard-win-x64-setup.exe)**,
+always the latest version, and run it.
+
+The build is not code-signed, so Windows SmartScreen stops the installer the first time with
+**"Windows protected your PC"**. Click **More info**, then **Run anyway**. The installer is per-user:
+it needs no administrator rights, puts a shortcut in the Start menu and on the desktop, and the app
+starts from either.
+
+Take the installer rather than the zip. The Start menu shortcut it installs is what Windows needs to
+deliver the app's notifications; the zip runs the same app, without them.
+
+**Updating**: when a newer version is out, a **Version X is available** button appears at the top
+right of the window. It downloads the installer; close the app and run it, it updates in place and
+keeps your settings. The check can be turned off in the settings.
+
 ## What you need on the machine
 
-The dashboard runs commands rather than reimplementing them, so what it can do depends on what is
-already installed. Nothing here is bundled, and nothing here is fatal: a missing tool disables the
-features that use it and says so where the command was going to run.
+The dashboard runs the tools you already have rather than bundling them, so what it can do depends
+on them. None is fatal: a missing one disables the features that use it, and says so where they run.
 
 | Tool | Needed for | Without it |
 | --- | --- | --- |
-| **Windows 10/11 x64** | everything | the app is Windows-only (ConPTY, `taskkill`) |
-| **git** on `PATH` | every column of the strip, the whole Git tab | rows read `?` and the Git tab reports the failure |
-| **Git Bash** | the shells that expand aliases, the `Commit` action | those actions print `command not found` in their tab |
-| **`gh`**, authenticated (`gh auth login`) | Checks, Workflows, the Pull requests tab | those columns read `?`, the tab stays empty |
-| **A CLI coding agent** on `PATH`, signed in | Triage, `Work on this`, `Generate` a commit message, the pull request review | the run fails in its own tab or line |
-| **A Jira API token** | the Jira tab, the Triage tab | nothing is queried at all, no error |
-| **Node 20+** | only to build from source | irrelevant to a downloaded build |
+| **Windows 10/11 x64** | everything | the app is Windows-only |
+| **git** on `PATH` | every column of the strip, the Git and Worktrees tabs | rows read `?` and the Git tab reports the failure |
+| **`gh`**, signed in (`gh auth login`) | Checks, Workflows, the Pull requests tab | those columns read `?`, the tab stays empty |
+| **Claude Code** (or another CLI coding agent), signed in | Triage, `Work on this`, `Generate` a commit message, the pull request review | the run says what failed, naming the command |
+| **Git Bash** (optional) | shell actions that need bash | those actions print `command not found` in their tab |
+| **A Jira API token** (optional) | the Jira issues in the Tickets tab, Triage | the Tickets tab shows your local tickets only |
 
-**One** feature expects a shell helper that does not ship with the app: the **Worktrees** tab's
-create, rename and remove entries run a shell function called `wt`. It prints `command not found` in
-the tab it opened, which names what is missing in the place it was going to be used, and nothing else
-is affected. Reimplementing it is deliberately refused: `git worktree add` and `remove` carry rules
-(a shared `node_modules` junction to unlink first, a refusal on a folder git no longer knows, a stale
-registration to prune) that a second implementation would get wrong, and getting one wrong deletes
-work. The reasoning is in `CLAUDE.md`.
+A Jira API token is created at `https://id.atlassian.com/manage-profile/security/api-tokens`, and
+pasted in the settings with your site and email. It is encrypted for your Windows account and never
+written to the settings file.
 
-Two other features used to need one and no longer do. **Create a branch** in the Jira tab creates
-`KEY-slug-of-the-summary` with git directly, and the seeded **`Commit`** action is gone: the Git tab
-commits with a real form, an amend and `Generate` writing the message from the staged diff. Actions
-are configuration anyway, so a row button running anything you like is one line in the settings.
+## First launch
 
-### First launch
+A fresh install watches **nothing**: the app does not adopt repositories nobody chose. In the
+settings (the gear at the top right):
 
-A fresh install watches **nothing**, on purpose: a project costs a `git` process on every poll, so the
-app does not adopt repositories nobody chose. The table's empty state offers the two ways in, `Add a
-folder` for one repository, or the settings to name the folder your clones live in and then `Detect
-repositories`. Everything else (poll cadences, the Jira connection, the Claude models) has a working
-default or is inert until configured.
+1. **Projects**: set **Repositories folder** to the folder holding your clones, press **Detect
+   repositories** and add the ones you work on. `+ Project` in the main window adds one folder at a
+   time.
+2. **Coding agent**: the defaults run Claude Code. Press **Test** to check it answers.
+3. **Tickets** (optional): your Jira site, email, project keys and API token, then **Test**.
 
-## Install
+If a teammate shared a **team configuration** file, **Import** it from the Interface section first:
+it adds the projects whose folders you have, and the team's agent and Jira settings. Your own email
+and token are never in such a file. **Export** makes one from your settings.
 
-One permanent link, always the latest build:
+Worktrees are created by the app itself, in a `worktrees` folder beside each repository unless the
+settings say otherwise, with `node_modules` linked from the main checkout rather than installed again.
 
-**[Download oxum-dev-dashboard-win-x64.zip](https://github.com/jpaniagua-dev/oxum-dev-dashboard/releases/latest/download/oxum-dev-dashboard-win-x64.zip)**
-
-Right-click the archive before unpacking, Properties, **Unblock**. The build is unsigned, so Windows
-marks it as coming from the internet and SmartScreen warns on the first launch; unblocking the zip once
-saves unblocking every file inside it. Then unpack it anywhere and run `Oxum Dev Dashboard.exe`.
-
-Close a running dashboard before replacing its folder: open files cannot be overwritten, and all the
-builds share one single-instance lock, so launching the new exe would only focus the window already up.
-
-### Build it yourself
+## Build it yourself
 
 ```bash
 npm install
 npm run dev          # run from source
-npm run dist         # build the installer, the zip and the portable build
-npm run dist:zip     # only the zip, under the name the GitHub release carries
+npm run dist         # the installer, the zip and the portable build, in release/
+npm run dist:setup   # only the installer, under the name the GitHub release carries
+npm run dist:zip     # only the zip
 ```
 
-`dist` produces three artifacts in `release/`, and the choice between them is a measured trade-off:
-
-| Artifact | Install | Time to a window |
-| --- | --- | --- |
-| `…-<version>-x64.exe` (NSIS installer) | yes | ~10 s |
-| `…-<version>-x64.zip` | no, unpack once | ~10 s |
-| `…-<version>-portable.exe` | no, single file | **~26 s, every launch** |
-
-The GitHub release carries that same zip under a version-free name, which is what keeps the download
-link above permanent; `dist:zip` is the script that renames it. Which version you are running is in the
-title bar.
-
-The single-file portable target unpacks the whole ~100 MB app into `%TEMP%` at **every** start, and it
-does not cache: measured at 30 s cold and 26,5 s on the next launch, against 9,6 s once unpacked. Prefer
-the zip unless you really need one self-contained file, on a USB stick for instance.
-
-All three carry the same `appId`, so they read the same settings in `AppData\Roaming`: the install-free
-builds are there to avoid an install, not to be isolated. For the same reason the single-instance lock is
-shared, and launching one while another runs focuses the window already open instead of starting a
-second.
-
 `dev` passes `--watch`, so a change to the **main process** restarts it instead of leaving a
-hot-reloaded renderer talking to a stale main. Without it, the two drift apart the moment an IPC
-contract changes, and the symptom is a button that quietly does nothing.
-
-Windows only. No C++ build tools required: the pty ships as a prebuilt Node-API binary, which loads
-in Electron unchanged.
+hot-reloaded renderer talking to a stale main. No C++ build tools are needed: the pty ships as a
+prebuilt Node-API binary. Every build shares one `appId`, so they read the same settings in
+`AppData\Roaming` and share one single-instance lock.
 
 ## What each column means
 
-On first launch the dashboard looks under your repositories root for a few common folder names
-(`web-app`, `admin-front`, `design-system`) and seeds a row for each one it finds. That is only a
-starting point, and an unrecognised layout simply starts empty: `+ Project` adds a folder,
-**double-clicking a project name renames it**, **dragging a row reorders the table**, and everything
-else is editable in the settings dialog.
+`+ Project` adds a folder, **double-clicking a project name renames it**, **dragging a row reorders
+the table**, and everything else is editable in the settings.
 
 The order is part of the configuration, not a view setting: drop a row where you want it and the
 settings window, the new-tab menu and the Servers window follow, on this machine and after a restart.
@@ -410,13 +388,11 @@ Admin      PROJ-1647-admin-front   PROJ-1647-list-sorting                      c
   widest read of the strip (one `git worktree list` per project, then a status per worktree). A read is
   skipped while a name is being typed.
 
-The tab does not implement the life cycle, it **spawns** it. `git worktree add` and `remove` have rules
-worth getting right (unlink a shared `node_modules` junction *before* the removal or it survives as an
-orphan, refuse a folder git no longer knows about, prune a stale registration instead of deleting it),
-so each entry runs a shell helper (`wt new`, `wt mv`, `wt rm`) in a terminal tab rather than a second
-implementation of those rules in here. Same choice as `dev <TICKET>` in the Jira tab. The helper is
-called bare, so it comes from your own shell profile; without one, the tab says `wt: command not found`
-where the command was going to run.
+The app creates, renames and removes worktrees itself, with the rules worth getting right: a branch
+from the remote's default branch, a `node_modules` junction to the main checkout instead of a fresh
+install, that junction taken out *before* the removal so the shared folder is never touched, and a
+locked folder told apart from one holding work. A personal shell helper can do it instead, in a
+terminal tab: set **Worktree helper** in the settings.
 
 ## Servers window
 

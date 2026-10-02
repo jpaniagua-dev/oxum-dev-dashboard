@@ -205,6 +205,8 @@ export class SettingsForm {
   private roots = { projects: '', workspace: '' };
   private worktrees = { helper: '', root: '' };
   private handoffs = { ask: '', auto: '', feedback: '' };
+  private updateCheck = true;
+  private teamStatus = '';
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
   private feedbackPass = false;
@@ -272,6 +274,7 @@ export class SettingsForm {
     this.ticketsDir = settings.localTicketsDir;
     this.roots = { projects: settings.projectsRoot, workspace: settings.workspaceRoot };
     this.worktrees = { helper: settings.worktreeHelper, root: settings.worktreesRoot };
+    this.updateCheck = settings.updateCheck;
     this.handoffs = {
       ask: settings.handoffAsk,
       auto: settings.handoffAuto,
@@ -520,6 +523,50 @@ export class SettingsForm {
       }),
     );
     this.hosts.interface.append(row);
+
+    this.hosts.interface.append(
+      this.checkbox('Tell me when a new version is out', this.updateCheck, (checked) => {
+        this.updateCheck = checked;
+        this.touch();
+      }),
+    );
+
+    /*
+     * The team configuration, a file one person exports and a colleague imports.
+     *
+     * Import is refused while the form holds unsaved changes: it writes the settings itself, and the
+     * draft on screen would then either hide what it brought or be lost to it.
+     */
+    const team = createElement('div', { className: 'settings-entry__row' });
+    const exportButton = createElement('button', { className: 'button', text: 'Export team configuration…' });
+    exportButton.type = 'button';
+    exportButton.title = 'Projects, actions, tags, Jira site and keys, agent profile and models. No secret, no email.';
+    exportButton.addEventListener('click', () => {
+      void window.api.exportTeamConfig().then((result) => {
+        this.teamStatus = result.message;
+        this.renderInterface();
+      });
+    });
+    const importButton = createElement('button', { className: 'button', text: 'Import…' });
+    importButton.type = 'button';
+    importButton.title =
+      'Adds the projects found on this machine and takes the team agent and Jira settings, after a confirmation';
+    importButton.addEventListener('click', () => {
+      if (this.dirty) {
+        this.teamStatus = 'Save or discard your changes first: an import writes the settings itself';
+        this.renderInterface();
+        return;
+      }
+      void window.api.importTeamConfig().then((result) => {
+        this.teamStatus = result.message;
+        this.renderInterface();
+      });
+    });
+    team.append(exportButton, importButton);
+    if (this.teamStatus.length > 0) {
+      team.append(createElement('span', { className: 'settings-aside', text: this.teamStatus }));
+    }
+    this.hosts.interface.append(team);
   }
 
   /**
@@ -1886,6 +1933,7 @@ export class SettingsForm {
       handoffAsk: this.handoffs.ask,
       handoffAuto: this.handoffs.auto,
       handoffFeedback: this.handoffs.feedback,
+      updateCheck: this.updateCheck,
       tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
@@ -1911,6 +1959,7 @@ export class SettingsForm {
     this.ticketsDir = saved.localTicketsDir;
     this.roots = { projects: saved.projectsRoot, workspace: saved.workspaceRoot };
     this.worktrees = { helper: saved.worktreeHelper, root: saved.worktreesRoot };
+    this.updateCheck = saved.updateCheck;
     this.handoffs = { ask: saved.handoffAsk, auto: saved.handoffAuto, feedback: saved.handoffFeedback };
     // Read back like the sizes and the models, and here it matters more than for either: the store
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would

@@ -944,6 +944,14 @@ export interface JiraIssue {
 
 export type TicketSource = 'jira' | 'local';
 
+/** A newer release than the running one, and where to get it. */
+export interface UpdateNotice {
+  readonly version: string;
+  /** The installer itself when the release carries it, the release page otherwise. */
+  readonly download: string;
+  readonly page: string;
+}
+
 /** How the Tickets tab draws its tickets. */
 export type TicketsLayout = 'board' | 'list';
 
@@ -1810,6 +1818,8 @@ export interface AppSettings {
   ticketsLayout: TicketsLayout;
   /** Folder of the local tickets. Empty means the app's own `tickets` folder. */
   localTicketsDir: string;
+  /** Whether the app looks for a newer release on GitHub, at launch and every six hours. */
+  updateCheck: boolean;
   /**
    * Height of the Git tab, and the tallest default of the four.
    *
@@ -2442,6 +2452,14 @@ export const IpcChannel = {
   VaultReset: 'vault:reset',
   /** invoke: () => ExtensionsView, both agents read off disk */
   ExtensionsRead: 'extensions:read',
+  /** invoke: () => UpdateNotice | null, the last check's answer */
+  UpdateRead: 'update:read',
+  /** invoke: () => { ok, message }, writes the team configuration to a file the user picks */
+  SettingsExport: 'settings:export',
+  /** invoke: () => { ok, message }, reads one, confirms what it changes, applies it */
+  SettingsImport: 'settings:import',
+  /** on: (notice: UpdateNotice | null) => void, after each check, dashboard only */
+  UpdateChanged: 'update:changed',
   /** invoke: () => ExtensionsResult, runs `claude mcp list` for the servers' status */
   ExtensionsCheck: 'extensions:check',
   /** invoke: (action: ExtensionAction) => ExtensionsResult */
@@ -2790,6 +2808,13 @@ export interface RendererApi {
   onVaultChanged(listener: (state: VaultState) => void): () => void;
   /** What both coding agents have installed. Read on demand, never polled. */
   readExtensions(): Promise<ExtensionsView>;
+  /** Whether a newer release is out, as the last check found. */
+  readUpdate(): Promise<UpdateNotice | null>;
+  /** Saves the team configuration (no secret, paths under the home folder) to a chosen file. */
+  exportTeamConfig(): Promise<{ ok: boolean; message: string }>;
+  /** Loads one, after a confirmation in the main process listing what it changes. */
+  importTeamConfig(): Promise<{ ok: boolean; message: string }>;
+  onUpdateChanged(listener: (notice: UpdateNotice | null) => void): () => void;
   /** Asks Claude Code for every server's status, claude.ai connectors included. Slow. */
   checkExtensions(): Promise<ExtensionsResult>;
   /** One change. Anything destructive is confirmed in the main process first. */

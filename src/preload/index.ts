@@ -26,6 +26,7 @@ import {
   type GitStashOp,
   type GitSyncOp,
   type IssueStage,
+  type UpdateNotice,
   type IssueTransition,
   type JiraConfig,
   type JiraState,
@@ -341,6 +342,18 @@ const api: RendererApi = {
   resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
 
   readExtensions: (): Promise<ExtensionsView> => ipcRenderer.invoke(IpcChannel.ExtensionsRead),
+  readUpdate: (): Promise<UpdateNotice | null> => ipcRenderer.invoke(IpcChannel.UpdateRead),
+  exportTeamConfig: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.SettingsExport),
+  importTeamConfig: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.SettingsImport),
+  onUpdateChanged: (listener: (notice: UpdateNotice | null) => void): (() => void) => {
+    const handler = (_event: unknown, notice: UpdateNotice | null): void => {
+      listener(notice);
+    };
+    ipcRenderer.on(IpcChannel.UpdateChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.UpdateChanged, handler);
+  },
   readLocalTickets: (): Promise<LocalTicketsState> => ipcRenderer.invoke(IpcChannel.TicketsRead),
   createLocalTicket: (draft: LocalTicketDraft): Promise<LocalTicketResult> =>
     ipcRenderer.invoke(IpcChannel.TicketsCreate, draft),

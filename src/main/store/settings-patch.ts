@@ -82,6 +82,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
     patch.ticketsLayout = input.ticketsLayout;
   }
   if (typeof input.localTicketsDir === 'string') patch.localTicketsDir = input.localTicketsDir;
+  if (typeof input.updateCheck === 'boolean') patch.updateCheck = input.updateCheck;
   if (typeof input.stripCollapsed === 'boolean') patch.stripCollapsed = input.stripCollapsed;
   if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
   // Coerced rather than merely type-checked, unlike its neighbours: the store clamps every other

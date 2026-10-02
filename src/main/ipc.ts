@@ -41,6 +41,7 @@ import {
   type ShellProfile,
   type TerminalGroup,
   type TerminalId,
+  type UpdateNotice,
   type WorktreeCommand,
   type ThemeMode,
   type ThemeState,
@@ -127,6 +128,9 @@ import type { VaultStore } from './vault/vault-store.js';
 import type { ExtensionsService } from './extensions/extensions-service.js';
 import type { LocalTicketStore } from './tickets/local-ticket-store.js';
 import { existingFolder, runFolder } from './projects/run-folder.js';
+import { existsSync } from 'node:fs';
+import { readFile as readTextFile, writeFile as writeTextFile } from 'node:fs/promises';
+import { planImport, toTeamConfig } from '@shared/team-config.js';
 import {
   createWorktree,
   pullWorktree,
@@ -168,6 +172,8 @@ export interface IpcDependencies {
   readonly localTickets: () => LocalTicketStore;
   /** The triage file, named in the built-in handoff prompt so a session can read the notes. */
   readonly triageFile: string;
+  /** The last update check's answer. */
+  readonly update: () => UpdateNotice | null;
   readonly pullReview: () => PullReviewService;
   readonly autoRuns: () => AutoRunRecords;
   /** Starts a feedback pass by hand, through the same gate the watcher uses. */
@@ -1700,6 +1706,76 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       }
     },
   );
+
+  ipcMain.handle(IpcChannel.UpdateRead, async (): Promise<UpdateNotice | null> => deps.update());
+
+  /*
+   * The team configuration: what one person hands a colleague to start from.
+   *
+   * Both ends go through native dialogs here, parented to the window that asked, and the import is
+   * confirmed with the list of what it changes before a byte is written: it replaces the agent
+   * profile and the Jira site, which a colleague may have set by hand.
+   */
+  ipcMain.handle(IpcChannel.SettingsExport, async (event): Promise<{ ok: boolean; message: string }> => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options: Electron.SaveDialogOptions = {
+      title: 'Export the team configuration',
+      defaultPath: 'oxum-team-config.json',
+      filters: [{ name: 'Team configuration', extensions: ['json'] }],
+    };
+    const { canceled, filePath } =
+      window === null ? await dialog.showSaveDialog(options) : await dialog.showSaveDialog(window, options);
+    if (canceled || filePath === undefined || filePath.length === 0) {
+      return { ok: false, message: 'Nothing was exported' };
+    }
+    const config = toTeamConfig(deps.settings.get(), homedir());
+    await writeTextFile(filePath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+    return { ok: true, message: `Exported ${config.projects.length} project(s) to ${filePath}` };
+  });
+
+  ipcMain.handle(IpcChannel.SettingsImport, async (event): Promise<{ ok: boolean; message: string }> => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options: Electron.OpenDialogOptions = {
+      title: 'Import a team configuration',
+      properties: ['openFile'],
+      filters: [{ name: 'Team configuration', extensions: ['json'] }],
+    };
+    const { canceled, filePaths } =
+      window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options);
+    const file = filePaths[0];
+    if (canceled || file === undefined) {
+      return { ok: false, message: 'Nothing was imported' };
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await readTextFile(file, 'utf8'));
+    } catch {
+      return { ok: false, message: `${basename(file)} is not readable JSON` };
+    }
+    const plan = planImport(raw, deps.settings.get(), homedir(), existsSync);
+    if (typeof plan === 'string') {
+      return { ok: false, message: plan };
+    }
+    const lines = [
+      plan.added.length > 0 ? `Adds ${plan.added.length} project(s): ${plan.added.join(', ')}.` : 'Adds no project.',
+      plan.missing.length > 0 ? `Not on this machine, left out: ${plan.missing.join(', ')}.` : '',
+      plan.skipped.length > 0 ? `Already configured, kept as they are: ${plan.skipped.join(', ')}.` : '',
+      'Replaces the agent profile, its models, the Jira site and project keys. Your Jira email and token are kept.',
+    ].filter((line) => line.length > 0);
+    const ok = await confirm(event, {
+      title: 'Import a team configuration',
+      message: `Import ${basename(file)}?`,
+      detail: lines.join('\n\n'),
+      confirmLabel: 'Import',
+    });
+    if (!ok) {
+      return { ok: false, message: 'Nothing was imported' };
+    }
+    const saved = await deps.settings.update(plan.patch);
+    await deps.reloadProjects();
+    deps.broadcastSettings(saved);
+    return { ok: true, message: `Imported: ${plan.added.length} project(s) added` };
+  });
 
   ipcMain.handle(IpcChannel.ExtensionsRead, async (): Promise<ExtensionsView> =>
     deps.extensions().read(),
