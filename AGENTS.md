@@ -3065,10 +3065,12 @@ on exactly one machine: the defaults, two helpers and three skills were the auth
   projects whose folder exists here, lists the missing ones, skips what is already configured,
   replaces the agent and Jira site after a confirmation in main that lists all of it, and is
   refused while the settings form holds unsaved changes.
-- **The README is written for a colleague**: the installer and not the zip (only the installer
-  gives notifications), the SmartScreen step for an unsigned build, what each missing tool looks
-  like, the first launch in three steps.
-
+- **The user documentation is `docs/`, and it moves with the code.** The README is one page
+  (install, prerequisites, a link); `docs/` holds getting started, the settings, the terminal, one
+  page per tab, troubleshooting and development. It says what a reader sees and does, never why it
+  was built that way: the reasons stay here, so a fact lives in one place. **A change to something
+  a user sees updates its page in the same commit**, and a new tab gets a page and a line in
+  `docs/README.md`. Examples use made-up names, the repository being public.
 - **`appId` and `APP_USER_MODEL_ID` keep the author's identity on purpose.** Changing them would
   install a second app beside the first and orphan the Start Menu shortcut toasts depend on.
 
