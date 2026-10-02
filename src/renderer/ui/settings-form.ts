@@ -153,7 +153,8 @@ function sameProfile(left: AgentProfile, right: AgentProfile): boolean {
     left.modelFlag === right.modelFlag &&
     left.extraDirFlag === right.extraDirFlag &&
     left.promptVia === right.promptVia &&
-    left.answerFormat === right.answerFormat
+    left.answerFormat === right.answerFormat &&
+    left.planArgs === right.planArgs
   );
 }
 
@@ -695,6 +696,20 @@ export class SettingsForm {
     interactive.title =
       'Used by Work on this, which opens a terminal tab. The prompt is appended as a quoted argument.';
     agentGrid.append(interactive);
+
+    const planArgs = this.field(
+      'Plan mode arguments',
+      this.agent.planArgs,
+      (value) => {
+        this.agent = { ...this.agent, planArgs: value };
+        this.touch();
+      },
+      'none: no plan mode',
+      true,
+    );
+    planArgs.title =
+      'Put after the program of the interactive command whenever a session starts in plan mode, such as Work on this in plan mode. {model} is the model flag. Empty means this agent has no plan mode.';
+    agentGrid.append(planArgs);
 
     const modelFlagField = this.field(
       'Model flag',

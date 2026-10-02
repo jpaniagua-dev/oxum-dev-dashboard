@@ -41,7 +41,12 @@ export class PullMonitor {
   rows(): RepoPulls[] {
     return this.projects
       .filter((project) => this.followed(project.id))
-      .map((project) => this.pulls.get(project.id) ?? idle(project));
+      .map((project) => {
+        const read = this.pulls.get(project.id);
+        // The label from the project as it is now: the cached read carries the one of its last poll,
+        // so a rename only showed here minutes later.
+        return read === undefined ? idle(project) : { ...read, label: project.label };
+      });
   }
 
   start(): void {

@@ -132,8 +132,10 @@ exceptions:
 - **The terminal pane has two sibling surfaces, and a card may show them side by side.**
   `.terminal__surface` is the grid and `.terminal__board` the session canvas. Board mode hides the
   grid until a card is selected; that click keeps the board in place and shows the selected live
-  terminal in a resizable right sidebar. That sidebar keeps a reduced strip holding the note button
-  alone, and its box hangs top right over the terminal exactly as in a grid pane, sharing
+  terminal in a resizable right sidebar. That sidebar keeps a reduced strip holding the session's
+  title at the left (double-click renames it with the tab's own editor, the sidebar having no tab
+  strip to say which session it shows) and the note button, whose box hangs top right over the
+  terminal exactly as in a grid pane, sharing
   `notesHidden` with it; the tabs, zoom and `Clear` stay hidden because the card already exposes
   them. The note came back on 2026-09-28, on request: the sidebar is one terminal read on its own,
   which is the moment the grid's box was built for. Its separator keeps at least
@@ -3052,6 +3054,15 @@ on exactly one machine: the defaults, two helpers and three skills were the auth
   this app's text, because it lands in a double-quoted shell argument. `migrateHandoffs` fills a
   key that was never stored with the skill of the old name when one is installed, once, so an
   install that used `/ticket` keeps it; an empty key that was saved stays empty.
+- **Plan mode is a profile field, `planArgs`, not a second command.** A plan session runs the
+  interactive command's program followed by those arguments (`buildPlanCommand`), so the two can
+  never name different binaries, and any later feature that opens a session in plan mode builds it
+  the same way. Claude Code's default plans first and only *allows* skipping permissions once the
+  plan is accepted. A profile stored before the field gets that default only if it runs the same
+  program: Claude's flags on a Codex profile would be an unknown option. Empty means no plan mode,
+  and the handoff says where to set it instead of launching a guess. `Work on this in plan mode`
+  is the asking handoff started differently, so it names the same skill and records the same Jira
+  writes.
 - **Git Bash is also found in a per-user install** (`%LOCALAPPDATA%\Programs\Git`).
 - **A notice, never a silent update.** `updates/update-check.ts` asks the public releases API
   (`net.fetch`, no `gh`, which a colleague may not have signed in) 15 s after launch and every six

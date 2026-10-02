@@ -1382,7 +1382,7 @@ class App {
     // The hint names the handoff, because the two menus look identical and only one of them opens a
     // session that publishes without asking. The repository question is the last moment the reader
     // still sees which button they pressed.
-    const how = handoff === 'auto' ? 'unattended, ' : '';
+    const how = handoff === 'auto' ? 'unattended, ' : handoff === 'plan' ? 'in plan mode, ' : '';
     showContextMenu(
       x,
       y,
@@ -2709,6 +2709,7 @@ class App {
         onOpen: (key) =>
           void window.api.openExternal(boardUrl(this.settings?.jira.siteUrl ?? '', key)),
         onWork: (keys, x, y) => this.openWorkProjectMenu(keys, x, y, 'ask'),
+        onWorkInPlanMode: (keys, x, y) => this.openWorkProjectMenu(keys, x, y, 'plan'),
         onRunAutonomously: (keys, x, y) => this.openWorkProjectMenu(keys, x, y, 'auto'),
       },
     );

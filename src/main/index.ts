@@ -773,6 +773,7 @@ async function bootstrap(): Promise<void> {
   const reloadProjects = async (): Promise<void> => {
     const next = resolveProjects(settingsStore.get().projects);
     terminalManager.reconcile(next);
+    terminalManager.relabel(projects, next);
 
     if (sameProjectSet(projects, next)) {
       projects = next;

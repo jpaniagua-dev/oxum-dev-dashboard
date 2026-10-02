@@ -1536,6 +1536,30 @@ export class TerminalPane {
        * know what it was for, the argument that gave the grid its box in the first place.
        */
       if (previewed) {
+        /*
+         * The session's name at the left, renamed by double-click with the tab's own editor: the
+         * sidebar shows one terminal with no tab strip, so nothing else said which session it is.
+         */
+        const session = this.sessions.find((entry) => entry.id === group.active);
+        if (session !== undefined) {
+          if (this.renaming === session.id) {
+            strip.append(this.buildRenameInput(session));
+          } else {
+            const title = createElement('button', {
+              className: 'terminal__preview-title',
+              text: session.title,
+              title: `${session.cwd}
+(double-click to rename)`,
+            });
+            title.type = 'button';
+            title.addEventListener('dblclick', (event) => {
+              event.preventDefault();
+              this.renaming = session.id;
+              this.renderStrips();
+            });
+            strip.append(title);
+          }
+        }
         const actions = createElement('div', { className: 'terminal__strip-actions' });
         actions.append(this.buildNoteControl(group));
         strip.append(actions);

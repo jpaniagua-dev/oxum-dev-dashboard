@@ -25,6 +25,9 @@ what answering it triggers.
 
 - **Work on this** asks which repository the ticket is in, then opens the agent in a terminal tab on
   it. **Work N ready** does the same for every ready ticket.
+- **Work on this in plan mode** does the same, the session starting in the agent's plan mode: it
+  proposes a plan before changing anything. The arguments that start it are in Settings → Agent →
+  Advanced (**Plan mode arguments**), so another agent, Codex included, gets its own.
 - **Run N autonomously** hands the tickets marked **100% agent** to agents that go all the way to a
   pull request without stopping for you. A reviewer still reads the pull request.
 - The handoff also records it on the board: the ticket is moved to the active sprint, assigned to

@@ -82,6 +82,15 @@ export interface AgentProfile {
    * the part the Agents tab can show for **any** profile.
    */
   readonly instructionFile: string;
+  /**
+   * Arguments of an interactive session started in plan mode, after the interactive command's own
+   * program, with `{model}` where the model flag goes. Empty when the agent has no plan mode.
+   *
+   * Arguments and not a second command: the program is the interactive one, so the two cannot
+   * name different binaries. Whatever opens a session in plan mode builds it from this, the
+   * `Work on this in plan mode` handoff being the first.
+   */
+  readonly planArgs: string;
 }
 
 /**
@@ -103,6 +112,9 @@ export const CLAUDE_CODE_PROFILE: AgentProfile = {
   extraDirFlag: '--add-dir',
   modelFlag: '--model {model}',
   instructionFile: 'CLAUDE.md',
+  // Plan first, and the way to skip the prompts offered once the plan is accepted rather than on
+  // from the start, which is what `--dangerously-skip-permissions` would do.
+  planArgs: '{model} --permission-mode plan --allow-dangerously-skip-permissions',
 };
 
 /**
@@ -245,5 +257,23 @@ export function readProfile(value: unknown, fallback: AgentProfile = CLAUDE_CODE
     // Not empty-able, unlike the two flags above: every agent reads its instructions from somewhere,
     // and an empty name would make the Agents tab walk the tree looking for a file called nothing.
     instructionFile: text('instructionFile', fallback.instructionFile),
+    planArgs: readPlanArgs(raw, fallback),
   };
+}
+
+/**
+ * The plan mode arguments, or the fallback's for a profile stored before they existed.
+ *
+ * The fallback's only when the profile runs the same program: Claude Code's plan flags handed to a
+ * Codex profile would be an unknown option on every plan session. Another program starts with none,
+ * which the app reports as "no plan mode configured" rather than launching a guess.
+ */
+function readPlanArgs(raw: Record<string, unknown>, fallback: AgentProfile): string {
+  if (typeof raw['planArgs'] === 'string') {
+    return raw['planArgs'].trim();
+  }
+  const program = (template: unknown): string =>
+    typeof template === 'string' ? (splitCommand(template)[0] ?? '') : '';
+  const own = program(raw['interactive']);
+  return own.length === 0 || own === program(fallback.interactive) ? fallback.planArgs : '';
 }

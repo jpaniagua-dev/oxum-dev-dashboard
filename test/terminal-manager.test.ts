@@ -389,3 +389,49 @@ describe('resolveActionCommand', () => {
     expect(resolved.args).toEqual(['/c', 'npm run start']);
   });
 });
+
+describe.runIf(onWindows)('renaming a project', () => {
+  it('carries the new name onto its tabs, except one the reader renamed', () => {
+    const manager = new TerminalManager({
+      onOutput: () => {},
+      onParsed: () => {},
+      onProjectStartExit: () => {},
+      onSessionsChanged: () => {},
+      onLayoutChanged: () => {},
+    });
+    const before = serverProject('echo hi').project;
+    const after = { ...before, label: 'Renamed' };
+    const shell = manager.openProjectShell(before, profile(CMD), { cols: 80, rows: 24 });
+    const task = manager.runProjectCommand({
+      project: before,
+      actionId: 'task',
+      title: 'Demo · commit',
+      file: CMD,
+      args: [],
+      size: { cols: 80, rows: 24 },
+    });
+    const mine = manager.runProjectCommand({
+      project: before,
+      actionId: 'other',
+      title: 'Demo · other',
+      file: CMD,
+      args: [],
+      size: { cols: 80, rows: 24 },
+    });
+    expect(shell).not.toBeNull();
+    manager.rename(mine ?? '', 'My own name');
+
+    manager.relabel([before], [after]);
+
+    const title = (id: string | null): string | undefined =>
+      manager.sessions().find((entry) => entry.id === id)?.title;
+    expect(title(shell)).toBe('Renamed');
+    expect(title(task)).toBe('Renamed · commit');
+    expect(title(mine)).toBe('My own name');
+    // The reused shell is the renamed one, not a fresh tab under the old name.
+    expect(manager.openProjectShell(after, profile(CMD), { cols: 80, rows: 24 })).toBe(shell);
+    for (const entry of manager.sessions()) {
+      manager.close(entry.id);
+    }
+  });
+});

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { CLAUDE_CODE_PROFILE, type AgentProfile } from '@shared/agent-profile.js';
+import { CLAUDE_CODE_PROFILE, splitCommand, type AgentProfile } from '@shared/agent-profile.js';
 import type { TriageHandoff } from '@shared/contracts.js';
 import { modelFlag } from '@shared/agent-model.js';
 
@@ -79,6 +79,7 @@ export function buildWorkCommand(
   options: HandoffOptions = { skill: '', notes: '' },
 ): string {
   const prompt = handoffPrompt(keys, folder, handoff, options);
+  const base = handoff === 'plan' ? buildPlanCommand(profile, model) : buildInteractiveCommand(profile, model);
 
   /*
    * The interactive template, with the prompt appended as a quoted argument.
@@ -89,7 +90,24 @@ export function buildWorkCommand(
    * `safeRepoName`), so the double quotes here are enough; nothing a colleague wrote reaches this
    * line.
    */
-  return `${buildInteractiveCommand(profile, model)} "${prompt}"`;
+  return `${base} "${prompt}"`;
+}
+
+/**
+ * The agent's interactive program started in plan mode, or `''` when the profile has no plan mode.
+ *
+ * The program comes from the interactive command and the rest from `planArgs`, so a profile's plan
+ * session and its ordinary one always run the same binary. Shared by every caller that opens a
+ * session in plan mode.
+ */
+export function buildPlanCommand(profile: AgentProfile = CLAUDE_CODE_PROFILE, model = ''): string {
+  const program = splitCommand(profile.interactive)[0] ?? '';
+  if (program.length === 0 || profile.planArgs.trim().length === 0) {
+    return '';
+  }
+  const args = profile.planArgs.replace('{model}', model.trim().length === 0 ? '' : modelFlag(model).trim());
+  const quoted = /\s/.test(program) ? `"${program}"` : program;
+  return `${quoted} ${args}`.replace(/\s+/g, ' ').trim();
 }
 
 /** What a handoff names instead of the built-in prompt, and where the triage notes are. */

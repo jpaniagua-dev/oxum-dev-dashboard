@@ -61,6 +61,10 @@ Advanced:
 - **The commands**: the headless one (answers and exits: triage, commit messages, reviews) and the
   interactive one (opens a session in a terminal tab). They are templates, not shell lines:
   `{model}` becomes the model flag. Press Test after any change.
+- **Plan mode arguments**: what follows the interactive command's program when a session starts in
+  plan mode, such as **Work on this in plan mode**. For Claude Code,
+  `{model} --permission-mode plan --allow-dangerously-skip-permissions`. Empty means the agent has no
+  plan mode.
 - **Prompt goes in through** and **Answer comes out as**: how the headless command is fed and read.
 - **Claude Code executable** and **Codex executable**: the programs the Extensions tab runs. A full
   path reaches one that is not on `PATH`.

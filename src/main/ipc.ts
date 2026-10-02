@@ -1057,7 +1057,16 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       // Anything that is not literally `auto` is the asking handoff. The unattended run is the one that
       // publishes without a human, so it is opted into by an exact word and never by a value that
       // merely failed to be something else.
-      const mode: TriageHandoff = handoff === 'auto' ? 'auto' : 'ask';
+      const mode: TriageHandoff = handoff === 'auto' ? 'auto' : handoff === 'plan' ? 'plan' : 'ask';
+      if (mode === 'plan' && settings.agentProfile.planArgs.trim().length === 0) {
+        return {
+          terminalId: null,
+          result: {
+            ok: false,
+            message: `${settings.agentProfile.label} has no plan mode configured: set its arguments in Settings, Agent, Advanced`,
+          },
+        };
+      }
       const command = buildWorkCommand(
         keys,
         basename(project.path),
@@ -1065,6 +1074,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         settings.agentProfile,
         mode,
         {
+          // Plan mode is the asking handoff started differently, so it names the same skill.
           skill: mode === 'auto' ? settings.handoffAuto : settings.handoffAsk,
           notes: deps.triageFile,
         },
@@ -1157,7 +1167,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
                 ok: true,
                 message: `${keys.join(', ')} handed to ${settings.agentProfile.label} in ${
                   project.label
-                }${mode === 'auto' ? ', unattended' : ''}`,
+                }${mode === 'auto' ? ', unattended' : mode === 'plan' ? ', in plan mode' : ''}`,
               },
       };
     },

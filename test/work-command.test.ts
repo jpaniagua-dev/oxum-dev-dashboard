@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   SKIP_PERMISSIONS_FLAG,
+  buildPlanCommand,
   buildWorkCommand,
   handoffPrompt,
   resolveWorkspaceRoot,
   safeSkill,
   safeRepoName,
 } from '../src/main/triage/work-command.js';
+import { CLAUDE_CODE_PROFILE, readProfile } from '../src/shared/agent-profile.js';
 
 /** The handoff as it ran before it became a setting: the `/ticket` skill. */
 const SKILL = { skill: '/ticket', notes: '' };
@@ -139,5 +141,36 @@ describe('resolveWorkspaceRoot', () => {
     expect(resolveWorkspaceRoot('   ', 'C:/workspace/repos/web-app', exists)).toBe(
       'C:/workspace/repos/web-app',
     );
+  });
+});
+
+describe('plan mode', () => {
+  it('starts the interactive program with the plan arguments and the model', () => {
+    expect(buildPlanCommand(CLAUDE_CODE_PROFILE, 'opus')).toBe(
+      'claude --model "opus" --permission-mode plan --allow-dangerously-skip-permissions',
+    );
+    expect(buildPlanCommand(CLAUDE_CODE_PROFILE)).toBe(
+      'claude --permission-mode plan --allow-dangerously-skip-permissions',
+    );
+  });
+
+  it('is unavailable for a profile with no plan arguments', () => {
+    expect(buildPlanCommand({ ...CLAUDE_CODE_PROFILE, planArgs: '' })).toBe('');
+  });
+
+  it('hands a ticket over in plan mode with the asking prompt', () => {
+    const command = buildWorkCommand(['PROJ-1'], 'web-app', '', CLAUDE_CODE_PROFILE, 'plan', SKILL);
+    expect(command).toBe(
+      'claude --permission-mode plan --allow-dangerously-skip-permissions "/ticket PROJ-1 in the web-app repository"',
+    );
+    expect(command).not.toContain('--dangerously-skip-permissions "');
+  });
+
+  it('gives a stored profile the default arguments only when it runs the same program', () => {
+    const stored = { ...CLAUDE_CODE_PROFILE } as Record<string, unknown>;
+    delete stored['planArgs'];
+    expect(readProfile(stored).planArgs).toBe(CLAUDE_CODE_PROFILE.planArgs);
+    expect(readProfile({ ...stored, interactive: 'codex {model}' }).planArgs).toBe('');
+    expect(readProfile({ ...stored, interactive: 'codex', planArgs: '--plan' }).planArgs).toBe('--plan');
   });
 });

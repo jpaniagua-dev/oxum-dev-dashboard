@@ -3188,9 +3188,31 @@ body {
   min-width: 0;
 }
 
-/* Only the note button is left, so it sits hard right, above the box it anchors. */
+/* The session's name at the left, the note button hard right, above the box it anchors. */
 .terminal__strip--preview {
-  justify-content: flex-end;
+  justify-content: space-between;
+}
+
+.terminal__preview-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.terminal__strip--preview .terminal__tab-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .terminal__board-resizer {

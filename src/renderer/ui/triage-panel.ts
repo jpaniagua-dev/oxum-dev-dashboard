@@ -68,6 +68,8 @@ export interface TriagePanelActions {
    * would be both fragile and a copy that starts going stale the moment it is made.
    */
   onWork: (keys: readonly string[], x: number, y: number) => void;
+  /** The same handoff, the session started in the agent's plan mode. */
+  onWorkInPlanMode: (keys: readonly string[], x: number, y: number) => void;
   /**
    * Starts the tickets the analysis and the guardrails both cleared, unattended.
    *
@@ -697,6 +699,15 @@ export class TriagePanel {
     this.bindWork(work, [ticket.key]);
     actions.append(work);
 
+    const plan = createElement('button', {
+      className: 'button',
+      text: 'Work on this in plan mode',
+      title: `${describeWork([ticket.key], ticket.estimate)}\nThe session starts by proposing a plan, with the plan mode arguments set in Settings.`,
+    });
+    plan.type = 'button';
+    this.bindWork(plan, [ticket.key], 'plan');
+    actions.append(plan);
+
     const open = createElement('button', { className: 'button', text: `Open ${ticket.key}` });
     open.type = 'button';
     open.addEventListener('click', () => this.actions.onOpen(ticket.key));
@@ -739,10 +750,14 @@ export class TriagePanel {
    * share one binder: the rule has to be remembered once per menu opener, and the third one would
    * have forgotten it too.
    */
-  private bindWork(button: HTMLButtonElement, keys: readonly string[]): void {
+  private bindWork(button: HTMLButtonElement, keys: readonly string[], mode: 'ask' | 'plan' = 'ask'): void {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
-      this.actions.onWork(keys, event.clientX, event.clientY);
+      if (mode === 'plan') {
+        this.actions.onWorkInPlanMode(keys, event.clientX, event.clientY);
+      } else {
+        this.actions.onWork(keys, event.clientX, event.clientY);
+      }
     });
   }
 

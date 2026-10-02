@@ -578,7 +578,7 @@ export const DESCRIPTION_TRUNCATED_MARK = '[description truncated]';
  * guardrails are evaluated where the button is drawn, and re-deriving them behind the click would be
  * a second answer to the same question, free to disagree with the label the reader just pressed.
  */
-export type TriageHandoff = 'ask' | 'auto';
+export type TriageHandoff = 'ask' | 'auto' | 'plan';
 
 /* ------------------------------------------------------------------ *
  * GitHub checks

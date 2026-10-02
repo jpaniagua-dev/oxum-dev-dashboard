@@ -700,6 +700,41 @@ export class TerminalManager {
    * An empty name is refused rather than accepted: a nameless tab is unclickable in practice, and
    * silently keeping the old one is what the user expects from clearing the field and pressing Enter.
    */
+  /**
+   * Carries a project's new name onto the tabs that bear its old one.
+   *
+   * A tab's title is set when it is spawned, from the project's label then, and a project shell is
+   * reused rather than reopened, so a renamed project kept its old name on every tab until each was
+   * closed. Only a title the app wrote is touched, the bare name or `<name> · <what>`; a tab the
+   * reader renamed keeps what they typed.
+   */
+  relabel(previous: readonly Project[], next: readonly Project[]): void {
+    const before = new Map(previous.map((project) => [project.id, project.label]));
+    let changed = false;
+    for (const project of next) {
+      const old = before.get(project.id);
+      if (old === undefined || old === project.label) {
+        continue;
+      }
+      for (const [id, entry] of this.entries) {
+        const { session } = entry;
+        if (session.projectId !== project.id || session.renamed === true) {
+          continue;
+        }
+        if (session.title === old || session.title.startsWith(`${old} · `)) {
+          this.entries.set(id, {
+            ...entry,
+            session: { ...session, title: `${project.label}${session.title.slice(old.length)}` },
+          });
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      this.hooks.onSessionsChanged(this.sessions());
+    }
+  }
+
   rename(terminalId: TerminalId, title: string): void {
     const entry = this.entries.get(terminalId);
     const trimmed = title.trim();

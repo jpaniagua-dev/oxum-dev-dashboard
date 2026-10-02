@@ -32,8 +32,9 @@ terminals. Clicking a tab unfolds it.
 ## Cards
 
 `Ctrl+G` shows the sessions as cards on a canvas instead of tabs: one card per terminal, with what it
-is doing. Click a card to open its terminal in a sidebar beside the canvas; drag cards to arrange
-them; the wheel zooms; the frame button brings every card into view. A note can be written on a
+is doing. Click a card to open its terminal in a sidebar beside the canvas, with the session's name
+at the top left (double-click it to rename); double-click a card's title to rename it there too;
+drag cards to arrange them; the wheel zooms; the frame button brings every card into view. A note can be written on a
 session: it shows on its card and at the top right of its terminal.
 
 ## The servers window
