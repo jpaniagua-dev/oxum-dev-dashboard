@@ -1,6 +1,7 @@
 import {
   TERMINAL_FONT_SIZE,
   UI_FONT_SIZE,
+  type ThemeMode,
   type AppSettings,
   type JiraConfig,
   type ProjectAction,
@@ -104,7 +105,7 @@ function signatureOf(
 }
 
 /**
- * The three model fields, as one object rather than three properties.
+ * The four model fields, as one object rather than four properties.
  *
  * Named so the render loop can be keyed (`keyof AgentModelDrafts`) instead of repeating the same
  * field three times with a different property each.
@@ -143,6 +144,18 @@ export interface SettingsFormActions {
  * which is what keeps them findable in a column of five lines.
  */
 type RailTone = 'neutral' | 'warn' | 'error';
+
+/** Whether two agent profiles run the same commands, which is what the preset reads. */
+function sameProfile(left: AgentProfile, right: AgentProfile): boolean {
+  return (
+    left.headless === right.headless &&
+    left.interactive === right.interactive &&
+    left.modelFlag === right.modelFlag &&
+    left.extraDirFlag === right.extraDirFlag &&
+    left.promptVia === right.promptVia &&
+    left.answerFormat === right.answerFormat
+  );
+}
 
 interface RailEntry {
   /** Id of the `<section>` in `settings.html` this entry scrolls to. */
@@ -206,6 +219,18 @@ export class SettingsForm {
   private worktrees = { helper: '', root: '' };
   private handoffs = { ask: '', auto: '', feedback: '' };
   private updateCheck = true;
+  private themeMode: ThemeMode = 'system';
+  /** Which pages' Advanced folds are open, kept across the repaints a change triggers. */
+  private readonly advancedOpen = new Set<string>();
+  /** Pages edited since the last load or save, marked in the rail. */
+  private readonly dirtyPages = new Set<string>();
+  /** Custom chosen in the preset, before any template has been changed. */
+  private agentCustom = false;
+  /** Project cards opened past their name and folder. */
+  private readonly expandedProjects = new Set<string>();
+  /** Why the last save failed, shown in the footer until the next change. */
+  private saveError = '';
+  private validateTimer: ReturnType<typeof setTimeout> | null = null;
   private teamStatus = '';
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
@@ -275,6 +300,7 @@ export class SettingsForm {
     this.roots = { projects: settings.projectsRoot, workspace: settings.workspaceRoot };
     this.worktrees = { helper: settings.worktreeHelper, root: settings.worktreesRoot };
     this.updateCheck = settings.updateCheck;
+    this.themeMode = settings.themeMode;
     this.handoffs = {
       ask: settings.handoffAsk,
       auto: settings.handoffAuto,
@@ -375,6 +401,11 @@ export class SettingsForm {
           text: entry.state,
         }),
       );
+      if (this.dirtyPages.has(entry.id)) {
+        const dot = createElement('span', { className: 'settings-rail__dirty', text: '•' });
+        dot.title = 'Unsaved changes on this page';
+        link.querySelector('.settings-rail__name')?.append(dot);
+      }
       link.addEventListener('click', () => this.actions.onNavigate(entry.id));
       item.append(link);
       this.hosts.rail.append(item);
@@ -390,7 +421,7 @@ export class SettingsForm {
     }
   }
 
-  /** The five readouts, each computed from the draft rather than from what was last saved. */
+  /** The readouts, one per page, each computed from the draft rather than from what was last saved. */
   private railEntries(): readonly RailEntry[] {
     const failing = this.validations.filter((entry) =>
       entry.issues.some((issue) => issue.level === 'error'),
@@ -409,7 +440,7 @@ export class SettingsForm {
     return [
       {
         id: 'section-interface',
-        name: 'Interface',
+        name: 'General',
         state: `${this.uiFontSize} px`,
         tone: 'neutral',
       },
@@ -433,7 +464,7 @@ export class SettingsForm {
       },
       {
         id: 'section-claude',
-        name: 'Coding agent',
+        name: 'Agent',
         state:
           invalid > 0
             ? count(invalid, 'invalid model')
@@ -443,8 +474,17 @@ export class SettingsForm {
         tone: invalid > 0 ? 'error' : 'neutral',
       },
       {
+        id: 'section-jira',
+        name: 'Tickets',
+        // A connected site is stated, not coloured: naming the host already says it is configured, and
+        // green at this size does not hold its contrast against the rail.
+        state:
+          host.length === 0 ? 'local tickets only' : this.jira.hasToken ? host : `${host} · no token`,
+        tone: host.length === 0 || this.jira.hasToken ? 'neutral' : 'warn',
+      },
+      {
         id: 'section-review',
-        name: 'Pull request review',
+        name: 'GitHub review',
         // The state names the consequence, not the value: "on" would be a word nobody weighs, while
         // "posts as you" is the sentence that makes somebody think before leaving it on.
         // The louder of the two wins the line: an agent that starts on its own is the bigger claim,
@@ -473,15 +513,6 @@ export class SettingsForm {
             : 'starts agents by itself',
         tone: this.automationsOn ? 'warn' : 'neutral',
       },
-      {
-        id: 'section-jira',
-        name: 'Tickets',
-        // A connected site is stated, not coloured: naming the host already says it is configured, and
-        // green at this size does not hold its contrast against the rail.
-        state:
-          host.length === 0 ? 'local tickets only' : this.jira.hasToken ? host : `${host} · no token`,
-        tone: host.length === 0 || this.jira.hasToken ? 'neutral' : 'warn',
-      },
     ];
   }
 
@@ -501,18 +532,10 @@ export class SettingsForm {
     const row = createElement('div', { className: 'settings-entry__row' });
     // "Font size" and not "Interface font size": the section it sits in is called Interface, and the
     // longer label wrapped onto two lines above a field two digits wide.
-    const size = this.field(
-      'Font size',
-      String(this.uiFontSize),
-      (value) => {
-        const parsed = Number.parseInt(value, 10);
-        // Same rule as the terminal's field: an unusable value falls back to the default instead of
-        // being kept, since this is the field that would become unreadable.
-        this.uiFontSize = Number.isFinite(parsed) ? parsed : UI_FONT_SIZE.default;
-        this.touch();
-      },
-      `${UI_FONT_SIZE.min} to ${UI_FONT_SIZE.max}`,
-    );
+    const size = this.numberField('Font size', this.uiFontSize, UI_FONT_SIZE, (value) => {
+      this.uiFontSize = value;
+      this.touch();
+    });
     // Two digits wide, so it is given the width of two digits rather than the width of the window.
     size.classList.add('settings-field--narrow');
     row.append(size);
@@ -523,6 +546,24 @@ export class SettingsForm {
       }),
     );
     this.hosts.interface.append(row);
+
+    // Applied at once, like the dashboard's theme button, and not held for Save: a theme is judged
+    // by looking at it.
+    this.hosts.interface.append(
+      this.select(
+        'Theme',
+        [
+          { value: 'system', label: 'Follow Windows' },
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+        ],
+        this.themeMode,
+        (value) => {
+          this.themeMode = value === 'light' || value === 'dark' ? value : 'system';
+          void window.api.setThemeMode(this.themeMode);
+        },
+      ),
+    );
 
     this.hosts.interface.append(
       this.checkbox('Tell me when a new version is out', this.updateCheck, (checked) => {
@@ -572,7 +613,7 @@ export class SettingsForm {
   /**
    * The model each Claude Code run is pinned to.
    *
-   * Three fields and not one, because the three runs are three jobs: classifying a sprint is bulk
+   * Four fields and not one, because the four runs are four jobs: classifying a sprint is bulk
    * reading where speed and cost dominate, implementing a ticket wants the strongest model there is,
    * and writing a commit message from a diff is short and frequent. One setting would be wrong for two
    * of them.
@@ -585,6 +626,8 @@ export class SettingsForm {
    */
   private renderAgent(): void {
     clearChildren(this.hosts.claude);
+    const basics: HTMLElement[] = [];
+    const expert: HTMLElement[] = [];
 
     const fields: readonly { key: keyof AgentModelDrafts; label: string; hint: string }[] = [
       {
@@ -682,7 +725,7 @@ export class SettingsForm {
       'Opens a second folder to a run. Only the pull request review uses it, to read the standards ' +
       'and the repository at once. Empty is fine: the review then runs in the repository.';
     agentGrid.append(dirFlagField);
-    this.hosts.claude.append(agentGrid);
+    expert.push(agentGrid);
 
     const choices = createElement('div', { className: 'settings-entry__grid' });
     choices.append(
@@ -714,7 +757,7 @@ export class SettingsForm {
         },
       ),
     );
-    this.hosts.claude.append(choices);
+    expert.push(choices);
 
     const testRow = createElement('div', { className: 'settings-entry__row' });
     const test = createElement('button', {
@@ -729,7 +772,7 @@ export class SettingsForm {
     if (this.agentStatus.length > 0) {
       testRow.append(createElement('span', { className: 'settings-aside', text: this.agentStatus }));
     }
-    this.hosts.claude.append(testRow);
+    basics.push(testRow);
 
     const grid = createElement('div', { className: 'settings-entry__grid' });
     for (const entry of fields) {
@@ -751,7 +794,7 @@ export class SettingsForm {
       this.markModelField(field, this.agentModels[entry.key]);
       grid.append(field);
     }
-    this.hosts.claude.append(grid);
+    basics.unshift(grid);
 
     /*
      * The two executables of the Extensions tab, after the profile and its models.
@@ -784,7 +827,7 @@ export class SettingsForm {
     codexCli.title =
       'Run by the Extensions tab to change MCP servers. A full path to codex.cmd when Codex is not on PATH.';
     cli.append(claudeCli, codexCli);
-    this.hosts.claude.append(cli);
+    expert.push(cli);
 
     const workspace = this.field(
       'Agent workspace folder',
@@ -798,7 +841,7 @@ export class SettingsForm {
     );
     workspace.title =
       'Where Work on this and the agent button start a session, so it reads the instructions shared by several repositories. Empty starts in the repository.';
-    this.hosts.claude.append(workspace);
+    expert.push(workspace);
 
     const handoffGrid = createElement('div', { className: 'settings-entry__grid' });
     for (const [key, label, hint] of [
@@ -819,7 +862,49 @@ export class SettingsForm {
       field.title = hint;
       handoffGrid.append(field);
     }
-    this.hosts.claude.append(handoffGrid);
+    expert.push(handoffGrid);
+
+    /*
+     * The page: a preset and the models, then Test; every template and flag under Advanced.
+     *
+     * Most people run Claude Code as installed and never need the templates, which used to open
+     * the page as six fields of command syntax. Choosing Custom opens Advanced, where they are.
+     */
+    const preset = this.select(
+      'Agent',
+      [
+        { value: 'claude', label: 'Claude Code (as installed)' },
+        { value: 'custom', label: 'Custom command' },
+      ],
+      this.agentCustom || !sameProfile(this.agent, CLAUDE_CODE_PROFILE) ? 'custom' : 'claude',
+      (value) => {
+        this.agentCustom = value === 'custom';
+        if (value === 'claude') {
+          this.agent = { ...CLAUDE_CODE_PROFILE };
+        } else {
+          this.advancedOpen.add('agent');
+        }
+        this.touch();
+        this.renderAgent();
+      },
+    );
+    this.hosts.claude.append(preset);
+    if (this.agent.interactive.includes('--dangerously-skip-permissions')) {
+      this.hosts.claude.append(
+        createElement('p', {
+          className: 'settings__note',
+          text: 'Sessions opened from a ticket run with --dangerously-skip-permissions: the agent edits files and runs commands without asking. Change the interactive command under Advanced to be asked instead.',
+        }),
+      );
+    }
+    this.hosts.claude.append(...basics);
+    expert.unshift(
+      createElement('p', {
+        className: 'settings__note',
+        text: 'Each command is a template passed through as written, not a shell: {model} becomes the model flag and disappears when no model is pinned. The headless command must make the agent answer and exit, and should keep it to reading; the pull request review trusts it. Press Test after any change.',
+      }),
+    );
+    this.hosts.claude.append(this.advanced('agent', expert));
   }
 
   /**
@@ -878,7 +963,7 @@ export class SettingsForm {
     login.title =
       'Whose existing remarks the review is given to weigh. Matched with and without the [bot] suffix, ' +
       'because GitHub reports it both ways and matching one spelling reads as "this bot said nothing".';
-    this.hosts.review.append(login);
+    this.hosts.review.append(this.advanced('review', [login]));
   }
 
   /**
@@ -1057,7 +1142,12 @@ export class SettingsForm {
     test.addEventListener('click', () => {
       test.disabled = true;
       void window.api
-        .testJira()
+        .testJira({
+          siteUrl: this.jira.siteUrl,
+          email: this.jira.email,
+          projectKeys: [...this.jira.projectKeys],
+          token: this.jiraToken,
+        })
         .then((result) => {
           this.jiraStatus = result.message;
         })
@@ -1159,7 +1249,7 @@ export class SettingsForm {
     worktreeHelper.title =
       'A shell function that creates and removes worktrees in a terminal tab instead of the app. Leave empty unless you have one.';
     worktreeGrid.append(worktreeRoot, worktreeHelper);
-    this.hosts.projects.append(worktreeGrid);
+    const worktreeAdvanced = this.advanced('projects', [worktreeGrid]);
 
     if (this.projects.length === 0) {
       this.hosts.projects.append(
@@ -1221,6 +1311,7 @@ export class SettingsForm {
     if (this.showCandidates) {
       this.hosts.projects.append(this.buildCandidates());
     }
+    this.hosts.projects.append(worktreeAdvanced);
   }
 
   private buildProjectEntry(project: ProjectDraft): HTMLElement {
@@ -1278,6 +1369,28 @@ export class SettingsForm {
     });
     pathRow.append(browse);
     card.append(pathRow);
+
+    /*
+     * Folded to its name and folder unless opened, or broken: ten projects of nine fields each made
+     * this page several screens long, for a list read far more often than edited. A project with an
+     * error stays open, being the one that needs editing.
+     */
+    const open = hasError || this.expandedProjects.has(project.id) || this.projects.length === 1;
+    const fold = createElement('button', { className: 'button button--quiet', text: open ? 'Less' : 'Details…' });
+    fold.type = 'button';
+    fold.setAttribute('aria-expanded', String(open));
+    fold.addEventListener('click', () => {
+      if (open) {
+        this.expandedProjects.delete(project.id);
+      } else {
+        this.expandedProjects.add(project.id);
+      }
+      this.renderProjects();
+    });
+    if (!open) {
+      card.append(fold);
+      return card;
+    }
 
     /*
      * The three settings that describe the row rather than the repository, on one line: what kind of
@@ -1353,6 +1466,9 @@ export class SettingsForm {
       );
     }
 
+    if (this.projects.length > 1 && !hasError) {
+      card.append(fold);
+    }
     return card;
   }
 
@@ -1739,22 +1855,15 @@ export class SettingsForm {
     const row = createElement('div', { className: 'settings-terminal-row' });
     row.append(defaults);
     row.append(
-      this.field(
-        'Font size',
-        String(this.fontSize),
-        (value) => {
-          const parsed = Number.parseInt(value, 10);
-          // An unparseable or out-of-range value falls back to the default rather than being stored:
-          // the field would otherwise be able to make the terminal unreadable while you type in it.
-          this.fontSize = Number.isFinite(parsed) ? parsed : TERMINAL_FONT_SIZE.default;
-          this.touch();
-        },
-        `${TERMINAL_FONT_SIZE.min} to ${TERMINAL_FONT_SIZE.max}`,
-        true,
-      ),
+      this.numberField('Font size', this.fontSize, TERMINAL_FONT_SIZE, (value) => {
+        this.fontSize = value;
+        this.touch();
+      }),
     );
     this.hosts.terminal.append(row);
 
+    // Each shell's binary and arguments: detection gets them right, so they wait under Advanced.
+    const cards: HTMLElement[] = [];
     for (const profile of this.profiles) {
       const card = createElement('div', { className: 'settings-entry' });
       const header = createElement('div', { className: 'settings-entry__header' });
@@ -1791,7 +1900,7 @@ export class SettingsForm {
       const browse = createElement('button', { className: 'button', text: '…' });
       browse.type = 'button';
       browse.addEventListener('click', () => {
-        void window.api.pickFolder(`${profile.label} binary`).then((picked) => {
+        void window.api.pickFile(`${profile.label} binary`).then((picked) => {
           if (picked !== null) {
             profile.file = picked;
             profile.detected = false;
@@ -1829,16 +1938,42 @@ export class SettingsForm {
         ),
       );
       card.append(grid);
-      this.hosts.terminal.append(card);
+      cards.push(card);
     }
+    const add = createElement('button', { className: 'button', text: '+ Shell' });
+    add.type = 'button';
+    add.title = 'A shell detection did not find, or the same one with other arguments';
+    add.addEventListener('click', () => {
+      this.profiles.push({
+        id: `custom-${Date.now().toString(36)}`,
+        label: 'Custom shell',
+        file: '',
+        args: [],
+        cwd: '',
+        detected: false,
+      });
+      this.advancedOpen.add('terminal');
+      this.touch();
+      this.renderTerminal();
+    });
+    cards.push(add);
+    this.hosts.terminal.append(this.advanced('terminal', cards));
   }
 
   private renderFooter(): void {
     clearChildren(this.hosts.footer);
 
     const status = createElement('span', {
-      className: this.dirty ? 'settings__status' : 'settings__status settings__status--ok',
-      text: this.dirty ? 'unsaved changes' : this.saved ? 'changes saved' : '',
+      className:
+        this.saveError.length > 0 || this.dirty ? 'settings__status' : 'settings__status settings__status--ok',
+      text:
+        this.saveError.length > 0
+          ? this.saveError
+          : this.dirty
+            ? 'unsaved changes'
+            : this.saved
+              ? 'changes saved'
+              : '',
     });
     this.hosts.footer.append(status);
 
@@ -1849,15 +1984,25 @@ export class SettingsForm {
 
     const save = createElement('button', { className: 'button button--primary', text: 'Save' });
     save.type = 'button';
-    // Saving a configuration with a broken path would produce a row that can never run.
-    const blocked = this.validations.some((entry) =>
+    // Saving a configuration with a broken path would produce a row that can never run, and a model
+    // that is not one would be saved as the default with nothing said.
+    const brokenProject = this.validations.some((entry) =>
       entry.issues.some((issue) => issue.level === 'error'),
     );
-    save.disabled = blocked;
-    if (blocked) {
-      save.title = 'Fix the reported errors before saving';
+    const badModel = Object.values(this.agentModels).some((model) => !isValidModel(model));
+    save.disabled = brokenProject || badModel;
+    if (brokenProject) {
+      save.title = 'Fix the reported project errors before saving';
+    } else if (badModel) {
+      save.title = 'A model on the Agent page is not a model name';
     }
-    save.addEventListener('click', () => void this.save());
+    save.addEventListener('click', () => {
+      // Each of the writes broadcasts and can fail on its own; a failure is said, never swallowed.
+      void this.save().catch((error: unknown) => {
+        this.saveError = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
+        this.renderFooter();
+      });
+    });
     this.hosts.footer.append(save);
   }
 
@@ -1882,6 +2027,8 @@ export class SettingsForm {
       return;
     }
     this.projects.push({ ...config, actions: config.actions.map((action) => ({ ...action })) });
+    // A project just added is the one about to be edited.
+    this.expandedProjects.add(config.id);
     this.touch();
     await this.revalidate();
     this.render();
@@ -2007,18 +2154,35 @@ export class SettingsForm {
   }
 
   private touch(): void {
+    // Only one page is on screen, so the page being edited is the one the rail says is current.
+    this.dirtyPages.add(this.activeSection);
     this.saved = false;
+    this.saveError = '';
     this.setDirty(true);
-    // The rail reports the draft, not the saved file, so it follows every keystroke the footer does.
-    void this.revalidate().then(() => {
-      this.renderFooter();
-      this.renderRail();
-    });
+    this.renderFooter();
+    this.renderRail();
+    /*
+     * The projects are validated in the main process, which reads the disk: once typing pauses
+     * rather than on every keystroke, which was a file system round trip per character typed.
+     */
+    if (this.validateTimer !== null) {
+      clearTimeout(this.validateTimer);
+    }
+    this.validateTimer = setTimeout(() => {
+      this.validateTimer = null;
+      void this.revalidate().then(() => {
+        this.renderFooter();
+        this.renderRail();
+      });
+    }, 250);
   }
 
   /** Single place where the dirty flag changes, so the window is always told. */
   private setDirty(dirty: boolean): void {
     this.dirty = dirty;
+    if (!dirty) {
+      this.dirtyPages.clear();
+    }
     this.actions.onDirtyChange(dirty);
   }
 
@@ -2055,6 +2219,55 @@ export class SettingsForm {
     input.addEventListener('input', () => onChange(input.value));
     wrapper.append(input);
     return wrapper;
+  }
+
+  /**
+   * A whole number in a range, said wrong rather than corrected in silence.
+   *
+   * It used to fall back to the default on anything unparseable, so a typo saved a size nobody
+   * typed. Now the draft keeps the last valid value and the field says what it accepts.
+   */
+  private numberField(
+    label: string,
+    value: number,
+    range: { readonly min: number; readonly max: number },
+    onValid: (value: number) => void,
+  ): HTMLElement {
+    const problem = createElement('span', { className: 'settings-field__problem' });
+    const wrapper = this.field(
+      label,
+      String(value),
+      (text) => {
+        const parsed = Number(text.trim());
+        const ok = /^\d+$/.test(text.trim()) && parsed >= range.min && parsed <= range.max;
+        problem.textContent = ok ? '' : `A whole number from ${range.min} to ${range.max}`;
+        wrapper.querySelector('input')?.classList.toggle('settings-field__input--invalid', !ok);
+        if (ok) {
+          onValid(parsed);
+        }
+      },
+      `${range.min} to ${range.max}`,
+    );
+    wrapper.append(problem);
+    return wrapper;
+  }
+
+  /** The expert fields of a page, folded, the fold remembered across repaints. */
+  private advanced(key: string, nodes: readonly HTMLElement[]): HTMLElement {
+    const details = createElement('details', { className: 'settings-advanced' });
+    details.open = this.advancedOpen.has(key);
+    details.append(createElement('summary', { text: 'Advanced' }));
+    const body = createElement('div', { className: 'settings-advanced__body' });
+    body.append(...nodes);
+    details.append(body);
+    details.addEventListener('toggle', () => {
+      if (details.open) {
+        this.advancedOpen.add(key);
+      } else {
+        this.advancedOpen.delete(key);
+      }
+    });
+    return details;
   }
 
   /** A labelled checkbox, laid out on one line unlike the stacked text fields. */

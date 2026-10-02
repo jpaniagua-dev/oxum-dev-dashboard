@@ -944,6 +944,15 @@ export interface JiraIssue {
 
 export type TicketSource = 'jira' | 'local';
 
+/** A Jira connection as typed in the settings, before it is saved. */
+export interface JiraTestDraft {
+  readonly siteUrl: string;
+  readonly email: string;
+  readonly projectKeys: readonly string[];
+  /** Empty means the token already stored. */
+  readonly token: string;
+}
+
 /** A newer release than the running one, and where to get it. */
 export interface UpdateNotice {
   readonly version: string;
@@ -2505,6 +2514,8 @@ export const IpcChannel = {
   ProfilesSave: 'profiles:save',
   /** invoke: (title) => string | null, native folder picker */
   PickFolder: 'dialog:pick-folder',
+  /** invoke: (title) => string | null, an executable */
+  PickFile: 'dialog:pick-file',
   /** on: (settings: AppSettings) => void, pushed when settings change from anywhere */
   SettingsChanged: 'settings:changed',
   /** invoke: () => void, opens (or focuses) the settings window */
@@ -2590,7 +2601,8 @@ export interface RendererApi {
    */
   saveJira(config: { siteUrl: string; email: string; projectKeys: string[] }, token?: string):
     Promise<{ config: JiraConfig; message: string }>;
-  testJira(): Promise<{ ok: boolean; message: string }>;
+  /** Tests the connection typed on screen. An empty token tests the stored one. */
+  testJira(draft?: JiraTestDraft): Promise<{ ok: boolean; message: string }>;
   /** The moves an issue can make, asked at the moment the menu opens rather than cached. */
   jiraTransitions(key: string): Promise<IssueTransition[]>;
   /** The local tickets, read from their folder. */
@@ -2867,6 +2879,8 @@ export interface RendererApi {
   validateProjects(projects: ProjectConfig[]): Promise<ProjectValidation[]>;
   saveProfiles(profiles: ShellProfile[], defaultProfileId: string): Promise<AppSettings>;
   pickFolder(title: string): Promise<string | null>;
+  /** Opens the native picker on an executable: a shell binary. */
+  pickFile(title: string): Promise<string | null>;
   onSettingsChanged(listener: (settings: AppSettings) => void): () => void;
 
   /** Opens the settings window, or focuses it when it is already up. */

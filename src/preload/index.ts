@@ -26,6 +26,7 @@ import {
   type GitStashOp,
   type GitSyncOp,
   type IssueStage,
+  type JiraTestDraft,
   type UpdateNotice,
   type IssueTransition,
   type JiraConfig,
@@ -206,7 +207,8 @@ const api: RendererApi = {
   ): Promise<{ config: JiraConfig; message: string }> =>
     ipcRenderer.invoke(IpcChannel.JiraSave, config, token),
 
-  testJira: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke(IpcChannel.JiraTest),
+  testJira: (draft?: JiraTestDraft): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.JiraTest, draft ?? null),
 
   refreshTriage: (): Promise<TriageState> => ipcRenderer.invoke(IpcChannel.TriageRefresh),
 
@@ -450,6 +452,7 @@ const api: RendererApi = {
 
   pickFolder: (title: string): Promise<string | null> =>
     ipcRenderer.invoke(IpcChannel.PickFolder, title),
+  pickFile: (title: string): Promise<string | null> => ipcRenderer.invoke(IpcChannel.PickFile, title),
 
   onSettingsChanged: (listener: (settings: AppSettings) => void): (() => void) => {
     const handler = (_event: unknown, settings: AppSettings): void => listener(settings);

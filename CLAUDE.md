@@ -105,12 +105,21 @@ exceptions:
 - **The "unsaved changes" prompt lives in the main process.** Only the window's `close` handler can
   still cancel the close, so the renderer reports its state through `SettingsDirty`; the question is
   asked with `showMessageBoxSync`, since an answer awaited with `await` would arrive too late.
-- **The settings rail reports, it does not only navigate.** Every entry carries a line saying what its
-  section is set to right now — `3 projects · 1 error`, `Git Bash · 14 px`, `not configured` — computed
-  from the draft and refreshed on every keystroke, like the footer. That readout is the reason it is
-  worth 196px, and a rail reduced to five words should be taken out rather than kept. Which entry is
-  current comes from an `IntersectionObserver` on the body, never from the last click: a rail that
-  disagrees with what is on screen is worse than no rail.
+- **The settings window is pages, one at a time, and the rail picks the page** (since 2026-10-02).
+  It was one scroll of every section, a hundred controls deep with a few projects, and the rail
+  followed the scroll through an `IntersectionObserver`. Now each page shows what most people set
+  and folds the rest under **Advanced** (a `<details>` whose open state the form keeps across
+  repaints): the agent templates and handoff skills, the worktree helper, the shell profiles, the
+  bot login. Every entry still carries what its page is set to right now, computed from the draft,
+  and a dot marks a page edited since the last save. One draft and one Save remain, for all pages.
+- **Nothing typed is corrected in silence.** A font size out of range says so under the field and
+  the draft keeps the last valid value; a model that is not one blocks Save like a project error;
+  a failed save says which write failed; project validation runs once typing pauses. Jira Test
+  and agent Test run on what is on screen, saved or not, and agent Test also checks the program of
+  the interactive command exists. The theme applies at once, like the dashboard's button.
+- **The Agent page opens on a preset**, Claude Code as installed or Custom, and the four models.
+  The templates live under Advanced, and the page says when the interactive command skips
+  permissions. A project card shows its name and folder until opened; a broken one stays open.
 - **Monospace means one thing in the settings window: a value something else has to read back
   exactly.** Paths, commands, ports, model ids, project keys, the rail readouts. A project name and a
   button label are words a person chose and are set in the interface face. It is a rule, not a

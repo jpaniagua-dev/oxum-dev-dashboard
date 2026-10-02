@@ -956,9 +956,14 @@ async function bootstrap(): Promise<void> {
       // five-minute loop.
       void jiraMonitor.refreshNow();
     },
-    testJira: async () => {
-      const { siteUrl, email, projectKeys } = settingsStore.get().jira;
-      const token = await secrets.read();
+    // The values on screen, not the saved ones: Test is pressed before Save, to know whether to save.
+    // An empty token means the stored one, the rule the token field follows everywhere.
+    testJira: async (draft) => {
+      const saved = settingsStore.get().jira;
+      const siteUrl = (draft?.siteUrl ?? saved.siteUrl).trim();
+      const email = (draft?.email ?? saved.email).trim();
+      const projectKeys = draft?.projectKeys ?? saved.projectKeys;
+      const token = draft !== null && draft.token.length > 0 ? draft.token : await secrets.read();
       if (siteUrl.length === 0 || email.length === 0 || token.length === 0) {
         return { ok: false, message: 'Site, email and token are all required' };
       }

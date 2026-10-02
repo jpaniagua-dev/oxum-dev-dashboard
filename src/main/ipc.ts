@@ -41,6 +41,7 @@ import {
   type ShellProfile,
   type TerminalGroup,
   type TerminalId,
+  type JiraTestDraft,
   type UpdateNotice,
   type WorktreeCommand,
   type ThemeMode,
@@ -98,7 +99,8 @@ import {
 import { terminalCompat } from './terminal/windows-pty.js';
 import type { ProjectMonitor } from './projects/project-monitor.js';
 import { setDraft } from './github/gh-write.js';
-import { buildHeadlessCommand, describeCommand, readProfile } from '@shared/agent-profile.js';
+import { buildHeadlessCommand, describeCommand, readProfile, splitCommand } from '@shared/agent-profile.js';
+import { resolveCommand } from './spawn/command-resolve.js';
 import { AGENT_TEST_TIMEOUT_MS, runAgent } from './agent/run-agent.js';
 import { findFreePort, withPort } from './projects/free-port.js';
 import type { PullReviewService } from './review/review-service.js';
@@ -183,7 +185,7 @@ export interface IpcDependencies {
   /** Writes the Jira token to the encrypted store. Never reads it back towards the renderer. */
   readonly saveJiraToken: (token: string) => Promise<{ ok: boolean; message: string }>;
   readonly jiraConfig: () => JiraConfig;
-  readonly testJira: () => Promise<{ ok: boolean; message: string }>;
+  readonly testJira: (draft: JiraTestDraft | null) => Promise<{ ok: boolean; message: string }>;
   /** Credentials for one Jira write, or null when the connection is incomplete. */
   readonly jiraCredentials: () => Promise<JiraCredentials | null>;
   /** Called after a successful write, to refresh the views without waiting for the poll. */
@@ -434,9 +436,15 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return { ok: false, message: run.error ?? `${profile.label} did not answer` };
       }
       const answer = run.answer.trim().split(/\r?\n/)[0] ?? '';
+      // The interactive command opens an interface, so it cannot be run here, but its program can be
+      // found: it is the one every ticket tab starts, and a wrong one only showed there.
+      const interactive = splitCommand(profile.interactive)[0] ?? '';
+      const found = interactive.length > 0 && (await resolveCommand(interactive)) !== null;
       return {
-        ok: true,
-        message: `${profile.label} answered "${answer.slice(0, 60)}"  ·  ${command}`,
+        ok: found,
+        message: found
+          ? `${profile.label} answered "${answer.slice(0, 60)}"  ·  ${command}`
+          : `${profile.label} answered, but the interactive command's program "${interactive}" was not found`,
       };
     },
   );
@@ -1228,8 +1236,24 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     },
   );
 
-  ipcMain.handle(IpcChannel.JiraTest, async (): Promise<{ ok: boolean; message: string }> =>
-    deps.testJira(),
+  ipcMain.handle(IpcChannel.JiraTest, async (_event, raw: unknown): Promise<{ ok: boolean; message: string }> => {
+    const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : null;
+    const draft: JiraTestDraft | null =
+      record !== null &&
+      typeof record['siteUrl'] === 'string' &&
+      typeof record['email'] === 'string' &&
+      typeof record['token'] === 'string' &&
+      Array.isArray(record['projectKeys']) &&
+      record['projectKeys'].every((key) => typeof key === 'string')
+        ? {
+            siteUrl: record['siteUrl'],
+            email: record['email'],
+            token: record['token'],
+            projectKeys: record['projectKeys'] as string[],
+          }
+        : null;
+    return deps.testJira(draft);
+  },
   );
 
   ipcMain.handle(
@@ -2102,6 +2126,18 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       return saved;
     },
   );
+
+  ipcMain.handle(IpcChannel.PickFile, async (event, title: unknown): Promise<string | null> => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const options: Electron.OpenDialogOptions = {
+      title: typeof title === 'string' ? title : 'Choose a program',
+      properties: ['openFile'],
+      filters: [{ name: 'Programs', extensions: ['exe', 'cmd', 'bat'] }],
+    };
+    const result =
+      window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
 
   ipcMain.handle(IpcChannel.PickFolder, async (event, title: unknown): Promise<string | null> =>
     deps.pickFolder(

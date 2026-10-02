@@ -34,15 +34,17 @@ async function start(): Promise<void> {
       // cancel it, so the flag has to live there.
       onDirtyChange: (dirty) => window.api.reportSettingsDirty(dirty),
       onRequestClose: () => void window.api.closeWindow(),
-      // Scrolling belongs to the window: the form builds the rail, this decides what "go there" means.
-      onNavigate: (sectionId) =>
-        document.getElementById(sectionId)?.scrollIntoView({ block: 'start' }),
+      // Pages belong to the window: the form builds the rail, this decides what "go there" means.
+      onNavigate: (sectionId) => {
+        showPage(body, sectionId);
+        form.setActiveSection(sectionId);
+      },
     },
   );
 
   await form.load(bootstrap.settings, bootstrap.shellProfiles, bootstrap.jiraConfig);
-
-  watchSections(body, (sectionId) => form.setActiveSection(sectionId));
+  showPage(body, 'section-interface');
+  form.setActiveSection('section-interface');
 
   window.api.onThemeChanged((state) => applyTheme(state));
 
@@ -77,44 +79,12 @@ function applyTheme(state: ThemeState): void {
   document.documentElement.dataset.theme = state.resolved;
 }
 
-/**
- * Tells the rail which section the window is looking at.
- *
- * The topmost section still intersecting the body wins, rather than the most visible one: sections
- * here are wildly uneven — Interface is four lines, Projects can be twenty screens — and "most
- * visible" would leave the rail stuck on Projects while Terminal fills the view. Reading the
- * *first* one that is still on screen is the same rule the eye uses.
- *
- * The band is the top fifth of the body, so a section becomes current when it reaches the top of the
- * window and not when it merely appears at the bottom of it.
- */
-function watchSections(body: HTMLElement, onChange: (sectionId: string) => void): void {
-  const sections = Array.from(body.querySelectorAll<HTMLElement>('.settings__section'));
-  if (sections.length === 0) {
-    return;
+/** Shows one page and hides the others, back at its top. */
+function showPage(body: HTMLElement, sectionId: string): void {
+  for (const section of body.querySelectorAll<HTMLElement>('.settings__section')) {
+    section.hidden = section.id !== sectionId;
   }
-
-  const visible = new Set<string>();
-  const observer = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          visible.add(entry.target.id);
-        } else {
-          visible.delete(entry.target.id);
-        }
-      }
-      const first = sections.find((section) => visible.has(section.id));
-      if (first !== undefined) {
-        onChange(first.id);
-      }
-    },
-    { root: body, rootMargin: '0px 0px -80% 0px', threshold: 0 },
-  );
-
-  for (const section of sections) {
-    observer.observe(section);
-  }
+  body.scrollTop = 0;
 }
 
 void start().catch((error: unknown) => {

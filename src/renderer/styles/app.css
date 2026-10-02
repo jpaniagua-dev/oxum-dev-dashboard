@@ -2427,23 +2427,55 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-/*
- * The last section has to be tall enough to be scrolled to the TOP, and that is a fix rather than a
- * detail of taste.
- *
- * A scroller stops at `scrollHeight - clientHeight`, so a section whose remaining content is shorter
- * than the viewport can never reach the top: clicking `Jira` in the rail scrolled as far as it could
- * and left the section starting halfway down the window. The rail then disagreed with the screen on
- * top of it, because `watchSections` only counts a section as current while its top sits in the top
- * 20% of the scroller (`rootMargin: 0 0 -80% 0`), a band the last section could never enter.
- *
- * One rule fixes both symptoms: given a viewport's worth of height, the section reaches the top, and
- * the observer then sees it arrive with no change of its own. The trailing space below a short form is
- * the price, and it is the end of the page.
- */
-.settings__section:last-child {
+/* One page at a time: a section is shown alone, so none of them needs a rule under it. */
+.settings__section {
   border-bottom: 0;
-  min-height: 100%;
+}
+
+.settings__section[hidden] {
+  display: none;
+}
+
+/*
+ * The expert fields of a page, folded. A `<details>` and not a custom toggle: it is keyboard
+ * reachable and announced as expandable for free, and its open state is kept by the form across a
+ * repaint.
+ */
+.settings-advanced {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.settings-advanced > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.settings-advanced[open] > summary {
+  margin-bottom: 10px;
+}
+
+.settings-advanced__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* A page with unsaved changes. A dot and not a colour on the name: the readout already uses colour. */
+.settings-rail__dirty {
+  margin-left: 6px;
+  color: var(--primary);
+  font-weight: 700;
+}
+
+/* An inline reason a typed value cannot be used, under the field rather than replaced in silence. */
+.settings-field__problem {
+  color: var(--danger);
+  font-size: var(--font-xs);
 }
 
 .settings__section-title {
@@ -5894,6 +5926,12 @@ textarea.extensions__input {
  * The Tickets tab's additions: the Board/List switch, the new ticket form, the list, and the badge
  * that says where a ticket lives.
  */
+/* Last in the bar whatever is appended after it, the assignee filter included, and against the right edge. */
+.tickets__new {
+  order: 99;
+  margin-left: auto;
+}
+
 .tickets__layouts {
   display: flex;
   align-items: center;

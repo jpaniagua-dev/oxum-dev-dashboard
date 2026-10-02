@@ -12,9 +12,8 @@
   </head>
   <body>
     <!--
-      A window of its own, not an overlay. The rail on the left names the sections and reports what
-      each one is currently set to; the footer is pinned; only the body scrolls, so Save stays
-      reachable however long the project list gets.
+      A window of its own, not an overlay. The rail on the left picks the page and reports what each
+      one is set to; the footer is pinned, so Save stays reachable on every page.
     -->
     <div class="settings-page">
       <nav class="settings-rail" aria-label="Settings sections">
@@ -24,98 +23,77 @@
 
       <main class="settings__body" id="settings-body">
         <!--
-          Interface before everything else, and a section of its own rather than a field tucked into
-          "Terminal": someone whose app is too small to read looks for the app, not for the terminal.
+          One page at a time, chosen in the rail. It was one long scroll of every section, a hundred
+          controls deep once a few projects were added, and a newcomer looking for one setting read
+          all of them on the way. Each page shows what most people set, and folds the rest under
+          Advanced.
         -->
         <section class="settings__section" id="section-interface">
-          <h2 class="settings__section-title">Interface</h2>
+          <h2 class="settings__section-title">General</h2>
           <p class="settings__note">
-            This size is the base of the whole app's typography: everything else (badges, headers,
-            lists) keeps its proportions around it. The terminal has its own size, in the section
-            below.
+            The size of the app's text, the update notice, and a team configuration to share or to
+            start from.
           </p>
           <div id="settings-interface"></div>
         </section>
 
-        <section class="settings__section" id="section-projects">
+        <section class="settings__section" id="section-projects" hidden>
           <h2 class="settings__section-title">Projects</h2>
           <p class="settings__note">
-            A folder is enough. The kind and the port are inferred from the repository's
-            <code>package.json</code> when there is one; leave them empty to follow the project
-            automatically.
+            The repositories the dashboard watches. A folder is enough: the kind and the port are
+            inferred from its <code>package.json</code>.
           </p>
           <div id="settings-projects"></div>
         </section>
 
-        <section class="settings__section" id="section-terminal">
+        <section class="settings__section" id="section-terminal" hidden>
           <h2 class="settings__section-title">Terminal</h2>
           <p class="settings__note">
-            Profiles are detected on this machine. Editing a path marks it as custom, and the custom
-            value then wins over detection.
+            The shell new tabs open in, and its text size. Shells installed on this machine are
+            detected; a path you edit is kept over the detected one.
           </p>
           <div id="settings-terminal"></div>
         </section>
 
-        <!--
-          The coding agent, after Terminal and before Jira: it is a preference about how the app works, like
-          the sizes above it, whereas Jira is a connection to something outside.
-        -->
-        <section class="settings__section" id="section-claude">
-          <h2 class="settings__section-title">Coding agent</h2>
+        <section class="settings__section" id="section-claude" hidden>
+          <h2 class="settings__section-title">Agent</h2>
           <p class="settings__note">
-            Which CLI agent runs, and how it is called. The command is a template: everything is
-            passed through as written, <code>{model}</code> is replaced by the model flag and
-            disappears when no model is pinned, and quoted sections are kept whole. It is
-            <strong>not</strong> a shell, so nothing is expanded or globbed.
-          </p>
-          <p class="settings__note">
-            Three of these decide whether anything runs at all, and they fail quietly when wrong: the
-            flag that means <em>answer and exit</em> (without it the agent opens its interface into a
-            pipe and never returns), how the prompt gets in (a sprint prompt is tens of kilobytes,
-            past what a command line accepts), and the flags that keep the run read-only. That last
-            one is yours to get right: the pull request review trusts the template, so an agent given
-            no restriction can write to the repository it is reviewing. <strong>Press Test</strong>
-            after any change: it is the only thing that proves the command works.
+            The coding agent the app runs for the triage, the handoff of a ticket, commit messages
+            and reviews. Claude Code works as installed; press <strong>Test</strong> to check it
+            answers.
           </p>
           <div id="settings-claude"></div>
         </section>
 
-        <!--
-          After the coding agent and before Jira: like Jira it is about something outside this machine,
-          but unlike Jira it decides whether this app may WRITE there, so it sits where the reader
-          meets it before the connection that makes it possible.
-        -->
-        <section class="settings__section" id="section-review">
-          <h2 class="settings__section-title">Pull request review</h2>
+        <section class="settings__section" id="section-jira" hidden>
+          <h2 class="settings__section-title">Tickets</h2>
           <p class="settings__note">
-            Off by default, and that is the point: with the switch off the review runs, shows its
-            verdicts and posts nothing. Turning it on lets the app submit reviews to GitHub
-            <strong>as you</strong>, on your colleagues' pull requests, through the <code>gh</code>
-            you are signed in with. A submitted review cannot be deleted, only dismissed.
+            The Tickets tab shows Jira issues and local tickets together. Jira needs the connection
+            below; local tickets need only their folder. The API token is encrypted for your Windows
+            account, stored apart from the settings and never shown again: to change it, type a new
+            one.
+          </p>
+          <div id="settings-jira"></div>
+        </section>
+
+        <section class="settings__section" id="section-review" hidden>
+          <h2 class="settings__section-title">GitHub review</h2>
+          <p class="settings__note">
+            Off by default: the review runs, shows its verdicts and posts nothing. Turned on, the app
+            submits reviews to GitHub <strong>as you</strong>, through the <code>gh</code> you are
+            signed in with. A submitted review cannot be deleted, only dismissed.
           </p>
           <div id="settings-review"></div>
         </section>
 
-        <section class="settings__section" id="section-automations">
+        <section class="settings__section" id="section-automations" hidden>
           <h2 class="settings__section-title">Rules</h2>
           <p class="settings__note">
-            Off by default. A rule watches something this app already knows, a pull request
-            approved, a dev server broken, an issue assigned to you, or simply a time of day, and
-            acts on it <strong>once, on its own</strong>. Every other agent in this app starts with
-            a button; these do not, which is why they have a switch of their own.
+            Off by default. A rule watches something the app already knows (a pull request approved,
+            a server broken, an issue assigned to you, a time of day) and acts on it
+            <strong>on its own</strong>, which is why it has a switch of its own.
           </p>
           <div id="settings-automations"></div>
-        </section>
-
-        <section class="settings__section" id="section-jira">
-          <h2 class="settings__section-title">Tickets</h2>
-          <p class="settings__note">
-            The Tickets tab shows Jira issues and local tickets together. Jira needs the connection
-            below; the local tickets need nothing but their folder, at the bottom. The API token is encrypted by Windows for your account and stored separately, never in
-            <code>settings.json</code>. It is never read back into this window: to change it, type a
-            new one. A token grants access to all of your Jira, and not read-only access either.
-          </p>
-          <div id="settings-jira"></div>
         </section>
       </main>
 
