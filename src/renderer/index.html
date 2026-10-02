@@ -45,39 +45,37 @@
             <!-- Double-clicking this row folds the strip, the way a title bar maximises a window. -->
             <div class="projects__header" id="projects-header" title="Double-click: fold or unfold">
               <div class="strip__tabs" role="tablist">
+                <!--
+              Ordered on request on 2026-10-02, by the order work flows through them rather than by
+              the date each tab was added. The ids are unchanged, `jira` included under its Tickets
+              label: they are what the settings store as the tab to reopen on.
+            -->
                 <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
                   Projects
                 </button>
                 <button type="button" id="strip-tab-pulls" class="strip__tab" role="tab">
                   Pull requests
                 </button>
-                <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">
-                  Jira
-                </button>
-                <button type="button" id="strip-tab-git" class="strip__tab" role="tab">Git</button>
-                <button type="button" id="strip-tab-triage" class="strip__tab" role="tab">
-                  Triage
-                </button>
-                <!--
-              Appended after the existing tabs rather than slotted next to Git, which is where it
-              belongs by subject: inserting it there would shift Triage under a cursor that has learnt
-              where to find it. A tab row is read by position long before it is read by label.
-            -->
                 <button type="button" id="strip-tab-worktrees" class="strip__tab" role="tab">
                   Worktrees
                 </button>
-                <!--
-              Last, because it is the newest and because a tab row is read by position: every other
-              tab keeps the place it has had, which is what stops a habit from breaking on an update.
-            -->
-                <button type="button" id="strip-tab-agents" class="strip__tab" role="tab">
-                  Agents
+                <button type="button" id="strip-tab-jira" class="strip__tab" role="tab">
+                  Tickets
+                </button>
+                <button type="button" id="strip-tab-triage" class="strip__tab" role="tab">
+                  Triage
+                </button>
+                <button type="button" id="strip-tab-git" class="strip__tab" role="tab">
+                  Git
                 </button>
                 <button type="button" id="strip-tab-automations" class="strip__tab" role="tab">
                   Rules
                 </button>
                 <button type="button" id="strip-tab-vault" class="strip__tab" role="tab">
                   Vault
+                </button>
+                <button type="button" id="strip-tab-agents" class="strip__tab" role="tab">
+                  Agents
                 </button>
                 <button type="button" id="strip-tab-extensions" class="strip__tab" role="tab">
                   Extensions

@@ -1302,19 +1302,21 @@ export type StripTab =
  * follow: a union that something has to test at runtime needs its members as a value, or the test
  * is a copy that ages.
  *
- * The order is the display order, and a new tab goes at the END whatever its subject: inserting one
- * in the middle moves the others under a cursor that has learnt where they are.
+ * The order is the display order, the same as the buttons in `index.html`. It was the order the
+ * tabs were added in until 2026-10-02, when it was rearranged on request to follow the work:
+ * projects, pull requests, worktrees, tickets, triage, git, then the tools. A new tab still goes at
+ * the END, because inserting one moves the others under a cursor that has learnt where they are.
  */
 export const STRIP_TABS: readonly StripTab[] = [
   'projects',
   'pulls',
-  'jira',
-  'git',
-  'triage',
   'worktrees',
-  'agents',
+  'jira',
+  'triage',
+  'git',
   'automations',
   'vault',
+  'agents',
   'extensions',
 ];
 

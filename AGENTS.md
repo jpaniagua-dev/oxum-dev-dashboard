@@ -1172,6 +1172,10 @@ service and the CLI runner, `renderer/ui/extensions-panel.ts` the tab.
 
 ## Jira tab
 
+- **Labelled `Tickets` on screen since 2026-10-02, and still `jira` everywhere else.** The id is the
+  value `activeStrip` stores and the prefix of `jiraHeight`, so renaming it would reopen every
+  install on `projects` once and drop the height somebody set. The settings section keeps `Jira`:
+  it configures the connection, not the tab.
 - **The API token never goes into `settings.json`.** It lives encrypted by `safeStorage` (DPAPI on
   Windows, tied to the account) in `jira-token.bin`. If encryption is unavailable, `SecretStore.write`
   **refuses** to write rather than falling back to plain text: a secret written in the clear because the
