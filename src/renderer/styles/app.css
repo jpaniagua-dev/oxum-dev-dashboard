@@ -3659,6 +3659,7 @@ body {
   flex: none;
 }
 
+.terminal__tab-rerun,
 .terminal__tab-close {
   display: grid;
   place-items: center;
@@ -3672,6 +3673,17 @@ body {
   font-size: var(--font-xl);
   line-height: 1;
   cursor: pointer;
+}
+
+.terminal__tab-rerun svg {
+  width: 13px;
+  height: 13px;
+}
+
+.terminal__tab-rerun:hover,
+.terminal__tab-rerun:focus-visible {
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 .terminal__tab-close:hover {
@@ -4075,11 +4087,38 @@ body {
 }
 
 .board-card__title {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.board-card__rerun {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+}
+
+.board-card__rerun svg {
+  width: 14px;
+  height: 14px;
+}
+
+.board-card__rerun:hover,
+.board-card__rerun:focus-visible {
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 
 .board-card__rename {

@@ -7,10 +7,11 @@ import type {
 } from '@shared/contracts.js';
 import { showContextMenu } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
-import { AGENT_ICON } from './icons.js';
+import { AGENT_ICON, RERUN_ICON } from './icons.js';
 import type { JobKind, JobRun } from '@shared/job-run.js';
 import { describeElapsed } from '@shared/job-run.js';
 import { NOTE_LIMIT } from '@shared/session-note.js';
+import { canRerunSession } from '@shared/session-actions.js';
 import { buildPill } from './project-table.js';
 import { presentServer } from './presenters.js';
 
@@ -211,6 +212,8 @@ export interface TerminalBoardActions {
   onOpen: (terminalId: TerminalId) => void;
   /** Right-click, so a card offers what its tab offers. */
   onMenu: (session: TerminalSession, x: number, y: number) => void;
+  /** Restarts a configured Watch/Server without going back through Projects. */
+  onRerun: (session: TerminalSession) => void;
   /**
    * Opens a new shell, without leaving the board.
    *
@@ -669,6 +672,20 @@ export class TerminalBoard {
     const head = createElement('div', { className: 'board-card__head' });
     head.append(createElement('span', { className: 'board-card__dot' }));
     head.append(createElement('span', { className: 'board-card__title', text: session.title }));
+    if (canRerunSession(session)) {
+      const rerun = createElement('button', {
+        className: 'board-card__rerun',
+        title: 'Rerun this Watch/Server',
+      });
+      rerun.type = 'button';
+      rerun.setAttribute('aria-label', `Rerun ${session.title}`);
+      rerun.append(createIcon(RERUN_ICON, { paint: 'stroke' }));
+      rerun.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.actions.onRerun(session);
+      });
+      head.append(rerun);
+    }
     body.append(head);
 
     // A server or build has a more precise phase below. "working" immediately above "building"

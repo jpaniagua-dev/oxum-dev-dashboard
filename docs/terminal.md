@@ -32,6 +32,10 @@ terminals. Clicking a tab unfolds it.
 
 ## Cards
 
+Watch and Server sessions have a rerun button on both their card and terminal tab. It stops the
+current process, waits for the port to be released, and starts the same configured action again.
+The same action is available from the card or tab context menu.
+
 `Ctrl+G` shows the sessions as cards on a canvas instead of tabs: one card per terminal, with what it
 is doing. Click a card to open its terminal in a sidebar beside the canvas, with the session's name
 at the top left (double-click it to rename); double-click a card's title to rename it there too;

@@ -51,6 +51,9 @@ export const MORE_ICON = 'M3.6 8L3.7 8M7.95 8L8.05 8M12.3 8L12.4 8';
  */
 export const RUN_ICON = 'M5.6 3.9L12.6 8L5.6 12.1Z';
 
+/** A circular arrow: stop the current Watch/Server process and run its configured action again. */
+export const RERUN_ICON = 'M12.8 5.5V2.8L10.6 5M12.5 5A5.2 5.2 0 1 0 13 9.6';
+
 /**
  * The same play, smaller, with a plus beside it: "run this, on what was added".
  *

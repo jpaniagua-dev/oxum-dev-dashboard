@@ -26,9 +26,10 @@ import {
   tabsAfter,
   type PaneGrid,
 } from '@shared/terminal-groups.js';
-import { AGENT_ICON } from './icons.js';
+import { AGENT_ICON, RERUN_ICON } from './icons.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
+import { canRerunSession } from '@shared/session-actions.js';
 import {
   createTerminalView,
   ensureTerminalRenderer,
@@ -100,6 +101,8 @@ export interface TerminalPaneActions {
   onInput: (terminalId: TerminalId, data: string) => void;
   onResize: (terminalId: TerminalId, cols: number, rows: number) => void;
   onClose: (terminalId: TerminalId) => void;
+  /** Restarts the configured Watch/Server action represented by this session. */
+  onRerun: (session: TerminalSession) => void;
   onRename: (terminalId: TerminalId, title: string) => void;
   /** Open a new shell tab from a profile, in the focused pane. */
   onNewShell: (profileId: string) => void;
@@ -1420,8 +1423,18 @@ export class TerminalPane {
       .map((id) => this.sessions.find((entry) => entry.id === id))
       .filter((entry): entry is TerminalSession => entry !== undefined && entry.closable);
     const kept = rightward.length - closable.length;
+    const rerun: MenuItem[] = canRerunSession(session)
+      ? [
+          {
+            label: 'Rerun',
+            hint: 'Stop this Watch/Server, wait for its port, then run it again',
+            run: () => this.actions.onRerun(session),
+          },
+        ]
+      : [];
 
     this.showMenu(x, y, [
+      ...rerun,
       {
         label: 'Move to a pane on the right',
         // The only tab of its pane is already alone: moving it would close one pane to open another.
@@ -1738,6 +1751,21 @@ export class TerminalPane {
     // A dot marks a live process, so a finished tab is visibly inert rather than looking active.
     if (session.running) {
       wrapper.append(createElement('span', { className: 'terminal__tab-dot' }));
+    }
+
+    if (canRerunSession(session)) {
+      const rerun = createElement('button', {
+        className: 'terminal__tab-rerun',
+        title: 'Rerun this Watch/Server',
+      });
+      rerun.type = 'button';
+      rerun.setAttribute('aria-label', `Rerun ${session.title}`);
+      rerun.append(createIcon(RERUN_ICON, { paint: 'stroke' }));
+      rerun.addEventListener('click', (event) => {
+        event.stopPropagation();
+        this.actions.onRerun(session);
+      });
+      wrapper.append(rerun);
     }
 
     if (session.closable) {

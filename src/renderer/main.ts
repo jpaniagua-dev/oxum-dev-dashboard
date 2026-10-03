@@ -54,6 +54,7 @@ import { TerminalBoard } from './ui/terminal-board.js';
 import { agentSessions, renderAgentsPanel } from './ui/agents-panel.js';
 import { ExtensionsPanel } from './ui/extensions-panel.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
+import { canRerunSession } from '@shared/session-actions.js';
 import {
   buildChangeMenuItems,
   buildCommitMenuItems,
@@ -122,6 +123,8 @@ class App {
   private extensions: ExtensionsPanel | null = null;
   /** Session shown in the board's right terminal sidebar, or null before a card is selected. */
   private boardPreviewId: TerminalId | null = null;
+  /** Sessions already in the stop/wait/start cycle, so a double click cannot launch two restarts. */
+  private readonly rerunning = new Set<TerminalId>();
   /** The separator keeps its session-local width when cards are switched or the preview is hidden. */
   private boardPreviewResizer: { refresh: () => void } | null = null;
   /** Which agent session the Agents tab is looking at. Null means "the newest one". */
@@ -308,6 +311,7 @@ class App {
         onInput: (terminalId, data) => window.api.sendPtyInput(terminalId, data),
         onResize: (terminalId, cols, rows) => window.api.resizePty(terminalId, { cols, rows }),
         onClose: (terminalId) => void window.api.closeTerminal(terminalId),
+        onRerun: (session) => void this.rerunSession(session),
         onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
         onMoveToServers: (terminalId) => void window.api.moveTerminalToServers(terminalId, true),
         // The same callback the board is given: two surfaces drawing one session must not grow two
@@ -380,6 +384,7 @@ class App {
         });
       },
       onMenu: (session, x, y) => this.openSessionMenu(session, x, y),
+      onRerun: (session) => void this.rerunSession(session),
       onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
       // The very callback the tab strip is given, so the board cannot grow its own idea of what
       // opening a shell means. Staying on the board is deliberate: setting up three sessions should
@@ -2250,6 +2255,22 @@ class App {
     const terminalId = await window.api.runAction(projectId, actionId);
     if (terminalId !== null) {
       await this.focusTerminal(terminalId);
+    }
+  }
+
+  /** Restarts the configured action behind a Watch/Server session from its tab or card. */
+  private async rerunSession(session: TerminalSession): Promise<void> {
+    if (!canRerunSession(session) || this.rerunning.has(session.id)) {
+      return;
+    }
+    this.rerunning.add(session.id);
+    try {
+      await this.runAction(session.projectId, session.actionId);
+    } catch (error: unknown) {
+      console.error('[terminal] could not rerun the Watch/Server:', error);
+      this.stampMessage('Could not rerun the Watch/Server, see the console');
+    } finally {
+      this.rerunning.delete(session.id);
     }
   }
 
