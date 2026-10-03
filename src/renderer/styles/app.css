@@ -219,6 +219,24 @@ body {
   white-space: nowrap;
 }
 
+.table__actions .button {
+  height: calc(var(--font-sm) * 1.2 + 10px);
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+.button.table__folder {
+  display: inline-grid;
+  place-items: center;
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.button.table__folder svg {
+  width: 1.2em;
+  height: 1.2em;
+}
+
 .cell-project {
   display: flex;
   flex-direction: column;

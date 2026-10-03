@@ -38,4 +38,6 @@ waiting for the port to be released. **Stop** ends the whole process tree, so `n
 the port. The **PR** button opens the pull request in the browser, and **`>_`** a shell in the
 repository.
 
+The folder icon opens the repository in Explorer.
+
 Closing the window asks first when servers started by the app are still running: they stop with it.

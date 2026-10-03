@@ -1,7 +1,7 @@
 import type { ProjectId, ProjectRow, TagColor, TagColors } from '@shared/contracts.js';
 import { MAX_TAGS_PER_PROJECT, hasTag } from '@shared/project-tags.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
-import { clearChildren, createElement, hitsInteractive } from './dom.js';
+import { clearChildren, createElement, createIcon, hitsInteractive } from './dom.js';
 import { buildTagChips } from './tags.js';
 import type { PullsByProject } from './worktree-list.js';
 import {
@@ -12,6 +12,9 @@ import {
   presentWorkflows,
   type Pill,
 } from './presenters.js';
+
+/** A repository folder, for the row action that reveals it in Explorer. */
+const FOLDER_ICON = 'M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z';
 
 export interface TableActions {
   /** Runs one of the project's configured actions. */
@@ -385,9 +388,13 @@ function buildActions(row: ProjectRow, actions: TableActions): DocumentFragment 
   terminal.addEventListener('click', () => actions.onNewTerminal(row.project.id));
   fragment.append(terminal);
 
-  const folder = createElement('button', { className: 'button button--quiet', text: '…' });
+  const folder = createElement('button', {
+    className: 'button table__folder',
+    title: 'Open the folder in Explorer',
+  });
   folder.type = 'button';
-  folder.title = 'Open the folder';
+  folder.setAttribute('aria-label', 'Open the folder');
+  folder.append(createIcon(FOLDER_ICON, { paint: 'stroke' }));
   folder.addEventListener('click', () => actions.onOpenFolder(row.project.id));
   fragment.append(folder);
 
