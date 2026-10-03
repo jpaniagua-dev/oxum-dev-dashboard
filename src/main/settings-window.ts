@@ -1,5 +1,5 @@
 import { BrowserWindow, dialog, shell } from 'electron';
-import type { WindowBounds } from '@shared/contracts.js';
+import { IpcChannel, type ProjectId, type WindowBounds } from '@shared/contracts.js';
 import type { WindowStateStore } from './store/window-state.js';
 import { forwardConsole, loadRendererPage, windowIcon } from './window.js';
 
@@ -26,6 +26,7 @@ export const SETTINGS_WINDOW_BOUNDS: WindowBounds = { x: -1, y: -1, width: 880, 
  */
 export class SettingsWindow {
   private window: BrowserWindow | null = null;
+  private scope: ProjectId | null = null;
   private saveTimer: NodeJS.Timeout | null = null;
   /**
    * Unsaved edits, reported by the renderer.
@@ -47,10 +48,16 @@ export class SettingsWindow {
     return this.window;
   }
 
+  get currentScope(): ProjectId | null {
+    return this.scope;
+  }
+
   /** Opens the window, or brings the existing one forward. */
-  async open(): Promise<void> {
+  async open(scope: ProjectId | null = null): Promise<void> {
+    this.scope = scope;
     const existing = this.window;
     if (existing !== null && !existing.isDestroyed()) {
+      this.send(IpcChannel.SettingsScopeChanged, scope);
       if (existing.isMinimized()) {
         existing.restore();
       }
@@ -106,6 +113,7 @@ export class SettingsWindow {
 
     window.on('closed', () => {
       this.window = null;
+      this.scope = null;
       this.dirty = false;
     });
 

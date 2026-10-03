@@ -1016,6 +1016,7 @@ class App {
         // somewhere to go without reading the README first.
         onAddProject: () => void this.addProject(),
         onOpenSettings: () => void window.api.openSettings(),
+        onOpenProjectSettings: (projectId) => void window.api.openSettings(projectId),
       },
     );
   }

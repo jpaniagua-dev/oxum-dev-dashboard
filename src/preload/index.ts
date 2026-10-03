@@ -460,7 +460,16 @@ const api: RendererApi = {
     return () => ipcRenderer.off(IpcChannel.SettingsChanged, handler);
   },
 
-  openSettings: (): Promise<void> => ipcRenderer.invoke(IpcChannel.SettingsOpen),
+  openSettings: (projectId?: ProjectId): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.SettingsOpen, projectId),
+
+  settingsScope: (): Promise<ProjectId | null> => ipcRenderer.invoke(IpcChannel.SettingsScope),
+
+  onSettingsScopeChanged: (listener: (projectId: ProjectId | null) => void): (() => void) => {
+    const handler = (_event: unknown, projectId: ProjectId | null): void => listener(projectId);
+    ipcRenderer.on(IpcChannel.SettingsScopeChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.SettingsScopeChanged, handler);
+  },
 
   reportSettingsDirty: (dirty: boolean): void => {
     ipcRenderer.send(IpcChannel.SettingsDirty, dirty);

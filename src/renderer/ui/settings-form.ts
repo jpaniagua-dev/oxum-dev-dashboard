@@ -7,6 +7,7 @@ import {
   type ProjectAction,
   type ProjectCandidate,
   type ProjectConfig,
+  type ProjectId,
   type ProjectValidation,
   type ShellProfile,
   type TagColors,
@@ -272,11 +273,23 @@ export class SettingsForm {
   private tagColors: TagColors = {};
   /** Section the rail marks as current. Driven by the window's scroll, not by the last click. */
   private activeSection = 'section-interface';
+  /** One project to render on its own, or null for the complete settings window. */
+  private projectScope: ProjectId | null = null;
 
   constructor(
     private readonly hosts: SettingsFormHosts,
     private readonly actions: SettingsFormActions,
   ) {}
+
+  /** Limits the Projects page to one entry without replacing the form's complete working draft. */
+  setProjectScope(projectId: ProjectId | null): void {
+    this.projectScope = projectId;
+    if (projectId !== null) {
+      this.expandedProjects.add(projectId);
+    }
+    this.renderProjects();
+    this.renderRail();
+  }
 
   /** Loads a fresh draft from the stored settings. */
   async load(
@@ -385,6 +398,10 @@ export class SettingsForm {
    */
   private renderRail(): void {
     clearChildren(this.hosts.rail);
+
+    if (this.projectScope !== null) {
+      return;
+    }
 
     for (const entry of this.railEntries()) {
       const item = createElement('li');
@@ -1205,6 +1222,21 @@ export class SettingsForm {
   private renderProjects(): void {
     clearChildren(this.hosts.projects);
 
+    if (this.projectScope !== null) {
+      const project = this.projects.find((entry) => entry.id === this.projectScope);
+      if (project === undefined) {
+        this.hosts.projects.append(
+          createElement('p', {
+            className: 'settings__empty',
+            text: 'This project is no longer configured.',
+          }),
+        );
+      } else {
+        this.hosts.projects.append(this.buildProjectEntry(project));
+      }
+      return;
+    }
+
     /*
      * The folder Detect scans, first in the section because it is what makes Detect useful.
      *
@@ -1390,7 +1422,11 @@ export class SettingsForm {
      * this page several screens long, for a list read far more often than edited. A project with an
      * error stays open, being the one that needs editing.
      */
-    const open = hasError || this.expandedProjects.has(project.id) || this.projects.length === 1;
+    const open =
+      hasError ||
+      this.projectScope === project.id ||
+      this.expandedProjects.has(project.id) ||
+      this.projects.length === 1;
     const fold = createElement('button', { className: 'button button--quiet', text: open ? 'Less' : 'Details…' });
     fold.type = 'button';
     fold.setAttribute('aria-expanded', String(open));
@@ -1481,7 +1517,7 @@ export class SettingsForm {
       );
     }
 
-    if (this.projects.length > 1 && !hasError) {
+    if (this.projectScope === null && this.projects.length > 1 && !hasError) {
       card.append(fold);
     }
     return card;

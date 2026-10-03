@@ -998,7 +998,8 @@ async function bootstrap(): Promise<void> {
           : await dialog.showOpenDialog(window, options);
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
-    openSettings: () => settingsWindow.open(),
+    openSettings: (projectId) => settingsWindow.open(projectId),
+    settingsScope: () => settingsWindow.currentScope,
     openServers: () => serversWindow.open(),
     closeServers: () => serversWindow.close(),
     // Broadcast rather than sent to the dashboard alone: the servers window's own `Back` button reads

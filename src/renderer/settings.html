@@ -15,8 +15,8 @@
       A window of its own, not an overlay. The rail on the left picks the page and reports what each
       one is set to; the footer is pinned, so Save stays reachable on every page.
     -->
-    <div class="settings-page">
-      <nav class="settings-rail" aria-label="Settings sections">
+    <div class="settings-page" id="settings-page">
+      <nav class="settings-rail" id="settings-rail-container" aria-label="Settings sections">
         <h1 class="settings-rail__title">Settings</h1>
         <ul class="settings-rail__list" id="settings-rail"></ul>
       </nav>
@@ -38,8 +38,8 @@
         </section>
 
         <section class="settings__section" id="section-projects" hidden>
-          <h2 class="settings__section-title">Projects</h2>
-          <p class="settings__note">
+          <h2 class="settings__section-title" id="settings-projects-title">Projects</h2>
+          <p class="settings__note" id="settings-projects-note">
             The repositories the dashboard watches. A folder is enough: the kind and the port are
             inferred from its <code>package.json</code>.
           </p>

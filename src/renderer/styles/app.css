@@ -2317,6 +2317,19 @@ body {
   background: var(--surface);
 }
 
+/* A row's Settings gesture opens the same form with no unrelated navigation or global controls. */
+.settings-page--project {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.settings-page--project .settings-rail {
+  display: none;
+}
+
+.settings-page--project .settings__body {
+  grid-column: 1;
+}
+
 /* ------------------------------------------------------------------- rail */
 
 .settings-rail {

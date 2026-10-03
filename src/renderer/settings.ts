@@ -1,4 +1,4 @@
-import type { ThemeState } from '@shared/contracts.js';
+import type { ProjectId, ThemeState } from '@shared/contracts.js';
 import { requireElement } from './ui/dom.js';
 import { SettingsForm } from './ui/settings-form.js';
 import { applyUiFontSize } from './ui/ui-font.js';
@@ -43,8 +43,9 @@ async function start(): Promise<void> {
   );
 
   await form.load(bootstrap.settings, bootstrap.shellProfiles, bootstrap.jiraConfig);
-  showPage(body, 'section-interface');
-  form.setActiveSection('section-interface');
+  applyScope(body, form, await window.api.settingsScope());
+
+  window.api.onSettingsScopeChanged((projectId) => applyScope(body, form, projectId));
 
   window.api.onThemeChanged((state) => applyTheme(state));
 
@@ -73,6 +74,25 @@ async function start(): Promise<void> {
       void window.api.closeWindow();
     }
   });
+}
+
+/** Switches between the complete settings window and one project's isolated configuration. */
+function applyScope(body: HTMLElement, form: SettingsForm, projectId: ProjectId | null): void {
+  const scoped = projectId !== null;
+  const page = requireElement('settings-page');
+  page.classList.toggle('settings-page--project', scoped);
+  requireElement('settings-rail-container').hidden = scoped;
+
+  requireElement('settings-projects-title').textContent = scoped ? 'Project settings' : 'Projects';
+  requireElement('settings-projects-note').textContent = scoped
+    ? 'Only this project is shown. Save applies these changes to its row in the dashboard.'
+    : 'The repositories the dashboard watches. A folder is enough: the kind and the port are inferred from its package.json.';
+  document.title = scoped ? 'Project settings - Oxum Dev Dashboard' : 'Settings - Oxum Dev Dashboard';
+
+  form.setProjectScope(projectId);
+  const section = scoped ? 'section-projects' : 'section-interface';
+  showPage(body, section);
+  form.setActiveSection(section);
 }
 
 function applyTheme(state: ThemeState): void {

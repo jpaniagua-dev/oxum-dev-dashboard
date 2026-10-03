@@ -25,6 +25,8 @@ export interface TableActions {
   onEditingChange: (editing: boolean) => void;
   onStop: (projectId: ProjectId) => void;
   onOpenFolder: (projectId: ProjectId) => void;
+  /** Opens the settings window with only this project's fields visible. */
+  onOpenProjectSettings: (projectId: ProjectId) => void;
   /**
    * Opens the repository's shell, reusing the one already there.
    *
@@ -772,6 +774,12 @@ function buildRowMenuItems(
       },
     });
   }
+
+  items.push({
+    label: 'Settings',
+    hint: 'Edit only this project',
+    run: () => actions.onOpenProjectSettings(row.project.id),
+  });
 
   return items;
 }

@@ -214,8 +214,9 @@ export interface IpcDependencies {
    * picker anchored to the dashboard while the user is in the settings window looks like a freeze.
    */
   readonly pickFolder: (title: string, parent: BrowserWindow | null) => Promise<string | null>;
-  /** Opens or focuses the settings window. */
-  readonly openSettings: () => Promise<void>;
+  /** Opens or focuses the settings window, optionally on one project's configuration only. */
+  readonly openSettings: (projectId: ProjectId | null) => Promise<void>;
+  readonly settingsScope: () => ProjectId | null;
   /** Opens or focuses the servers window. */
   readonly openServers: () => Promise<void>;
   /** Closes the servers window, if it is open. Its `closed` hook hands any sessions back. */
@@ -2156,7 +2157,17 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     ),
   );
 
-  ipcMain.handle(IpcChannel.SettingsOpen, async (): Promise<void> => deps.openSettings());
+  ipcMain.handle(IpcChannel.SettingsOpen, async (_event, projectId: unknown): Promise<void> => {
+    const scope =
+      typeof projectId === 'string' && deps.projects().some((project) => project.id === projectId)
+        ? (projectId as ProjectId)
+        : null;
+    await deps.openSettings(scope);
+  });
+
+  ipcMain.handle(IpcChannel.SettingsScope, async (): Promise<ProjectId | null> =>
+    deps.settingsScope(),
+  );
 
   ipcMain.on(IpcChannel.SettingsDirty, (_event, dirty: unknown) => {
     deps.setSettingsDirty(dirty === true);

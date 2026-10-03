@@ -2520,6 +2520,10 @@ export const IpcChannel = {
   SettingsChanged: 'settings:changed',
   /** invoke: () => void, opens (or focuses) the settings window */
   SettingsOpen: 'settings:open',
+  /** invoke: () => ProjectId | null, the project-only scope of the settings window */
+  SettingsScope: 'settings:scope',
+  /** on: (projectId: ProjectId | null) => void, switches the open settings window's scope */
+  SettingsScopeChanged: 'settings:scope-changed',
   /** send: (dirty: boolean) => void, lets the main process warn before closing on unsaved edits */
   SettingsDirty: 'settings:dirty',
   /** invoke: () => void, closes the window the call came from */
@@ -2883,8 +2887,11 @@ export interface RendererApi {
   pickFile(title: string): Promise<string | null>;
   onSettingsChanged(listener: (settings: AppSettings) => void): () => void;
 
-  /** Opens the settings window, or focuses it when it is already up. */
-  openSettings(): Promise<void>;
+  /** Opens the settings window, optionally limited to one project's configuration. */
+  openSettings(projectId?: ProjectId): Promise<void>;
+  /** Project-only scope of this settings window, or null for every settings page. */
+  settingsScope(): Promise<ProjectId | null>;
+  onSettingsScopeChanged(listener: (projectId: ProjectId | null) => void): () => void;
   /** Reports unsaved edits so closing the settings window can ask for confirmation. */
   reportSettingsDirty(dirty: boolean): void;
   /** Closes the window the renderer runs in. */
