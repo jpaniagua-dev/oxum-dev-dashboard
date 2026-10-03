@@ -28,6 +28,7 @@ terminals. Clicking a tab unfolds it.
 | `Ctrl+N` | start the configured agent |
 | `Ctrl+Shift+N` | open a terminal with the default shell |
 | `Ctrl+G` | switch between tabs and cards |
+| `Ctrl+B` | show or hide the active terminal's note, including the terminal previewed in Cards |
 
 ## Cards
 

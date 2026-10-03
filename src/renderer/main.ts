@@ -2554,7 +2554,7 @@ class App {
     /*
      * App-wide shortcuts are captured before xterm can turn them into terminal input.
      *
-     * The resolver is pure and tested; this listener only performs the three resulting gestures.
+     * The resolver is pure and tested; this listener only performs the resulting gestures.
      * Holding a chord never repeats an action because `appShortcut` refuses repeated keydowns.
      */
     document.addEventListener(
@@ -2562,6 +2562,22 @@ class App {
       (event) => {
         const shortcut = appShortcut(event);
         if (shortcut === null) {
+          return;
+        }
+        if (shortcut === 'toggle-terminal-note') {
+          /*
+           * Cards mode still shows the selected session through TerminalPane: it is the preview on
+           * the right, including its note panel. The first Cards implementation toggled the note
+           * drawn inside the card instead, so the panel beside it did not move at all. Route both
+           * surfaces through the pane, but refuse the chord in Cards until a card is previewed.
+           */
+          const toggled =
+            this.boardMode && this.boardPreviewId === null
+              ? false
+              : this.terminal?.toggleActiveNote();
+          if (toggled === true) {
+            event.preventDefault();
+          }
           return;
         }
         event.preventDefault();

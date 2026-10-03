@@ -1191,6 +1191,27 @@ export class TerminalPane {
   }
 
   /**
+   * Shows or hides the note attached to the tab that currently owns the keyboard.
+   *
+   * Returns whether a note was toggled so the app-level shortcut only consumes `Ctrl+B` when this
+   * surface can act on it. An editor stays open: hiding it would discard text that has not reached
+   * the main process yet.
+   */
+  toggleActiveNote(): boolean {
+    const active = this.activeId;
+    if (active === null || this.notingEdit !== null) {
+      return false;
+    }
+    if (this.notesHidden.has(active)) {
+      this.notesHidden.delete(active);
+    } else {
+      this.notesHidden.add(active);
+    }
+    this.renderStrips();
+    return true;
+  }
+
+  /**
    * True while a note is actually being typed into.
    *
    * The FIELD and not the box, which is the whole reason the two states are separate: a box that is
@@ -1243,10 +1264,10 @@ export class TerminalPane {
     });
     button.type = 'button';
     button.title = shown
-      ? 'Hide this note'
+      ? 'Hide this note (Ctrl+B)'
       : session.note === null
-        ? 'Add a note saying what this session is for'
-        : `${session.note.text}\n(click to show this note)`;
+        ? 'Add a note saying what this session is for (Ctrl+B)'
+        : `${session.note.text}\n(click or press Ctrl+B to show this note)`;
     button.setAttribute(
       'aria-label',
       session.note === null ? 'Add a note' : 'Show or hide the note',

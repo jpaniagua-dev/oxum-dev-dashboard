@@ -40,6 +40,10 @@ describe('appShortcut', () => {
     expect(appShortcut(key('KeyG', { ctrlKey: true }))).toBe('toggle-terminal-view');
   });
 
+  it('shows or hides the active terminal note with Ctrl+B', () => {
+    expect(appShortcut(key('KeyB', { ctrlKey: true }))).toBe('toggle-terminal-note');
+  });
+
   it('opens a default terminal with Ctrl+Shift+N', () => {
     expect(appShortcut(key('KeyN', { ctrlKey: true, shiftKey: true }))).toBe('new-terminal');
   });
@@ -49,5 +53,6 @@ describe('appShortcut', () => {
     expect(appShortcut(key('KeyG', { ctrlKey: true, repeat: true }))).toBeNull();
     expect(appShortcut(key('KeyN', { ctrlKey: true, altKey: true }))).toBeNull();
     expect(appShortcut(key('KeyG', { ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(appShortcut(key('KeyB', { ctrlKey: true, shiftKey: true }))).toBeNull();
   });
 });
