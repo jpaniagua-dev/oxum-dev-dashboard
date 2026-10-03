@@ -1097,8 +1097,8 @@ export function isClosable(
  * - bash gets `-ic`. Interactive, because `commit` is an **alias**: bash refuses to expand aliases in
  *   a non-interactive shell at all, and `-lc` reads `.bash_profile` rather than the `.bashrc` that
  *   defines it. Both verified on this machine.
- * - cmd gets `/c`, which is also why the default `Run` action ships pointed at cmd: a pty does not
- *   resolve the `.cmd` shims that make a bare `npm` work.
+ * - cmd gets `/c`. The shell then resolves Windows command shims such as `npm.cmd`, just as bash,
+ *   PowerShell and WSL resolve the equivalent command through their own rules.
  *
  * An unrecognised executable falls back to cmd's convention rather than guessing, and the profile's
  * own arguments are dropped in that case: they configure an interactive session, not a one-shot

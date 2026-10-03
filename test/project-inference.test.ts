@@ -10,7 +10,7 @@ import {
   validateActions,
   validateProjectPath,
 } from '../src/main/projects/project-inference.js';
-import { defaultLabel, makeId } from '../src/main/projects/registry.js';
+import { configFromPath, defaultLabel, makeId } from '../src/main/projects/registry.js';
 
 /**
  * Repositories root, built on a temporary directory.
@@ -182,6 +182,10 @@ describe('validateActions', () => {
 });
 
 describe('label and id derivation', () => {
+  it('lets a freshly added project action inherit the configured default shell', () => {
+    expect(configFromPath(join(ROOT, 'web-app')).actions[0]?.profileId).toBeNull();
+  });
+
   it('keeps the folder name as the default label', () => {
     // No shortening rule: guessing which part of someone else's folder name is noise removes the
     // word that told two projects apart. Renaming is a gesture, not an inference.

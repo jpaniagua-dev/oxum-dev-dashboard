@@ -11,8 +11,8 @@ describe('asActions', () => {
      */
     const actions = asActions(undefined);
     expect(actions.map((action) => action.id)).toEqual(['run']);
-    // `cmd` and not the default shell: a pty does not resolve the `.cmd` shims, so a bare `npm` fails.
-    expect(actions[0]).toMatchObject({ command: 'npm run start', role: 'server', profileId: 'cmd' });
+    // No override: the action follows the default profile chosen in Settings.
+    expect(actions[0]).toMatchObject({ command: 'npm run start', role: 'server', profileId: null });
   });
 
   it('migrates a pre-actions project, keeping a customised start script', () => {

@@ -53,12 +53,13 @@ export function makeId(folder: string): ProjectId {
  * that already carries a `Commit` button keeps it. Only a project added from now on starts with `Run`
  * alone.
  *
- * `cmd` for npm and not the default shell, which is not cosmetic: a pty does not resolve the `.cmd`
- * shims a shell would, so a bare `npm` fails outside it.
+ * No profile override: a freshly added project follows the configured default shell, exactly like
+ * the terminal opened by clicking its row. `runProjectAction` executes the command through that
+ * shell, so Git Bash, PowerShell, cmd and WSL each receive the syntax they understand.
  */
 export function defaultActions(startScript = 'start'): ProjectAction[] {
   return [
-    { id: 'run', label: 'Run', command: `npm run ${startScript}`, role: 'server', profileId: 'cmd' },
+    { id: 'run', label: 'Run', command: `npm run ${startScript}`, role: 'server', profileId: null },
   ];
 }
 
