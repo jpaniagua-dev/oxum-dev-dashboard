@@ -1565,9 +1565,10 @@ export class TerminalPane {
       strip.classList.toggle('terminal__strip--preview', previewed);
 
       /*
-       * The board sidebar keeps the note and nothing else. The card already carries the tab's
-       * identity and its menu, but a terminal read on its own is exactly when the reader wants to
-       * know what it was for, the argument that gave the grid its box in the first place.
+       * The board sidebar keeps the controls that belong to this one session: its note and, once
+       * the session is closable, the same close action its tab and card menu expose. The card
+       * already carries the rest of the tab menu, but making somebody leave the open terminal just
+       * to close it turns the sidebar into a dead end.
        */
       if (previewed) {
         /*
@@ -1596,6 +1597,9 @@ export class TerminalPane {
         }
         const actions = createElement('div', { className: 'terminal__strip-actions' });
         actions.append(this.buildNoteControl(group));
+        if (session?.closable === true) {
+          actions.append(this.buildCloseButton(session));
+        }
         strip.append(actions);
         return;
       }
@@ -1769,17 +1773,23 @@ export class TerminalPane {
     }
 
     if (session.closable) {
-      const close = createElement('button', { className: 'terminal__tab-close', text: '×' });
-      close.type = 'button';
-      close.title = 'Close this tab';
-      close.addEventListener('click', (event) => {
-        event.stopPropagation();
-        this.actions.onClose(session.id);
-      });
-      wrapper.append(close);
+      wrapper.append(this.buildCloseButton(session));
     }
 
     return wrapper;
+  }
+
+  /** The one close control shared by a full tab and the Cards sidebar preview. */
+  private buildCloseButton(session: TerminalSession): HTMLButtonElement {
+    const close = createElement('button', { className: 'terminal__tab-close', text: '×' });
+    close.type = 'button';
+    close.title = 'Close this tab';
+    close.setAttribute('aria-label', `Close ${session.title}`);
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      this.actions.onClose(session.id);
+    });
+    return close;
   }
 
   /* ------------------------------------------------------------------ drag */
