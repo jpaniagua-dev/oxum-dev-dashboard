@@ -172,6 +172,13 @@ export interface TerminalPaneActions {
   onOpenLink: (url: string) => void;
 }
 
+interface SessionMenuOptions {
+  /** Cards rename on the visible card; tabs use their inline editor. */
+  readonly onRename?: () => void;
+  /** A positional tab command has no meaning on the freely arranged Cards canvas. */
+  readonly includeCloseTabsToRight?: boolean;
+}
+
 /** Which side of a tab a drop lands on. */
 type DropSide = 'before' | 'after';
 
@@ -1406,7 +1413,12 @@ export class TerminalPane {
    * One list and not two: a card and a tab are two drawings of one session, and a second menu would
    * drift the first time an entry was added to only one of them.
    */
-  openSessionMenu(session: TerminalSession, x: number, y: number, onRename?: () => void): void {
+  openSessionMenu(
+    session: TerminalSession,
+    x: number,
+    y: number,
+    options: SessionMenuOptions = {},
+  ): void {
     const alone =
       (this.layout.groups[groupIndexOf(this.layout.groups, session.id)]?.tabs.length ?? 0) <= 1;
 
@@ -1432,6 +1444,28 @@ export class TerminalPane {
           },
         ]
       : [];
+    const closeTabsToRight: MenuItem[] =
+      options.includeCloseTabsToRight === false
+        ? []
+        : [
+            {
+              label:
+                closable.length > 0
+                  ? `Close tabs to the right (${closable.length})`
+                  : 'Close tabs to the right',
+              // Nothing to the right, or nothing there that can be closed: either way there is no gesture.
+              disabled: closable.length === 0,
+              hint:
+                kept > 0
+                  ? `${kept} tab(s) stay: a running server does not close here, it stops with "Stop".`
+                  : 'Closes the following tabs of this pane only, not those of a neighbouring pane.',
+              run: () => {
+                for (const entry of closable) {
+                  this.actions.onClose(entry.id);
+                }
+              },
+            },
+          ];
 
     this.showMenu(x, y, [
       ...rerun,
@@ -1460,8 +1494,8 @@ export class TerminalPane {
         label: 'Rename',
         run: () => {
           // Cards must edit their visible title, not an input in a hidden tab strip.
-          if (onRename !== undefined) {
-            onRename();
+          if (options.onRename !== undefined) {
+            options.onRename();
             return;
           }
           this.renaming = session.id;
@@ -1482,23 +1516,7 @@ export class TerminalPane {
         disabled: !session.closable,
         run: () => this.actions.onClose(session.id),
       },
-      {
-        label:
-          closable.length > 0
-            ? `Close tabs to the right (${closable.length})`
-            : 'Close tabs to the right',
-        // Nothing to the right, or nothing there that can be closed: either way there is no gesture.
-        disabled: closable.length === 0,
-        hint:
-          kept > 0
-            ? `${kept} tab(s) stay: a running server does not close here, it stops with "Stop".`
-            : 'Closes the following tabs of this pane only, not those of a neighbouring pane.',
-        run: () => {
-          for (const entry of closable) {
-            this.actions.onClose(entry.id);
-          }
-        },
-      },
+      ...closeTabsToRight,
     ]);
   }
 

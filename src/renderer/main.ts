@@ -919,7 +919,11 @@ class App {
    * session, and two menus would drift the first time an entry was added to one of them.
    */
   private openSessionMenu(session: TerminalSession, x: number, y: number): void {
-    this.terminal?.openSessionMenu(session, x, y, () => this.board?.rename(session.id));
+    this.terminal?.openSessionMenu(session, x, y, {
+      onRename: () => this.board?.rename(session.id),
+      // Cards can be moved freely, so there is no stable session "to the right" of another one.
+      includeCloseTabsToRight: false,
+    });
   }
 
   /**
