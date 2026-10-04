@@ -181,6 +181,14 @@ export function fitView(
   };
 }
 
+/** The pan that puts one card at the centre of the part of the board that is actually visible. */
+export function centreCardView(card: BoardRect, viewport: BoardRect, zoom: number): CardPoint {
+  return {
+    x: viewport.x + viewport.width / 2 - (card.x + card.width / 2) * zoom,
+    y: viewport.y + viewport.height / 2 - (card.y + card.height / 2) * zoom,
+  };
+}
+
 /**
  * The pan that keeps the canvas point under `anchor` where it is when the zoom changes.
  *
@@ -337,6 +345,8 @@ export class TerminalBoard {
    * second, for no change at all.
    */
   private painted = '';
+  /** The first state adopts an existing board; only later additions count as newly opened cards. */
+  private hasRenderedState = false;
 
   constructor(
     private readonly host: HTMLElement,
@@ -428,8 +438,31 @@ export class TerminalBoard {
 
   /** Repaints from the state it is handed. Cheap enough to call on every poll. */
   render(state: TerminalBoardState): void {
+    const previousIds = new Set([
+      ...this.state.sessions.map((session) => session.id),
+      ...this.state.jobs.map((job) => job.id),
+    ]);
+    const nextIds = [
+      ...state.sessions.map((session) => session.id),
+      ...state.jobs.map((job) => job.id),
+    ];
+    const added = this.hasRenderedState
+      ? nextIds.filter((id) => !previousIds.has(id)).at(-1)
+      : undefined;
+    const selected =
+      this.hasRenderedState && state.selectedId !== null && state.selectedId !== this.state.selectedId
+        ? state.selectedId
+        : null;
     this.state = state;
     this.paint();
+    this.hasRenderedState = true;
+
+    // Selecting a freshly opened session adds the sidebar before this render. Measuring now means
+    // the viewport is the canvas that remains beside it, not the full window it had one frame ago.
+    const reveal = selected ?? added;
+    if (reveal !== undefined && reveal !== null) {
+      this.centreCard(reveal);
+    }
   }
 
   /**
@@ -567,6 +600,7 @@ export class TerminalBoard {
     const card = createElement('div', {
       className: 'board-card board-card--working board-card--agent board-card--job',
     });
+    card.dataset['boardId'] = job.id;
     card.style.left = `${point.x}px`;
     card.style.top = `${point.y}px`;
     card.title = `${job.title}: ${job.subject}\n(drag to move it, click to show the tab that owns it)`;
@@ -640,6 +674,7 @@ export class TerminalBoard {
         .join(' '),
     });
     card.dataset['card'] = session.id;
+    card.dataset['boardId'] = session.id;
     card.setAttribute('aria-current', selected ? 'true' : 'false');
     card.style.left = `${point.x}px`;
     card.style.top = `${point.y}px`;
@@ -1081,6 +1116,36 @@ export class TerminalBoard {
       x: this.host.clientWidth / 2,
       y: this.host.clientHeight / 2,
     });
+  }
+
+  /** Moves the plane, not the card, so opening it never destroys a layout arranged by hand. */
+  private centreCard(id: CardId): void {
+    const card = [...this.content.querySelectorAll<HTMLElement>('.board-card')].find(
+      (entry) => entry.dataset['boardId'] === id,
+    );
+    if (card === undefined) {
+      return;
+    }
+
+    const margin = 24;
+    // The toolbar floats above the canvas and is therefore not part of its usable centre.
+    const head = this.toolbar.offsetTop + this.toolbar.offsetHeight + 12;
+    this.pan = centreCardView(
+      {
+        x: card.offsetLeft,
+        y: card.offsetTop,
+        width: card.offsetWidth,
+        height: card.offsetHeight,
+      },
+      {
+        x: margin,
+        y: head,
+        width: Math.max(1, this.host.clientWidth - 2 * margin),
+        height: Math.max(1, this.host.clientHeight - head - margin),
+      },
+      this.zoom,
+    );
+    this.applyTransform();
   }
 
   private zoomTo(next: number, anchor: CardPoint): void {

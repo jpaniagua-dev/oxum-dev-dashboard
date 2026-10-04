@@ -5,6 +5,7 @@ import {
   ZOOM_MAX,
   ZOOM_MIN,
   activityOf,
+  centreCardView,
   clampZoom,
   defaultPoint,
   fitView,
@@ -112,6 +113,26 @@ describe('fitView', () => {
     const view = fitView({ x: 50, y: 70, width: 10_000, height: 10_000 }, viewport);
     expect(view.zoom).toBe(ZOOM_MIN);
     expect(view.pan).toEqual({ x: 24 - 50 * ZOOM_MIN, y: 48 - 70 * ZOOM_MIN });
+  });
+});
+
+describe('centreCardView', () => {
+  it('centres a new card inside a narrow canvas left beside a wide sidebar', () => {
+    const card = { x: 540, y: 160, width: 240, height: 112 };
+    const viewport = { x: 24, y: 48, width: 360, height: 500 };
+    const pan = centreCardView(card, viewport, 1);
+
+    expect(pan.x + (card.x + card.width / 2)).toBe(viewport.x + viewport.width / 2);
+    expect(pan.y + (card.y + card.height / 2)).toBe(viewport.y + viewport.height / 2);
+  });
+
+  it('accounts for the current zoom when centring', () => {
+    const card = { x: 300, y: 200, width: 240, height: 112 };
+    const viewport = { x: 20, y: 40, width: 700, height: 500 };
+    const pan = centreCardView(card, viewport, 0.5);
+
+    expect(pan.x + (card.x + card.width / 2) * 0.5).toBe(viewport.x + viewport.width / 2);
+    expect(pan.y + (card.y + card.height / 2) * 0.5).toBe(viewport.y + viewport.height / 2);
   });
 });
 
