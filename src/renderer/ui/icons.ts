@@ -2,10 +2,19 @@
  * Icon paths shared by more than one view.
  *
  * An icon stays next to the view that draws it as long as it has a single consumer — that is why the
- * sync arrows live in `git-panel.ts` and the picker's chevron in `terminal-pane.ts`. This module exists
+ * sync arrows live in `git-panel.ts`. This module exists
  * for the ones that do not: two copies of a path drift into two slightly different glyphs for the same
  * gesture, and the whole point of an icon is that it is recognised before it is read.
  */
+
+/**
+ * A chevron pointing down: this control opens a list.
+ *
+ * Drawn as a stroke so it keeps the weight of the glyph or label next to it at any zoom, which the `⌄`
+ * character did not: as text its size and baseline were the font's decision. Shared by the shell
+ * picker of a terminal pane and the Git tab's commit button, both of which say "there is a choice".
+ */
+export const CHEVRON_DOWN_ICON = 'M3.5 6l4.5 4.5L12.5 6';
 
 /**
  * A terminal window with a prompt inside it.

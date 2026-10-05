@@ -4799,11 +4799,61 @@ body {
   user-select: text;
 }
 
-.git__commit-actions {
+/* The message's own label, with the amend on the same line at the right: arming it changes the message. */
+.git__commit-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.git__commit-label {
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+/*
+ * The count at the left, the two buttons together at the right. It was `space-between` across five
+ * children, which spread one gesture over the whole width of the form.
+ */
+.git__commit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.git__commit-actions .strip__meta {
+  margin-right: auto;
+}
+
+/* `Commit` and its chevron read as one button: shared edge, no gap, a hairline between the halves. */
+.git__commit-split {
+  display: inline-flex;
+}
+
+.git__commit-split > .button:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.git__commit-split > .button + .button {
+  margin-left: 0;
+}
+
+.git__commit-more {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 6px;
+  border-left: 1px solid color-mix(in srgb, var(--text-on-primary) 35%, transparent);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.git__commit-more svg {
+  display: block;
+  width: 10px;
+  height: 10px;
 }
 
 .git__diff {

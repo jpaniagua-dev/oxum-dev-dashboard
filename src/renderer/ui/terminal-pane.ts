@@ -26,7 +26,7 @@ import {
   tabsAfter,
   type PaneGrid,
 } from '@shared/terminal-groups.js';
-import { AGENT_ICON, RERUN_ICON } from './icons.js';
+import { AGENT_ICON, CHEVRON_DOWN_ICON, RERUN_ICON } from './icons.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
 import { canRerunSession } from '@shared/session-actions.js';
@@ -37,14 +37,9 @@ import {
   type TerminalView,
 } from './terminal-view.js';
 
-/**
- * The chevron of the shell picker.
- *
- * Drawn as a stroke so it keeps the same weight as the `+` next to it at any zoom, which the `⌄`
- * character did not: as text its size and baseline were the font's decision.
- */
+/** The chevron of the shell picker. */
 function chevronDown(): SVGSVGElement {
-  return createIcon('M3.5 6l4.5 4.5L12.5 6', { paint: 'stroke' });
+  return createIcon(CHEVRON_DOWN_ICON, { paint: 'stroke' });
 }
 
 /**

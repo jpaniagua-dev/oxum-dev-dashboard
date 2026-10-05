@@ -1412,7 +1412,12 @@ service and the CLI runner, `renderer/ui/extensions-panel.ts` the tab.
   clearing timer is held on the app so a second push cannot have its line wiped by the first one's
   countdown. Deliberately **not** a confirmation dialog: that was offered and refused, a push being run
   twenty times a day, and a modal in front of each is a modal nobody reads by the third.
-- **`Commit and push` is one button and two processes, chained on an exit code.** The commit runs in
+- **`Commit and push` lives in the chevron of a split `Commit` button** (since 2026-10-05), beside
+  `Generate`, the buttons grouped at the right and the amend moved above the message, at its right:
+  the row used to spread five controls over the whole width with `space-between`. It stays an entry
+  of the menu, disabled with its reason, when an amend is already upstream, rather than vanishing.
+  The chevron path is `CHEVRON_DOWN_ICON` in `icons.ts`, shared with the terminal's shell picker.
+- **`Commit and push` is one action and two processes, chained on an exit code.** The commit runs in
   its tab as it always has, and the push runs from the main process **only** if that process exits 0,
   which is what makes a refusing pre-commit hook stop the whole thing. That is not the invented
   completion signal the Worktrees tab refuses to guess at: this process spawned the commit and node-pty
