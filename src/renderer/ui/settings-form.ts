@@ -1415,7 +1415,7 @@ export class SettingsForm {
     /*
      * Grouping lives here and not in the table, because it is a **save**: the stored order is the
      * displayed order everywhere, so a grouping applied to the view alone would leave the table
-     * disagreeing with this window, the new-tab menu and the servers window. Doing it on the draft has
+     * disagreeing with this window and the new-tab menu. Doing it on the draft has
      * a second benefit the table could not offer: the result is on screen before anything is written,
      * and closing without saving undoes it.
      *

@@ -44,10 +44,3 @@ drag cards to arrange them; the wheel zooms; the frame button brings every card 
 opened card is centred in the canvas space that remains visible, including when a wide terminal
 sidebar is open. A note can be written on a session: it shows on its card and at the top right of its
 terminal.
-
-## The servers window
-
-The rack icon next to the gear moves the dev servers into a window of their own, for a second
-monitor. Each server is a tile whose border takes its state (serving, build failed, crashed). The
-processes keep running and keep their output; closing the window hands them back. Right-click a tab
-for **Move to the servers window**, for a server started by hand.

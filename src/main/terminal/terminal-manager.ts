@@ -126,27 +126,6 @@ export class TerminalManager {
    * to what the surface currently looks like. The settings seed it once, at construction.
    */
   private columns: number = PANE_COLUMNS_AUTO;
-  /**
-   * Whether the servers window is currently open.
-   *
-   * Held here and nowhere else because this class is the only holder of a session's `role`, and because
-   * the layout is its business: a detached session must leave the dashboard's panes, and putting that
-   * anywhere else would mean a second answer to "which tabs exist".
-   */
-  private serversDetached = false;
-  /**
-   * Exactly which sessions the servers window owns.
-   *
-   * A **set** and not a rule re-evaluated on every read, and the difference is the whole reason a tab
-   * can be moved by hand. `role === 'server'` is what seeds it and what a newly spawned server joins,
-   * but once a session is in or out, it stays where it was put: pulling a server back to the dashboard
-   * has to survive the next spawn, and sending a shell over has to survive at all, neither of which a
-   * derived rule can express.
-   *
-   * Only meaningful while `serversDetached`; emptied when the window closes, so there is no stale
-   * membership to reconcile the next time it opens.
-   */
-  private readonly detachedIds = new Set<TerminalId>();
 
   constructor(
     private readonly hooks: TerminalHooks,
@@ -182,80 +161,8 @@ export class TerminalManager {
    */
   setLayout(groups: readonly TerminalGroup[], columns: number): void {
     this.columns = sanitizeColumns(columns);
-    this.groups = normalizeGroups(groups, this.layoutLive());
+    this.groups = normalizeGroups(groups, [...this.entries.keys()]);
     this.hooks.onLayoutChanged(this.layout());
-  }
-
-  /**
-   * The sessions the dashboard's panes are allowed to hold.
-   *
-   * Everything except what is currently detached. Filtering here, in the one place both `setLayout` and
-   * `syncLayout` read, is what makes detaching a **layout** fact rather than a rendering trick: a
-   * detached session is simply not live as far as the panes are concerned, so `normalizeGroups` drops
-   * its tab and, crucially, does not re-add it as an orphan on the next sync. Filtering in the renderer
-   * instead would have the dashboard drop the tab, report the new layout, and the manager put it back,
-   * once per round, forever.
-   *
-   * Re-attaching needs no code at all for the same reason: the id becomes live again and
-   * `normalizeGroups` places it as an orphan, which is exactly how a freshly spawned session lands.
-   */
-  private layoutLive(): TerminalId[] {
-    return [...this.entries.keys()].filter((id) => !this.isDetached(id));
-  }
-
-  /** True when this session belongs to the servers window rather than to the dashboard. */
-  isDetached(id: TerminalId): boolean {
-    return this.serversDetached && this.detachedIds.has(id);
-  }
-
-  /**
-   * Moves one session between the two windows.
-   *
-   * The escape hatch for what the role cannot know: a `npm run start` typed by hand into a shell is a
-   * dev server in every way that matters and a `shell` session as far as this app can tell, so the only
-   * honest answer is to let it be said. It works in both directions, which also makes it the correction
-   * for a `server` action that is not really a server.
-   *
-   * A no-op when the servers window is closed: there would be nowhere for the session to go, and moving
-   * it anyway would take a tab off the dashboard and give it to nobody.
-   */
-  moveTerminal(id: TerminalId, toServers: boolean): void {
-    if (!this.serversDetached || !this.entries.has(id) || this.isDetached(id) === toServers) {
-      return;
-    }
-    if (toServers) {
-      this.detachedIds.add(id);
-    } else {
-      this.detachedIds.delete(id);
-    }
-    this.syncLayout();
-    this.hooks.onSessionsChanged(this.sessions());
-  }
-
-  /**
-   * Moves the `server` sessions to their own window, or brings them back.
-   *
-   * Both hooks fire, and both are needed: the layout because the dashboard's panes gain or lose tabs,
-   * and the session list because each window is sent only the sessions it owns. No pty is touched, which
-   * is the point of doing this at the layout level: a detached server keeps running, keeps its
-   * scrollback in `entry.buffer`, and only changes which window paints it.
-   */
-  setServersDetached(detached: boolean): void {
-    if (this.serversDetached === detached) {
-      return;
-    }
-    this.serversDetached = detached;
-    this.detachedIds.clear();
-    if (detached) {
-      // Seeded from the role, once. From here on membership is explicit: see `detachedIds`.
-      for (const [id, entry] of this.entries) {
-        if (entry.role === 'server') {
-          this.detachedIds.add(id);
-        }
-      }
-    }
-    this.syncLayout();
-    this.hooks.onSessionsChanged(this.sessions());
   }
 
   /**
@@ -268,7 +175,7 @@ export class TerminalManager {
    */
   private syncLayout(): void {
     const before = JSON.stringify(this.groups);
-    this.groups = normalizeGroups(this.groups, this.layoutLive());
+    this.groups = normalizeGroups(this.groups, [...this.entries.keys()]);
     if (JSON.stringify(this.groups) !== before) {
       this.hooks.onLayoutChanged(this.layout());
     }
@@ -280,9 +187,8 @@ export class TerminalManager {
     return [...this.entries.values()].map((entry) => ({
       ...entry.session,
       closable: isClosable(entry.session, entry.role),
-      // Exposed so a renderer can tell a dev server from a shell without asking. `closable` is already
-      // derived from it here; the servers window needs the same fact to know which sessions are its own
-      // in the one payload that is not filtered per window, `bootstrap`.
+      // Exposed so a renderer can tell a dev server from a shell without asking: the Cards board draws a
+      // server's phase on its card. `closable` is already derived from it here.
       role: entry.role,
     }));
   }
@@ -867,17 +773,6 @@ export class TerminalManager {
       scrollback: new Scrollback(BUFFER_LIMIT),
     };
     this.entries.set(id, entry);
-    /*
-     * A server launched while the servers window is open goes straight there.
-     *
-     * This is the only place the role still decides membership, and it has to be here rather than in
-     * `isDetached`: clicking `Run` on a second monitor's worth of servers must not require moving each
-     * one by hand, while a session already placed by hand must not be re-grabbed. Spawn time is exactly
-     * the moment where there is no prior placement to respect.
-     */
-    if (this.serversDetached && options.role === 'server') {
-      this.detachedIds.add(id);
-    }
 
     child.onData((data) => {
       entry.scrollback.push(data);

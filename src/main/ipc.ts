@@ -217,12 +217,6 @@ export interface IpcDependencies {
   /** Opens or focuses the settings window, optionally on one project's configuration only. */
   readonly openSettings: (projectId: ProjectId | null) => Promise<void>;
   readonly settingsScope: () => ProjectId | null;
-  /** Opens or focuses the servers window. */
-  readonly openServers: () => Promise<void>;
-  /** Closes the servers window, if it is open. Its `closed` hook hands any sessions back. */
-  readonly closeServers: () => void;
-  /** Tells every window whether the servers are detached, so the dashboard's button reads right. */
-  readonly broadcastServersDetached: (detached: boolean) => void;
   /** Records unsaved edits in the settings window, so closing it can ask first. */
   readonly setSettingsDirty: (dirty: boolean) => void;
   /** Pushes settings to every window, after a change that alters more than the caller's own state. */
@@ -230,7 +224,7 @@ export interface IpcDependencies {
   /**
    * Tells the dashboard how a write it could not wait for turned out.
    *
-   * The dashboard only, like `GitPolled`: the servers window has no Git tab to show it in.
+   * The dashboard only, like `GitPolled`: the settings window has no Git tab to show it in.
    */
   readonly notifyGit: (notice: GitNotice) => void;
 }
@@ -636,46 +630,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
             ? { ok: false, message: 'Could not open the tab' }
             : { ok: true, message: `${built.command} launched in ${project.label}` },
       };
-    },
-  );
-
-  /*
-   * Detaches the `server` tabs into their own window, or brings them back.
-   *
-   * The order is load-bearing in both directions. **Detaching** opens the window first and moves the
-   * sessions second, so the payload that follows lands in a renderer that exists. **Re-attaching** moves
-   * the sessions back first and closes the window second, so the dashboard has adopted them before the
-   * window that was painting them goes away; and the window's own `closed` hook then re-runs the
-   * hand-back, which is a no-op because the manager returns early on an unchanged value.
-   */
-  ipcMain.handle(IpcChannel.ServersDetach, async (_event, detached: unknown): Promise<void> => {
-    const wanted = detached === true;
-    if (wanted) {
-      await deps.openServers();
-      deps.terminals.setServersDetached(true);
-    } else {
-      deps.terminals.setServersDetached(false);
-      deps.closeServers();
-    }
-    deps.broadcastServersDetached(wanted);
-    // Remembered, so a window parked on a second monitor is still populated at the next launch.
-    await deps.settings.update({ serversDetached: wanted });
-  });
-
-  /*
-   * Moves one tab between the two windows.
-   *
-   * Nothing is validated here beyond the types: the manager refuses an unknown id, a move that changes
-   * nothing, and any move at all while the servers window is closed, which is the one case that could
-   * otherwise take a tab off the dashboard and hand it to nobody.
-   */
-  ipcMain.handle(
-    IpcChannel.ServersMove,
-    async (_event, terminalId: unknown, toServers: unknown): Promise<void> => {
-      if (typeof terminalId !== 'string') {
-        return;
-      }
-      deps.terminals.moveTerminal(terminalId, toServers === true);
     },
   );
 

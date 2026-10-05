@@ -29,9 +29,6 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   // Picked from the dashboard's own header, so broadcasting it back would re-adopt the layout in the
   // middle of the click that changed it.
   'terminalColumns',
-  // Written by the dashboard when the servers window opens or closes. Broadcasting it back would make
-  // the dashboard reload settings in the middle of the gesture that produced it.
-  'serversDetached',
 ]);
 
 /**
@@ -99,7 +96,6 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   }
   if (typeof input.gitPollSeconds === 'number') patch.gitPollSeconds = input.gitPollSeconds;
   if (typeof input.checksPollSeconds === 'number') patch.checksPollSeconds = input.checksPollSeconds;
-  if (typeof input.serversDetached === 'boolean') patch.serversDetached = input.serversDetached;
   // The three model names. Accepted as typed and normalised by the store, which is the single place
   // that decides what a model name is: rejecting here as well would mean two answers to that question,
   // and the one that silently dropped the value would be this one.

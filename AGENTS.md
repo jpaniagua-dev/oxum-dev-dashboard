@@ -33,7 +33,7 @@ exceptions:
   on another port and has to stay a distinct row.
 - **The stored `projects` array is the display order.** There is no sort key and there must not be one:
   `resolveProjects` maps the configuration as it stands, so a permutation saved once shows up in the
-  table, the settings window, the new-tab menu and the servers window without any of them being told.
+  table, the settings window and the new-tab menu without any of them being told.
   Reordering is therefore a settings save (`moveProject` in `shared/project-order.ts`), not a view
   state.
 - **A change that does not touch the set of projects must not rebuild the monitors.** `reloadProjects`
@@ -1120,7 +1120,7 @@ committed or pasted into a chat.
 - **A blob that will not decrypt is KEPT, never replaced**, and every write is refused while it is
   there: it may be readable again on the account that wrote it. `Start a new vault` is the one way
   out, behind a confirmation, because a refusal with no exit is a dead feature.
-- **`VaultChanged` is routed to the dashboard, never broadcast.** The servers window has no business
+- **`VaultChanged` is routed to the dashboard, never broadcast.** The settings window has no business
   receiving a payload about secrets even when it carries none.
 - **Every saved on-demand tab is loaded explicitly during bootstrap.** `StripTabs.adopt` restores a
   tab without firing `onChange`, so `Rules`, `Vault` and `Triage` all take the same read path
@@ -2352,96 +2352,23 @@ service and the CLI runner, `renderer/ui/extensions-panel.ts` the tab.
   it. `AutoRunsRefresh` exists because the first poll is up to three minutes away, and a row that says
   nothing for three minutes reads as a feature that is off.
 
-## Servers window: terminals in a second window
+## Servers window: removed in 10.0.0
 
-- **Ownership is a fact of the LAYOUT, decided in `TerminalManager`.** `setLayout` and `syncLayout`
-  filter their live-session list through `layoutLive()`, so a detached session is simply not live as far
-  as the dashboard's panes are concerned. `normalizeGroups` therefore drops its tab **and does not
-  re-add it as an orphan** on the next sync. Filtering in the renderer instead would have the dashboard
-  drop the tab, report the new layout, the manager put it back, once per round, forever. Re-attaching
-  needs no code at all for the same reason: the id becomes live again and lands as an orphan, exactly
-  like a freshly spawned session.
-- **Each window is sent only the sessions it owns**, and that is what made this cheap.
-  `TerminalPane.setSessions` already disposes the views of sessions that left the list and re-normalises
-  its panes, so a dashboard that stops being told about a server frees its terminal on its own. No
-  "hide this tab" flag threaded through the renderer.
-- **Output is routed, never broadcast.** `TerminalPane.write` creates a view for whatever id it is
-  handed, so a broadcast would build a second hidden xterm per detached server in the dashboard and feed
-  it every byte of a `ng serve`. Routing costs one map lookup. `RowsChanged` *is* broadcast, and the
-  difference is the point: one small payload on a poll cadence, not a byte stream.
-- **`detachedIds` is a set, not a rule re-evaluated on read.** `role === 'server'` seeds it and a newly
-  spawned server joins it, but once a session is in or out it stays where it was put. A derived rule
-  cannot express "this shell is really a server" or "pull this one back and leave it back", and both are
-  needed because the role knows what a `Run` action is and cannot know what somebody typed into a shell.
-  Spawn time is the only place the role still decides, because it is the only moment with no prior
-  placement to respect.
-- **Closing hands the sessions back, from `closed` and not `close`.** `close` can still be cancelled,
-  and re-attaching to a window that then stays open would paint the servers in two places. This is the
-  app's own invariant applied to a second window: no work runs where nothing can show or stop it.
-- **`App.replayed` is cleared for sessions that leave.** It ran once per id, which was safe while an id
-  only ever disappeared for good. A detached server keeps its id and comes back, and without this it
-  came back to a view whose scrollback was never written: an empty tab for a process running fine.
-- **The tiles reuse `presentServer`.** What `serving`, `lint failed` and `crashed` look like is decided
-  once for the whole app, so a tile and a projects-table row can never disagree about the same process.
-  The tone is put on the tile's border as well as in the pill, because the window exists to be read from
-  across a room and four characters of text are not that.
-- **One forced `refreshNow` when the window opens.** The phases arrive on the monitor's cadence, so a
-  window opened between two pushes would show no phase for up to ten seconds, which is exactly the
-  window in which somebody is looking at it to find out whether anything needs them.
-- **A grid, not a second `TerminalPane`.** No tab bar, no splitter, no active pane, nothing persisted:
-  the arrangement is `ceil(sqrt(n))` columns derived from the session list. That is why `servers.ts` is
-  a fraction of the pane's size, and why the layout-per-window problem never had to be solved.
-- **`.terminal__view` needed no override in the grid**, only a different padding. That the shared
-  container dropped into a grid cell unchanged is the clearest sign `createTerminalView` was cut at the
-  right seam.
+The dev servers could be moved into a window of their own, a grid of live terminals meant for a
+second monitor. Removed on 2026-10-05, for two reasons:
 
-### Ending a terminal from the tile
+- **The Cards board took over what it was for.** A server's card shows its phase (`serving`,
+  `lint failed`, `crashed`) through the same `presentServer`, which was the window's first job. What
+  it alone did was several live outputs at once, and output is only opened when a phase turns red,
+  when one terminal in the Cards sidebar is enough.
+- **It cost a second owner for every session.** `TerminalManager` kept `detachedIds` and filtered the
+  layout through it, output and session lists were routed per window, and a returning session needed
+  its replay flag cleared. Each of those produced a bug once. Removing the window removed all of it:
+  every session belongs to the dashboard again, output goes to it alone, and `settings.json` drops
+  `serversDetached` on its next save.
 
-Added on 2026-09-04. The window could show a server and hand it back, and not end it: every tile in it
-is a `server`, so the dashboard's cross was never available for one, and there was no `Stop` here
-either. Killing a build meant a trip back to the dashboard for the row's own button.
-
-- **ONE slot with two states, driven by `session.closable`.** That is the field the main process
-  already derives for this exact question, so a tile and a dashboard tab can never disagree about
-  whether a process may be ended: a shell and a one-shot task always may, a `server` only once it has
-  stopped. Reading the same field is also what makes a shell dragged into this window behave here the
-  way it does over there, with no rule of this window's own.
-- **A bare cross was the obvious version and is refused.** `TerminalManager.close` does stop a running
-  process on its way out, so a single `×` would have worked mechanically, and that is precisely the
-  trap: this window is several running builds side by side, and one misclick would take one down with
-  no step in between. Two states cost a click and turn a slip into a stop, whose tab and output survive.
-- **Not two buttons with one of them permanently disabled**, on a window whose tiles are servers by
-  construction: that is the dead control the projects table refuses on `Add a tag` at its cap.
-- **The session is looked up at CLICK time.** The head is built once per tile and survives every
-  render, so a handler closed over the session the tile was born with would still be stopping a process
-  that exited ten minutes ago. `this.sessions` is replaced whole on every broadcast, so reading it in
-  the handler is reading the state the button is painted for.
-- **`paintLifecycle` runs from `ensure`, not from `paintPhases`.** The two follow different clocks, the
-  same split the phase pill already records: the phase changes on the project monitor's poll, while
-  this entry flips when a process exits, which is a **session** broadcast. Putting it in the phase pass
-  would have it follow the wrong one.
-- **`stopPty`, never `stopProjectServer`.** A tile IS a session and it knows which one. Going through
-  the project would ask the manager to find "a" running server action for it, which is the same pty
-  here and an indirection that can only ever aim at the wrong one. The projects table uses the other
-  call because a row is a project, not a session.
-- **The stop square is small and NEUTRAL, and only the cross is painted.** `--primary` is this app's
-  red: right on the send-back arrow beside it, which is a hairline glyph, and wrong on `■`, which at
-  the head's font size is a solid block, so the accent turned every *healthy* server into a red mark on
-  hover. That is the one thing this interface's colour rule forbids. The cross takes
-  `.terminal__tab-close`'s own values, size included: `■` stops a process that keeps its output and is
-  recoverable, `×` forgets the session in both windows, and one vocabulary for "this discards
-  something" beats a shade chosen fresh here.
-- **Both controls stay quiet until the tile is hovered**, like the send-back arrow always has. For this
-  one the fade earns a second keep: a permanently lit kill switch on each of four builds is a row of
-  things to misclick. `:focus-visible` keeps both reachable by keyboard regardless.
-- **Two `min-width: 0` were needed in the head, and their absence was a latent bug.** The tile is a
-  **grid** and the head is one of its items, so it defaulted to `min-width: auto` and refused to shrink
-  below its content: measured at 336px inside a 290px tile, which is how a long title pushed the
-  send-back button out through the right edge instead of truncating. The title had the same default.
-  Letting the title shrink was necessary and not sufficient, the head being the box that was too wide;
-  both lines are needed, the head agreeing to be narrow and the title being what gives way. Three
-  columns of tiles is a normal arrangement here and `neos-rating-acquisition-front · run` a normal
-  title, so this was reachable before the second control existed and simply less visible.
+If a second window ever comes back, `createTerminalView` (`terminal-view.ts`) is still the seam it
+would plug into: it builds the xterm and knows nothing about panes.
 
 ## Agent runs: four of them, four models, one profile
 
@@ -2862,8 +2789,8 @@ the pairing the Git tab's `...` button and the fold's double-click already recor
 
 - **It is a REORDER, never a sort key**, and that is the invariant on the stored order applied rather
   than bent. `sortProjectsByTag` permutes the configuration and the settings window saves it, so the
-  grouping reaches the table, the new-tab menu and the servers window the way a drag does. A sort held
-  in the view would make the table disagree with the other three, and a drag would then be arithmetic
+  grouping reaches the table and the new-tab menu the way a drag does. A sort held
+  in the view would make the table disagree with the other two, and a drag would then be arithmetic
   on a list nobody displays. Corollary, and the reason it needs no toggle: there is nothing to turn
   off, and a drag afterwards refines the result instead of fighting it.
 - **The Jira tab's column sort is not a precedent against this.** That list is *fetched*, so it has no

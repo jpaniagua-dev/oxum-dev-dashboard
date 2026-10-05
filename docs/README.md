@@ -6,7 +6,7 @@ page of the tab you are using.
 - [Getting started](getting-started.md): install, what the machine needs, first launch, updates, a
   team configuration.
 - [Settings](settings.md): every page of the settings window, and what sits under Advanced.
-- [The terminal](terminal.md): tabs, panes, shells, the servers window.
+- [The terminal](terminal.md): tabs, panes, shells.
 - Tabs, in the order of the strip:
   - [Projects](tabs/projects.md): the watched repositories, their server, files, branch and checks.
   - [Pull requests](tabs/pull-requests.md): the pull requests that involve you, and their review.
