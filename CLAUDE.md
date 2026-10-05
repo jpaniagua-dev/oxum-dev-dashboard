@@ -117,9 +117,25 @@ exceptions:
   a failed save says which write failed; project validation runs once typing pauses. Jira Test
   and agent Test run on what is on screen, saved or not, and agent Test also checks the program of
   the interactive command exists. The theme applies at once, like the dashboard's button.
-- **The Agent page opens on a preset**, Claude Code as installed or Custom, and the four models.
-  The templates live under Advanced, and the page says when the interactive command skips
-  permissions. A project card shows its name and folder until opened; a broken one stays open.
+- **The Agent page opens on a choice of agent**, two radio cards (Claude Code as installed, or
+  another CLI) each saying what picking it means, then `Test`, then the model for each task.
+  The templates live under Advanced, in three titled groups, and the page says when the
+  interactive command skips permissions. The model fields are named after the task they change
+  (`Sprint triage`, not `Triage analysis`), offer Claude Code's aliases as buttons under the
+  field while that is the agent (`CLAUDE_CODE_MODEL_ALIASES`; a `datalist` was tried and hid them
+  until the field had focus), name the agent in the placeholder (`Claude Code default`), and say
+  an invalid name under the field. Another agent keeps a free field: its model names are its own
+  and nobody here can verify them. The page used to open on
+  four fields named after buttons with `default` as their only placeholder: its own author could
+  not say what to type in them. A project card shows its name and folder until opened; a broken
+  one stays open.
+- **What a field is for is visible text, not a tooltip** (since 2026-10-05). `describe()` puts
+  the sentence under the label and links it with `aria-describedby`; a `title` is read only by
+  somebody who already suspected there was something to read. Labels are sentences in the
+  interface's text colour, no longer uppercase eyebrows that read as column headings. The pages
+  but Projects carry `settings__fields`, twenty pixels between two controls, and a page groups
+  its fields in `fieldset`s (`group()`), whose legend is announced with every control inside.
+  The other pages still hold `title` hints to move the same way.
 - **Monospace means one thing in the settings window: a value something else has to read back
   exactly.** Paths, commands, ports, model ids, project keys, the rail readouts. A project name and a
   button label are words a person chose and are set in the interface face. It is a rule, not a

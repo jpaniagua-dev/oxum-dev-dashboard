@@ -45,33 +45,40 @@ machine are detected; a path you edit is kept over the detected one. **+ Shell**
 
 ## Agent
 
-- **Agent**: Claude Code as installed, or a custom command.
-- **Models**: one per job, empty for the agent's own default.
-  - **Triage analysis** reads a whole sprint.
-  - **Work on this** implements a ticket.
-  - **Commit message** writes a message from the staged diff.
-  - **Pull request review** reads a patch against your standards.
-- **Test** runs the agent once and reports what came back, and checks that the program of the
-  interactive command exists.
+**Which agent**
+
+- **Claude Code** runs the `claude` installed on the machine, with nothing else to fill in.
+  **Another command-line agent** opens Advanced, where you describe how to start it.
+- **Test** runs the agent once on a one-word prompt and reports what came back, and checks that the
+  program of the command for terminal sessions exists.
 
 The page says so when sessions opened from a ticket skip the agent's permission prompts.
 
-Advanced:
+**Model for each task**: one model per task, empty for the agent's own default. With Claude Code,
+`fable`, `opus`, `sonnet` and `haiku` sit under each field: a click fills it, a second click empties
+it. A full model name can be typed too. Another agent's field takes the names its documentation gives.
 
-- **The commands**: the headless one (answers and exits: triage, commit messages, reviews) and the
-  interactive one (opens a session in a terminal tab). They are templates, not shell lines:
-  `{model}` becomes the model flag. Press Test after any change.
-- **Plan mode arguments**: what follows the interactive command's program when a session starts in
-  plan mode, such as **Work on this in plan mode**. For Claude Code,
-  `{model} --permission-mode plan --allow-dangerously-skip-permissions`. Empty means the agent has no
-  plan mode.
-- **Prompt goes in through** and **Answer comes out as**: how the headless command is fed and read.
-- **Claude Code executable** and **Codex executable**: the programs the Extensions tab runs. A full
-  path reaches one that is not on `PATH`.
-- **Agent workspace folder**: where sessions start, so they read the instructions several
-  repositories share. Empty starts in the repository.
-- **Work on this skill**, **Unattended run skill**, **Feedback pass skill**: a slash command (such as
-  `/ticket`) to hand work to instead of the app's own prompt.
+- **Sprint triage** reads every ticket of a sprint: a fast model keeps it cheap.
+- **Working on a ticket** implements it in a terminal tab (**Work on this**): the run that writes code.
+- **Commit messages** writes a message from the staged changes (**Generate**).
+- **Pull request reviews** checks a patch against your standards.
+
+Advanced, in three groups:
+
+- **How the app starts the agent**: the **command for background runs** (answers and exits: triage,
+  commit messages, reviews) and the **command for terminal sessions** (opens a session in a tab).
+  They are templates, not shell lines: `{model}` becomes the **model option**. **Plan mode
+  arguments** follow the program when a session starts in plan mode, such as **Work on this in plan
+  mode**; for Claude Code, `{model} --permission-mode plan --allow-dangerously-skip-permissions`, and
+  empty means the agent has no plan mode. **Extra folder option** lets the review read your
+  standards beside the repository. **How the prompt is sent** and **Answer format** say how the
+  background command is fed and read. Press Test after any change.
+- **Other programs**: the **Claude Code program** and the **Codex program** the Extensions tab runs. A
+  full path reaches one that is not on `PATH`.
+- **Handing over a ticket**: the **starting folder** of sessions, so they read the instructions
+  several repositories share (empty starts in the repository), and the skills (**Skill for Work on
+  this**, **Skill for unattended runs**, **Skill for review feedback**): a slash command such as
+  `/ticket` to hand work to instead of the app's own prompt.
 
 ## Tickets
 
