@@ -6073,29 +6073,35 @@ textarea.tickets__input {
 }
 
 /*
- * One row per ticket, on a grid so the columns line up whatever a row carries: source, key,
- * summary, type, assignee, status. `My issues` drops the assignee column.
+ * One row per ticket, on a grid so the columns line up whatever a row carries: status, source, key,
+ * summary, type, assignee. `My issues` drops the assignee column.
+ *
+ * The status leads, being what a reader scans a list for. Its column is `max-content` on the LIST,
+ * and each row a `subgrid` of it, so the column is as wide as the longest status in view: a status
+ * name is the team's own word (`Waiting for review`), and a fixed width either cut it or left a
+ * gutter of empty space in front of every ticket.
  */
 .tickets__list {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  display: grid;
+  grid-template-columns: max-content 48px 92px minmax(0, 1fr) 64px 130px;
+  row-gap: 1px;
+}
+
+.tickets__list--mine {
+  grid-template-columns: max-content 48px 92px minmax(0, 1fr) 64px;
 }
 
 .tickets__row {
   display: grid;
-  grid-template-columns: 48px 92px minmax(0, 1fr) 64px 130px max-content;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
   padding: 4px 8px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-size: var(--font-md);
   cursor: pointer;
-}
-
-.tickets__list--mine .tickets__row {
-  grid-template-columns: 48px 92px minmax(0, 1fr) 64px max-content;
 }
 
 .tickets__row:hover {
@@ -6125,7 +6131,7 @@ textarea.tickets__input {
 }
 
 .tickets__row-status {
-  justify-self: end;
+  justify-self: start;
 }
 
 /* Quiet for Jira, the ordinary case; the local badge carries the one accent, being the new fact. */
