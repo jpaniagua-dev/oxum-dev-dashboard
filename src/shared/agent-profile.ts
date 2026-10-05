@@ -101,6 +101,14 @@ export interface AgentProfile {
  * reading the code is the difference between a verdict and a guess, and no `--bare` because that
  * mode wants an API key while a normal install is signed in through OAuth.
  */
+/**
+ * The model aliases `claude --model` accepts, offered under each model field while Claude Code is the
+ * agent. Aliases rather than full names because they follow each new release on their own; a pinned
+ * full name is still typed by hand. Kept beside the profile they belong to: another agent's names are
+ * its own, and this app cannot verify them.
+ */
+export const CLAUDE_CODE_MODEL_ALIASES: readonly string[] = ['fable', 'opus', 'sonnet', 'haiku'];
+
 export const CLAUDE_CODE_PROFILE: AgentProfile = {
   label: 'Claude Code',
   headless:

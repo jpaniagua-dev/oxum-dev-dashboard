@@ -8,9 +8,9 @@ Pick a repository on the left (each carries its count of uncommitted files), the
 - Tick a file to stage it; click it to see its diff. `MM` is a file staged and edited again.
 - **Commit** runs in a terminal tab, so hooks (`husky`, `lint-staged`) show what they print. The
   message is kept if the commit is refused.
-- **Commit and push** pushes only if the commit succeeded.
-- **Amend** (the checkbox beside Commit) rewrites the last commit; its tooltip names the commit and
-  warns when it is already pushed.
+- **Commit and push**, in the chevron beside Commit, pushes only if the commit succeeded.
+- **Amend** (the checkbox above the message, at its right) rewrites the last commit; its tooltip
+  names the commit and warns when it is already pushed.
 - **Generate** writes a message from the staged diff with the agent, following the repository's own
   convention. It fills the field and never commits.
 

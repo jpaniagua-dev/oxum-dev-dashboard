@@ -17,7 +17,8 @@ import type {
 } from '@shared/contracts.js';
 import { hasStagedChanges, hasWorktreeChange, isStaged } from '@shared/git-changes.js';
 import { clearChildren, createElement, createIcon, createIconButton, hitsInteractive } from './dom.js';
-import { TERMINAL_ICON } from './icons.js';
+import { showContextMenu } from './context-menu.js';
+import { CHEVRON_DOWN_ICON, TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
 import { presentChange, presentTrack } from './presenters.js';
 import { buildTagDots, type TagPalette } from './tags.js';
@@ -823,6 +824,12 @@ function buildChangeRow(
  * that commits. Arming it first, watching the button change name, then clicking, is the deliberate
  * two-step gesture. Ticking it pre-fills the form with the message being replaced (`headMessage`),
  * because an amend that silently drops the old body would lose what it promised to edit.
+ *
+ * Laid out as the gesture runs: a header naming the message with the amend at its right, since
+ * arming the amend changes what the message is; the message; then the buttons together at the right,
+ * `Generate` beside a split `Commit` whose chevron holds `Commit and push`. The buttons used to be
+ * spread across the whole width, so the eye travelled from one end of the form to the other between
+ * two halves of one gesture.
  */
 function renderCommitForm(
   host: HTMLElement,
@@ -832,6 +839,7 @@ function renderCommitForm(
 ): void {
   const area = document.createElement('textarea');
   area.className = 'git__message';
+  area.id = 'git-commit-message';
   area.rows = 3;
   area.placeholder = 'Commit message';
   area.value = state.message;
@@ -842,6 +850,9 @@ function renderCommitForm(
 
   const staged = hasStagedChanges(repo.changes);
   const head = repo.commits[0];
+
+  const heading = createElement('label', { className: 'git__commit-label', text: 'Commit message' });
+  heading.htmlFor = area.id;
 
   const toggle = createElement('label', { className: 'git__toggle' });
   const box = document.createElement('input');
@@ -902,9 +913,9 @@ function renderCommitForm(
   button.addEventListener('click', () => actions.onCommit(false));
 
   /*
-   * `Commit and push`, the everyday gesture in one click.
+   * `Commit and push`, the everyday gesture in two clicks: the chevron, then the entry.
    *
-   * Secondary next to a primary `Commit`, and not the other way round: the primary is the one that
+   * In the menu of a primary `Commit`, and not the other way round: the primary is the one that
    * touches the local repository only, and the one that publishes to a branch other people read is
    * named in full rather than inherited by muscle memory. The push runs from the main process once
    * the commit's own process exits, so a pre-commit hook that refuses stops it dead, and the outcome
@@ -912,24 +923,42 @@ function renderCommitForm(
    *
    * Refused on an amend that is **already upstream**, the one case where a plain push cannot work:
    * the branch has been rewritten under a remote that still has the old commit, and git will refuse
-   * without `--force`. A button whose only possible outcome is a refusal is a trap, and forcing from
-   * a one-click button is not something this tab is going to offer. The tooltip says which of the two
-   * it is, because "disabled" on its own is a dead end.
+   * without `--force`. An entry whose only possible outcome is a refusal is a trap, and forcing from
+   * a menu is not something this tab is going to offer. The entry stays in the menu, disabled, with
+   * its reason as a tooltip, because an entry that vanishes takes the knowledge that it exists with it.
+   *
+   * The chevron is disabled whenever `Commit` is: with nothing to commit there is nothing to push
+   * either, and a menu whose only entry is greyed out is a click that answers nothing.
    */
   const amendPushed = state.amend && repo.hasUpstream && repo.ahead === 0;
-  const push = createElement('button', {
-    className: 'button',
-    text: state.amend ? 'Amend and push' : 'Commit and push',
+  const pushLabel = state.amend ? 'Amend and push' : 'Commit and push';
+  const more = createElement('button', { className: 'button button--primary git__commit-more' });
+  more.type = 'button';
+  more.append(createIcon(CHEVRON_DOWN_ICON, { paint: 'stroke' }));
+  more.disabled = button.disabled;
+  more.title = pushLabel;
+  more.setAttribute('aria-label', 'More commit actions');
+  more.setAttribute('aria-haspopup', 'menu');
+  more.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const box = split.getBoundingClientRect();
+    showContextMenu(box.left, box.bottom + 4, [
+      {
+        label: pushLabel,
+        disabled: amendPushed,
+        hint: amendPushed
+          ? 'The commit being amended is already on the remote: the push would need --force, which this menu does not do'
+          : `${button.title}\nThen git push, from here, if and only if the commit exits cleanly`,
+        run: () => actions.onCommit(true),
+      },
+    ]);
   });
-  push.type = 'button';
-  push.disabled = button.disabled || amendPushed;
-  push.title = amendPushed
-    ? 'The commit being amended is already on the remote: the push would need --force, which this button does not do'
-    : staged || state.amend
-      ? `${button.title}
-Then git push, from here, if and only if the commit exits cleanly`
-      : 'Nothing staged: tick at least one file';
-  push.addEventListener('click', () => actions.onCommit(true));
+
+  const split = createElement('div', { className: 'git__commit-split' });
+  split.append(button, more);
+
+  const header = createElement('div', { className: 'git__commit-head' });
+  header.append(heading, toggle);
 
   const footer = createElement('div', { className: 'git__commit-actions' });
   footer.append(
@@ -941,13 +970,11 @@ Then git push, from here, if and only if the commit exits cleanly`
           ? 'Empty index: rewords the last commit'
           : 'Empty index',
     }),
-    toggle,
     generate,
-    button,
-    push,
+    split,
   );
 
-  host.append(area, footer);
+  host.append(header, area, footer);
 }
 
 /* --------------------------------------------------------------- branches */

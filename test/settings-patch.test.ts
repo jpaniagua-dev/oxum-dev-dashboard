@@ -136,9 +136,6 @@ describe('LOCAL_ONLY_KEYS', () => {
       'projectsHeight',
       'pullScope',
       'pullsHeight',
-      // Not a geometry, but local for the same reason: it is written by the dashboard the moment the
-      // servers window opens, and an echo would reload settings in the middle of that gesture.
-      'serversDetached',
       'stripCollapsed',
       // Local for the same reason: the grid is picked from the dashboard's own header, so an echo
       // would re-adopt the layout in the middle of the click that changed it.
@@ -157,14 +154,6 @@ describe('LOCAL_ONLY_KEYS', () => {
     // renderer will draw, so an impossible value has to become the default at the first gate.
     expect(asPatch({ terminalColumns: 9 })).toEqual({ terminalColumns: 0 });
     expect(asPatch({ terminalColumns: '2' })).toEqual({});
-  });
-
-  it('lets the dashboard remember that the servers were detached', () => {
-    // The whole point of persisting it: a window parked on a second monitor that has to be reopened at
-    // every launch is a window you stop using. Same silent-drop trap as the heights above.
-    expect(asPatch({ serversDetached: true })).toEqual({ serversDetached: true });
-    expect(asPatch({ serversDetached: false })).toEqual({ serversDetached: false });
-    expect(asPatch({ serversDetached: 'yes' })).toEqual({});
   });
 
   it('lets the dashboard persist the Triage tab height', () => {

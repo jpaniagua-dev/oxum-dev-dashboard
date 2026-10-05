@@ -1138,9 +1138,9 @@ export interface TerminalSession {
   /**
    * What kind of thing is running: a long-lived `server`, a one-shot `task`, or null for a shell.
    *
-   * Comes from the action's own configured role. Exposed to the renderers because it is what tells a dev
-   * server from a Claude Code session, which is the whole basis on which the servers window decides
-   * what it owns. `closable` is already derived from it in the main process.
+   * Comes from the action's own configured role. Exposed to the renderer because it is what tells a dev
+   * server from a Claude Code session: the Cards board draws a server's phase on its card. `closable`
+   * is already derived from it in the main process.
    */
   readonly role: ActionRole | null;
   /** Set for `shell` sessions. */
@@ -1926,14 +1926,6 @@ export interface AppSettings {
    * default has to be the absence of the flag rather than an empty one. Values are validated against
    * `MODEL_PATTERN`, since one of the three reaches a shell.
    */
-  /**
-   * Whether the dev servers were in their own window when the app was last closed.
-   *
-   * Persisted for one reason: the window's whole point is to be parked on a second monitor and left
-   * there, and a second monitor you have to re-populate at every launch is one you stop using. Restored
-   * at startup **after** the terminals have been rebuilt, or there would be nothing to detach.
-   */
-  serversDetached: boolean;
   agentAnalysisModel: string;
   /** Model for the `Work on this` handoff, the one run that is interactive. */
   agentWorkModel: string;
@@ -2252,25 +2244,6 @@ export const IpcChannel = {
   WorktreeRun: 'worktrees:run',
   /** invoke: (projectId) => GitRepoState | null, everything the Git tab shows for one repository */
   GitState: 'git:state',
-  /**
-   * invoke: (detached: boolean) => void, shows the `server` tabs in their own window, or brings them back
-   *
-   * One channel for both directions rather than an open and a close: the two windows would otherwise
-   * each hold their own idea of whether the other exists, and the main process is the only side that
-   * knows. Opening the window and detaching the sessions is deliberately the same gesture: a servers
-   * window with no servers in it, or servers detached to a window that is not there, are both states
-   * with nothing able to show or stop a running process.
-   */
-  ServersDetach: 'servers:detach',
-  /** on: (detached: boolean) => void, pushed when the servers window opens or closes, however it closed */
-  ServersDetachedChanged: 'servers:detached-changed',
-  /**
-   * invoke: (terminalId, toServers: boolean) => void, moves one tab between the two windows
-   *
-   * The escape hatch for what the role cannot know: a `npm run start` typed by hand into a shell is a
-   * dev server in every way that matters, and a `shell` session as far as this app can tell.
-   */
-  ServersMove: 'servers:move',
   /** invoke: (projectId, target: GitDiffTarget) => GitDiff, a file's changes or a whole commit */
   GitDiff: 'git:diff',
   /**
@@ -2645,23 +2618,6 @@ export interface RendererApi {
   startTicketBranch(projectId: ProjectId, issueKey: string, summary: string): Promise<GitResult>;
   /** Opens a pull request in the real browser. Only http(s) is followed, checked in the main process. */
   openExternal(url: string): Promise<void>;
-  /**
-   * Shows the `server` tabs in a window of their own, or brings them back to the dashboard.
-   *
-   * Called by the dashboard to detach, and by the servers window itself to give the sessions back before
-   * it closes. Nothing about the ptys changes: a detached server keeps running and keeps its scrollback,
-   * only the window painting it changes.
-   */
-  detachServers(detached: boolean): Promise<void>;
-  /** Pushed whenever the servers window opens or closes, including when the user closes it by hand. */
-  onServersDetachedChanged(listener: (detached: boolean) => void): () => void;
-  /**
-   * Moves one tab to the servers window, or back to the dashboard.
-   *
-   * A no-op while the servers window is closed: there would be nowhere for the session to go. Nothing
-   * about the pty changes either way.
-   */
-  moveTerminalToServers(terminalId: TerminalId, toServers: boolean): Promise<void>;
 
   /**
    * Reads every project's linked worktrees, for the Worktrees tab.

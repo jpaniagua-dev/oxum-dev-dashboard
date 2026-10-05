@@ -283,14 +283,6 @@ class App {
   private resizer: { setHeight: (height: number) => void } | null = null;
   /** The Git tab's list/diff separator. Held so a settings change can reapply the stored width. */
   private gitSplitter: { setWidth: (width: number) => void } | null = null;
-  /**
-   * Whether the dev servers are currently in their own window.
-   *
-   * Mirrored from the main process rather than decided here: the window can be closed by its own cross,
-   * which this renderer never hears about directly, so a locally toggled flag would drift the moment it
-   * was. The button reads this; the main process writes it.
-   */
-  private serversDetached = false;
 
   async start(): Promise<void> {
     const bootstrap = await window.api.bootstrap();
@@ -313,7 +305,6 @@ class App {
         onClose: (terminalId) => void window.api.closeTerminal(terminalId),
         onRerun: (session) => void this.rerunSession(session),
         onRename: (terminalId, title) => void window.api.renameTerminal(terminalId, title),
-        onMoveToServers: (terminalId) => void window.api.moveTerminalToServers(terminalId, true),
         // The same callback the board is given: two surfaces drawing one session must not grow two
         // ideas of what writing a note means.
         onNote: (terminalId, text) => {
@@ -2471,7 +2462,7 @@ class App {
    *
    * Saved through the same channel as a rename, because it is the same kind of change: the stored
    * `projects` array **is** the display order, so there is no sort key to keep anywhere and the new
-   * order reaches the settings window, the new-tab menu and the servers window on its own.
+   * order reaches the settings window and the new-tab menu on its own.
    *
    * Nothing optimistic is painted. The main process answers with the saved settings and broadcasts the
    * rows, so the order on screen is always the order on disk; a drop the store refused would otherwise
@@ -2647,22 +2638,6 @@ class App {
 
     requireElement<HTMLButtonElement>('add-project').addEventListener('click', () => {
       void this.addProject();
-    });
-
-    const serversButton = requireElement<HTMLButtonElement>('servers-button');
-    serversButton.addEventListener('click', () => {
-      // The state is not toggled here: the main process owns it and pushes it back, which is what keeps
-      // this button honest when the window is closed by its own cross rather than by this click.
-      void window.api.detachServers(!this.serversDetached);
-    });
-    window.api.onServersDetachedChanged((detached) => {
-      this.serversDetached = detached;
-      // The pane needs it too: it decides whether the tab menu may offer to move a tab over.
-      this.terminal?.setServersDetached(detached);
-      serversButton.setAttribute('aria-pressed', String(detached));
-      serversButton.title = detached
-        ? 'Bring the dev servers back into this window'
-        : 'Show the dev servers in their own window';
     });
 
     requireElement<HTMLButtonElement>('settings-button').addEventListener('click', () => {

@@ -1,7 +1,7 @@
 # Projects
 
 One row per watched repository. `+ Project` adds a folder; double-click a name to rename it; drag a
-row to reorder the table (the order is kept everywhere: settings, new-tab menu, servers window).
+row to reorder the table (the order is kept everywhere: settings, new-tab menu).
 Right-click a row and choose **Settings** to edit that project alone, without the other settings
 pages or the other projects.
 

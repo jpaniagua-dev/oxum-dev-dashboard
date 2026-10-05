@@ -26,7 +26,7 @@ import {
   tabsAfter,
   type PaneGrid,
 } from '@shared/terminal-groups.js';
-import { AGENT_ICON, RERUN_ICON } from './icons.js';
+import { AGENT_ICON, CHEVRON_DOWN_ICON, RERUN_ICON } from './icons.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
 import { canRerunSession } from '@shared/session-actions.js';
@@ -37,14 +37,9 @@ import {
   type TerminalView,
 } from './terminal-view.js';
 
-/**
- * The chevron of the shell picker.
- *
- * Drawn as a stroke so it keeps the same weight as the `+` next to it at any zoom, which the `⌄`
- * character did not: as text its size and baseline were the font's decision.
- */
+/** The chevron of the shell picker. */
 function chevronDown(): SVGSVGElement {
-  return createIcon('M3.5 6l4.5 4.5L12.5 6', { paint: 'stroke' });
+  return createIcon(CHEVRON_DOWN_ICON, { paint: 'stroke' });
 }
 
 /**
@@ -123,8 +118,6 @@ export interface TerminalPaneActions {
    * the caller decides which profile that means.
    */
   onSplitShell: (cwd: string, direction: PaneDirection) => void;
-  /** Hands one tab over to the servers window. Only offered while that window is open. */
-  onMoveToServers: (terminalId: TerminalId) => void;
   /**
    * Writes what a session is for, or clears it when the text is empty.
    *
@@ -242,14 +235,6 @@ export class TerminalPane {
    * keyed on sessions, and sessions die with the app.
    */
   private readonly notesHidden = new Set<TerminalId>();
-  /**
-   * Whether the servers window is open, which decides whether a tab can be sent there.
-   *
-   * Mirrored from the main process through `setServersDetached`, never inferred: that window can be
-   * closed by its own cross, and a pane offering to move a tab into a window that is gone would take
-   * the tab off this surface and hand it to nobody.
-   */
-  private serversDetached = false;
   /** Tab being dragged, if any. Held so a drop knows what to move. */
   private dragging: TerminalId | null = null;
   /** The panes, mirroring what the main process holds. */
@@ -515,11 +500,6 @@ export class TerminalPane {
    * Views for sessions that disappeared are disposed here: a closed tab must free its xterm, or the
    * surface leaks a renderer per closed terminal.
    */
-  /** Tells the pane whether the servers window exists, for the one menu entry that depends on it. */
-  setServersDetached(detached: boolean): void {
-    this.serversDetached = detached;
-  }
-
   setSessions(sessions: readonly TerminalSession[]): void {
     this.sessions = sessions;
     const live = new Set(sessions.map((session) => session.id));
@@ -985,8 +965,8 @@ export class TerminalPane {
    * Split in two on purpose. `createTerminalView` builds the xterm instance, which is the part every
    * owner of a terminal needs and which no second window may re-derive; everything below it is about
    * **this** surface: where the container goes, what a click on it focuses, and which menu a right-click
-   * opens. That is the seam, and it is the whole reason a servers window could tile the same terminals
-   * without a tab bar or a splitter.
+   * opens. That is the seam: a second surface for the same terminals would reuse the first half and
+   * write its own second half.
    */
   private ensure(terminalId: TerminalId): View {
     const existing = this.views.get(terminalId);
@@ -1479,16 +1459,6 @@ export class TerminalPane {
         label: 'Move to a pane below',
         disabled: alone,
         run: () => this.moveToOwnPane(session.id, 'rows'),
-      },
-      {
-        label: 'Move to the servers window',
-        // Only while that window exists: moving a tab to a window that is not open would take it off
-        // the dashboard and hand it to nobody. The hint says so rather than leaving a dead entry.
-        disabled: !this.serversDetached,
-        hint: this.serversDetached
-          ? 'For a server this app cannot recognise on its own, a `npm run start` typed into a shell'
-          : 'Open the servers window first, from the icon next to the settings gear',
-        run: () => this.actions.onMoveToServers(session.id),
       },
       {
         label: 'Rename',

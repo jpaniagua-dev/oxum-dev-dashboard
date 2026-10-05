@@ -17,11 +17,12 @@ import { createElement } from './dom.js';
  * "looks wrong" in one window and not the other.
  *
  * That is the failure this codebase has already recorded twice, with `verdictFor` / `isStaged` and with
- * the context menu's dismissal rule. One definition, two consumers.
+ * the context menu's dismissal rule. One consumer today, since the servers window was removed in
+ * 10.0.0; the seam is kept because it is where a second one would plug in.
  *
  * What is **not** here is anything about panes: no surface to attach to, no tab order, no focus, no
- * layout. Those belong to whoever owns the arrangement, and they are the whole reason a second window
- * can look nothing like the first while driving identical terminals.
+ * layout. Those belong to whoever owns the arrangement, which is what would let a second surface look
+ * nothing like the first while driving identical terminals.
  */
 
 /** What a key combination should do inside a terminal. */

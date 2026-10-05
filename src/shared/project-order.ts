@@ -7,7 +7,7 @@ import { tagKey } from './project-tags.js';
  * The stored `projects` array **is** the display order: `resolveProjects` maps it as it stands, the
  * monitor maps that, and the table renders the rows it gets. So reordering is not a view concern with
  * a sort key behind it, it is a permutation of the configuration, and the same permutation shows up in
- * the settings window, in the new-tab menu and in the servers window without any of them being told.
+ * the settings window and in the new-tab menu without either of them being told.
  *
  * Pure and in `shared/` for the reason `terminal-groups.ts` is: a reorder is easy to get subtly wrong
  * (an index computed after the removal instead of before, a drop on the moved item itself, a drop past
@@ -75,9 +75,8 @@ function groupKeyOf(config: Pick<ProjectConfig, 'tags'>): string {
  * Groups the list by tag, as a permutation of the configuration.
  *
  * **This is a reorder, not a sort key**, and that distinction is the whole design. The stored
- * `projects` array *is* the display order: the table, the settings window, the new-tab menu and the
- * servers window all read it as it stands. A sort applied in the view would make the table disagree
- * with the other three, and a drag would then be arithmetic on a list nobody displays. So grouping is
+ * `projects` array *is* the display order: the table, the settings window and the new-tab menu all
+ * read it as it stands. A sort applied in the view would make the table disagree with the other two, and a drag would then be arithmetic on a list nobody displays. So grouping is
  * a save, exactly like `moveProject`, and it composes with a drag afterwards instead of overruling it.
  * That is also why it is a one-shot command and not a mode: there is nothing to turn off.
  *

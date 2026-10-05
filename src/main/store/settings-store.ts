@@ -103,9 +103,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   handoffFeedback: '',
   // Empty means "whatever Claude Code itself is set to", for all three. A default named here would be
   // this app deciding which model a user's own CLI runs on, which is not its call to make.
-  // Closed on a fresh install: a window nobody asked for, opening on first launch, is the wrong
-  // first impression of a feature that is opt-in by nature.
-  serversDetached: false,
   agentAnalysisModel: '',
   agentWorkModel: '',
   agentCommitModel: '',
@@ -289,7 +286,6 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     // value that is not a model name is stored as empty (the default) rather than passed on. The
     // settings form is where a typo is shown; this is the guard that holds when the file is edited by
     // hand.
-    serversDetached: typeof input.serversDetached === 'boolean' ? input.serversDetached : false,
     /*
      * The four models, and the old `claude*` spelling read as a fallback.
      *

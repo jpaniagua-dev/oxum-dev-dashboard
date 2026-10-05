@@ -12,7 +12,11 @@ import {
   type ShellProfile,
   type TagColors,
 } from '@shared/contracts.js';
-import { CLAUDE_CODE_PROFILE, type AgentProfile } from '@shared/agent-profile.js';
+import {
+  CLAUDE_CODE_MODEL_ALIASES,
+  CLAUDE_CODE_PROFILE,
+  type AgentProfile,
+} from '@shared/agent-profile.js';
 import { isValidModel } from '@shared/agent-model.js';
 import { hasAnyTag, sortProjectsByTag } from '@shared/project-order.js';
 import {
@@ -224,6 +228,8 @@ export class SettingsForm {
   private themeMode: ThemeMode = 'system';
   /** Which pages' Advanced folds are open, kept across the repaints a change triggers. */
   private readonly advancedOpen = new Set<string>();
+  /** Gives each visible help text the id its input points to with `aria-describedby`. */
+  private helpIds = 0;
   /** Pages edited since the last load or save, marked in the rail. */
   private readonly dirtyPages = new Set<string>();
   /** Custom chosen in the preset, before any template has been changed. */
@@ -629,287 +635,54 @@ export class SettingsForm {
   }
 
   /**
-   * The model each Claude Code run is pinned to.
+   * The Agent page: which agent, whether it answers, then the model each task gets.
    *
-   * Four fields and not one, because the four runs are four jobs: classifying a sprint is bulk
-   * reading where speed and cost dominate, implementing a ticket wants the strongest model there is,
-   * and writing a commit message from a diff is short and frequent. One setting would be wrong for two
-   * of them.
+   * The order is the order the questions arise in, and it is an argument: the command decides whether
+   * anything runs at all, and a model pinned on an agent that cannot start is a setting about nothing.
+   * `Test` sits with the choice of agent for the same reason. Every template and flag waits under
+   * Advanced, which choosing another agent opens.
    *
-   * **Validated as you type, and that is not decoration.** One of these three ends up on a shell
-   * command line, so the store normalises anything that is not a model name to empty. Without a mark
-   * here, typing `sonnet 4` would look accepted, save, and come back as the default with nothing said:
-   * a setting failing in complete silence, which is the failure `asPatch` already records. The mark is
-   * on the field rather than a message beside it, since there is nothing to explain beyond "not this".
+   * The page used to open on four fields named after buttons (`Work on this`), each with `default` as
+   * its only placeholder and its explanation in a tooltip: its own author could not say what to type
+   * in them. Every field now says, in visible text, which task it changes and what leaving it empty
+   * does.
+   *
+   * **Model names are validated as you type, and that is not decoration.** One of them ends up on a
+   * shell command line, so the store normalises anything that is not a model name to empty. Without
+   * the mark, typing `sonnet 4` would look accepted, save, and come back as the default with nothing
+   * said: a setting failing in complete silence, which is the failure `asPatch` already records.
    */
   private renderAgent(): void {
     clearChildren(this.hosts.claude);
-    const basics: HTMLElement[] = [];
-    const expert: HTMLElement[] = [];
-
-    const fields: readonly { key: keyof AgentModelDrafts; label: string; hint: string }[] = [
-      {
-        key: 'analysis',
-        label: 'Triage analysis',
-        hint: 'Reads a whole sprint: the run where speed and cost show most',
-      },
-      {
-        key: 'work',
-        label: 'Work on this',
-        hint: 'Implements a ticket in a terminal tab: the run that writes code',
-      },
-      {
-        key: 'commit',
-        label: 'Commit message',
-        hint: 'Reads a staged diff and writes the message: short and frequent',
-      },
-      {
-        key: 'review',
-        label: 'Pull request review',
-        hint: 'Reads a patch against a written standard, and can end in a public comment',
-      },
-    ];
+    const custom = this.agentCustom || !sameProfile(this.agent, CLAUDE_CODE_PROFILE);
 
     /*
-     * The profile first, the models after.
-     *
-     * Order is an argument here: the command decides whether anything runs at all, and a model
-     * pinned on an agent that cannot start is a setting about nothing. `Test` sits with the command
-     * for the same reason, and its answer is a sentence rather than a tick, because what a reader
-     * needs after a failure is the line that was launched.
+     * The choice of agent as two cards rather than a dropdown: a dropdown shows one option and no
+     * sentence, so nobody learns there was a choice, let alone what each one implies.
      */
-    const agentGrid = createElement('div', { className: 'settings-entry__grid' });
-    agentGrid.append(
-      this.field('Agent name', this.agent.label, (value) => {
-        this.agent = { ...this.agent, label: value };
-        this.touch();
-      }),
-    );
-    const headless = this.field(
-      'Headless command',
-      this.agent.headless,
-      (value) => {
-        this.agent = { ...this.agent, headless: value };
-        this.touch();
-      },
-      'agent --print {model}',
-      true,
-    );
-    headless.title =
-      'Used by the triage, the commit message and the pull request review. It must make the agent ' +
-      'answer and exit, and it should restrict it to reading.';
-    agentGrid.append(headless);
-
-    const interactive = this.field(
-      'Interactive command',
-      this.agent.interactive,
-      (value) => {
-        this.agent = { ...this.agent, interactive: value };
-        this.touch();
-      },
-      'agent {model}',
-      true,
-    );
-    interactive.title =
-      'Used by Work on this, which opens a terminal tab. The prompt is appended as a quoted argument.';
-    agentGrid.append(interactive);
-
-    const planArgs = this.field(
-      'Plan mode arguments',
-      this.agent.planArgs,
-      (value) => {
-        this.agent = { ...this.agent, planArgs: value };
-        this.touch();
-      },
-      'none: no plan mode',
-      true,
-    );
-    planArgs.title =
-      'Put after the program of the interactive command whenever a session starts in plan mode, such as Work on this in plan mode. {model} is the model flag. Empty means this agent has no plan mode.';
-    agentGrid.append(planArgs);
-
-    const modelFlagField = this.field(
-      'Model flag',
-      this.agent.modelFlag,
-      (value) => {
-        this.agent = { ...this.agent, modelFlag: value };
-        this.touch();
-      },
-      '--model {model}',
-      true,
-    );
-    modelFlagField.title =
-      'What {model} expands to. Empty if the agent takes no model flag: the four fields below are ' +
-      'then ignored.';
-    agentGrid.append(modelFlagField);
-
-    const dirFlagField = this.field(
-      'Extra directory flag',
-      this.agent.extraDirFlag,
-      (value) => {
-        this.agent = { ...this.agent, extraDirFlag: value };
-        this.touch();
-      },
-      '--add-dir',
-      true,
-    );
-    dirFlagField.title =
-      'Opens a second folder to a run. Only the pull request review uses it, to read the standards ' +
-      'and the repository at once. Empty is fine: the review then runs in the repository.';
-    agentGrid.append(dirFlagField);
-    expert.push(agentGrid);
-
-    const choices = createElement('div', { className: 'settings-entry__grid' });
-    choices.append(
-      this.select(
-        'Prompt goes in through',
-        [
-          { value: 'stdin', label: 'stdin' },
-          { value: 'argument', label: 'an argument' },
-          { value: 'file', label: 'a file' },
-        ],
-        this.agent.promptVia,
-        (value) => {
-          this.agent = { ...this.agent, promptVia: value as AgentProfile['promptVia'] };
-          this.touch();
-        },
-      ),
-    );
-    choices.append(
-      this.select(
-        'Answer comes out as',
-        [
-          { value: 'stream-json', label: 'stream-json (live progress)' },
-          { value: 'stdout', label: 'plain output' },
-        ],
-        this.agent.answerFormat,
-        (value) => {
-          this.agent = { ...this.agent, answerFormat: value as AgentProfile['answerFormat'] };
-          this.touch();
-        },
-      ),
-    );
-    expert.push(choices);
-
-    const testRow = createElement('div', { className: 'settings-entry__row' });
-    const test = createElement('button', {
-      className: 'button',
-      text: this.agentTesting ? 'Testing…' : 'Test',
-    });
-    test.type = 'button';
-    test.disabled = this.agentTesting;
-    test.title = 'Runs the agent once on a one-word prompt and reports what came back.';
-    test.addEventListener('click', () => void this.testAgent());
-    testRow.append(test);
-    if (this.agentStatus.length > 0) {
-      testRow.append(createElement('span', { className: 'settings-aside', text: this.agentStatus }));
-    }
-    basics.push(testRow);
-
-    const grid = createElement('div', { className: 'settings-entry__grid' });
-    for (const entry of fields) {
-      // A model id is a string the machine has to match exactly, so it is set in the mono face.
-      const field = this.field(
-        entry.label,
-        this.agentModels[entry.key],
-        (value) => {
-          this.agentModels[entry.key] = value;
-          this.markModelField(field, value);
-          this.touch();
-        },
-        'default',
-        true,
-      );
-      // The hint on hover rather than in the placeholder: a placeholder long enough to explain the run
-      // is one that hides the value as soon as there is one.
-      field.title = entry.hint;
-      this.markModelField(field, this.agentModels[entry.key]);
-      grid.append(field);
-    }
-    basics.unshift(grid);
-
-    /*
-     * The two executables of the Extensions tab, after the profile and its models.
-     *
-     * Not part of the profile: that tab lists both agents whichever one the profile runs. A bare
-     * name is looked up on PATH, and a full path reaches an install that is not on it.
-     */
-    const cli = createElement('div', { className: 'settings-entry__grid' });
-    const claudeCli = this.field(
-      'Claude Code executable',
-      this.commands.claude,
-      (value) => {
-        this.commands = { ...this.commands, claude: value };
-        this.touch();
-      },
-      'claude',
-      true,
-    );
-    claudeCli.title = 'Run by the Extensions tab to change plugins and MCP servers.';
-    const codexCli = this.field(
-      'Codex executable',
-      this.commands.codex,
-      (value) => {
-        this.commands = { ...this.commands, codex: value };
-        this.touch();
-      },
-      'codex',
-      true,
-    );
-    codexCli.title =
-      'Run by the Extensions tab to change MCP servers. A full path to codex.cmd when Codex is not on PATH.';
-    cli.append(claudeCli, codexCli);
-    expert.push(cli);
-
-    const workspace = this.field(
-      'Agent workspace folder',
-      this.roots.workspace,
-      (value) => {
-        this.roots = { ...this.roots, workspace: value };
-        this.touch();
-      },
-      'the repository itself',
-      true,
-    );
-    workspace.title =
-      'Where Work on this and the agent button start a session, so it reads the instructions shared by several repositories. Empty starts in the repository.';
-    expert.push(workspace);
-
-    const handoffGrid = createElement('div', { className: 'settings-entry__grid' });
-    for (const [key, label, hint] of [
-      ['ask', 'Work on this skill', 'The skill a ticket is handed to, such as /ticket. Empty uses the app prompt.'],
-      ['auto', 'Unattended run skill', 'The skill of a run that goes to a pull request on its own. Empty uses the app prompt.'],
-      ['feedback', 'Feedback pass skill', 'The skill that treats review comments. Empty uses the app prompt.'],
-    ] as const) {
-      const field = this.field(
-        label,
-        this.handoffs[key],
-        (value) => {
-          this.handoffs = { ...this.handoffs, [key]: value };
-          this.touch();
-        },
-        'the app prompt',
-        true,
-      );
-      field.title = hint;
-      handoffGrid.append(field);
-    }
-    expert.push(handoffGrid);
-
-    /*
-     * The page: a preset and the models, then Test; every template and flag under Advanced.
-     *
-     * Most people run Claude Code as installed and never need the templates, which used to open
-     * the page as six fields of command syntax. Choosing Custom opens Advanced, where they are.
-     */
-    const preset = this.select(
-      'Agent',
+    const presets = createElement('div', { className: 'settings-choices' });
+    for (const [value, label, help] of [
       [
-        { value: 'claude', label: 'Claude Code (as installed)' },
-        { value: 'custom', label: 'Custom command' },
+        'claude',
+        'Claude Code',
+        'Runs the claude command installed on this machine, with the account and settings it already has. Nothing else to fill in.',
       ],
-      this.agentCustom || !sameProfile(this.agent, CLAUDE_CODE_PROFILE) ? 'custom' : 'claude',
-      (value) => {
+      [
+        'custom',
+        'Another command-line agent',
+        'Codex or any other CLI. You describe how to start it under Advanced, from its own documentation, then press Test.',
+      ],
+    ] as const) {
+      const choice = createElement('label', { className: 'settings-choice' });
+      const input = createElement('input', { className: 'settings-choice__input' });
+      input.type = 'radio';
+      input.name = 'agent-preset';
+      input.value = value;
+      input.checked = (value === 'custom') === custom;
+      input.addEventListener('change', () => {
+        if (!input.checked) {
+          return;
+        }
         this.agentCustom = value === 'custom';
         if (value === 'claude') {
           this.agent = { ...CLAUDE_CODE_PROFILE };
@@ -918,25 +691,337 @@ export class SettingsForm {
         }
         this.touch();
         this.renderAgent();
-      },
+        // The repaint replaced the radio that had focus: give it back, or arrow keys stop working.
+        this.hosts.claude.querySelector<HTMLInputElement>('input[name="agent-preset"]:checked')?.focus();
+      });
+      const text = createElement('span', { className: 'settings-choice__text' });
+      text.append(createElement('span', { className: 'settings-choice__label', text: label }));
+      choice.append(input, text);
+      presets.append(this.describe(choice, help));
+    }
+
+    /*
+     * Its answer is a sentence rather than a tick, because what a reader needs after a failure is the
+     * line that was launched. Before any run, the same place says what pressing it does.
+     */
+    const testRow = createElement('div', { className: 'settings-entry__row' });
+    const test = createElement('button', {
+      className: 'button',
+      text: this.agentTesting ? 'Testing…' : 'Test',
+    });
+    test.type = 'button';
+    test.disabled = this.agentTesting;
+    test.addEventListener('click', () => void this.testAgent());
+    testRow.append(
+      test,
+      createElement('span', {
+        className: 'settings-aside',
+        text:
+          this.agentStatus.length > 0
+            ? this.agentStatus
+            : 'Starts the agent once with a one-word prompt and shows what came back.',
+      }),
     );
-    this.hosts.claude.append(preset);
+
+    const which: HTMLElement[] = [presets, testRow];
     if (this.agent.interactive.includes('--dangerously-skip-permissions')) {
-      this.hosts.claude.append(
+      which.push(
         createElement('p', {
-          className: 'settings__note',
-          text: 'Sessions opened from a ticket run with --dangerously-skip-permissions: the agent edits files and runs commands without asking. Change the interactive command under Advanced to be asked instead.',
+          className: 'settings-group__intro',
+          text: 'Sessions opened from a ticket run with --dangerously-skip-permissions: the agent edits files and runs commands without asking. Change the command for terminal sessions under Advanced to be asked instead.',
         }),
       );
     }
-    this.hosts.claude.append(...basics);
-    expert.unshift(
-      createElement('p', {
-        className: 'settings__note',
-        text: 'Each command is a template passed through as written, not a shell: {model} becomes the model flag and disappears when no model is pinned. The headless command must make the agent answer and exit, and should keep it to reading; the pull request review trusts it. Press Test after any change.',
-      }),
+    this.hosts.claude.append(this.group('Which agent', '', which));
+
+    /*
+     * Four fields and not one, because the four runs are four jobs: classifying a sprint is bulk
+     * reading where speed and cost dominate, implementing a ticket wants the strongest model there
+     * is, a commit message is short and frequent, and a review reads a patch against a standard.
+     * One setting would be wrong for three of them.
+     */
+    const tasks: readonly { key: keyof AgentModelDrafts; label: string; help: string }[] = [
+      {
+        key: 'analysis',
+        label: 'Sprint triage',
+        help: 'Reads every ticket of a sprint to sort out which ones an agent can take on. Long and mostly reading: a fast model keeps it quick and cheap.',
+      },
+      {
+        key: 'work',
+        label: 'Working on a ticket',
+        help: 'Implements a ticket in a terminal tab when you press Work on this. This is the run that writes code, where the strongest model pays off.',
+      },
+      {
+        key: 'commit',
+        label: 'Commit messages',
+        help: 'Writes a commit message from the staged changes when you press Generate. Short and frequent: a small model is enough.',
+      },
+      {
+        key: 'review',
+        label: 'Pull request reviews',
+        help: 'Checks a pull request against your written standards, and can end in a comment posted on GitHub.',
+      },
+    ];
+
+    /*
+     * The aliases are Claude Code's, so they are only offered while that is the agent; another agent's
+     * field stays free for whatever name its documentation gives. Buttons under the field rather than
+     * a datalist: a datalist shows its options only once the field has focus, so a reader looking at
+     * an empty field had no way to learn it expected a model name.
+     */
+    const aliases = custom ? [] : CLAUDE_CODE_MODEL_ALIASES;
+    // Names the agent, so an empty field says whose default it falls back to.
+    const placeholder = `${this.agent.label.trim().length > 0 ? this.agent.label.trim() : 'agent'} default`;
+
+    const models: HTMLElement[] = [];
+    for (const task of tasks) {
+      const chips = createElement('div', { className: 'settings-suggestions' });
+      const syncChips = (value: string): void => {
+        for (const chip of chips.querySelectorAll('button')) {
+          chip.setAttribute('aria-pressed', String(chip.dataset.model === value.trim()));
+        }
+      };
+      // A model id is a string the machine has to match exactly, so it is set in the mono face.
+      const field = this.field(
+        task.label,
+        this.agentModels[task.key],
+        (value) => {
+          this.agentModels[task.key] = value;
+          this.markModelField(field, value);
+          syncChips(value);
+          this.touch();
+        },
+        placeholder,
+        true,
+      );
+      field.classList.add('settings-field--model');
+      const input = field.querySelector('input');
+      for (const alias of aliases) {
+        const chip = createElement('button', { className: 'settings-suggestion', text: alias });
+        chip.type = 'button';
+        chip.dataset.model = alias;
+        chip.addEventListener('click', () => {
+          if (input === null) {
+            return;
+          }
+          // A second click on the chosen alias empties the field: the way back to the default.
+          input.value = input.value.trim() === alias ? '' : alias;
+          input.dispatchEvent(new Event('input'));
+        });
+        chips.append(chip);
+      }
+      if (aliases.length > 0) {
+        input?.after(chips);
+        syncChips(this.agentModels[task.key]);
+      }
+      field.append(createElement('span', { className: 'settings-field__problem' }));
+      this.describe(field, task.help);
+      this.markModelField(field, this.agentModels[task.key]);
+      models.push(field);
+    }
+    this.hosts.claude.append(
+      this.group(
+        'Model for each task',
+        this.agent.modelFlag.trim().length === 0
+          ? 'This agent takes no model option (see Model option under Advanced), so these fields are ignored.'
+          : custom
+            ? 'Each task the app hands to the agent can use its own model. Type a model name your agent accepts, or leave a field empty to use its own default.'
+            : 'Each task the app hands to the agent can use its own model. Pick one under a field or type a full model name, or leave the field empty to use the model Claude Code is set to.',
+        models,
+      ),
     );
-    this.hosts.claude.append(this.advanced('agent', expert));
+
+    this.hosts.claude.append(this.advanced('agent', this.agentAdvanced()));
+  }
+
+  /**
+   * The profile's templates and the agent's surroundings, folded under Advanced.
+   *
+   * Most people run Claude Code as installed and never need any of this, which used to open the page
+   * as six fields of command syntax. Grouped by the question each block answers, so a reader looking
+   * for "where does a session start" does not read the command templates on the way.
+   */
+  private agentAdvanced(): HTMLElement[] {
+    const profileField = (
+      key: 'label' | 'headless' | 'interactive' | 'planArgs' | 'modelFlag' | 'extraDirFlag',
+      label: string,
+      placeholder: string,
+      help: string,
+    ): HTMLElement =>
+      this.describe(
+        this.field(
+          label,
+          this.agent[key],
+          (value) => {
+            this.agent = { ...this.agent, [key]: value };
+            this.touch();
+          },
+          placeholder,
+          // The name is a word a person chose; every other value here is read back by a program.
+          key !== 'label',
+        ),
+        help,
+      );
+
+    const commands = [
+      profileField(
+        'label',
+        'Display name',
+        '',
+        'How this agent is named in the app, in its messages and in the list on the left.',
+      ),
+      profileField(
+        'headless',
+        'Command for background runs',
+        'agent --print {model}',
+        'Used for the sprint triage, commit messages and reviews, which run without a terminal. It must make the agent answer and exit, and should keep it to reading files: the review trusts it.',
+      ),
+      profileField(
+        'interactive',
+        'Command for terminal sessions',
+        'agent {model}',
+        'Used by Work on this, which opens the agent in a terminal tab. The prompt is added at the end as a quoted argument.',
+      ),
+      profileField(
+        'planArgs',
+        'Plan mode arguments',
+        'none: no plan mode',
+        'Put after the program whenever a session starts in plan mode. Empty if this agent has no plan mode.',
+      ),
+      profileField(
+        'modelFlag',
+        'Model option',
+        '--model {model}',
+        'What {model} becomes in the commands above, with {model} here standing for the model name. Empty if the agent takes no model option: the models on this page are then ignored.',
+      ),
+      profileField(
+        'extraDirFlag',
+        'Extra folder option',
+        '--add-dir',
+        'Lets a run read a second folder. Only the pull request review uses it, to read your standards and the repository together. Empty is fine: the review then reads the repository only.',
+      ),
+      this.describe(
+        this.select(
+          'How the prompt is sent',
+          [
+            { value: 'stdin', label: 'Standard input (stdin)' },
+            { value: 'argument', label: 'As an argument' },
+            { value: 'file', label: 'Through a file' },
+          ],
+          this.agent.promptVia,
+          (value) => {
+            this.agent = { ...this.agent, promptVia: value as AgentProfile['promptVia'] };
+            this.touch();
+          },
+        ),
+        "How the command for background runs receives the prompt. Follow your agent's documentation: a wrong choice can cut a long prompt short without any error.",
+      ),
+      this.describe(
+        this.select(
+          'Answer format',
+          [
+            { value: 'stream-json', label: 'stream-json (live progress)' },
+            { value: 'stdout', label: 'Plain text' },
+          ],
+          this.agent.answerFormat,
+          (value) => {
+            this.agent = { ...this.agent, answerFormat: value as AgentProfile['answerFormat'] };
+            this.touch();
+          },
+        ),
+        'With stream-json the app shows what the agent is doing while it runs. With plain text it can only show a running clock.',
+      ),
+    ];
+
+    /*
+     * The two executables of the Extensions tab. Not part of the profile: that tab lists both agents
+     * whichever one the profile runs. A bare name is looked up on PATH, and a full path reaches an
+     * install that is not on it.
+     */
+    const cliField = (key: 'claude' | 'codex', label: string, help: string): HTMLElement =>
+      this.describe(
+        this.field(
+          label,
+          this.commands[key],
+          (value) => {
+            this.commands = { ...this.commands, [key]: value };
+            this.touch();
+          },
+          key,
+          true,
+        ),
+        help,
+      );
+    const programs = [
+      cliField(
+        'claude',
+        'Claude Code program',
+        'Used by the Extensions tab to manage plugins and MCP servers. A name found on PATH, or a full path.',
+      ),
+      cliField(
+        'codex',
+        'Codex program',
+        'Used by the Extensions tab to manage MCP servers. A full path to codex.cmd if Codex is not on PATH.',
+      ),
+    ];
+
+    const workspace = this.describe(
+      this.field(
+        'Starting folder',
+        this.roots.workspace,
+        (value) => {
+          this.roots = { ...this.roots, workspace: value };
+          this.touch();
+        },
+        'the repository itself',
+        true,
+      ),
+      'Where Work on this and the agent button open a session. Point it at a folder whose instructions cover several repositories, or leave it empty to start in the repository itself.',
+    );
+    const handoff: HTMLElement[] = [workspace];
+    for (const [key, label, help] of [
+      [
+        'ask',
+        'Skill for Work on this',
+        "The slash command a ticket is handed to, such as /ticket. Empty sends the app's own prompt.",
+      ],
+      [
+        'auto',
+        'Skill for unattended runs',
+        "The skill of a run that goes all the way to a pull request on its own. Empty sends the app's own prompt.",
+      ],
+      [
+        'feedback',
+        'Skill for review feedback',
+        "The skill that handles the review comments on a pull request. Empty sends the app's own prompt.",
+      ],
+    ] as const) {
+      handoff.push(
+        this.describe(
+          this.field(
+            label,
+            this.handoffs[key],
+            (value) => {
+              this.handoffs = { ...this.handoffs, [key]: value };
+              this.touch();
+            },
+            'the app prompt',
+            true,
+          ),
+          help,
+        ),
+      );
+    }
+
+    return [
+      this.group(
+        'How the app starts the agent',
+        'Each command is a template passed on as written, not through a shell: {model} becomes the model option, and disappears when no model is set. Press Test after any change.',
+        commands,
+      ),
+      this.group('Other programs', '', programs),
+      this.group('Handing over a ticket', '', handoff),
+    ];
   }
 
   /**
@@ -1024,9 +1109,13 @@ export class SettingsForm {
     }
     const invalid = !isValidModel(value);
     input.classList.toggle('settings-field__input--invalid', invalid);
-    input.title = invalid
-      ? 'Not a model name: letters, digits, dot, dash, underscore and brackets. This would be ignored.'
-      : '';
+    // Said under the field, not in a tooltip: the reader is looking at the field while typing.
+    const problem = field.querySelector('.settings-field__problem');
+    if (problem !== null) {
+      problem.textContent = invalid
+        ? 'Not a model name: only letters, digits, dot, dash, underscore and brackets. It would be ignored.'
+        : '';
+    }
   }
 
   /**
@@ -1326,7 +1415,7 @@ export class SettingsForm {
     /*
      * Grouping lives here and not in the table, because it is a **save**: the stored order is the
      * displayed order everywhere, so a grouping applied to the view alone would leave the table
-     * disagreeing with this window, the new-tab menu and the servers window. Doing it on the draft has
+     * disagreeing with this window and the new-tab menu. Doing it on the draft has
      * a second benefit the table could not offer: the result is on screen before anything is written,
      * and closing without saving undoes it.
      *
@@ -2301,6 +2390,40 @@ export class SettingsForm {
     );
     wrapper.append(problem);
     return wrapper;
+  }
+
+  /**
+   * Puts the sentence that explains a field under its label, where it is read, rather than in a
+   * `title` only a hover reveals. Linked by `aria-describedby`, so it is also announced.
+   */
+  private describe<T extends HTMLElement>(wrapper: T, help: string): T {
+    const id = `settings-help-${++this.helpIds}`;
+    const text = createElement('span', { className: 'settings-field__help', text: help });
+    text.id = id;
+    const label = wrapper.querySelector('.settings-field__label, .settings-choice__label');
+    if (label === null) {
+      wrapper.append(text);
+    } else {
+      label.after(text);
+    }
+    wrapper.querySelector('input, select')?.setAttribute('aria-describedby', id);
+    return wrapper;
+  }
+
+  /**
+   * A titled block of fields within a page. The intro, when there is one, says what the whole block
+   * decides, so the fields inside it only have to say what each one changes.
+   */
+  private group(legend: string, intro: string, nodes: readonly HTMLElement[]): HTMLElement {
+    const fieldset = createElement('fieldset', { className: 'settings-group' });
+    fieldset.append(createElement('legend', { className: 'settings-group__legend', text: legend }));
+    const body = createElement('div', { className: 'settings-group__body' });
+    if (intro.length > 0) {
+      body.append(createElement('p', { className: 'settings-group__intro', text: intro }));
+    }
+    body.append(...nodes);
+    fieldset.append(body);
+    return fieldset;
   }
 
   /** The expert fields of a page, folded, the fold remembered across repaints. */

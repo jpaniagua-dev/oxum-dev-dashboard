@@ -46,7 +46,6 @@ import { SecretStore } from './store/secret-store.js';
 import { sameProjectSet } from '@shared/project-order.js';
 import { ProjectMonitor } from './projects/project-monitor.js';
 import { resolveProjects } from './projects/registry.js';
-import { ServersWindow, SERVERS_WINDOW_BOUNDS } from './servers-window.js';
 import { SettingsWindow, SETTINGS_WINDOW_BOUNDS } from './settings-window.js';
 import { AppPaths } from './store/paths.js';
 import { SettingsStore } from './store/settings-store.js';
@@ -138,25 +137,6 @@ async function bootstrap(): Promise<void> {
     },
   );
 
-  /*
-   * The servers window, and the ownership rule that comes with it.
-   *
-   * `onClosed` hands the sessions back unconditionally, however the window went: closed by its own
-   * button, by the title bar, or with the app shutting down. A running dev server owned by a window that
-   * no longer exists would be work with nothing able to show or stop it, which this app does not allow.
-   */
-  const serversWindow: ServersWindow = new ServersWindow(
-    new WindowStateStore(AppPaths.serversWindowState(), SERVERS_WINDOW_BOUNDS),
-    {
-      preloadPath: preloadPath(),
-      backgroundColor: () => themeController.backgroundColor(),
-      onClosed: () => {
-        terminals?.setServersDetached(false);
-        dashboardWindow.send(IpcChannel.ServersDetachedChanged, false);
-      },
-    },
-  );
-
   /** Sends to every live window. Used for state no window owns: the theme and the settings. */
   const broadcast = (channel: string, payload: unknown): void => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -171,7 +151,6 @@ async function bootstrap(): Promise<void> {
     (color) => {
       dashboardWindow.setBackgroundColor(color);
       settingsWindow.setBackgroundColor(color);
-      serversWindow.setBackgroundColor(color);
     },
   );
   themeController.setMode(settings.themeMode);
@@ -182,15 +161,10 @@ async function bootstrap(): Promise<void> {
       () => settingsStore.get(),
       (rows: ProjectRow[]) => {
         dashboardWindow.send(IpcChannel.RowsChanged, rows);
-        // The servers window paints a phase per tile, and the phase lives on the row. Broadcast rather
-        // than routed, unlike the pty output: this is one small payload on the poll's cadence, not a
-        // byte stream, and there is nothing per-window to decide about it.
-        serversWindow.send(IpcChannel.RowsChanged, rows);
         // Never awaited by the poll: the runner reports on its own channel, and a rule that takes a
         // moment must not hold the row payload the whole app paints from.
         void runAutomations();
       },
-      // The dashboard only: the servers window has no tab that reads git on demand.
       () => dashboardWindow.send(IpcChannel.GitPolled),
     );
 
@@ -468,9 +442,9 @@ async function bootstrap(): Promise<void> {
   /**
    * Pushes the vault to the DASHBOARD only, never broadcast.
    *
-   * The servers window has no business receiving a payload about secrets, even one that carries
-   * none: the rule that routes pty output rather than broadcasting it, applied to the one shape in
-   * this app where the cost of being wrong is not a wasted xterm.
+   * The settings window has no business receiving a payload about secrets, even one that carries
+   * none: the rule that sends pty output to the dashboard rather than broadcasting it, applied to the
+   * one shape in this app where the cost of being wrong is not a wasted xterm.
    */
   /*
    * The newer release, if any. Looked at a little after launch, so the first paint never waits on
@@ -580,40 +554,18 @@ async function bootstrap(): Promise<void> {
 
   const terminalManager = new TerminalManager({
     /*
-     * Output goes to the one window that owns the session, never to both.
-     *
-     * Not a broadcast, and the reason is measured rather than stylistic: `TerminalPane.write` creates a
-     * view for whatever id it is handed, so a broadcast would build a second, hidden xterm per detached
-     * server in the dashboard and feed it every byte of a `ng serve`. Routing costs one map lookup.
+     * Output goes to the dashboard alone, never broadcast: `TerminalPane.write` creates a view for
+     * whatever id it is handed, so the settings window would otherwise be fed every byte of a
+     * `ng serve` it has no terminal for.
      */
-    onOutput: (terminalId, data) => {
-      const target = terminalManager.isDetached(terminalId) ? serversWindow : dashboardWindow;
-      target.send(IpcChannel.PtyOutput, { terminalId, data });
-    },
+    onOutput: (terminalId, data) => dashboardWindow.send(IpcChannel.PtyOutput, { terminalId, data }),
     // Reads `projectMonitor` through the closure rather than capturing it, so output keeps reaching
     // the current monitor after the project list is rebuilt.
     onParsed: (projectId, parsed) => projectMonitor.applyParsed(projectId, parsed),
     onProjectStartExit: (projectId, exitCode, stopped) =>
       projectMonitor.markExited(projectId, exitCode, stopped),
-    /*
-     * Each window is told about its own sessions and no others.
-     *
-     * This is what makes detaching work with no change to `TerminalPane`: its `setSessions` already
-     * disposes the views of sessions that have left the list and re-normalises its panes, so a dashboard
-     * that stops being told about a server drops its tab and frees its terminal on its own. The servers
-     * window does the same in reverse. One rule, applied twice, instead of a "hide this tab" flag
-     * threaded through the renderer.
-     */
-    onSessionsChanged: (sessions: TerminalSession[]) => {
-      dashboardWindow.send(
-        IpcChannel.TerminalsChanged,
-        sessions.filter((session) => !terminalManager.isDetached(session.id)),
-      );
-      serversWindow.send(
-        IpcChannel.TerminalsChanged,
-        sessions.filter((session) => terminalManager.isDetached(session.id)),
-      );
-    },
+    onSessionsChanged: (sessions: TerminalSession[]) =>
+      dashboardWindow.send(IpcChannel.TerminalsChanged, sessions),
     onLayoutChanged: (layout: TerminalLayout) =>
       dashboardWindow.send(IpcChannel.TerminalLayoutChanged, layout),
   },
@@ -794,7 +746,6 @@ async function bootstrap(): Promise<void> {
     pullMonitor = buildPullMonitor();
     pullMonitor.start();
     dashboardWindow.send(IpcChannel.RowsChanged, projectMonitor.rows());
-    serversWindow.send(IpcChannel.RowsChanged, projectMonitor.rows());
     // Broadcast: the change usually comes from the settings window, and the dashboard reloads from
     // this event.
     broadcast(IpcChannel.SettingsChanged, settingsStore.get());
@@ -806,7 +757,7 @@ async function bootstrap(): Promise<void> {
 
   registerIpcHandlers({
     projects: () => projects,
-    // The dashboard only, like `GitPolled`: the servers window has no Git tab to put a notice in.
+    // The dashboard only, like `GitPolled`: the settings window has no Git tab to put a notice in.
     notifyGit: (notice) => dashboardWindow.send(IpcChannel.GitNotice, notice),
     monitor: () => projectMonitor,
     pulls: () => pullMonitor,
@@ -1000,12 +951,6 @@ async function bootstrap(): Promise<void> {
     },
     openSettings: (projectId) => settingsWindow.open(projectId),
     settingsScope: () => settingsWindow.currentScope,
-    openServers: () => serversWindow.open(),
-    closeServers: () => serversWindow.close(),
-    // Broadcast rather than sent to the dashboard alone: the servers window's own `Back` button reads
-    // the same state, and a window told nothing would keep showing a control for a state it has left.
-    broadcastServersDetached: (detached) =>
-      broadcast(IpcChannel.ServersDetachedChanged, detached),
     setSettingsDirty: (dirty) => settingsWindow.setDirty(dirty),
     broadcastSettings: (next: AppSettings) => broadcast(IpcChannel.SettingsChanged, next),
   });
@@ -1032,20 +977,6 @@ async function bootstrap(): Promise<void> {
   pullMonitor.start();
   hasJiraToken = (await secrets.read()).length > 0;
   jiraMonitor.start();
-
-  /*
-   * Reopens the servers window if that is how the app was left.
-   *
-   * After the dashboard's page has loaded, and that ordering is the whole subtlety: detaching pushes a
-   * session list to both windows, and a dashboard still loading would never receive the one telling it
-   * which tabs it has lost. There are no sessions yet at this point either, so nothing actually moves;
-   * what this restores is the **window**, ready for the first `Run`, which then joins it on spawn.
-   */
-  if (settingsStore.get().serversDetached) {
-    await serversWindow.open();
-    terminalManager.setServersDetached(true);
-    broadcast(IpcChannel.ServersDetachedChanged, true);
-  }
 
   window.on('close', (event) => {
     // Only dev servers matter here. A shell tab dying with the app is expected; a build being killed
