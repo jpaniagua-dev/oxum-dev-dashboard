@@ -4,6 +4,11 @@ The terminal fills everything below the strip. Drag the separator to resize the 
 away (the chevron beside `+ Project`, `Alt+Shift+A`, or a double-click on the tab row) to keep only
 terminals. Clicking a tab unfolds it.
 
+New terminal sessions advertise truecolor support, so tools such as Codex can display their full
+theme palette. Explicit `FORCE_COLOR` and `NO_COLOR` environment preferences are preserved.
+After upgrading, open a new terminal session to use the updated environment; existing sessions
+keep the environment they started with.
+
 ## Tabs and panes
 
 - **`+`** opens the default shell in that pane; the **caret** beside it lists the other shells.

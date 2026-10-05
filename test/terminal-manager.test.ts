@@ -190,6 +190,65 @@ describe('stopProjectServer', () => {
 const onWindows = process.platform === 'win32';
 const CMD = 'C:/WINDOWS/System32/cmd.exe';
 
+describe.runIf(onWindows)('terminal color environment reaches the real pty', () => {
+  it.each([
+    {
+      preference: {},
+      expected: { FORCE_COLOR: '3', COLORTERM: 'truecolor', TERM: 'xterm-256color' },
+    },
+    { preference: { FORCE_COLOR: '2' }, expected: { FORCE_COLOR: '2' } },
+    { preference: { NO_COLOR: '1' }, expected: { NO_COLOR: '1' } },
+  ])(
+    'passes the color policy through the shared spawn path: $preference',
+    async ({ preference, expected }) => {
+      const manager = new TerminalManager(
+        {
+          onOutput: () => {},
+          onParsed: () => {},
+          onProjectStartExit: () => {},
+          onSessionsChanged: () => {},
+          onLayoutChanged: () => {},
+        },
+        0,
+        () => ({
+          FORCE_COLOR: undefined,
+          NO_COLOR: undefined,
+          COLORTERM: undefined,
+          TERM: undefined,
+          ...preference,
+        }),
+      );
+      const id = manager.runProjectCommand({
+        project: serverProject('').project,
+        actionId: 'color-probe',
+        title: 'Color probe',
+        file: process.execPath,
+        args: [
+          '-e',
+          "console.log('COLOR_PROBE=' + JSON.stringify({ FORCE_COLOR: process.env.FORCE_COLOR, NO_COLOR: process.env.NO_COLOR, COLORTERM: process.env.COLORTERM, TERM: process.env.TERM }))",
+        ],
+        size: { cols: 200, rows: 24 },
+      });
+      try {
+        expect(id).not.toBeNull();
+        await expect
+          .poll(() => stripAnsi(manager.buffer(id as string)), { timeout: 10_000 })
+          .toMatch(/COLOR_PROBE=(\{[^\r\n]*\})/);
+        const output = stripAnsi(manager.buffer(id as string));
+        const payload = /COLOR_PROBE=(\{[^\r\n]*\})/.exec(output)?.[1];
+        expect(payload).toBeDefined();
+        const env: Record<string, string> = JSON.parse(payload as string);
+        expect(env).toMatchObject(expected);
+        if ('NO_COLOR' in preference) {
+          expect(env.FORCE_COLOR).toBeUndefined();
+        }
+      } finally {
+        if (id !== null) manager.close(id);
+      }
+    },
+  );
+});
+
 function serverProject(command: string): { project: Project; action: ProjectAction } {
   const serverAction = action({ command });
   return {

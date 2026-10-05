@@ -20,6 +20,7 @@ import { trimNote } from '@shared/session-note.js';
 import { normalizeGroups, sanitizeColumns } from '@shared/terminal-groups.js';
 import { spawnOffThread } from '../spawn/spawn-pool.js';
 import { Scrollback } from './scrollback.js';
+import { terminalEnvironment } from './terminal-environment.js';
 import { parseOutputChunk, type ParsedOutput } from '../projects/output-parser.js';
 
 /**
@@ -832,7 +833,7 @@ export class TerminalManager {
         cwd: options.cwd,
         cols: options.size.cols,
         rows: options.size.rows,
-        env: { ...process.env, ...this.environmentFor(options.projectId), FORCE_COLOR: '1' },
+        env: terminalEnvironment(process.env, this.environmentFor(options.projectId)),
       });
     } catch (error) {
       // A profile pointing at a missing executable must surface in the tab rather than crash the
