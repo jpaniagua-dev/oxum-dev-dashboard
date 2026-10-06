@@ -2,8 +2,9 @@
 
 ## Install
 
-1. **[Download the installer](https://github.com/jpaniagua-dev/oxum-dev-dashboard/releases/latest/download/oxum-dev-dashboard-win-x64-setup.exe)**.
-   The link always points at the latest version.
+1. Download the installer, `oxum-dev-dashboard-<version>-win-x64-setup.exe`, from the
+   **[latest release](https://github.com/jpaniagua-dev/oxum-dev-dashboard/releases/latest)**. Its
+   name carries the version it installs.
 2. Run it. The build is not code-signed, so Windows SmartScreen stops it the first time with
    **"Windows protected your PC"**: click **More info**, then **Run anyway**.
 3. The installer is per-user and needs no administrator rights. It adds a shortcut to the Start
@@ -11,6 +12,15 @@
 
 Take the installer rather than the zip: the Start menu shortcut it installs is what Windows needs to
 deliver the app's notifications. The zip runs the same app, without them.
+
+## Uninstall
+
+From **Uninstall Oxum Dev Dashboard** in the Start menu, from **Settings → Apps → Installed apps**, or
+by running `Uninstall Oxum Dev Dashboard.exe` in the install folder
+(`%LOCALAPPDATA%\Programs\Oxum Dev Dashboard`). It asks whether to delete your settings and data too
+(`%APPDATA%\oxum-dev-dashboard`); the answer is No unless you choose otherwise, so a reinstall finds
+them. An update never deletes them. The Start menu entry exists from 10.1.0 on; an older install has
+the other two.
 
 ## What the machine needs
 

@@ -6,7 +6,8 @@ const RELEASE = {
   html_url: 'https://github.com/example/app/releases/tag/v9.1.0',
   assets: [
     { name: 'app.zip', browser_download_url: 'https://example.com/app.zip' },
-    { name: SETUP_ASSET, browser_download_url: 'https://example.com/setup.exe' },
+    { name: 'oxum-dev-dashboard-9.1.0-win-x64-setup.exe.blockmap', browser_download_url: 'https://example.com/blockmap' },
+    { name: 'oxum-dev-dashboard-9.1.0-win-x64-setup.exe', browser_download_url: 'https://example.com/setup.exe' },
   ],
 };
 
@@ -32,6 +33,15 @@ describe('noticeFrom', () => {
     expect(noticeFrom(RELEASE, '9.1.0')).toBeNull();
     expect(noticeFrom(RELEASE, '10.0.0')).toBeNull();
     expect(noticeFrom(null, '1.0.0')).toBeNull();
+  });
+
+  it('still finds the unversioned installer of releases before 10.1.0', () => {
+    const legacy = {
+      ...RELEASE,
+      assets: [{ name: 'oxum-dev-dashboard-win-x64-setup.exe', browser_download_url: 'https://example.com/legacy.exe' }],
+    };
+    expect(noticeFrom(legacy, '8.5.0')?.download).toBe('https://example.com/legacy.exe');
+    expect(SETUP_ASSET.test('Oxum Dev Dashboard-9.1.0-portable.exe')).toBe(false);
   });
 
   it('falls back to the release page without the installer', () => {

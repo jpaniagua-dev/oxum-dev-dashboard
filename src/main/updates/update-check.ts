@@ -12,8 +12,12 @@ import type { UpdateNotice } from '@shared/contracts.js';
 /** The public repository the releases are published on. */
 export const RELEASES_REPO = 'jpaniagua-dev/oxum-dev-dashboard';
 
-/** The installer's stable name on every release, the one that also installs the toast shortcut. */
-export const SETUP_ASSET = 'oxum-dev-dashboard-win-x64-setup.exe';
+/**
+ * The installer's name on a release, the one that also installs the toast shortcut. Versioned since
+ * 10.1.0 (`oxum-dev-dashboard-10.1.0-win-x64-setup.exe`); the unversioned name earlier releases
+ * carried still matches, so this never depends on which pattern the latest release was built with.
+ */
+export const SETUP_ASSET = /^oxum-dev-dashboard-(?:\d+\.\d+\.\d+-)?win-x64-setup\.exe$/;
 
 /** How often a running app looks again. */
 export const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -53,10 +57,10 @@ export function noticeFrom(body: unknown, running: string): UpdateNotice | null 
   }
   const page = typeof release.html_url === 'string' ? release.html_url : `https://github.com/${RELEASES_REPO}/releases/latest`;
   const assets = Array.isArray(release.assets) ? release.assets : [];
-  const setup = assets.find(
-    (asset: unknown) =>
-      typeof asset === 'object' && asset !== null && (asset as { name?: unknown }).name === SETUP_ASSET,
-  ) as { browser_download_url?: unknown } | undefined;
+  const setup = assets.find((asset: unknown) => {
+    const name = typeof asset === 'object' && asset !== null ? (asset as { name?: unknown }).name : undefined;
+    return typeof name === 'string' && SETUP_ASSET.test(name);
+  }) as { browser_download_url?: unknown } | undefined;
   return {
     version: release.tag_name.replace(/^v/, ''),
     download: typeof setup?.browser_download_url === 'string' ? setup.browser_download_url : page,

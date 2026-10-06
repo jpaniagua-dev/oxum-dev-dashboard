@@ -3194,7 +3194,7 @@ npm run lint       # ESLint, zero warnings tolerated
 npm run typecheck  # tsc on the node, web and test projects
 npm run dist       # installer, zip and portable build in release/
 npm run dist:zip   # only the zip, under the name the GitHub release carries
-npm run dist:setup # only the NSIS installer, under the name the GitHub release carries
+npm run dist:setup # only the NSIS installer, under the versioned name the GitHub release carries
 ```
 
 ## Versioning
@@ -3240,7 +3240,7 @@ Three rules the workflow enforces and that a change must not break silently:
   from a version to a commit.
 - **Two assets now, and the installer is the one the notifications need.** `dist:zip` and
   `dist:setup` both run, and the release carries `oxum-dev-dashboard-win-x64.zip` and
-  `oxum-dev-dashboard-win-x64-setup.exe`. The zip stays because its permanent URL is already in use
+  `oxum-dev-dashboard-<version>-win-x64-setup.exe`. The zip stays because its permanent URL is already in use
   and because it is the install-free way in; the installer exists because a Windows toast is only
   delivered to a process whose AppUserModelID matches a **shortcut installed on the Start Menu**, and
   a zip installs no shortcut. A build that only shipped the zip could never notify, however correct
@@ -3253,16 +3253,27 @@ Three rules the workflow enforces and that a change must not break silently:
   and that is the nastiest half: a local build runs **before** the tag exists, so the same command
   passes on the machine and fails on the runner. Publishing here is `gh release create`'s job, in the
   workflow, where the assets and the notes are chosen.
-- **The installer's name is pinned on `nsis.artifactName`, not on the command line.** Unlike the zip,
-  whose per-target name has to be an override, `NsisOptions` does carry an `artifactName`, so the
-  stable name lives in the config where a reader looks for it. The versioned pattern stays on `win`
-  because the portable target still needs it.
+- **The installer's name is versioned, on `nsis.artifactName`, and that was decided (2026-10-06).** A
+  downloaded `oxum-dev-dashboard-10.1.0-win-x64-setup.exe` says which build it installs; the stable
+  name it replaced did not. The price is the permanent `releases/latest/download/...-setup.exe` URL,
+  so the README and `docs/getting-started.md` link the `releases/latest` page instead, and three
+  places have to agree on the pattern: `nsis.artifactName`, the asset path in `release.yml` (built
+  from the tag, which the first step already holds equal to `package.json`), and `SETUP_ASSET` in
+  `update-check.ts`. The last one is a **regex** that also accepts the old unversioned name: an
+  installed build looks for the installer on whatever the latest release is, and a build from before
+  this change that misses it falls back to the release page rather than failing.
 - **The zip's stable name is a command-line override, and it has to be.** `-c.win.artifactName` on
   the `dist:zip` line, because a **zip** target is a `TargetConfiguration`, which carries no
   `artifactName` of its own; `nsis` is a config block and does, which is the whole asymmetry between
-  the two lines above. Putting `${version}` back on either would break the permanent URLs
-  `releases/latest/download/oxum-dev-dashboard-win-x64.zip` and `...-setup.exe`, which are the whole
-  point of keeping a single release.
+  the two lines above. Putting `${version}` on the zip would break the permanent URL
+  `releases/latest/download/oxum-dev-dashboard-win-x64.zip`, which stays in use.
+- **The uninstaller is NSIS's own, extended by `resources/installer.nsh`.** electron-builder already
+  writes `Uninstall Oxum Dev Dashboard.exe` into the install folder and registers it under Installed
+  apps, so there is no separate uninstaller to ship. The include adds a Start menu shortcut to it and
+  asks, on a hand-run uninstall only, whether to delete the app data. ⚠️ **An update runs the
+  previous uninstaller** with `/S --updated` before installing, so the question and the deletion sit
+  behind `${Silent}` and `${isUpdated}`: without that guard, every update would wipe `settings.json`.
+  The default answer is No, so a reinstall finds the data it left.
 
 A repository with no workflow at all reads `no-runs` in the Workflows column, and this one now has
 one: if the dashboard watches its own repository, that cell moves to a real pipeline state while a

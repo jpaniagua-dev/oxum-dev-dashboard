@@ -27,10 +27,13 @@ nsis:
   # can never notify and the installer is what the feature actually needs.
   createStartMenuShortcut: true
   shortcutName: Oxum Dev Dashboard
-  # A stable name, like the zip's, so `releases/latest/download/...` is a permanent URL rather than one
-  # that moves every version. The versioned pattern on `win` is what the portable target needs, and a
-  # per-target name is the only way to have both.
-  artifactName: oxum-dev-dashboard-win-x64-setup.${ext}
+  # Versioned, so a downloaded installer says which build it installs. That gives up the permanent
+  # `releases/latest/download/...` URL the zip keeps: the docs link the release page instead, and the
+  # update check finds this asset by pattern rather than by name.
+  artifactName: oxum-dev-dashboard-${version}-win-x64-setup.${ext}
+  # The uninstall shortcut and the offer to delete the app data. Named explicitly although it is the
+  # default location under `buildResources`, so a reader finds it from here.
+  include: resources/installer.nsh
 
 win:
   target:

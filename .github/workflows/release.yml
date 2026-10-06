@@ -65,7 +65,7 @@ jobs:
           gh release delete "$tag" --yes 2>/dev/null || true
           gh release create "$tag" --title "$tag" --notes-file notes.md --latest \
             release/oxum-dev-dashboard-win-x64.zip \
-            release/oxum-dev-dashboard-win-x64-setup.exe
+            "release/oxum-dev-dashboard-${tag#v}-win-x64-setup.exe"
 
           # One package alive. Creating before pruning matters: a failure never leaves zero
           # releases. Tags are kept, being the only link from a version to a commit.

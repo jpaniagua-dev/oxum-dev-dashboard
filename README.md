@@ -8,8 +8,8 @@ nothing ever sends you to an external console.
 
 ## Install
 
-**[Download the installer](https://github.com/jpaniagua-dev/oxum-dev-dashboard/releases/latest/download/oxum-dev-dashboard-win-x64-setup.exe)**,
-always the latest version, and run it. The build is not code-signed: when SmartScreen says
+Download the installer, `oxum-dev-dashboard-<version>-win-x64-setup.exe`, from the
+**[latest release](https://github.com/jpaniagua-dev/oxum-dev-dashboard/releases/latest)**, and run it. The build is not code-signed: when SmartScreen says
 **"Windows protected your PC"**, click **More info**, then **Run anyway**. The installer is per-user
 and needs no administrator rights.
 

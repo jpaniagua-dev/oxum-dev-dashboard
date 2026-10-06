@@ -19,7 +19,12 @@ ships as a prebuilt Node-API binary.
 
 Pushing a `v*` tag equal to the `package.json` version runs the release workflow: lint, tests,
 typecheck, the zip and the installer, then a GitHub release. Only the latest release is kept, so the
-`releases/latest/download/...` links always point at it. The versioning rule is in `CLAUDE.md`.
+`releases/latest` page always shows it. The installer's name carries its version; the zip's does not,
+so `releases/latest/download/oxum-dev-dashboard-win-x64.zip` stays permanent. The versioning rule is
+in `CLAUDE.md`.
+
+The installer's own hooks (the Start menu uninstall shortcut and the offer to delete the app data) are
+in `resources/installer.nsh`.
 
 ## Architecture
 
