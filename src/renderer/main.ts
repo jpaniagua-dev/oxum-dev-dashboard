@@ -1756,6 +1756,20 @@ class App {
        */
       onDiscard: (paths) =>
         void this.runGitWrite(() => window.api.gitDiscard(this.requireGitProject(), paths)),
+      /*
+       * The Explorer's editor, not a second one: its two gates check the path, it tracks unsaved
+       * changes, and a file is never open twice. The tab is shown BEFORE the open, so the panel's
+       * terminal is measured at the size the editor will keep.
+       */
+      onEditFile: (path, target) => {
+        if (this.gitProject === null) {
+          return;
+        }
+        if (target === 'panel') {
+          this.strip?.select('explorer');
+        }
+        this.explorer?.edit(this.gitProject, path, target);
+      },
       onCheckout: (name) =>
         void this.runGitWrite(() => window.api.gitCheckout(this.requireGitProject(), name)),
       onCreateBranch: (name) => {

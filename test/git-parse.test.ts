@@ -8,7 +8,12 @@ import {
   parseStatusZ,
   parseUnifiedDiff,
 } from '../src/main/git/git-parse.js';
-import { hasStagedChanges, hasWorktreeChange, isStaged } from '../src/shared/git-changes.js';
+import {
+  hasStagedChanges,
+  hasWorktreeChange,
+  isDeletedOnDisk,
+  isStaged,
+} from '../src/shared/git-changes.js';
 
 describe('parseStatusZ', () => {
   it('keeps the index and worktree columns apart', () => {
@@ -200,6 +205,16 @@ describe('git-changes', () => {
   it('answers whether a commit would contain anything', () => {
     expect(hasStagedChanges([change(' ', 'M'), change('?', '?')])).toBe(false);
     expect(hasStagedChanges([change(' ', 'M'), change('A', ' ')])).toBe(true);
+  });
+
+  it('knows which files have nothing left on disk to open', () => {
+    for (const [index, worktree] of [[' ', 'D'], ['M', 'D'], ['D', ' '], ['D', 'D']] as const) {
+      expect(isDeletedOnDisk(change(index, worktree))).toBe(true);
+    }
+    // A conflict where one side deleted the file leaves the other side's version on disk.
+    for (const [index, worktree] of [[' ', 'M'], ['A', ' '], ['?', '?'], ['R', 'M'], ['U', 'D'], ['D', 'U'], ['U', 'U']] as const) {
+      expect(isDeletedOnDisk(change(index, worktree))).toBe(false);
+    }
   });
 });
 

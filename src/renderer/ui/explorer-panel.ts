@@ -235,6 +235,26 @@ export class ExplorerPanel {
     }
   }
 
+  /**
+   * Edits a file named from outside the tab: a changed file of the Git tab.
+   *
+   * In the panel, the project becomes the open one and the list moves to the file's folder, so what
+   * sits beside the editor is where the file lives. A window leaves the tab as it was. The caller
+   * shows the tab first: the editor is started at the size the panel measures.
+   */
+  edit(projectId: ProjectId, path: string, target: ExplorerTarget): void {
+    if (target === 'panel') {
+      this.folders.set(projectId, parentPath(path) ?? '');
+      if (projectId === this.projectId) {
+        this.resetForProject();
+        void this.readFolder();
+      } else {
+        this.selectProject(projectId);
+      }
+    }
+    void this.openFile(path, target, null, projectId);
+  }
+
   /** The configured projects changed: keep the open one if it still exists. */
   projectsChanged(): void {
     const before = this.projectId;

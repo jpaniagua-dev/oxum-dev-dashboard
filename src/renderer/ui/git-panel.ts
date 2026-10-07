@@ -15,7 +15,8 @@ import type {
   ProjectId,
   TagColors,
 } from '@shared/contracts.js';
-import { hasStagedChanges, hasWorktreeChange, isStaged } from '@shared/git-changes.js';
+import { hasStagedChanges, hasWorktreeChange, isDeletedOnDisk, isStaged } from '@shared/git-changes.js';
+import type { ExplorerTarget } from '@shared/explorer.js';
 import { clearChildren, createElement, createIcon, createIconButton, hitsInteractive } from './dom.js';
 import { showContextMenu } from './context-menu.js';
 import { CHEVRON_DOWN_ICON, TERMINAL_ICON } from './icons.js';
@@ -160,6 +161,8 @@ export interface GitPanelActions {
    * reach of a stray click in a list, the dialog names the files before anything is touched.
    */
   onDiscard: (paths: string[]) => void;
+  /** Opens a changed file in the editor set in Settings: the Explorer's panel, or a window of its own. */
+  onEditFile: (path: string, target: ExplorerTarget) => void;
   onCheckout: (name: string) => void;
   onCreateBranch: (name: string) => void;
   /** Commits in a terminal tab. With `push`, a `git push` follows a commit that exited cleanly. */
@@ -1331,8 +1334,8 @@ function buildStashRow(
 /**
  * What a changed file offers on a right-click.
  *
- * Three entries and no more: the diff, the staging toggle the checkbox already carries, and the one
- * gesture that has nowhere else to live. The first two are repeated deliberately, since a menu
+ * The diff, the editor, the staging toggle the checkbox already carries, and the one gesture that has
+ * nowhere else to live. The first two are repeated deliberately, since a menu
  * holding a single destructive item is a menu whose only purpose is that item, and it invites the
  * click it should be making people think about.
  *
@@ -1353,12 +1356,27 @@ export function buildChangeMenuItems(
   // cherry-pick refuses every one of these for a cause that has nothing to do with the click.
   const blocked = state.busy || (state.repo !== null && state.repo.sequencer !== 'none');
   const staged = isStaged(change);
+  const deleted = isDeletedOnDisk(change);
   return [
     {
       label: 'See the diff',
       hint: 'The same thing a click on the row does.',
       disabled: false,
       run: () => actions.onSelectTarget(defaultTargetFor(change)),
+    },
+    // Not `blocked`: opening a file runs no git command, so a busy repository or a half-done
+    // cherry-pick is no reason to refuse it. A conflict is precisely the file one wants to edit.
+    {
+      label: 'Edit',
+      hint: deleted ? 'Deleted on disk: there is no file to open.' : 'Opens it in the Explorer tab, in the editor set in Settings.',
+      disabled: deleted,
+      run: () => actions.onEditFile(change.path, 'panel'),
+    },
+    {
+      label: 'Edit in a window',
+      hint: deleted ? 'Deleted on disk: there is no file to open.' : 'Opens it in a window of its own, and this tab stays on screen.',
+      disabled: deleted,
+      run: () => actions.onEditFile(change.path, 'window'),
     },
     {
       label: staged ? 'Unstage' : 'Stage',

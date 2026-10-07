@@ -29,6 +29,21 @@ export function hasWorktreeChange(change: GitChange): boolean {
   return change.worktree !== ' ' && change.worktree !== '?';
 }
 
+/**
+ * Whether the file is gone from the working tree, so there is nothing on disk to open.
+ *
+ * A deletion shows in the working-tree column (` D`, `MD`), or in the index alone once it is staged
+ * (`D `). A conflict is the exception to read before the columns: `UD` and `DU` say one side deleted
+ * the file and git leaves the other side's version on disk, which is exactly the file to open. Only
+ * `DD`, deleted on both sides, has nothing left.
+ */
+export function isDeletedOnDisk(change: GitChange): boolean {
+  if (change.index === 'U' || change.worktree === 'U') {
+    return false;
+  }
+  return change.worktree === 'D' || (change.index === 'D' && change.worktree === ' ');
+}
+
 /** True when at least one file would go into a commit right now. */
 export function hasStagedChanges(changes: readonly GitChange[]): boolean {
   return changes.some(isStaged);

@@ -1676,6 +1676,15 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   line. The confirmation is in the main process for the reason every other question in this app is:
   a page under this CSP has no dialog worth the name, and a modal of our own is the pattern that got
   the settings modal removed.
+- **A changed file opens in the Explorer's editor from its right-click** (added on 2026-10-07, on
+  request): `Edit` shows the Explorer tab and opens it in the panel there, `Edit in a window` keeps
+  this tab on screen beside the file. It is the Explorer's editor and not a second one, so the path
+  goes through the same two gates, unsaved changes are tracked and a file is never open twice.
+  Neither entry is held off by `busy` or a half-done cherry-pick, which the stage and discard entries
+  are: opening a file runs no git command, and a conflicted file is the one most worth opening.
+  `isDeletedOnDisk` greys them out for a file with nothing left on disk, reading the conflict
+  columns first: `UD` and `DU` leave the surviving side's version in the working tree, only `DD`
+  leaves nothing.
 - **`discardPaths` re-reads the status, like `applyStash` re-reads the stash list.** The renderer's
   snapshot is up to a poll old, and in that window a file can have been staged, committed or created:
   acting on a stale classification would `clean` a path git now tracks. A path with no change left is

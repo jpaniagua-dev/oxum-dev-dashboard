@@ -6,6 +6,9 @@ Pick a repository on the left (each carries its count of uncommitted files), the
 ## Changes
 
 - Tick a file to stage it; click it to see its diff. `MM` is a file staged and edited again.
+- **Right-click** a file to edit it, in the Explorer tab or in a window of its own (the Git tab then
+  stays on screen), to stage it, or to discard its changes. A file deleted on disk has nothing to
+  edit.
 - **Commit** runs in a terminal tab, so hooks (`husky`, `lint-staged`) show what they print. The
   message is kept if the commit is refused.
 - **Commit and push**, in the chevron beside Commit, pushes only if the commit succeeded.
