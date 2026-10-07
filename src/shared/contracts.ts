@@ -2210,6 +2210,7 @@ export const IpcChannel = {
    * alone leaves the merge blocked, so the two are one gesture.
    */
   PullReviewRetract: 'pull-review:retract',
+  PullApproveDirect: 'pull-review:approve-direct',
   /**
    * invoke: (projectId, number, draft: boolean) => GitResult
    *
@@ -2595,6 +2596,12 @@ export interface RendererApi {
   ): Promise<PullReviewState>;
   /** Dismisses a review this app posted and replaces its text. There is no delete on GitHub. */
   retractPullReview(slug: string, number: number): Promise<PullReviewState>;
+  /** Approves with no review of this app behind it, pinned to the head the list showed. */
+  approvePullDirectly(
+    slug: string,
+    number: number,
+    headSha: string,
+  ): Promise<{ ok: boolean; message: string }>;
   /** Runs the agent once on a tiny prompt and reports what came back, command line included. */
   testAgent(profile: AgentProfile): Promise<{ ok: boolean; message: string }>;
   /** The body a review would post, or posted. Empty when there is no review. */

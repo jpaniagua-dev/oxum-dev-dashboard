@@ -17,7 +17,12 @@ import {
 } from '../src/shared/agent-profile.js';
 import { reviewArgs } from '../src/main/github/gh-write.js';
 import { withPort } from '../src/main/projects/free-port.js';
-import { decideAction, decideManual, type GateInput } from '../src/main/review/review-gate.js';
+import {
+  decideAction,
+  decideDirectApprove,
+  decideManual,
+  type GateInput,
+} from '../src/main/review/review-gate.js';
 import { MAX_CHANGED_FILES, MAX_PRS_PER_REPO, MAX_PRS_PER_RUN } from '../src/main/review/review-limits.js';
 import { parseReview } from '../src/main/review/review-parse.js';
 import { selectPulls } from '../src/main/review/review-select.js';
@@ -252,6 +257,22 @@ describe('decideAction', () => {
     expect(decideAction('request-changes', own).kind).toBe('none');
     expect(decideManual('APPROVE', { ...own, reviewIsCurrent: true }).kind).toBe('none');
     expect(decideManual('REQUEST_CHANGES', { ...own, reviewIsCurrent: true }).kind).toBe('none');
+  });
+
+  it('approves without a review only on an open, ready, unmoved pull request of somebody else', () => {
+    expect(decideDirectApprove(allowed)).toEqual({ kind: 'post', event: 'APPROVE' });
+    for (const input of [
+      { ...allowed, writesEnabled: false },
+      { ...allowed, viewerLogin: '' },
+      { ...allowed, postable: false },
+      { ...allowed, state: 'MERGED' },
+      { ...allowed, isDraft: true },
+      { ...allowed, headMoved: true },
+    ]) {
+      expect(decideDirectApprove(input).kind).toBe('none');
+    }
+    const moved = decideDirectApprove({ ...allowed, headMoved: true });
+    expect(moved.kind === 'none' && moved.reason).toContain('moved since the list was read');
   });
 
   it('writes nothing when gh is not signed in', () => {

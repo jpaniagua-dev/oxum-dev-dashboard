@@ -94,6 +94,31 @@ export function decideManual(event: ReviewEvent, input: GateInput & { readonly r
   return { kind: 'post', event };
 }
 
+/**
+ * An approval asked for with no review of this app behind it.
+ *
+ * The same preconditions as any write, then two of its own, worded for this gesture: a draft is not
+ * asking for an approval, and a head that moved since the list was read is code the reader has not
+ * seen. That second one is what replaces "the review is about this commit": the commit approved is
+ * the one that was on screen, or nothing is.
+ */
+export function decideDirectApprove(input: GateInput): ReviewAction {
+  const blocked = refusal({ ...input, isDraft: false, headMoved: false });
+  if (blocked !== null) {
+    return { kind: 'none', reason: blocked };
+  }
+  if (input.isDraft) {
+    return { kind: 'none', reason: 'A draft is not asking for an approval yet' };
+  }
+  if (input.headMoved) {
+    return {
+      kind: 'none',
+      reason: 'The pull request moved since the list was read: look at it again before approving',
+    };
+  }
+  return { kind: 'post', event: 'APPROVE' };
+}
+
 /** Every reason nothing may be written, in a fixed order, or `null` when writing is allowed. */
 function refusal(input: GateInput): string | null {
   if (!input.writesEnabled) {

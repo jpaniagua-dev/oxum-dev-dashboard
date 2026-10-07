@@ -963,6 +963,16 @@ user's own identity, on a colleague's work.
   hint, where the column showed them and let the main process refuse: the reason is known before
   the click. `Request changes` and `Comment` post the review's text, which only the column shows,
   and their hint says so.
+- **`Approve without the review` is the reader's own approval, saved the trip to GitHub** (added
+  on 2026-10-07, on request). It does not weaken the rule that the write unblocking a merge stays a
+  human click: it is one, made on the reader's judgement rather than on a run's. What replaces "the
+  review is about this commit" is the head the list showed: the approval is pinned to that sha and
+  refused if the pull request has moved since (`decideDirectApprove`), so nobody approves a commit
+  they have not had on screen. Offered only where the review-backed `Approve` is not, so the menu
+  never holds two approve entries; absent on your own pull request and on a draft. Its body is
+  **empty**, so no `review-sha` marker is posted: a later run is not told this head was reviewed by
+  the app, because it was not. Nothing is stored either; the list is read again so the review pill
+  shows the approval at once.
 - **The third column is `.pulls--detail`, added by the renderer while a review is read.** Not a
   change to `.pulls`, which paints the Jira panel too, and not set in the markup any more: without
   it the grid has two tracks, so a hidden column leaves no empty one behind.

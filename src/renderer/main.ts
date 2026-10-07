@@ -37,6 +37,7 @@ import type { AgentContext } from '@shared/agent-context.js';
 import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
+import { isReviewCurrent } from '@shared/pull-review.js';
 import type { AutomationState } from '@shared/contracts.js';
 import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
 import { renderAutomationPanel } from './ui/automation-panel.js';
@@ -2062,6 +2063,23 @@ class App {
         ),
       );
     }
+    /*
+     * Approving with no review of ours behind it, offered only where the review-backed `Approve`
+     * above is not: two approve entries side by side would ask the reader which one is which. Absent
+     * on a pull request GitHub would refuse (your own, a draft), like every write in this menu.
+     */
+    const reviewApproves = stored !== undefined && stored.postable && isReviewCurrent(stored, pull);
+    const slug = this.pulls.find((entry) => entry.projectId === projectId)?.slug ?? null;
+    if (!reviewApproves && !pull.isAuthor && !pull.isDraft && slug !== null) {
+      items.push({
+        label: 'Approve without the review',
+        hint:
+          blocked ??
+          `Submits an approval under your name, pinned to ${pull.headSha.slice(0, 7)}, the commit this list shows. Refused if it has moved.`,
+        disabled: blocked !== null,
+        run: () => void this.approvePullDirectly(slug, pull),
+      });
+    }
     if (stored?.posted != null) {
       items.push({
         label: 'Retract on GitHub',
@@ -2079,6 +2097,19 @@ class App {
       });
     }
     return items;
+  }
+
+  /**
+   * Approves a pull request with no review behind it, then reads the list again so the review pill
+   * says so at once rather than at the next poll, three minutes away.
+   */
+  private async approvePullDirectly(slug: string, pull: PullRequest): Promise<void> {
+    const result = await window.api.approvePullDirectly(slug, pull.number, pull.headSha);
+    this.stampMessage(result.message);
+    if (result.ok) {
+      this.pulls = await window.api.refreshPulls();
+      this.renderPulls();
+    }
   }
 
   /** Submits a review event. A refusal lands on the state's own error line, not in a dialog. */

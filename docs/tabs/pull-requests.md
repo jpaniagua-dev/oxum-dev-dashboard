@@ -19,6 +19,9 @@ A headless agent run reads a pull request against your team's standards and give
   be posted open beside the list, with the same actions. **Close** puts them away.
 - **Verdicts**: `clean` offers **Approve**; `remarks` waits for you; `blocking` posts a
   comment and requests changes; `unclear` posts nothing.
+- **Approve without the review**, in the row's menu, approves a pull request you have checked
+  yourself, with no review run. It approves the commit the list shows, and is refused if the pull
+  request has moved since.
 - **Nothing is posted** until **Let the review submit to GitHub** is on in the settings. Approve is
   never automatic, and is refused if the pull request moved since the review.
 - Drafts and your own pull requests are reviewed and shown, never posted to.

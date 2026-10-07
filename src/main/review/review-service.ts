@@ -15,7 +15,14 @@ import { buildReviewBody, readMarkerSha } from './review-body.js';
 import { PER_PR_TIMEOUT_MS, RUN_TIMEOUT_MS } from './review-limits.js';
 import { parseReview } from './review-parse.js';
 import { buildReviewPrompt } from './review-prompt.js';
-import { decideAction, decideManual, type GateInput, type ReviewEvent } from './review-gate.js';
+import {
+  decideAction,
+  decideDirectApprove,
+  decideManual,
+  type GateInput,
+  type ReviewEvent,
+} from './review-gate.js';
+import { sameLogin } from '../github/bot-findings.js';
 import { selectPulls, type PullTarget } from './review-select.js';
 import { PullReviewStore } from './review-store.js';
 import type { ExistingReview, PullDetail } from '../github/gh-review-read.js';
@@ -507,6 +514,64 @@ export class PullReviewService {
     this.error = null;
     await this.submit(review, action.event, login);
     return this.push();
+  }
+
+  /**
+   * Approves a pull request this app has not reviewed, or not at its current head.
+   *
+   * The reader's own judgement, made on GitHub or in a workspace, saved the trip back to the
+   * browser. Nothing is stored: there is no review of ours to attach it to, and the next poll shows
+   * the approval in the review pill like one given on GitHub. The body is empty, so no marker is
+   * posted and a later run is not told this head was reviewed by the app, because it was not.
+   *
+   * `seenHeadSha` is the head the list showed. The approval is pinned to it and refused if the pull
+   * request has moved since: approving a commit nobody has looked at is the one outcome to rule out.
+   */
+  async approveDirectly(
+    slug: string,
+    number: number,
+    seenHeadSha: string,
+  ): Promise<{ ok: boolean; message: string }> {
+    const login = await this.ports.viewerLogin();
+    this.writesBlocked = login.length === 0 ? 'gh is not signed in' : null;
+    const fresh = await this.ports.readDetail(slug, number);
+    if (fresh.value === null) {
+      return { ok: false, message: fresh.error ?? 'Could not read the pull request' };
+    }
+    const detail = fresh.value;
+    const action = decideDirectApprove({
+      writesEnabled: this.settings().reviewWritesEnabled,
+      viewerLogin: login,
+      dryRun: false,
+      postable: !sameLogin(detail.authorLogin, login),
+      state: detail.state,
+      isDraft: detail.isDraft,
+      headMoved: detail.headSha.toLowerCase() !== seenHeadSha.toLowerCase(),
+      alreadyPostedAtHead: false,
+      humanBlockPresent: false,
+      aborted: false,
+    });
+    if (action.kind === 'none') {
+      return { ok: false, message: action.reason };
+    }
+
+    const bodyPath = await this.ports.writeBody(slug, number, detail.headSha, '');
+    const outcome = await this.ports.submitReview({
+      slug,
+      number,
+      headSha: detail.headSha,
+      event: 'APPROVE',
+      bodyPath,
+    });
+    switch (outcome.kind) {
+      case 'posted':
+        return { ok: true, message: `Approved #${number} at ${detail.headSha.slice(0, 7)}` };
+      case 'unknown':
+        // Never retried, for the reason `submit` records: a timed-out write may have landed.
+        return { ok: false, message: `${outcome.message}. Check #${number} on GitHub before trying again.` };
+      case 'failed':
+        return { ok: false, message: outcome.message };
+    }
   }
 
   /**

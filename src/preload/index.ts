@@ -97,6 +97,13 @@ const api: RendererApi = {
   retractPullReview: (slug: string, number: number): Promise<PullReviewState> =>
     ipcRenderer.invoke(IpcChannel.PullReviewRetract, slug, number),
 
+  approvePullDirectly: (
+    slug: string,
+    number: number,
+    headSha: string,
+  ): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.PullApproveDirect, slug, number, headSha),
+
   testAgent: (profile: AgentProfile): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(IpcChannel.AgentTest, profile),
 

@@ -401,6 +401,29 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     },
   );
 
+  // An approval with no review behind it: the sha is the head the list showed, and must be one.
+  ipcMain.handle(
+    IpcChannel.PullApproveDirect,
+    async (
+      _event,
+      slug: unknown,
+      number: unknown,
+      headSha: unknown,
+    ): Promise<{ ok: boolean; message: string }> => {
+      const id = Number(number);
+      if (
+        typeof slug !== 'string' ||
+        !REPO_SLUG_PATTERN.test(slug) ||
+        !Number.isInteger(id) ||
+        typeof headSha !== 'string' ||
+        !/^[0-9a-f]{40}$/i.test(headSha)
+      ) {
+        return { ok: false, message: 'That pull request could not be read' };
+      }
+      return deps.pullReview().approveDirectly(slug, id, headSha);
+    },
+  );
+
   ipcMain.handle(
     IpcChannel.PullReviewRetract,
     async (_event, slug: unknown, number: unknown): Promise<PullReviewState> => {
