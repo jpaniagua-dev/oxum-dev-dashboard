@@ -218,6 +218,8 @@ export class SettingsForm {
   private agentModels: AgentModelDrafts = { analysis: '', work: '', commit: '', review: '' };
   /** The two executables the Extensions tab runs. */
   private commands = { claude: 'claude', codex: 'codex' };
+  /** The Explorer's editor program, and its exclusions as typed: one pattern per line. */
+  private explorer = { editor: 'micro', exclusions: '' };
   /** The local tickets folder. Empty means the app's own. */
   private ticketsDir = '';
   /** The folder Detect scans, and the one an agent session starts in. Empty means not set. */
@@ -316,6 +318,7 @@ export class SettingsForm {
     this.botLogin = settings.geminiBotLogin;
     this.agent = { ...settings.agentProfile };
     this.commands = { claude: settings.claudeCommand, codex: settings.codexCommand };
+    this.explorer = { editor: settings.editorCommand, exclusions: settings.explorerExclusions.join('\n') };
     this.ticketsDir = settings.localTicketsDir;
     this.roots = { projects: settings.projectsRoot, workspace: settings.workspaceRoot };
     this.worktrees = { helper: settings.worktreeHelper, root: settings.worktreesRoot };
@@ -632,6 +635,43 @@ export class SettingsForm {
       team.append(createElement('span', { className: 'settings-aside', text: this.teamStatus }));
     }
     this.hosts.interface.append(team);
+
+    const editor = this.describe(
+      this.field(
+        'Editor program',
+        this.explorer.editor,
+        (value) => {
+          this.explorer = { ...this.explorer, editor: value };
+          this.touch();
+        },
+        'micro',
+        true,
+      ),
+      'The terminal editor a file opens in, beside the Explorer list or in a window of its own. A name found on PATH, or a full path.',
+    );
+    const exclusions = createElement('label', { className: 'settings-field settings-field--mono' });
+    exclusions.append(createElement('span', { className: 'settings-field__label', text: 'Excluded files' }));
+    const patterns = createElement('textarea', { className: 'settings-field__input settings-field__textarea' });
+    patterns.rows = 5;
+    patterns.spellcheck = false;
+    patterns.placeholder = 'node_modules\n*.lock\ndist';
+    patterns.value = this.explorer.exclusions;
+    patterns.addEventListener('input', () => {
+      this.explorer = { ...this.explorer, exclusions: patterns.value };
+      this.touch();
+    });
+    exclusions.append(patterns);
+    this.describe(
+      exclusions,
+      'One pattern per line. A name matches at any depth (node_modules, *.lock); a path with a / starts at the project root (docs/generated). Excluded files are greyed and left out of the search.',
+    );
+    patterns.setAttribute('aria-describedby', exclusions.querySelector('.settings-field__help')?.id ?? '');
+    this.hosts.interface.append(
+      this.group('Explorer', 'How the Explorer tab opens files, and which ones it keeps out of the way.', [
+        editor,
+        exclusions,
+      ]),
+    );
   }
 
   /**
@@ -2212,6 +2252,8 @@ export class SettingsForm {
       agentProfile: this.agent,
       claudeCommand: this.commands.claude,
       codexCommand: this.commands.codex,
+      editorCommand: this.explorer.editor,
+      explorerExclusions: this.explorer.exclusions.split(/\r?\n/),
       localTicketsDir: this.ticketsDir,
       projectsRoot: this.roots.projects,
       workspaceRoot: this.roots.workspace,
@@ -2243,6 +2285,8 @@ export class SettingsForm {
     this.botLogin = saved.geminiBotLogin;
     this.agent = { ...saved.agentProfile };
     this.commands = { claude: saved.claudeCommand, codex: saved.codexCommand };
+    // Read back: the store drops blank lines, comments and duplicates, and the field shows what is kept.
+    this.explorer = { editor: saved.editorCommand, exclusions: saved.explorerExclusions.join('\n') };
     this.ticketsDir = saved.localTicketsDir;
     this.roots = { projects: saved.projectsRoot, workspace: saved.workspaceRoot };
     this.worktrees = { helper: saved.worktreeHelper, root: saved.worktreesRoot };

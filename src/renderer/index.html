@@ -80,6 +80,9 @@
                 <button type="button" id="strip-tab-extensions" class="strip__tab" role="tab">
                   Extensions
                 </button>
+                <button type="button" id="strip-tab-explorer" class="strip__tab" role="tab">
+                  Explorer
+                </button>
               </div>
               <div class="projects__header-actions">
                 <!--
@@ -251,6 +254,12 @@
           `extensions-panel.ts`, which builds the three columns itself.
         -->
             <div class="pulls pulls--detail" id="strip-panel-extensions" role="tabpanel" hidden></div>
+
+            <!--
+          The files of each project: browse, search, preview, and open one in an editor window.
+          Filled by `explorer-panel.ts`, which builds the three columns itself.
+        -->
+            <div class="pulls pulls--detail explorer" id="strip-panel-explorer" role="tabpanel" hidden></div>
 
             <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
               <div class="pulls__repos" id="triage-sprints"></div>

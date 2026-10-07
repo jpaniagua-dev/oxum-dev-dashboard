@@ -31,11 +31,12 @@ in `resources/installer.nsh`.
 ```
 src/shared/contracts.ts        every main <-> renderer type and channel
 src/main/                      services: projects, git, github, jira, triage, review, terminal,
-                               automation, vault, extensions, tickets, updates
+                               automation, vault, extensions, explorer, editor, tickets, updates
 src/main/spawn/                every process spawn, off the main thread
 src/preload/index.ts           the only bridge the renderers have
 src/renderer/index.html        the dashboard
 src/renderer/settings.html     the settings window, a second renderer over the same bridge
+src/renderer/editor.html       an editor window opened from the Explorer, a third one
 src/renderer/ui/               one module per panel
 ```
 

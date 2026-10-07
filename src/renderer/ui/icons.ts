@@ -44,6 +44,18 @@ export const TERMINAL_ICON =
 export const MORE_ICON = 'M3.6 8L3.7 8M7.95 8L8.05 8M12.3 8L12.4 8';
 
 /**
+ * A folder with its tab. Shared by the project row that reveals a repository in Windows Explorer and
+ * by the Explorer tab's folder rows: both mean "a folder", so they draw the same one.
+ */
+export const FOLDER_ICON = 'M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z';
+
+/**
+ * A page with its corner folded: a file, beside `FOLDER_ICON` in the Explorer tab's list. Same stroke
+ * and the same height as the folder, so the two columns of glyphs line up row after row.
+ */
+export const FILE_ICON = 'M4 2.5h5l3 3v8H4z M9 2.5v3h3';
+
+/**
  * A play triangle: the gesture is "start this run".
  *
  * A magnifier was tried first and read as "search", which is what the button is not: it launches a

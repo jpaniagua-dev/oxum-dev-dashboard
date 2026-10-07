@@ -16,6 +16,8 @@
 | Starting a server fails on "address already in use" | another process holds the port | stop that process, or let **Run** restart the one the app owns |
 | Removing a worktree says the folder is locked | an editor, a terminal or a dev server holds it | close it, then remove again |
 | Extensions shows nothing for Codex | Codex is not on `PATH` | set its full path in Settings → Agent → Advanced |
+| Explorer says "micro was not found" | the editor is not on `PATH` | install it, or set its full path in Settings → General → Editor program |
+| Explorer search says it needs a git repository | the project folder is not a repository | the field still filters the open folder; search works in a git repository |
 | No "new version" button though one is out | the check is off, or GitHub was unreachable | Settings → General; the check runs again every six hours |
 | A local ticket does not appear | its file has no valid `key`, or another file uses it | the tab lists the file as a problem; fix its header |
 

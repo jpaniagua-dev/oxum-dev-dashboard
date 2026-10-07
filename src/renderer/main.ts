@@ -53,6 +53,7 @@ import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
 import { agentSessions, renderAgentsPanel } from './ui/agents-panel.js';
 import { ExtensionsPanel } from './ui/extensions-panel.js';
+import { ExplorerPanel } from './ui/explorer-panel.js';
 import { hitsInteractive, requireElement } from './ui/dom.js';
 import { canRerunSession } from '@shared/session-actions.js';
 import {
@@ -121,6 +122,8 @@ class App {
   private boardMode = false;
   /** The Extensions tab, which keeps its own selection and forms. */
   private extensions: ExtensionsPanel | null = null;
+  /** The Explorer tab, which keeps its own folder per project and its own search. */
+  private explorer: ExplorerPanel | null = null;
   /** Session shown in the board's right terminal sidebar, or null before a card is selected. */
   private boardPreviewId: TerminalId | null = null;
   /** Sessions already in the stop/wait/start cycle, so a double click cannot launch two restarts. */
@@ -438,6 +441,14 @@ class App {
     this.extensions = new ExtensionsPanel(requireElement('strip-panel-extensions'), (message) =>
       this.stampMessage(message),
     );
+    this.explorer = new ExplorerPanel(requireElement('strip-panel-explorer'), {
+      projects: () => this.projects,
+      editorCommand: () => this.settings?.editorCommand ?? 'micro',
+      stamp: (message) => this.stampMessage(message),
+      theme: this.theme.resolved,
+      fontSize: bootstrap.settings.terminalFontSize,
+      compat: bootstrap.terminalCompat,
+    });
     // `adopt` restores the saved tab without firing the user's `onChange` callback. Every panel
     // whose state is read only when shown therefore needs the same bootstrap path as a click, or an
     // app reopened on that tab stays empty until somebody leaves and comes back.
@@ -448,6 +459,7 @@ class App {
       worktrees: () => void this.loadWorktrees(),
       git: () => void this.loadGit(),
       extensions: () => void this.extensions?.load(),
+      explorer: () => void this.explorer?.load(),
     });
 
     window.api.onRowsChanged((rows) => {
@@ -936,10 +948,12 @@ class App {
   private async reloadAfterSettings(): Promise<void> {
     const bootstrap = await window.api.bootstrap();
     this.projects = bootstrap.projects;
+    this.explorer?.projectsChanged();
     this.settings = bootstrap.settings;
     this.profiles = bootstrap.shellProfiles;
     this.terminal?.setProfiles(this.profiles);
     this.terminal?.setFontSize(bootstrap.settings.terminalFontSize);
+    this.explorer?.setFontSize(bootstrap.settings.terminalFontSize);
     // A tag renamed or recoloured in the settings window repaints the strips, the same way it
     // repaints the dots on the pull request, Git and worktree rows.
     // The board offers the same shells as the strip, so a profile added in the settings has to reach
@@ -2768,6 +2782,10 @@ class App {
         if (tab === 'extensions') {
           void this.extensions?.load();
         }
+        // Same rule: a folder is read when it is looked at, so a file created meanwhile is there.
+        if (tab === 'explorer') {
+          void this.explorer?.load();
+        }
         // Leaving the Vault tab takes any revealed value off the screen with it: the risk a reveal
         // carries is not the click, it is the value still being there afterwards.
         if (tab !== 'vault' && isRevealing()) {
@@ -2908,6 +2926,7 @@ class App {
     this.theme = state;
     document.documentElement.dataset.theme = state.resolved;
     this.terminal?.setTheme(state.resolved);
+    this.explorer?.setTheme(state.resolved);
     this.renderThemeIcon();
   }
 
@@ -3033,6 +3052,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.vaultHeight;
     case 'extensions':
       return settings.extensionsHeight;
+    case 'explorer':
+      return settings.explorerHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -3051,7 +3072,8 @@ function heightKeyOf(
   | 'agentsHeight'
   | 'automationsHeight'
   | 'vaultHeight'
-  | 'extensionsHeight' {
+  | 'extensionsHeight'
+  | 'explorerHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -3071,6 +3093,8 @@ function heightKeyOf(
       return 'vaultHeight';
     case 'extensions':
       return 'extensionsHeight';
+    case 'explorer':
+      return 'explorerHeight';
     case 'projects':
       return 'projectsHeight';
   }

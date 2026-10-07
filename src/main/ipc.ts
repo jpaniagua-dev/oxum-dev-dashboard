@@ -128,6 +128,17 @@ import {
 import type { VaultFiles } from './vault/vault-files.js';
 import type { VaultStore } from './vault/vault-store.js';
 import type { ExtensionsService } from './extensions/extensions-service.js';
+import type { ExplorerService } from './explorer/explorer-service.js';
+import type { EditorWindows } from './editor/editor-windows.js';
+import type { PanelEditor } from './editor/panel-editor.js';
+import {
+  sanitizeExplorerPath,
+  type ExplorerFiles,
+  type ExplorerListing,
+  type ExplorerOpenResult,
+  type PanelEditorState,
+} from '@shared/explorer.js';
+import type { EditorStart, TerminalSize } from '@shared/contracts.js';
 import type { LocalTicketStore } from './tickets/local-ticket-store.js';
 import { existingFolder, runFolder } from './projects/run-folder.js';
 import { existsSync } from 'node:fs';
@@ -171,6 +182,9 @@ export interface IpcDependencies {
   /** Pushes the vault to the dashboard after a change. Routed, never broadcast: see the channel. */
   readonly pushVault: () => VaultState;
   readonly extensions: () => ExtensionsService;
+  readonly explorer: () => ExplorerService;
+  readonly editors: () => EditorWindows;
+  readonly panelEditor: () => PanelEditor;
   readonly localTickets: () => LocalTicketStore;
   /** The triage file, named in the built-in handoff prompt so a session can read the notes. */
   readonly triageFile: string;
@@ -1770,6 +1784,101 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     deps.extensions().read(),
   );
 
+  /*
+   * The Explorer: a project id and a path relative to it, both checked here before anything reads the
+   * disk. `sanitizeExplorerPath` refuses the shapes that could mean two places (`..`, a drive, a
+   * backslash); the service then resolves the rest against the real folder and refuses a link that
+   * leads out. Two gates on purpose: the first one is pure and tested, the second one knows the disk.
+   */
+  ipcMain.handle(
+    IpcChannel.ExplorerList,
+    async (_event, projectId: unknown, path: unknown): Promise<ExplorerListing> => {
+      const relative = sanitizeExplorerPath(path);
+      if (typeof projectId !== 'string' || relative === null) {
+        return { ok: false, path: '', message: 'Not a folder of this project' };
+      }
+      return deps.explorer().list(projectId, relative);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.ExplorerFiles,
+    async (_event, projectId: unknown, refresh: unknown): Promise<ExplorerFiles> => {
+      if (typeof projectId !== 'string') {
+        return { ok: false, message: 'No project' };
+      }
+      if (refresh === true) {
+        deps.explorer().invalidate();
+      }
+      return deps.explorer().projectFiles(projectId);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.ExplorerOpen,
+    async (
+      _event,
+      projectId: unknown,
+      path: unknown,
+      target: unknown,
+      size: unknown,
+    ): Promise<ExplorerOpenResult> => {
+      const relative = sanitizeExplorerPath(path);
+      if (typeof projectId !== 'string' || relative === null) {
+        return { ok: false, message: 'Not a file of this project' };
+      }
+      return deps
+        .explorer()
+        .open(projectId, relative, target === 'window' ? 'window' : 'panel', asEditorSize(size));
+    },
+  );
+
+  // The editor beside the list answers the dashboard only: another page has no business typing in it.
+  ipcMain.handle(IpcChannel.PanelEditorRead, async (): Promise<PanelEditorState> => deps.panelEditor().read());
+
+  ipcMain.handle(IpcChannel.PanelEditorClose, async (event): Promise<void> => {
+    if (deps.panelEditor().ownedBy(event.sender)) {
+      deps.panelEditor().close();
+    }
+  });
+
+  ipcMain.on(IpcChannel.PanelEditorInput, (event, data: unknown) => {
+    if (typeof data === 'string' && deps.panelEditor().ownedBy(event.sender)) {
+      deps.panelEditor().write(data);
+    }
+  });
+
+  ipcMain.on(IpcChannel.PanelEditorResize, (event, size: unknown) => {
+    if (deps.panelEditor().ownedBy(event.sender)) {
+      deps.panelEditor().resize(asEditorSize(size));
+    }
+  });
+
+  // The editor windows name nothing: the sender is the window, and the window knows its one file.
+  ipcMain.handle(IpcChannel.EditorStart, async (event, size: unknown): Promise<EditorStart> =>
+    deps.editors().start(event.sender, asEditorSize(size)),
+  );
+
+  ipcMain.on(IpcChannel.EditorInput, (event, data: unknown) => {
+    if (typeof data === 'string') {
+      deps.editors().write(event.sender, data);
+    }
+  });
+
+  ipcMain.on(IpcChannel.EditorResize, (event, size: unknown) => {
+    deps.editors().resize(event.sender, asEditorSize(size));
+  });
+
+  ipcMain.on(IpcChannel.EditorModified, (event, modified: unknown) => {
+    deps.editors().setModified(event.sender, modified === true);
+  });
+
+  ipcMain.on(IpcChannel.PanelEditorModified, (event, modified: unknown) => {
+    if (deps.panelEditor().ownedBy(event.sender)) {
+      deps.panelEditor().setModified(modified === true);
+    }
+  });
+
   ipcMain.handle(IpcChannel.ExtensionsCheck, async (): Promise<ExtensionsResult> =>
     deps.extensions().check(),
   );
@@ -2141,6 +2250,14 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
  */
 function asRawProjects(value: unknown): ProjectConfig[] {
   return Array.isArray(value) ? (value as ProjectConfig[]) : [];
+}
+
+/** A terminal size from a renderer, held to whole cells a pty accepts. */
+function asEditorSize(value: unknown): TerminalSize {
+  const record = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const cells = (raw: unknown, fallback: number): number =>
+    typeof raw === 'number' && Number.isFinite(raw) ? Math.min(1000, Math.max(2, Math.floor(raw))) : fallback;
+  return { cols: cells(record.cols, 80), rows: cells(record.rows, 24) };
 }
 
 function resolveProject(projects: readonly Project[], id: unknown): Project | undefined {

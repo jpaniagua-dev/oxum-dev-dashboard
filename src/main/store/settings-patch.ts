@@ -20,6 +20,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'automationsHeight',
   'vaultHeight',
   'extensionsHeight',
+  'explorerHeight',
   'gitListWidth',
   'activeStrip',
   'pullScope',
@@ -61,6 +62,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
     patch.automationsHeight = input.automationsHeight;
   if (typeof input.vaultHeight === 'number') patch.vaultHeight = input.vaultHeight;
   if (typeof input.extensionsHeight === 'number') patch.extensionsHeight = input.extensionsHeight;
+  if (typeof input.explorerHeight === 'number') patch.explorerHeight = input.explorerHeight;
   // Broadcast, unlike the heights: both are written by the settings window and have to reach the
   // dashboard, which is the window whose runner reads them.
   if (typeof input.automationsEnabled === 'boolean')
@@ -121,6 +123,13 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.handoffFeedback === 'string') patch.handoffFeedback = input.handoffFeedback.trim();
   if (typeof input.workspaceRoot === 'string') patch.workspaceRoot = input.workspaceRoot.trim();
   if (typeof input.codexCommand === 'string') patch.codexCommand = input.codexCommand;
+  if (typeof input.editorCommand === 'string') patch.editorCommand = input.editorCommand;
+  // Cleaned by the store, which is the one place that decides what a pattern list is.
+  if (Array.isArray(input.explorerExclusions)) {
+    patch.explorerExclusions = input.explorerExclusions.filter(
+      (pattern): pattern is string => typeof pattern === 'string',
+    );
+  }
   // Validated by the store, which is the single place that decides what a profile is. Accepted here
   // as typed, like the model names above and for the same reason: two answers to "is this valid" is
   // how one of them silently drops a value the other accepted.

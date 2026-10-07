@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Same locked-down policy as the other pages: everything an editor prints comes from disk. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'"
+    />
+    <title>Editor</title>
+    <link rel="stylesheet" href="./styles/app.css" />
+  </head>
+  <body>
+    <!--
+      One terminal and nothing else: the editor running in it is the whole interface. The status line
+      only appears when there is something to say, a program that did not start or ended badly.
+    -->
+    <div class="editor-page">
+      <p class="editor-page__unsaved" id="editor-unsaved" hidden>Unsaved changes. Ctrl+S saves them.</p>
+      <main class="editor-page__terminal" id="editor-terminal"></main>
+      <p class="editor-page__status" id="editor-status" hidden></p>
+    </div>
+    <script type="module" src="./editor.ts"></script>
+  </body>
+</html>

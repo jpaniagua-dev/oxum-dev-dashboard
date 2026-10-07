@@ -449,7 +449,8 @@ row. None of it can say what a session was opened FOR.
   started inside a repository therefore begins with no memory at all, which the panel says in the
   warning colour because it is invisible everywhere else.
 - **Paths in that tab are read-only.** Opening one would need an IPC handing an arbitrary path to the
-  shell, which is a capability this app does not have and does not need to say what an agent reads.
+  shell, which this app does not do and does not need to say what an agent reads. The Explorer opens
+  files, but only inside a configured project and through its own two gates: see that section.
 - **The activity panel groups sessions by how loudly they ask for you**, and `attention` is the
   HONEST version of Dorothy's "Needs Attention", not a copy. That panel lists agents waiting for an
   answer, which its host learns from Claude Code's hooks; here a session waiting for you and one
@@ -552,13 +553,13 @@ row. None of it can say what a session was opened FOR.
   there is a selection, `Ctrl+C` stays SIGINT otherwise, AltGr guard) lives in `decideTerminalKey`,
   pure and tested; the pane's context menu goes through the same `copySelection` / `pasteInto` as the
   shortcut.
-- **Rendering goes through the WebGL addon**, not the default DOM renderer. The DOM under Chromium's
 - ⚠️ **A key the app handled never reaches the pty.** The app chords (`Ctrl+B/N/G`, the `Alt+Shift`
   pane gestures) are caught on `document` in the capture phase and only call `preventDefault`, and
   xterm 6 does not read it: `_keyDown` consults the custom key handler and nothing else. Until
   2026-10-07, `Ctrl+B` toggled the note **and** sent `^B` to the program, which a full-screen editor
   acts on. `decideTerminalKey` now answers `consumed` for a prevented keydown. A chord the app
   declines is not prevented (the note toggle with nothing to toggle), so it still reaches the shell.
+- **Rendering goes through the WebGL addon**, not the default DOM renderer. The DOM under Chromium's
   GPU compositing left frozen glyphs on screen while scrolling (seen for real); the WebGL canvas is
   repainted whole, so nothing can stay behind. Three rules, each one paid for: the addon is loaded from
   `fitVisible` and **never in `ensure()`**, because a view can be created for a background tab (`write`
@@ -1202,6 +1203,79 @@ service and the CLI runner, `renderer/ui/extensions-panel.ts` the tab.
   once is reported (for `run`, it may mean two fires). Creating or changing a routine opens a
   terminal tab on `/schedule`: a routine is a prompt, a repository and connectors, which is a
   conversation, not a form. The API has no delete.
+
+## Explorer tab: a project's files, and an editor beside them
+
+Added on 2026-10-07, on request: browse each project, find a file by name and edit it in `micro`
+without leaving the app. `shared/explorer.ts` holds the types and every pure rule (path validation,
+sorting, search ranking, the exclusion matcher), `main/explorer/explorer-service.ts` the reads,
+`main/editor/` the editor processes (`panel-editor.ts` beside the list, `editor-windows.ts` popped
+out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the tab and
+`renderer/editor.ts` a window's page.
+
+- **The editor took the place of a preview, the same day.** The first version showed a read-only
+  preview and opened micro in a window. Asked whether micro could stand where the preview was, the
+  answer was yes with conditions, and they are the design: the panel widens while editing (the 340px
+  detail column is about forty terminal columns), micro starts on a click or `Enter` and never on an
+  arrow key, and the window survives as **Pop out**. micro also colours the syntax, which the preview
+  never did.
+
+- ⚠️ **This is the first place the app reads arbitrary files, so it is bounded twice.** The renderer
+  sends a project id and a path **relative** to it. `sanitizeExplorerPath` refuses at the IPC boundary
+  every shape that could mean two places (`..`, `.`, a drive, a backslash, an absolute path) and
+  `.git` at any depth; then `resolveInside` resolves the result with `realpath` on both sides and
+  refuses anything that lands outside the project. The first gate is pure and tested, the second one
+  knows the disk: a junction inside a repository that leads elsewhere passes the first and stops at
+  the second.
+- ⚠️ **git for Windows walks into a junction as if it were a folder.** Found by the service test, not
+  by reasoning: `ls-files --others` listed a file under a junction pointing out of the project, so
+  the search offered a file the app would then refuse to open. `dropLinked` checks every folder of
+  the file list once with `lstat` and drops what lies under a link.
+- **The search is git's file list, not a walk.** `ls-files --cached --others --exclude-standard` is
+  what keeps `node_modules` out without re-implementing `.gitignore`. Cached per project until the tab
+  is shown again or the exclusions change. A folder that is not a repository says so, and the field
+  still filters the open folder.
+- **Greyed = ignored by git or matched by the exclusions; hidden = `.git` only.** A `.env` or a local
+  `config.json` is exactly what one needs to open from here, so ignored files stay listed. Ignored
+  children come from `ls-files --others --ignored --directory`, which names an ignored folder once
+  instead of every file in it. The exclusions are a simplified gitignore, compiled once per change of
+  the setting, empty by default: which folders are noise is the user's call.
+- ⚠️ **Every editor process is deliberately outside `TerminalManager`.** That is what the servers
+  window removed in 10.0.0 paid for: a second owner for the dashboard's sessions. The panel's editor
+  and each window own their pty outright, none appears in the terminal tabs, and output goes to one
+  `webContents` on its own channel. Input is accepted from that page only: a window is identified by
+  `event.sender`, the panel's editor checks the sender is the dashboard (`ownedBy`). Both pages reuse
+  `createTerminalView`, the seam that section kept for exactly this.
+- ⚠️ **Replacing the file in the panel asks the editor to quit; it never kills it.** The app cannot
+  see whether a buffer is saved, the editor can: `EDITOR_QUIT_KEY` (`Ctrl+Q`, micro's) makes a clean
+  editor exit at once and a modified one ask "Save changes?" in the panel, and the next file starts
+  from the exit. A cancelled quit leaves the next file waiting, named above the editor, and the next
+  click replaces it. **Pop out** and **Close** go through the same quit. An editor whose quit key is
+  not `Ctrl+Q` will simply not quit, which is visible, never destructive.
+- **One editor per file.** A file that has a window is brought forward there rather than opened in
+  the panel too; a second open of a window's file brings the window forward. Quitting (exit 0) empties
+  the panel or closes the window; another exit code keeps the output on screen, the only account of
+  what went wrong.
+- ⚠️ **Unsaved changes are read off micro's status line, and only they are asked about.** The first
+  version asked on every quit and every window close once an editor had run, and the question was
+  disliked within the day: it fired with nothing to lose. micro draws `file.ts + (1,2)` once a buffer
+  is modified and drops the `+` on save (measured on 2.0.15 in a real pty). `editorModified` reads it
+  from the **rendered** xterm screen through `watchModified`, never from the output stream: micro only
+  redraws the cells that change, so the stream after a keystroke holds `+ ( ,2)` between escape codes.
+  The page reports the change; the window's title gets a `●`, an inline warning shows above the
+  editor, and a window close and the dashboard's quit (`quitWarning`) ask only when something is
+  unsaved. No recognised status line (another editor, a customised `statusformatl`) means no warning
+  and no question, which is the trade accepted for not asking when nothing is at stake.
+- **An editor starts at the size it was measured at.** A full-screen editor draws for the size it
+  starts at; started at a guess and resized a moment later, it redraws at best and leaves debris at
+  worst. A window's page sends its size with `EditorStart`; the panel switches to its editing layout
+  **before** asking, and the open carries the size. A `ResizeObserver` on the panel's terminal covers
+  the strip's splitter and the tab being shown again; nothing is sent while it measures zero.
+- **The editor is a setting, `micro` by default**, resolved with `resolveCommand` like the agent CLIs:
+  the full path it returns is also what spares the pty the missing-`.exe` trap. A `.cmd` shim goes
+  through `cmd.exe` with the line `cmdLine` vets, handed to node-pty as a raw string.
+- **The folder per project and the search are session state**, never persisted, like every selection
+  in this app. The search field is built once and never repainted, so typing and the arrows keep focus.
 
 ## Jira tab
 

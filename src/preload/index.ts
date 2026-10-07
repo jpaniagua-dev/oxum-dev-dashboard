@@ -4,6 +4,13 @@ import type { AgentProfile } from '@shared/agent-profile.js';
 import type { AutomationRule } from '@shared/automation.js';
 import type { ExtensionAction, ExtensionsResult, ExtensionsView } from '@shared/extensions.js';
 import type {
+  ExplorerFiles,
+  ExplorerListing,
+  ExplorerOpenResult,
+  ExplorerTarget,
+  PanelEditorState,
+} from '@shared/explorer.js';
+import type {
   LocalTicketDraft,
   LocalTicketResult,
   LocalTicketsState,
@@ -13,6 +20,7 @@ import {
   IpcChannel,
   type AgentOpenResult,
   type AutomationState,
+  type EditorStart,
   type VaultResult,
   type AppSettings,
   type BootstrapState,
@@ -332,6 +340,57 @@ const api: RendererApi = {
   resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
 
   readExtensions: (): Promise<ExtensionsView> => ipcRenderer.invoke(IpcChannel.ExtensionsRead),
+  listExplorer: (projectId: ProjectId, path: string): Promise<ExplorerListing> =>
+    ipcRenderer.invoke(IpcChannel.ExplorerList, projectId, path),
+  explorerFiles: (projectId: ProjectId, refresh: boolean): Promise<ExplorerFiles> =>
+    ipcRenderer.invoke(IpcChannel.ExplorerFiles, projectId, refresh),
+  openExplorerFile: (
+    projectId: ProjectId,
+    path: string,
+    target: ExplorerTarget,
+    size: TerminalSize,
+  ): Promise<ExplorerOpenResult> => ipcRenderer.invoke(IpcChannel.ExplorerOpen, projectId, path, target, size),
+  readPanelEditor: (): Promise<PanelEditorState> => ipcRenderer.invoke(IpcChannel.PanelEditorRead),
+  closePanelEditor: (): Promise<void> => ipcRenderer.invoke(IpcChannel.PanelEditorClose),
+  sendPanelEditorInput: (data: string): void => {
+    ipcRenderer.send(IpcChannel.PanelEditorInput, data);
+  },
+  resizePanelEditor: (size: TerminalSize): void => {
+    ipcRenderer.send(IpcChannel.PanelEditorResize, size);
+  },
+  onPanelEditorOutput: (listener: (data: string) => void): (() => void) => {
+    const handler = (_event: unknown, data: string): void => listener(data);
+    ipcRenderer.on(IpcChannel.PanelEditorOutput, handler);
+    return () => ipcRenderer.off(IpcChannel.PanelEditorOutput, handler);
+  },
+  onPanelEditorState: (listener: (state: PanelEditorState) => void): (() => void) => {
+    const handler = (_event: unknown, state: PanelEditorState): void => listener(state);
+    ipcRenderer.on(IpcChannel.PanelEditorState, handler);
+    return () => ipcRenderer.off(IpcChannel.PanelEditorState, handler);
+  },
+  startEditor: (size: TerminalSize): Promise<EditorStart> => ipcRenderer.invoke(IpcChannel.EditorStart, size),
+  sendEditorInput: (data: string): void => {
+    ipcRenderer.send(IpcChannel.EditorInput, data);
+  },
+  resizeEditor: (size: TerminalSize): void => {
+    ipcRenderer.send(IpcChannel.EditorResize, size);
+  },
+  onEditorOutput: (listener: (data: string) => void): (() => void) => {
+    const handler = (_event: unknown, data: string): void => listener(data);
+    ipcRenderer.on(IpcChannel.EditorOutput, handler);
+    return () => ipcRenderer.off(IpcChannel.EditorOutput, handler);
+  },
+  reportEditorModified: (modified: boolean): void => {
+    ipcRenderer.send(IpcChannel.EditorModified, modified);
+  },
+  reportPanelEditorModified: (modified: boolean): void => {
+    ipcRenderer.send(IpcChannel.PanelEditorModified, modified);
+  },
+  onEditorExited: (listener: (exitCode: number) => void): (() => void) => {
+    const handler = (_event: unknown, exitCode: number): void => listener(exitCode);
+    ipcRenderer.on(IpcChannel.EditorExited, handler);
+    return () => ipcRenderer.off(IpcChannel.EditorExited, handler);
+  },
   readUpdate: (): Promise<UpdateNotice | null> => ipcRenderer.invoke(IpcChannel.UpdateRead),
   exportTeamConfig: (): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(IpcChannel.SettingsExport),

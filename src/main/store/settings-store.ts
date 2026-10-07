@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeModel } from '@shared/agent-model.js';
 import { isStripTab } from '@shared/contracts.js';
+import { sanitizeExclusions } from '@shared/explorer.js';
 import {
   sanitizeTagColors,
   sanitizeTags,
@@ -69,6 +70,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   automationsHeight: 460,
   vaultHeight: 460,
   extensionsHeight: 460,
+  explorerHeight: 460,
   automationsEnabled: false,
   automationShellEnabled: false,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
@@ -96,6 +98,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentProfile: CLAUDE_CODE_PROFILE,
   claudeCommand: 'claude',
   codexCommand: 'codex',
+  editorCommand: 'micro',
+  // Empty, like every list here: which folders are noise is the user's call, and a default would be
+  // the author's own repositories leaking into everybody's install.
+  explorerExclusions: [],
   worktreeHelper: '',
   worktreesRoot: '',
   handoffAsk: '',
@@ -249,6 +255,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       90,
       1200,
     ),
+    explorerHeight: clamp(asNumber(input.explorerHeight, DEFAULT_SETTINGS.explorerHeight), 90, 1200),
     // `=== true` and never a truthy read: a hand-edited file must not be able to switch on a
     // feature that starts agents by itself with the string "false".
     automationsEnabled: input.automationsEnabled === true,
@@ -302,6 +309,8 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     // Blank falls back to the bare name, which PATH resolves: an empty command is no command at all.
     claudeCommand: asCommand(input.claudeCommand, DEFAULT_SETTINGS.claudeCommand),
     codexCommand: asCommand(input.codexCommand, DEFAULT_SETTINGS.codexCommand),
+    editorCommand: asCommand(input.editorCommand, DEFAULT_SETTINGS.editorCommand),
+    explorerExclusions: sanitizeExclusions(input.explorerExclusions),
     // Empty is a real value for both: the app's own worktrees, beside the repository.
     worktreeHelper: typeof input.worktreeHelper === 'string' ? input.worktreeHelper.trim() : '',
     worktreesRoot: typeof input.worktreesRoot === 'string' ? input.worktreesRoot.trim() : '',

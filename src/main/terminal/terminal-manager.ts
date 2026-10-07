@@ -1039,7 +1039,7 @@ export function resolveShellCommand(
  * `pty.kill()` signals only the process at the head of the pty, which for `npm run start` is a
  * `cmd.exe` wrapper; the `ng serve` underneath would survive and keep holding the port.
  */
-function killTree(child: IPty): void {
+export function killTree(child: IPty): void {
   const pid = child.pid;
   if (typeof pid !== 'number') {
     return;

@@ -3165,6 +3165,12 @@ body {
   font-family: var(--font-mono);
 }
 
+/* A list typed one entry per line, such as the Explorer's exclusions. Grows down, never sideways. */
+.settings-field__textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
 .settings-field__input:focus,
 .settings-field__select:focus {
   border-color: var(--primary);
@@ -6125,4 +6131,285 @@ textarea.tickets__input {
 .tickets__source--local {
   border-color: var(--primary-border);
   color: var(--primary);
+}
+
+/*
+ * The Explorer tab: projects on the left, one folder (or the search results) in the middle, the
+ * selected file read-only on the right. Built on `.pulls--detail` like the Extensions tab; only what is
+ * its own is here.
+ */
+.explorer__rail {
+  overflow-y: auto;
+}
+
+.explorer__bar {
+  flex-wrap: nowrap;
+}
+
+/* The breadcrumb gives way to the search field, and truncates from the left of each name. */
+.explorer__crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.explorer__crumb {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.explorer__crumb:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.explorer__crumb--current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.explorer__crumb-sep {
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.explorer__search {
+  flex: 1;
+  min-width: 140px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+}
+
+.explorer__search:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.explorer__list {
+  display: flex;
+  flex-direction: column;
+}
+
+.explorer__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorer__row:hover {
+  background: var(--surface-hover);
+}
+
+.explorer__row--active {
+  background: var(--surface-inset);
+  border-color: var(--border);
+}
+
+.explorer__row--folder .explorer__name {
+  font-weight: 600;
+}
+
+/* Ignored by git or excluded in Settings: still reachable, visibly out of the way. */
+.explorer__row--dimmed {
+  color: var(--text-faint);
+}
+
+.explorer__row--dimmed .explorer__name {
+  font-weight: inherit;
+}
+
+/* Sized against the text so a row's height does not change with the interface font size. */
+.explorer__icon {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+  color: var(--text-faint);
+}
+
+.explorer__icon svg {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+/* Folders in the primary tone, files in the faint one: the two kinds part at a glance. */
+.explorer__row--folder .explorer__icon {
+  color: var(--primary);
+}
+
+/* A greyed folder stays grey: its icon must not be the loudest thing in a row that is out of the way. */
+.explorer__row--dimmed .explorer__icon {
+  color: var(--text-faint);
+}
+
+.explorer__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A search result's folder, after its name: what tells two `index.ts` apart. */
+.explorer__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.explorer__meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Editing: the editor takes the width, the list keeps enough to read names and the rail shrinks. The
+ * 340px detail column of `.pulls--detail` is about forty columns of terminal, too narrow for code.
+ */
+.pulls--detail.explorer--editing {
+  grid-template-columns: 150px minmax(200px, 1fr) minmax(0, 2.4fr);
+}
+
+.explorer__detail {
+  overflow: hidden;
+}
+
+.explorer__editor-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.explorer__editor-head:empty {
+  display: none;
+}
+
+.explorer__editor-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Unsaved changes in the editor, read off its status line. Warning, not error: nothing is lost yet. */
+.explorer__unsaved,
+.editor-page__unsaved {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--warning);
+  font-size: var(--font-sm);
+}
+
+.editor-page__unsaved {
+  margin: 0;
+  justify-self: start;
+}
+
+.editor-page__unsaved[hidden] {
+  display: none;
+}
+
+.explorer__editor-status {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+}
+
+.explorer__editor-status--error {
+  color: var(--danger);
+}
+
+.explorer__editor-status[hidden],
+.explorer__detail .pulls__empty[hidden] {
+  display: none;
+}
+
+.explorer__terminal {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.explorer__terminal .terminal__view {
+  flex: 1;
+}
+
+/* The file open in the editor, marked in the list even when the selection has moved on. */
+.explorer__row--open .explorer__name {
+  color: var(--primary);
+}
+
+/*
+ * An editor window: one terminal filling the page, and a status line only when the program did not
+ * start or ended badly.
+ */
+.editor-page {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  height: 100vh;
+  box-sizing: border-box;
+  padding: 6px;
+  background: var(--surface);
+}
+
+.editor-page__terminal {
+  display: flex;
+  min-height: 0;
+}
+
+.editor-page__terminal .terminal__view {
+  flex: 1;
+}
+
+.editor-page__status {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--font-sm);
+}
+
+.editor-page__status[hidden] {
+  display: none;
 }

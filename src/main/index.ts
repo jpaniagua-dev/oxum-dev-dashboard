@@ -3,6 +3,10 @@ import { app, BrowserWindow, dialog, ipcMain, net, shell } from 'electron';
 import type { UpdateNotice } from '@shared/contracts.js';
 import { checkForUpdate, UPDATE_INTERVAL_MS } from './updates/update-check.js';
 import { ExtensionsService } from './extensions/extensions-service.js';
+import { ExplorerService } from './explorer/explorer-service.js';
+import { EditorWindows } from './editor/editor-windows.js';
+import { PanelEditor } from './editor/panel-editor.js';
+import { quitWarning } from './quit-warning.js';
 import { LocalTicketStore } from './tickets/local-ticket-store.js';
 import {
   IpcChannel,
@@ -137,6 +141,20 @@ async function bootstrap(): Promise<void> {
     },
   );
 
+  // One window per file popped out of the Explorer tab, each with its own editor process, and the one
+  // editor beside the tab's list.
+  const editorWindows = new EditorWindows({
+    preloadPath: preloadPath(),
+    backgroundColor: () => themeController.backgroundColor(),
+  });
+  const panelEditor = new PanelEditor({
+    owner: () => {
+      const window = dashboardWindow.browserWindow;
+      return window === null || window.isDestroyed() ? null : window.webContents;
+    },
+    windows: editorWindows,
+  });
+
   /** Sends to every live window. Used for state no window owns: the theme and the settings. */
   const broadcast = (channel: string, payload: unknown): void => {
     for (const window of BrowserWindow.getAllWindows()) {
@@ -151,6 +169,7 @@ async function bootstrap(): Promise<void> {
     (color) => {
       dashboardWindow.setBackgroundColor(color);
       settingsWindow.setBackgroundColor(color);
+      editorWindows.setBackgroundColor(color);
     },
   );
   themeController.setMode(settings.themeMode);
@@ -426,6 +445,13 @@ async function bootstrap(): Promise<void> {
     trashItem: (path) => shell.trashItem(path),
     openExternal: (url) => shell.openExternal(url),
     routinesFile: AppPaths.routines(),
+  });
+  const explorerService = new ExplorerService({
+    projects: () => projects,
+    exclusions: () => settingsStore.get().explorerExclusions,
+    editorCommand: () => settingsStore.get().editorCommand,
+    openEditor: (request, target, size) =>
+      target === 'window' ? panelEditor.popOut(request) : panelEditor.open(request, size),
   });
   const startupDropped = await vaultStore.sweep(new Date());
   await vaultFiles.sync(
@@ -768,6 +794,9 @@ async function bootstrap(): Promise<void> {
     vaultState,
     pushVault,
     extensions: () => extensionsService,
+    explorer: () => explorerService,
+    editors: () => editorWindows,
+    panelEditor: () => panelEditor,
     localTickets: () => localTickets,
     triageFile: AppPaths.triage(),
     update: () => update,
@@ -979,14 +1008,17 @@ async function bootstrap(): Promise<void> {
   jiraMonitor.start();
 
   window.on('close', (event) => {
-    // Only dev servers matter here. A shell tab dying with the app is expected; a build being killed
-    // silently is not.
-    const owned = terminalManager.runningProjectStarts();
-    if (owned.length === 0 || quitConfirmed) {
+    // Dev servers and editors matter here. A shell tab dying with the app is expected; a build being
+    // killed silently is not, and neither is a file closed with its changes unsaved.
+    const warning = quitWarning(
+      terminalManager.runningProjectStarts().length,
+      editorWindows.modifiedCount() + panelEditor.modifiedCount(),
+    );
+    if (warning === null || quitConfirmed) {
       return;
     }
     event.preventDefault();
-    void confirmQuit(window, owned.length).then((confirmed) => {
+    void confirmQuit(window, warning).then((confirmed) => {
       if (confirmed) {
         quitConfirmed = true;
         window.close();
@@ -1013,6 +1045,8 @@ async function bootstrap(): Promise<void> {
     pullMonitor.stop();
     jiraMonitor.stop();
     terminalManager.stopAll();
+    editorWindows.closeAll();
+    panelEditor.stop();
   });
 
   // Closing the dashboard ends the session, so the settings window must not keep the app alive.
@@ -1021,24 +1055,26 @@ async function bootstrap(): Promise<void> {
     if (settings !== null && !settings.isDestroyed()) {
       settings.destroy();
     }
+    // Nor the editors: the quit confirmation already counted them.
+    editorWindows.closeAll();
   });
 
   app.on('window-all-closed', () => app.quit());
 }
 
-/** Asks before killing dev servers the dashboard owns. */
-async function confirmQuit(window: BrowserWindow, count: number): Promise<boolean> {
+/** Asks before killing dev servers the dashboard owns or closing editors. */
+async function confirmQuit(
+  window: BrowserWindow,
+  warning: { message: string; detail: string },
+): Promise<boolean> {
   const { response } = await dialog.showMessageBox(window, {
     type: 'warning',
     buttons: ['Quit and stop', 'Cancel'],
     defaultId: 1,
     cancelId: 1,
     title: 'Quit the dashboard',
-    message:
-      count === 1
-        ? '1 server started by the dashboard will be stopped.'
-        : `${count} servers started by the dashboard will be stopped.`,
-    detail: 'Servers started from an external terminal are not affected.',
+    message: warning.message,
+    detail: warning.detail,
   });
   return response === 0;
 }

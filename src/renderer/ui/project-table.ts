@@ -2,6 +2,7 @@ import type { ProjectId, ProjectRow, TagColor, TagColors } from '@shared/contrac
 import { MAX_TAGS_PER_PROJECT, hasTag } from '@shared/project-tags.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { clearChildren, createElement, createIcon, hitsInteractive } from './dom.js';
+import { FOLDER_ICON } from './icons.js';
 import { buildTagChips } from './tags.js';
 import type { PullsByProject } from './worktree-list.js';
 import {
@@ -13,8 +14,6 @@ import {
   type Pill,
 } from './presenters.js';
 
-/** A repository folder, for the row action that reveals it in Explorer. */
-const FOLDER_ICON = 'M2.5 4.5h4l1.5 1.5h5.5v6.5h-11z';
 
 export interface TableActions {
   /** Runs one of the project's configured actions. */

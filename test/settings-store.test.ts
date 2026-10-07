@@ -172,6 +172,27 @@ describe('sanitizeSettings', () => {
     expect(sanitizeSettings({ activeStrip: 'usage' }).activeStrip).toBe('projects');
   });
 
+  it('clamps the Explorer tab height and remembers the tab', () => {
+    expect(sanitizeSettings({ explorerHeight: 4 }).explorerHeight).toBe(90);
+    expect(sanitizeSettings({}).explorerHeight).toBe(460);
+    expect(sanitizeSettings({ activeStrip: 'explorer' }).activeStrip).toBe('explorer');
+  });
+
+  it('opens files in micro by default, and never in an empty command', () => {
+    expect(sanitizeSettings({}).editorCommand).toBe('micro');
+    expect(sanitizeSettings({ editorCommand: '   ' }).editorCommand).toBe('micro');
+    expect(sanitizeSettings({ editorCommand: ' C:/tools/micro.exe ' }).editorCommand).toBe('C:/tools/micro.exe');
+  });
+
+  it('keeps the Explorer exclusions as clean patterns, empty by default', () => {
+    expect(sanitizeSettings({}).explorerExclusions).toEqual([]);
+    expect(
+      sanitizeSettings({ explorerExclusions: [' node_modules ', '', '# a comment', 'node_modules', '*.lock', 7] })
+        .explorerExclusions,
+    ).toEqual(['node_modules', '*.lock']);
+    expect(sanitizeSettings({ explorerExclusions: 'node_modules' }).explorerExclusions).toEqual([]);
+  });
+
   it('clamps the Worktrees tab height like every other strip height', () => {
     expect(sanitizeSettings({ worktreesHeight: 4 }).worktreesHeight).toBe(90);
     expect(sanitizeSettings({ worktreesHeight: 5000 }).worktreesHeight).toBe(1200);

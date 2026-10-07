@@ -13,6 +13,7 @@ export interface RestoredStripLoaders {
   readonly worktrees: () => void;
   readonly git: () => void;
   readonly extensions: () => void;
+  readonly explorer: () => void;
 }
 
 /** Runs the on-demand read that `adopt` deliberately does not report as a user tab change. */
@@ -35,6 +36,9 @@ export function loadRestoredStrip(tab: StripTab, loaders: RestoredStripLoaders):
       break;
     case 'extensions':
       loaders.extensions();
+      break;
+    case 'explorer':
+      loaders.explorer();
       break;
     case 'projects':
     case 'pulls':
@@ -64,6 +68,7 @@ export class StripTabs {
     automations: requireElement<HTMLButtonElement>('strip-tab-automations'),
     vault: requireElement<HTMLButtonElement>('strip-tab-vault'),
     extensions: requireElement<HTMLButtonElement>('strip-tab-extensions'),
+    explorer: requireElement<HTMLButtonElement>('strip-tab-explorer'),
   };
 
   private readonly panels: Record<StripTab, HTMLElement> = {
@@ -77,6 +82,7 @@ export class StripTabs {
     automations: requireElement('strip-panel-automations'),
     vault: requireElement('strip-panel-vault'),
     extensions: requireElement('strip-panel-extensions'),
+    explorer: requireElement('strip-panel-explorer'),
   };
 
   constructor(private readonly actions: StripTabsActions) {

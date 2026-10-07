@@ -14,6 +14,14 @@ Each page shows what most people set. The rest is folded under **Advanced**.
 - **Tell me when a new version is out**: the update notice, on by default.
 - **Export team configuration… / Import…**: see [Getting started](getting-started.md#a-team-configuration).
   Import is refused while the form has unsaved changes.
+- **Explorer**, for the [Explorer tab](tabs/explorer.md):
+  - **Editor program**: the terminal editor a file opens in, beside the list or in a window of its
+    own. `micro` by default; a name found on `PATH`, or a full path. Another file replaces the open
+    one by asking the editor to quit with `Ctrl+Q`, micro's key.
+  - **Excluded files**: one pattern per line, greyed in the list and left out of the search. A name
+    matches at any depth (`node_modules`, `*.lock`); a pattern with a `/` starts at the project
+    root (`docs/generated`); `**` crosses folders. Blank lines and lines starting with `#` are
+    dropped.
 
 ## Projects
 

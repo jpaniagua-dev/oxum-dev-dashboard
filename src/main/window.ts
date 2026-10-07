@@ -137,7 +137,7 @@ export function windowIcon(): { icon: string } | Record<string, never> {
  */
 export async function loadRendererPage(
   window: BrowserWindow,
-  page: 'index.html' | 'settings.html',
+  page: 'index.html' | 'settings.html' | 'editor.html',
 ): Promise<void> {
   const devServerUrl = process.env.ELECTRON_RENDERER_URL;
   if (devServerUrl !== undefined && devServerUrl.length > 0) {

@@ -1,6 +1,13 @@
 import type { AgentProfile } from './agent-profile.js';
 import type { AutomationRule } from './automation.js';
 import type { ExtensionAction, ExtensionsResult, ExtensionsView } from './extensions.js';
+import type {
+  ExplorerFiles,
+  ExplorerListing,
+  ExplorerOpenResult,
+  ExplorerTarget,
+  PanelEditorState,
+} from './explorer.js';
 import type { LocalTicketDraft, LocalTicketResult, LocalTicketsState } from './local-tickets.js';
 import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
 /**
@@ -1254,6 +1261,17 @@ export interface TerminalSize {
   readonly rows: number;
 }
 
+/**
+ * The answer an editor window gets when it asks for its program to start.
+ *
+ * `title` is the file it edits, for the window's own heading; `message` says why nothing started.
+ */
+export interface EditorStart {
+  readonly ok: boolean;
+  readonly title: string;
+  readonly message: string;
+}
+
 
 /** Request to open a shell tab. */
 export interface OpenShellRequest {
@@ -1314,7 +1332,8 @@ export type StripTab =
   | 'agents'
   | 'automations'
   | 'vault'
-  | 'extensions';
+  | 'extensions'
+  | 'explorer';
 
 /**
  * Every tab, in display order, as a value.
@@ -1346,6 +1365,7 @@ export const STRIP_TABS: readonly StripTab[] = [
   'vault',
   'agents',
   'extensions',
+  'explorer',
 ];
 
 /** Whether an unknown value names a tab. The one test both gates run. */
@@ -1868,6 +1888,7 @@ export interface AppSettings {
   automationsHeight: number;
   vaultHeight: number;
   extensionsHeight: number;
+  explorerHeight: number;
   /**
    * Whether rules may act at all. **False by default.**
    *
@@ -1957,6 +1978,16 @@ export interface AppSettings {
    */
   claudeCommand: string;
   codexCommand: string;
+  /**
+   * The editor the Explorer tab opens a file in, each file in a window of its own: a name looked up
+   * on PATH, or a full path. `micro` by default, a terminal editor, since the window is a terminal.
+   */
+  editorCommand: string;
+  /**
+   * Patterns the Explorer greys and leaves out of its search, one per entry, in a simplified
+   * gitignore syntax (`node_modules`, `*.lock`, `docs/generated`). See `compileExclusions`.
+   */
+  explorerExclusions: string[];
   /**
    * The shell helper that manages worktrees, run in a terminal tab, or empty for the app's own.
    *
@@ -2434,6 +2465,38 @@ export const IpcChannel = {
   VaultReset: 'vault:reset',
   /** invoke: () => ExtensionsView, both agents read off disk */
   ExtensionsRead: 'extensions:read',
+  /** invoke: (projectId, path) => ExplorerListing, one folder of a project */
+  ExplorerList: 'explorer:list',
+  /** invoke: (projectId, refresh) => ExplorerFiles, the files the search may return */
+  ExplorerFiles: 'explorer:files',
+  /** invoke: (projectId, path, target, size) => ExplorerOpenResult, in the panel or a window */
+  ExplorerOpen: 'explorer:open',
+  /** invoke: () => PanelEditorState, the editor beside the Explorer's list, dashboard only */
+  PanelEditorRead: 'panel-editor:read',
+  /** invoke: () => void, asks that editor to quit */
+  PanelEditorClose: 'panel-editor:close',
+  /** send: (data) => void */
+  PanelEditorInput: 'panel-editor:input',
+  /** send: (size) => void */
+  PanelEditorResize: 'panel-editor:resize',
+  /** on: (data: string) => void */
+  PanelEditorOutput: 'panel-editor:output',
+  /** on: (state: PanelEditorState) => void */
+  PanelEditorState: 'panel-editor:state',
+  /** invoke: (size) => EditorStart, from an editor window, once its terminal is measured */
+  EditorStart: 'editor:start',
+  /** send: (data) => void, keystrokes from an editor window to its own program */
+  EditorInput: 'editor:input',
+  /** send: (size) => void */
+  EditorResize: 'editor:resize',
+  /** on: (data: string) => void, the program's output, to its own window only */
+  EditorOutput: 'editor:output',
+  /** on: (exitCode: number) => void, the program ended other than cleanly */
+  EditorExited: 'editor:exited',
+  /** send: (modified: boolean) => void, an editor window's buffer as its status line shows it */
+  EditorModified: 'editor:modified',
+  /** send: (modified: boolean) => void, the same for the editor beside the Explorer's list */
+  PanelEditorModified: 'panel-editor:modified',
   /** invoke: () => UpdateNotice | null, the last check's answer */
   UpdateRead: 'update:read',
   /** invoke: () => { ok, message }, writes the team configuration to a file the user picks */
@@ -2780,6 +2843,34 @@ export interface RendererApi {
   onVaultChanged(listener: (state: VaultState) => void): () => void;
   /** What both coding agents have installed. Read on demand, never polled. */
   readExtensions(): Promise<ExtensionsView>;
+  /** One folder of a project, `''` being its root. */
+  listExplorer(projectId: ProjectId, path: string): Promise<ExplorerListing>;
+  /** Every file the search may return. `refresh` drops the cached list first. */
+  explorerFiles(projectId: ProjectId, refresh: boolean): Promise<ExplorerFiles>;
+  /** Opens a file in the editor beside the list or in a window of its own, `size` being the panel's. */
+  openExplorerFile(
+    projectId: ProjectId,
+    path: string,
+    target: ExplorerTarget,
+    size: TerminalSize,
+  ): Promise<ExplorerOpenResult>;
+  readPanelEditor(): Promise<PanelEditorState>;
+  /** Asks the editor beside the list to quit. It asks about unsaved changes itself. */
+  closePanelEditor(): Promise<void>;
+  sendPanelEditorInput(data: string): void;
+  resizePanelEditor(size: TerminalSize): void;
+  onPanelEditorOutput(listener: (data: string) => void): () => void;
+  onPanelEditorState(listener: (state: PanelEditorState) => void): () => void;
+  /** From an editor window: starts its program at the measured size. */
+  startEditor(size: TerminalSize): Promise<EditorStart>;
+  sendEditorInput(data: string): void;
+  resizeEditor(size: TerminalSize): void;
+  onEditorOutput(listener: (data: string) => void): () => void;
+  onEditorExited(listener: (exitCode: number) => void): () => void;
+  /** Tells the main process whether this window's editor holds unsaved changes. */
+  reportEditorModified(modified: boolean): void;
+  /** The same, for the editor beside the Explorer's list. */
+  reportPanelEditorModified(modified: boolean): void;
   /** Whether a newer release is out, as the last check found. */
   readUpdate(): Promise<UpdateNotice | null>;
   /** Saves the team configuration (no secret, paths under the home folder) to a chosen file. */

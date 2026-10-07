@@ -19,6 +19,8 @@ page of the tab you are using.
   - [Agents](tabs/agents.md): the coding agents running, and what each one reads.
   - [Extensions](tabs/extensions.md): hooks, skills, plugins, MCP servers and routines of Claude
     Code and Codex.
+  - [Explorer](tabs/explorer.md): the files of each project, searched and edited in place or in a
+    window of their own.
 - [Troubleshooting](troubleshooting.md): a symptom, its cause, what to do.
 - [Development](development.md): build from source, tests, architecture.
 

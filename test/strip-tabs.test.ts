@@ -13,6 +13,7 @@ function loaders(): Record<keyof RestoredStripLoaders, ReturnType<typeof vi.fn>>
     worktrees: vi.fn(),
     git: vi.fn(),
     extensions: vi.fn(),
+    explorer: vi.fn(),
   };
 }
 
@@ -24,6 +25,7 @@ describe('loadRestoredStrip', () => {
     worktrees: 'worktrees',
     git: 'git',
     extensions: 'extensions',
+    explorer: 'explorer',
   };
 
   for (const tab of STRIP_TABS) {
