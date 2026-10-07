@@ -10,6 +10,7 @@ import {
   matchFiles,
   moveSelection,
   parentPath,
+  splitLineSuffix,
   type ExplorerEntry,
   type ExplorerFiles,
   type ExplorerListing,
@@ -164,7 +165,7 @@ export class ExplorerPanel {
     this.crumbs.setAttribute('aria-label', 'Folder');
     this.search = createElement('input', { className: 'explorer__search' });
     this.search.type = 'search';
-    this.search.placeholder = 'Filter, or find a file in the project';
+    this.search.placeholder = 'Filter, or find a file in the project (name:line)';
     this.search.setAttribute('aria-label', 'Filter this folder or find a file in the project');
     this.search.addEventListener('input', () => {
       this.query = this.search.value;
@@ -271,7 +272,7 @@ export class ExplorerPanel {
 
   private rows(): ExplorerRow[] {
     const files = this.projectId === null ? null : (this.files.get(this.projectId) ?? null);
-    return explorerRows(this.listing, files, this.query);
+    return explorerRows(this.listing, files, splitLineSuffix(this.query).query);
   }
 
   private resetForProject(): void {
@@ -345,7 +346,12 @@ export class ExplorerPanel {
    * For the panel, the layout switches to the editor **before** asking, so the size sent with the
    * request is the one the editor will keep: it draws its first frame for that size.
    */
-  private async openFile(path: string, target: ExplorerTarget, projectId = this.projectId): Promise<void> {
+  private async openFile(
+    path: string,
+    target: ExplorerTarget,
+    line: number | null = null,
+    projectId = this.projectId,
+  ): Promise<void> {
     if (projectId === null) {
       return;
     }
@@ -354,10 +360,8 @@ export class ExplorerPanel {
       ensureTerminalRenderer(this.view);
       this.fit();
     }
-    const result = await window.api.openExplorerFile(projectId, path, target, {
-      cols: this.view.term.cols,
-      rows: this.view.term.rows,
-    });
+    const size = { cols: this.view.term.cols, rows: this.view.term.rows };
+    const result = await window.api.openExplorerFile(projectId, path, target, size, line);
     if (result.message.length > 0) {
       this.options.stamp(result.message);
     }
@@ -372,13 +376,16 @@ export class ExplorerPanel {
     }
   }
 
-  /** What Enter or a click does on a row: go into a folder, or edit a file. */
+  /**
+   * What Enter or a click does on a row: go into a folder, or edit a file, at the line typed after
+   * its name when there is one (`app.ts:42`).
+   */
   private activate(row: ExplorerRow, target: ExplorerTarget = 'panel'): void {
     if (row.type === 'up' || (row.type === 'entry' && row.entry.kind === 'dir')) {
       void this.openFolder(row.path);
       return;
     }
-    void this.openFile(row.path, target);
+    void this.openFile(row.path, target, splitLineSuffix(this.query).line);
   }
 
   private onKey(event: KeyboardEvent): void {
@@ -629,7 +636,7 @@ export class ExplorerPanel {
     const popOut = createElement('button', { className: 'button button--quiet', text: 'Pop out' });
     popOut.type = 'button';
     popOut.title = `Moves this file to a window of its own. ${name} is asked to close it here first.`;
-    popOut.addEventListener('click', () => void this.openFile(path, 'window', projectId));
+    popOut.addEventListener('click', () => void this.openFile(path, 'window', null, projectId));
     const close = createElement('button', { className: 'button button--quiet', text: 'Close' });
     close.type = 'button';
     close.title = `Asks ${name} to quit. It asks about unsaved changes itself.`;

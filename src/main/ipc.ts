@@ -132,6 +132,7 @@ import type { ExplorerService } from './explorer/explorer-service.js';
 import type { EditorWindows } from './editor/editor-windows.js';
 import type { PanelEditor } from './editor/panel-editor.js';
 import {
+  sanitizeEditorLine,
   sanitizeExplorerPath,
   type ExplorerFiles,
   type ExplorerListing,
@@ -1822,14 +1823,22 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       path: unknown,
       target: unknown,
       size: unknown,
+      line: unknown,
     ): Promise<ExplorerOpenResult> => {
       const relative = sanitizeExplorerPath(path);
       if (typeof projectId !== 'string' || relative === null) {
         return { ok: false, message: 'Not a file of this project' };
       }
+      // A line that is not one is dropped rather than refused: the file still opens, at the top.
       return deps
         .explorer()
-        .open(projectId, relative, target === 'window' ? 'window' : 'panel', asEditorSize(size));
+        .open(
+          projectId,
+          relative,
+          target === 'window' ? 'window' : 'panel',
+          asEditorSize(size),
+          sanitizeEditorLine(line),
+        );
     },
   );
 

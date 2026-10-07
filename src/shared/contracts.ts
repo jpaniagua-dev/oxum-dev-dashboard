@@ -2847,12 +2847,16 @@ export interface RendererApi {
   listExplorer(projectId: ProjectId, path: string): Promise<ExplorerListing>;
   /** Every file the search may return. `refresh` drops the cached list first. */
   explorerFiles(projectId: ProjectId, refresh: boolean): Promise<ExplorerFiles>;
-  /** Opens a file in the editor beside the list or in a window of its own, `size` being the panel's. */
+  /**
+   * Opens a file in the editor beside the list or in a window of its own, `size` being the panel's
+   * and `line` where the cursor starts, null for the editor's own choice.
+   */
   openExplorerFile(
     projectId: ProjectId,
     path: string,
     target: ExplorerTarget,
     size: TerminalSize,
+    line: number | null,
   ): Promise<ExplorerOpenResult>;
   readPanelEditor(): Promise<PanelEditorState>;
   /** Asks the editor beside the list to quit. It asks about unsaved changes itself. */

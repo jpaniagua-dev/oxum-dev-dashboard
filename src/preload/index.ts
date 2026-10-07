@@ -349,7 +349,9 @@ const api: RendererApi = {
     path: string,
     target: ExplorerTarget,
     size: TerminalSize,
-  ): Promise<ExplorerOpenResult> => ipcRenderer.invoke(IpcChannel.ExplorerOpen, projectId, path, target, size),
+    line: number | null,
+  ): Promise<ExplorerOpenResult> =>
+    ipcRenderer.invoke(IpcChannel.ExplorerOpen, projectId, path, target, size, line),
   readPanelEditor: (): Promise<PanelEditorState> => ipcRenderer.invoke(IpcChannel.PanelEditorRead),
   closePanelEditor: (): Promise<void> => ipcRenderer.invoke(IpcChannel.PanelEditorClose),
   sendPanelEditorInput: (data: string): void => {

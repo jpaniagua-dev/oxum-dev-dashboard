@@ -144,12 +144,25 @@ describe('ExplorerService.open', () => {
     expect(targets).toEqual(['panel', 'window']);
   });
 
+  it('starts the editor at a line with +LINE before the file, and at the top without one', async () => {
+    editor = 'editor';
+    opened.length = 0;
+    await service().open('web-app', 'src/main.ts', 'panel', SIZE, 42);
+    expect(opened[0]?.args).toEqual(['+42', join('src', 'main.ts')]);
+    expect(opened[0]?.line).toBe(42);
+    expect(opened[0]?.key).toBe('web-app\0src/main.ts');
+    await service().open('web-app', 'src/main.ts', 'panel', SIZE);
+    expect(opened[1]?.line).toBeNull();
+  });
+
   it('runs a batch shim through cmd.exe with a vetted line', async () => {
     editor = 'shim';
     opened.length = 0;
     await service().open('web-app', 'README.md', 'panel', SIZE);
     expect(opened[0]?.file).toBe('cmd.exe');
     expect(opened[0]?.args).toBe('/d /s /c "C:/npm/shim.cmd README.md"');
+    await service().open('web-app', 'README.md', 'panel', SIZE, 7);
+    expect(opened[1]?.args).toBe('/d /s /c "C:/npm/shim.cmd +7 README.md"');
   });
 
   it('says so when the editor is not found, and opens nothing', async () => {

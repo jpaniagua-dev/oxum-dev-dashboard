@@ -231,6 +231,33 @@ export function matchFiles(paths: readonly string[], query: string, limit: numbe
   return ranked.slice(0, limit).map((entry) => entry.path);
 }
 
+/** The highest line the editor is asked to start at. Past the end of a file, micro stops at its last line. */
+const LINE_LIMIT = 9_999_999;
+
+/** A line to start the editor at, or null when the value cannot be one. Checked again at the IPC boundary. */
+export function sanitizeEditorLine(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= LINE_LIMIT
+    ? value
+    : null;
+}
+
+/**
+ * What was typed in the search field, without a trailing `:line` or `:line:column`.
+ *
+ * `app.ts:42` searches for `app.ts` and opens the file at line 42, which is how a compiler or a stack
+ * trace names a place: pasted as is, it lands there. The column is accepted so such a paste still
+ * finds the file, and dropped: `+LINE` is the one start position micro, vim, nano and emacs all read,
+ * while each writes the column differently. Unambiguous because the IPC refuses `:` in a path, so no
+ * file name of a project can end that way. A suffix alone (`:42`) names no file and stays the query.
+ */
+export function splitLineSuffix(query: string): { readonly query: string; readonly line: number | null } {
+  const match = /^(.*?):(\d+)(?::\d+)?\s*$/.exec(query);
+  if (match === null || (match[1] ?? '').trim().length === 0) {
+    return { query, line: null };
+  }
+  return { query: match[1] ?? '', line: sanitizeEditorLine(Number(match[2])) };
+}
+
 /** The row an arrow key lands on, held inside the list. -1 means nothing selected. */
 export function moveSelection(index: number, delta: number, count: number): number {
   if (count === 0) {

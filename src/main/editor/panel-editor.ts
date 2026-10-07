@@ -11,6 +11,15 @@ import { terminalEnvironment } from '../terminal/terminal-environment.js';
 import { EDITOR_QUIT_KEY, spawnEditor, type EditorRequest } from './editor-process.js';
 import type { EditorWindows } from './editor-windows.js';
 
+/**
+ * Said when a line was asked for a file an editor already shows.
+ *
+ * The start position is an argument, so it only applies when the editor starts. Moving the cursor of
+ * a running one would mean typing into it blind, while it may be holding a prompt of its own, and
+ * restarting it would ask about unsaved changes for a jump. The editor has its own gesture for this.
+ */
+export const ALREADY_OPEN_LINE_HINT = 'Ctrl+L goes to a line in micro';
+
 /** A file waiting for the current editor to quit, and where it goes once it has. */
 interface Pending {
   readonly request: EditorRequest;
@@ -66,13 +75,16 @@ export class PanelEditor {
     this.size = size;
     if (this.deps.windows.has(request.key)) {
       this.deps.windows.open(request);
-      return { ok: true, message: 'Already open in its own window' };
+      return {
+        ok: true,
+        message: `Already open in its own window${request.line === null ? '' : `. ${ALREADY_OPEN_LINE_HINT}`}`,
+      };
     }
     if (this.pty !== null && this.request?.key === request.key) {
       // The same file again: drop a file that was waiting, the click says this one is wanted.
       this.pending = null;
       this.publish({ pending: null });
-      return { ok: true, message: '' };
+      return { ok: true, message: request.line === null ? '' : `Already open here. ${ALREADY_OPEN_LINE_HINT}` };
     }
     if (this.pty !== null) {
       this.pending = { request, target: 'panel' };

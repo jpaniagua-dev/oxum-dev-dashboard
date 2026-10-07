@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { IpcChannel } from '../src/shared/contracts.js';
 import type { PanelEditorState } from '../src/shared/explorer.js';
 import { EDITOR_QUIT_KEY, type EditorRequest } from '../src/main/editor/editor-process.js';
-import { PanelEditor } from '../src/main/editor/panel-editor.js';
+import { ALREADY_OPEN_LINE_HINT, PanelEditor } from '../src/main/editor/panel-editor.js';
 
 /** A pty that records what it is told and exits when the test says so. */
 class FakePty {
@@ -23,12 +23,13 @@ class FakePty {
   }
 }
 
-function request(path: string): EditorRequest {
+function request(path: string, line: number | null = null): EditorRequest {
   return {
     key: `web-app\0${path}`,
     projectId: 'web-app',
     path,
     title: `${path} - web-app`,
+    line,
     file: 'editor.exe',
     args: [path],
     cwd: 'C:/repos/web-app',
@@ -101,6 +102,21 @@ describe('PanelEditor', () => {
     ptys[0]?.end(0);
     expect(ptys).toHaveLength(1);
     expect(last()?.session).toBeNull();
+  });
+
+  it('starts nothing for a line asked of a file already open, and says how to get there', () => {
+    const { editor, ptys } = setup();
+    editor.open(request('a.ts'), SIZE);
+    expect(editor.open(request('a.ts', 42), SIZE)).toEqual({
+      ok: true,
+      message: `Already open here. ${ALREADY_OPEN_LINE_HINT}`,
+    });
+    expect(ptys).toHaveLength(1);
+    expect(ptys[0]?.written).toEqual([]);
+    const windowed = setup(['web-app\0a.ts']);
+    expect(windowed.editor.open(request('a.ts', 42), SIZE).message).toBe(
+      `Already open in its own window. ${ALREADY_OPEN_LINE_HINT}`,
+    );
   });
 
   it('moves the open file to its own window once the editor here has quit', () => {

@@ -156,6 +156,7 @@ export class ExplorerService {
     path: string,
     target: ExplorerTarget,
     size: TerminalSize,
+    line: number | null = null,
   ): Promise<ExplorerOpenResult> {
     const project = this.project(projectId);
     if (project === undefined || path.length === 0) {
@@ -184,15 +185,18 @@ export class ExplorerService {
     // Relative to the project, which is where the editor starts: its status bar then shows
     // `src/app/app.ts` rather than a drive letter and the whole way down to it.
     const argument = path.split('/').join(sep);
+    // `+LINE` BEFORE the file: micro reads it on either side (measured on 2.0.15), and nano and emacs
+    // apply it to the file that follows, so this order is the one every editor that takes it reads.
+    const argv = line === null ? [argument] : [`+${line}`, argument];
     let launch: Pick<EditorRequest, 'file' | 'args'>;
     if (resolved.viaCmd) {
-      const line = cmdLine(resolved.file, [argument]);
-      if (line === null) {
+      const command = cmdLine(resolved.file, argv);
+      if (command === null) {
         return { ok: false, message: 'This file name cannot be passed to a batch file safely' };
       }
-      launch = { file: 'cmd.exe', args: `/d /s /c ${line}` };
+      launch = { file: 'cmd.exe', args: `/d /s /c ${command}` };
     } else {
-      launch = { file: resolved.file, args: [argument] };
+      launch = { file: resolved.file, args: argv };
     }
     return this.deps.openEditor(
       {
@@ -200,6 +204,7 @@ export class ExplorerService {
         projectId: project.id,
         path,
         title: `${path} - ${project.label}`,
+        line,
         cwd: project.path,
         ...launch,
       },

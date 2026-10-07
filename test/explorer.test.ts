@@ -9,9 +9,11 @@ import {
   matchFiles,
   moveSelection,
   parentPath,
+  sanitizeEditorLine,
   sanitizeExclusions,
   sanitizeExplorerPath,
   sortEntries,
+  splitLineSuffix,
   type ExplorerEntry,
 } from '../src/shared/explorer.js';
 
@@ -123,6 +125,32 @@ describe('matchFiles', () => {
     expect(matchFiles(paths, 'readme', 10)).toEqual(['README.md']);
     expect(matchFiles(paths, '  ', 10)).toEqual([]);
     expect(matchFiles(paths, 'ts', 2)).toHaveLength(2);
+  });
+});
+
+describe('splitLineSuffix', () => {
+  it('takes a line off the end of a file name, the way a compiler names a place', () => {
+    expect(splitLineSuffix('app.ts:42')).toEqual({ query: 'app.ts', line: 42 });
+    expect(splitLineSuffix('src/app/app.ts:42:7')).toEqual({ query: 'src/app/app.ts', line: 42 });
+    expect(splitLineSuffix('app.ts:42 ')).toEqual({ query: 'app.ts', line: 42 });
+  });
+
+  it('leaves alone a query with no line, a bare suffix and a line that cannot be one', () => {
+    expect(splitLineSuffix('app.ts')).toEqual({ query: 'app.ts', line: null });
+    expect(splitLineSuffix(':42')).toEqual({ query: ':42', line: null });
+    expect(splitLineSuffix('app.ts:')).toEqual({ query: 'app.ts:', line: null });
+    expect(splitLineSuffix('app.ts:abc')).toEqual({ query: 'app.ts:abc', line: null });
+    expect(splitLineSuffix('app.ts:0')).toEqual({ query: 'app.ts', line: null });
+  });
+});
+
+describe('sanitizeEditorLine', () => {
+  it('accepts a positive integer within bounds and nothing else', () => {
+    expect(sanitizeEditorLine(1)).toBe(1);
+    expect(sanitizeEditorLine(9_999_999)).toBe(9_999_999);
+    for (const value of [0, -3, 1.5, 10_000_000, Number.NaN, '42', null, undefined]) {
+      expect(sanitizeEditorLine(value)).toBeNull();
+    }
   });
 });
 

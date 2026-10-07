@@ -1282,6 +1282,18 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   through `cmd.exe` with the line `cmdLine` vets, handed to node-pty as a raw string.
 - **The folder per project and the search are session state**, never persisted, like every selection
   in this app. The search field is built once and never repainted, so typing and the arrows keep focus.
+- **`app.ts:42` in the search opens the file at line 42** (added on 2026-10-07, on request). The
+  suffix is how a compiler or a stack trace names a place, so a pasted location lands there;
+  `splitLineSuffix` takes it off before the search, and it is unambiguous only because
+  `sanitizeExplorerPath` refuses `:` in a path. The editor gets `+LINE` **before** the file: micro
+  2.0.15 reads it on either side (measured in a real pty, and it stops at the last line past the
+  end), nano and emacs only before. A column is accepted and **dropped**, each editor spelling it
+  differently. Moving to a line inside the file is micro's own `Ctrl+L`, which the app does not
+  catch.
+- ⚠️ **A line asked of a file already open moves nothing, and says so.** The start position is an
+  argument, so it only exists at launch. Typing a goto into a running editor is blind (it may be
+  holding its own prompt) and restarting it asks about unsaved changes for a jump; the answer is
+  `ALREADY_OPEN_LINE_HINT`, pointing at `Ctrl+L`.
 
 ## Jira tab
 

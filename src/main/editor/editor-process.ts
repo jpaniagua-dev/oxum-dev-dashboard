@@ -10,6 +10,8 @@ export interface EditorRequest {
   /** The file, relative to the project. */
   readonly path: string;
   readonly title: string;
+  /** The line the cursor starts at, already in `args` as `+LINE`. Null for the top of the file. */
+  readonly line: number | null;
   readonly file: string;
   /** An array for a real executable; a raw command line for a batch shim behind `cmd.exe`. */
   readonly args: readonly string[] | string;

@@ -8,6 +8,9 @@ left; the middle column lists the open folder, folders first.
   list goes back to any folder above, and `..` to the one just above.
 - **Type** in the field to filter the folder. The same field searches the whole project by file
   name: `app.ts` finds `src/app/app.ts` from anywhere, its folder shown after its name.
+- **Go to a line**: type `:42` after the name (`app.ts:42`, or a pasted `src/app/app.ts:42:7`) and
+  the file opens at line 42. Inside an open file, `Ctrl+L` in micro asks for a line. A file already
+  open is not moved: use `Ctrl+L` there.
 - **Keyboard**, from the field: `↑` `↓` move; `Enter` opens a folder or edits a file; `Shift+Enter`
   edits it in a window of its own; `Backspace` in an empty field goes up; `Escape` clears it.
 - **Another file** replaces the one being edited, but only once the editor has let go of it: it is
