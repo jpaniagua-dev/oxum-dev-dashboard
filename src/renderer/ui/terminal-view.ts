@@ -26,7 +26,7 @@ import { createElement } from './dom.js';
  */
 
 /** What a key combination should do inside a terminal. */
-export type TerminalKeyAction = 'copy' | 'paste' | 'pass';
+export type TerminalKeyAction = 'copy' | 'paste' | 'consumed' | 'pass';
 
 /**
  * Decides what `Ctrl`-based keys mean in a terminal.
@@ -38,13 +38,25 @@ export type TerminalKeyAction = 'copy' | 'paste' | 'pass';
  *
  * `Ctrl+V` never has a terminal meaning worth keeping, so it always pastes.
  *
+ * A keydown the app already handled is `consumed` and never reaches the pty. The app's chords
+ * (`Ctrl+B`, `Ctrl+N`, `Ctrl+G`, the `Alt+Shift` pane gestures) are caught on `document` in the capture
+ * phase and only call `preventDefault`, which xterm 6 does not read: without this, `Ctrl+B` toggled the
+ * note **and** sent `^B` to the program, which a full-screen editor such as micro acts on. A chord the
+ * app declines (the note toggle with nothing to toggle) is not prevented, so it still reaches the shell.
+ *
  * Pure and exported: this is a two-line rule whose failure modes are "cannot copy" and, far worse,
  * "cannot interrupt a build".
  */
 export function decideTerminalKey(
-  event: Pick<KeyboardEvent, 'type' | 'key' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey'>,
+  event: Pick<
+    KeyboardEvent,
+    'type' | 'key' | 'ctrlKey' | 'shiftKey' | 'altKey' | 'metaKey' | 'defaultPrevented'
+  >,
   hasSelection: boolean,
 ): TerminalKeyAction {
+  if (event.defaultPrevented) {
+    return 'consumed';
+  }
   if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) {
     return 'pass';
   }
@@ -212,6 +224,8 @@ export function createTerminalView(options: TerminalViewOptions): TerminalView {
             term.paste(text);
           }
         });
+        return false;
+      case 'consumed':
         return false;
       case 'pass':
         return true;

@@ -35,6 +35,9 @@ keep the environment they started with.
 | `Ctrl+G` | switch between tabs and cards |
 | `Ctrl+B` | show or hide the active terminal's note, including the terminal previewed in Cards |
 
+A shortcut the app acts on is not passed on to the program in the terminal. One it has nothing to do
+for (`Ctrl+B` with no terminal to show a note for) reaches the program as usual.
+
 ## Cards
 
 Watch and Server sessions have a rerun button on both their card and terminal tab. It stops the

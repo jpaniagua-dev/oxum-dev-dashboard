@@ -11,6 +11,7 @@ function key(over: Partial<Key> = {}): Key {
     shiftKey: false,
     altKey: false,
     metaKey: false,
+    defaultPrevented: false,
     ...over,
   };
 }
@@ -44,6 +45,13 @@ describe('decideTerminalKey', () => {
     expect(decideTerminalKey(key({ key: 'd' }), true)).toBe('pass');
     expect(decideTerminalKey(key({ key: 'r' }), false)).toBe('pass');
     expect(decideTerminalKey(key({ key: 'z' }), false)).toBe('pass');
+  });
+
+  it('keeps a key the app already handled away from the program', () => {
+    // Ctrl+B toggles the note; sent on as ^B as well, micro would open its shell prompt.
+    expect(decideTerminalKey(key({ key: 'b', defaultPrevented: true }), false)).toBe('consumed');
+    expect(decideTerminalKey(key({ key: 'c', defaultPrevented: true }), true)).toBe('consumed');
+    expect(decideTerminalKey(key({ key: 'b' }), false)).toBe('pass');
   });
 
   it('does not fire without Ctrl, nor with Alt or Meta held', () => {

@@ -553,6 +553,12 @@ row. None of it can say what a session was opened FOR.
   pure and tested; the pane's context menu goes through the same `copySelection` / `pasteInto` as the
   shortcut.
 - **Rendering goes through the WebGL addon**, not the default DOM renderer. The DOM under Chromium's
+- ⚠️ **A key the app handled never reaches the pty.** The app chords (`Ctrl+B/N/G`, the `Alt+Shift`
+  pane gestures) are caught on `document` in the capture phase and only call `preventDefault`, and
+  xterm 6 does not read it: `_keyDown` consults the custom key handler and nothing else. Until
+  2026-10-07, `Ctrl+B` toggled the note **and** sent `^B` to the program, which a full-screen editor
+  acts on. `decideTerminalKey` now answers `consumed` for a prevented keydown. A chord the app
+  declines is not prevented (the note toggle with nothing to toggle), so it still reaches the shell.
   GPU compositing left frozen glyphs on screen while scrolling (seen for real); the WebGL canvas is
   repainted whole, so nothing can stay behind. Three rules, each one paid for: the addon is loaded from
   `fitVisible` and **never in `ensure()`**, because a view can be created for a background tab (`write`
