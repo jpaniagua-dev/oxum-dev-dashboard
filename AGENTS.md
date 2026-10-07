@@ -164,6 +164,12 @@ exceptions:
   meaning to protect. The step is proportional to `deltaY`, not fixed per event: a trackpad sends
   dozens of small deltas where a mouse sends one notch, and a fixed step made it zoom far too fast.
   `zoomAbout` keeps the point under the cursor still; the buttons zoom about the plane's centre.
+- **A selected or new card moves the plane only when it is not entirely visible.** `revealCard`
+  centred on every change of selection, so a click on a card in plain sight slid the canvas under the
+  pointer; reported on 2026-10-07, together with new cards seeming to land in different places
+  depending on how they were opened. Every opening path (`Ctrl+N`, the agent button, a new shell, a
+  project's terminal) goes through `focusTerminal`, so the slot was always the same: what moved was
+  the canvas. `cardInView` now gates it, measured against what remains beside the sidebar.
 - **The frame button fits every card in the visible plane, it does not reset to the origin.** Cards
   are easily dragged under the sidebar and lost, and a reset to `(0, 0)` at 100% does not find them.
   `fitView` never enlarges past 100%, and when even `ZOOM_MIN` is too large it keeps the top left in

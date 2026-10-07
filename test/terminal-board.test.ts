@@ -5,6 +5,7 @@ import {
   ZOOM_MAX,
   ZOOM_MIN,
   activityOf,
+  cardInView,
   centreCardView,
   clampZoom,
   defaultPoint,
@@ -133,6 +134,27 @@ describe('centreCardView', () => {
 
     expect(pan.x + (card.x + card.width / 2) * 0.5).toBe(viewport.x + viewport.width / 2);
     expect(pan.y + (card.y + card.height / 2) * 0.5).toBe(viewport.y + viewport.height / 2);
+  });
+});
+
+describe('cardInView', () => {
+  const viewport = { x: 24, y: 48, width: 600, height: 400 };
+  const card = { x: 100, y: 100, width: 240, height: 112 };
+
+  it('leaves a card in plain sight alone, which is what a click on it must do', () => {
+    expect(cardInView(card, viewport, { x: 0, y: 0 }, 1)).toBe(true);
+  });
+
+  it('wants to move a card that is off screen or cut by an edge', () => {
+    expect(cardInView(card, viewport, { x: -500, y: 0 }, 1)).toBe(false);
+    // Its right edge under the sidebar: 100 + 240 = 340 past a 300px-wide visible canvas.
+    expect(cardInView(card, { ...viewport, width: 300 }, { x: 0, y: 0 }, 1)).toBe(false);
+  });
+
+  it('measures at the current zoom', () => {
+    const far = { x: 800, y: 100, width: 240, height: 112 };
+    expect(cardInView(far, viewport, { x: 0, y: 0 }, 1)).toBe(false);
+    expect(cardInView(far, viewport, { x: 0, y: 0 }, 0.5)).toBe(true);
   });
 });
 

@@ -181,6 +181,21 @@ export function fitView(
   };
 }
 
+/**
+ * Whether a card is entirely on screen, given where the plane is: card in canvas units, viewport in
+ * screen pixels, as `centreCardView` takes them.
+ */
+export function cardInView(card: BoardRect, viewport: BoardRect, pan: CardPoint, zoom: number): boolean {
+  const left = pan.x + card.x * zoom;
+  const top = pan.y + card.y * zoom;
+  return (
+    left >= viewport.x &&
+    top >= viewport.y &&
+    left + card.width * zoom <= viewport.x + viewport.width &&
+    top + card.height * zoom <= viewport.y + viewport.height
+  );
+}
+
 /** The pan that puts one card at the centre of the part of the board that is actually visible. */
 export function centreCardView(card: BoardRect, viewport: BoardRect, zoom: number): CardPoint {
   return {
@@ -461,7 +476,7 @@ export class TerminalBoard {
     // the viewport is the canvas that remains beside it, not the full window it had one frame ago.
     const reveal = selected ?? added;
     if (reveal !== undefined && reveal !== null) {
-      this.centreCard(reveal);
+      this.revealCard(reveal);
     }
   }
 
@@ -1118,8 +1133,16 @@ export class TerminalBoard {
     });
   }
 
-  /** Moves the plane, not the card, so opening it never destroys a layout arranged by hand. */
-  private centreCard(id: CardId): void {
+  /**
+   * Brings a card on screen when it is not, by moving the plane and never the card, so a layout
+   * arranged by hand survives.
+   *
+   * ⚠️ **Only when it is not already entirely visible.** It centred on every change of selection, so a
+   * click on a card in plain sight slid the whole canvas under the pointer to put that card in the
+   * middle (reported 2026-10-07). A card that is visible stays where it is; one that is off screen,
+   * or hidden behind the sidebar that opening it just added, is centred in what remains.
+   */
+  private revealCard(id: CardId): void {
     const card = [...this.content.querySelectorAll<HTMLElement>('.board-card')].find(
       (entry) => entry.dataset['boardId'] === id,
     );
@@ -1128,23 +1151,24 @@ export class TerminalBoard {
     }
 
     const margin = 24;
-    // The toolbar floats above the canvas and is therefore not part of its usable centre.
+    // The toolbar floats above the canvas and is therefore not part of its usable area.
     const head = this.toolbar.offsetTop + this.toolbar.offsetHeight + 12;
-    this.pan = centreCardView(
-      {
-        x: card.offsetLeft,
-        y: card.offsetTop,
-        width: card.offsetWidth,
-        height: card.offsetHeight,
-      },
-      {
-        x: margin,
-        y: head,
-        width: Math.max(1, this.host.clientWidth - 2 * margin),
-        height: Math.max(1, this.host.clientHeight - head - margin),
-      },
-      this.zoom,
-    );
+    const rect: BoardRect = {
+      x: card.offsetLeft,
+      y: card.offsetTop,
+      width: card.offsetWidth,
+      height: card.offsetHeight,
+    };
+    const viewport: BoardRect = {
+      x: margin,
+      y: head,
+      width: Math.max(1, this.host.clientWidth - 2 * margin),
+      height: Math.max(1, this.host.clientHeight - head - margin),
+    };
+    if (cardInView(rect, viewport, this.pan, this.zoom)) {
+      return;
+    }
+    this.pan = centreCardView(rect, viewport, this.zoom);
     this.applyTransform();
   }
 

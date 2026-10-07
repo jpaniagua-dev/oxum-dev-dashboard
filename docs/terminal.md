@@ -48,7 +48,8 @@ The same action is available from the card or tab context menu.
 is doing. Click a card to open its terminal in a sidebar beside the canvas, with the session's name
 at the top left (double-click it to rename) and a close button at the top right once the session can
 be closed; double-click a card's title to rename it there too;
-drag cards to arrange them; the wheel zooms; the frame button brings every card into view. A newly
-opened card is centred in the canvas space that remains visible, including when a wide terminal
-sidebar is open. A note can be written on a session: it shows on its card and at the top right of its
+drag cards to arrange them; the wheel zooms; the frame button brings every card into view. The canvas
+only moves when the card you open or select is not entirely visible: it is then centred in the canvas
+space that remains, including when a wide terminal sidebar is open. Clicking a card in view leaves
+everything where it is. A note can be written on a session: it shows on its card and at the top right of its
 terminal.
