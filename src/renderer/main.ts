@@ -19,6 +19,8 @@ import type {
   Project,
   ProjectId,
   ProjectRow,
+  PullRequest,
+  PullReview,
   PullReviewState,
   PullReviewTarget,
   PullScope,
@@ -54,7 +56,7 @@ import { TerminalBoard } from './ui/terminal-board.js';
 import { agentSessions, renderAgentsPanel } from './ui/agents-panel.js';
 import { ExtensionsPanel } from './ui/extensions-panel.js';
 import { ExplorerPanel } from './ui/explorer-panel.js';
-import { hitsInteractive, requireElement } from './ui/dom.js';
+import { clearChildren, hitsInteractive, requireElement } from './ui/dom.js';
 import { canRerunSession } from '@shared/session-actions.js';
 import {
   buildChangeMenuItems,
@@ -170,10 +172,11 @@ class App {
   /** Repository selected in the pull request tab, so a refresh does not jump back to the first. */
   private selectedRepo: ProjectId | null = null;
   /**
-   * The pull request the review column describes. Session-local, and reset when the repository
-   * changes: a row selected on one repository says nothing about the next.
+   * The pull request whose review the column shows, null while the column is put away. Opened from
+   * the row's menu, session-local, and reset when the repository changes: a review read on one
+   * repository says nothing about the next.
    */
-  private selectedPull: number | null = null;
+  private readingPull: number | null = null;
   private pullReview: PullReviewState = {
     reviews: {},
     runs: {},
@@ -1520,51 +1523,57 @@ class App {
     window.setTimeout(() => this.stampRefresh(), 4000);
   }
 
+  /** The stored review of a pull request of the selected repository, if it has one. */
+  private storedReviewFor(number: number): PullReview | undefined {
+    const repo = this.pulls.find((entry) => entry.projectId === this.selectedRepo) ?? this.pulls[0];
+    return repo?.slug === undefined || repo.slug === null
+      ? undefined
+      : this.pullReview.reviews[`${repo.slug}#${number}`];
+  }
+
   private renderPulls(): void {
     const repo = this.pulls.find((entry) => entry.projectId === this.selectedRepo) ?? this.pulls[0];
     const pull =
-      repo === undefined
+      repo === undefined || this.readingPull === null
         ? undefined
-        : (repo.pulls.find((entry) => entry.number === this.selectedPull) ?? repo.pulls[0]);
-    const stored =
-      repo?.slug === undefined || repo.slug === null || pull === undefined
-        ? undefined
-        : this.pullReview.reviews[`${repo.slug}#${pull.number}`];
+        : repo.pulls.find((entry) => entry.number === this.readingPull);
+    const stored = pull === undefined ? undefined : this.storedReviewFor(pull.number);
 
-    renderReviewOverview(
-      requireElement('pulls-overview'),
-      pull,
-      stored,
-      repo?.projectId ?? null,
-      stored === undefined ? '' : (this.reviewBodies[`${stored.slug}#${stored.number}`] ?? ''),
+    /*
+     * The column exists only while a review is being read. A pull request that merged, or a review
+     * removed from the list, puts it away by itself: a column describing a row that is gone would be
+     * the stale view the old selection rules guarded against.
+     */
+    const overview = requireElement('pulls-overview');
+    const reading = pull !== undefined && stored !== undefined;
+    overview.hidden = !reading;
+    requireElement('strip-panel-pulls').classList.toggle('pulls--detail', reading);
+    if (pull !== undefined && stored !== undefined) {
+      renderReviewOverview(
+        overview,
+        pull,
+        stored,
+        repo?.projectId ?? null,
+        this.reviewBodies[`${stored.slug}#${stored.number}`] ?? '',
+        {
+          onOpenPull: (url) => void window.api.openExternal(url),
+          onSubmit: (slug, number, event) => this.submitReview(slug, number, event),
+          onReview: (projectId, number) => this.startReview({ kind: 'pull', projectId, number }),
+          onDismiss: (slug, number) => void this.dismissReview(slug, number),
+          onRetract: (slug, number) => this.retractReview(slug, number),
+          onOpenWorkspace: (projectId, number) => void this.openPullWorkspace(projectId, number),
+          onClose: () => {
+            this.readingPull = null;
+            this.renderPulls();
+          },
+        },
+      );
       // `void`: the body is fetched once per review and the column repaints when it lands. Awaiting
       // it here would make every repaint wait on an IPC round trip for text most rows never show.
-
-      {
-        onOpenPull: (url) => void window.api.openExternal(url),
-        onSubmit: (slug, number, event) => {
-          void window.api.submitPullReview(slug, number, event).then((state) => {
-            this.pullReview = state;
-            // The refusal, when there is one, is on the state's own error line rather than in a
-            // dialog: it is a sentence to read, not a question to answer.
-            this.renderPulls();
-          });
-        },
-        onReview: (projectId, number) => this.startReview({ kind: 'pull', projectId, number }),
-        onDismiss: (slug, number) => void this.dismissReview(slug, number),
-        onRetract: (slug, number) => {
-          void window.api.retractPullReview(slug, number).then((state) => {
-            this.pullReview = state;
-            this.reviewBodies = {};
-            this.renderPulls();
-          });
-        },
-        onOpenWorkspace: (projectId, number) => void this.openPullWorkspace(projectId, number),
-      },
-    );
-
-    if (stored !== undefined) {
       void this.loadReviewBody(stored.slug, stored.number);
+    } else {
+      this.readingPull = null;
+      clearChildren(overview);
     }
 
     renderPullList(
@@ -1581,14 +1590,11 @@ class App {
       this.pullReview,
       this.autoRuns,
       {
-        onSelectPull: (number) => {
-          this.selectedPull = number;
-          this.renderPulls();
-        },
         onReview: (target) => this.startReview(target),
         onRowMenu: (pull, x, y) => {
           const projectId = this.selectedRepo ?? this.pulls[0]?.projectId ?? null;
           showContextMenu(x, y, [
+            ...this.pullReviewMenuItems(pull, projectId),
             {
               label: pull.isDraft ? 'Mark ready for review' : 'Convert to draft',
               hint: pull.isDraft
@@ -1643,9 +1649,9 @@ class App {
         onOpenPull: (url) => void window.api.openExternal(url),
         onSelect: (projectId) => {
           this.selectedRepo = projectId;
-          // The pull request selection belonged to the repository being left: keeping it would
-          // describe a row nobody can see.
-          this.selectedPull = null;
+          // The review being read belonged to the repository being left: keeping it would describe
+          // a row nobody can see.
+          this.readingPull = null;
           this.renderPulls();
         },
         onSelectScope: (scope) => {
@@ -1974,6 +1980,125 @@ class App {
     this.stampMessage(result.message);
     this.pulls = await window.api.refreshPulls();
     this.renderPulls();
+  }
+
+  /**
+   * The review half of a pull request's menu: run it, read it, act on it.
+   *
+   * What the review column carried permanently until 2026-10-07, and still carries once opened. The
+   * three GitHub writes appear only on a review that can be posted, as the column's buttons do: an
+   * entry whose only outcome is a refusal is a trap. They are disabled, with the reason as the hint,
+   * while writing is blocked, since the main process would refuse them for that reason anyway.
+   */
+  private pullReviewMenuItems(
+    pull: PullRequest,
+    projectId: ProjectId | null,
+  ): { label: string; hint: string; disabled: boolean; run: () => void }[] {
+    const stored = this.storedReviewFor(pull.number);
+    const blocked = this.pullReview.writesBlocked;
+    const items = [
+      {
+        label: stored === undefined ? `Review #${pull.number}` : `Review #${pull.number} again`,
+        hint:
+          stored === undefined
+            ? 'Reads the patch and judges it. Minutes, and it posts nothing by itself unless it finds something blocking.'
+            : 'Reads it again from scratch, whatever the stored verdict says.',
+        disabled: projectId === null || this.pullReview.running,
+        run: () => {
+          if (projectId !== null) {
+            this.startReview({ kind: 'pull', projectId, number: pull.number });
+          }
+        },
+      },
+      {
+        label: 'Read the review',
+        hint:
+          stored === undefined
+            ? 'Not reviewed yet.'
+            : 'Opens the verdict and its findings beside the list.',
+        disabled: stored === undefined,
+        run: () => {
+          this.readingPull = pull.number;
+          this.renderPulls();
+        },
+      },
+      {
+        label: 'Open as a workspace',
+        hint: 'Checks this pull request out in its own worktree and starts the dev server on a free port.',
+        disabled: projectId === null,
+        run: () => {
+          if (projectId !== null) {
+            void this.openPullWorkspace(projectId, pull.number);
+          }
+        },
+      },
+    ];
+    if (stored !== undefined && stored.postable) {
+      const write = (
+        label: string,
+        hint: string,
+        event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT',
+      ): (typeof items)[number] => ({
+        label,
+        hint: blocked ?? hint,
+        disabled: blocked !== null,
+        run: () => this.submitReview(stored.slug, stored.number, event),
+      });
+      items.push(
+        write(
+          'Approve',
+          'Submits an approval on GitHub, under your name. Refused if the head has moved.',
+          'APPROVE',
+        ),
+        write(
+          'Request changes',
+          "Posts the review's text and blocks the merge. Read the review shows the text.",
+          'REQUEST_CHANGES',
+        ),
+        write(
+          'Comment',
+          "Posts the review's text without blocking the merge. Read the review shows the text.",
+          'COMMENT',
+        ),
+      );
+    }
+    if (stored?.posted != null) {
+      items.push({
+        label: 'Retract on GitHub',
+        hint: 'Dismisses the posted review and replaces its text. A submitted review cannot be deleted.',
+        disabled: blocked !== null,
+        run: () => this.retractReview(stored.slug, stored.number),
+      });
+    }
+    if (stored !== undefined) {
+      items.push({
+        label: 'Remove the review from the list',
+        hint: 'Local: the pull request is untouched and anything posted stays posted.',
+        disabled: false,
+        run: () => void this.dismissReview(stored.slug, stored.number),
+      });
+    }
+    return items;
+  }
+
+  /** Submits a review event. A refusal lands on the state's own error line, not in a dialog. */
+  private submitReview(
+    slug: string,
+    number: number,
+    event: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT',
+  ): void {
+    void window.api.submitPullReview(slug, number, event).then((state) => {
+      this.pullReview = state;
+      this.renderPulls();
+    });
+  }
+
+  private retractReview(slug: string, number: number): void {
+    void window.api.retractPullReview(slug, number).then((state) => {
+      this.pullReview = state;
+      this.reviewBodies = {};
+      this.renderPulls();
+    });
   }
 
   private async dismissReview(slug: string, number: number): Promise<void> {

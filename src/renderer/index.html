@@ -184,16 +184,17 @@
             <!--
           `pulls--detail` and not a change to `.pulls`: the Jira panel below reuses that class for
           the same master-detail grammar, so widening the grid there would move a column nobody
-          touched. The modifier is on this panel alone.
+          touched. On this panel the renderer adds the modifier only while a review is being read
+          (`Read the review` in a row's menu), and the third column is hidden otherwise.
         -->
-            <div class="pulls pulls--detail" id="strip-panel-pulls" role="tabpanel" hidden>
+            <div class="pulls" id="strip-panel-pulls" role="tabpanel" hidden>
               <div class="pulls__repos" id="pulls-repos"></div>
               <div class="pulls__main">
                 <div class="pulls__views" id="pulls-views" role="tablist"></div>
                 <div class="pulls__bar" id="pulls-bar"></div>
                 <div class="pulls__list" id="pulls-list"></div>
               </div>
-              <div class="pulls__overview" id="pulls-overview"></div>
+              <div class="pulls__overview" id="pulls-overview" hidden></div>
             </div>
 
             <!--

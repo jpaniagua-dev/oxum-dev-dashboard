@@ -5,16 +5,19 @@ in its settings), their pull requests on the right. **Mine** shows the ones you 
 to review; **All** every open one.
 
 Each row shows the title, the author, your involvement, the review state and the checks. `no review`
-means the repository requires none, not that it is approved. Click a row to see what the review
-concluded about it; the terminal icon opens a shell in that repository.
+means the repository requires none, not that it is approved. Click a row to open it on GitHub; the
+terminal icon opens a shell in that repository. **Right-click** a row for everything else: review it,
+read its review, open it as a workspace, approve or post, mark it draft or ready.
 
 ## The review
 
 A headless agent run reads a pull request against your team's standards and gives a verdict.
 
 - **Start it** from a repository row (everything open, or only what has no verdict at its current
-  commit) or from a pull request row (**Review**, then **Review again**).
-- **Verdicts**: `clean` offers an **Approve** button; `remarks` waits for you; `blocking` posts a
+  commit) or from a pull request row (its play icon, or **Review** in its menu).
+- **Read it** with **Read the review** in the row's menu: the verdict, the findings and what would
+  be posted open beside the list, with the same actions. **Close** puts them away.
+- **Verdicts**: `clean` offers **Approve**; `remarks` waits for you; `blocking` posts a
   comment and requests changes; `unclear` posts nothing.
 - **Nothing is posted** until **Let the review submit to GitHub** is on in the settings. Approve is
   never automatic, and is refused if the pull request moved since the review.

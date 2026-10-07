@@ -11,6 +11,9 @@ import { buildPill } from './project-table.js';
  * behind it, and checking that reason used to mean opening the pull request in a browser, which is
  * the trip this tab exists to save. Blocks in a fixed order, so the eye learns where the findings
  * are.
+ *
+ * Shown on request since 2026-10-07, from `Read the review` in the row's menu, and closed from its
+ * own head. A permanent column was 340px of "not reviewed yet" for most rows.
  */
 
 export interface ReviewOverviewActions {
@@ -25,6 +28,8 @@ export interface ReviewOverviewActions {
   readonly onRetract: (slug: string, number: number) => void;
   /** Checks the pull request out in a worktree and starts its dev server. */
   readonly onOpenWorkspace: (projectId: string, number: number) => void;
+  /** Puts the column away. */
+  readonly onClose: () => void;
 }
 
 export function renderReviewOverview(
@@ -53,6 +58,14 @@ export function renderReviewOverview(
     head.append(buildPill(presentPullVerdict(review.verdict, isReviewCurrent(review, pull))));
   }
   head.append(createElement('span', { className: 'triage__overview-summary', text: pull.title }));
+  const close = createElement('button', {
+    className: 'button button--quiet pulls__overview-close',
+    text: 'Close',
+  });
+  close.type = 'button';
+  close.title = 'Puts the review away';
+  close.addEventListener('click', () => actions.onClose());
+  head.append(close);
   host.append(head);
 
   const facts = [

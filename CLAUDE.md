@@ -948,14 +948,24 @@ user's own identity, on a colleague's work.
   `gh pr view --json comments`, which returns issue comments only: reading the wrong collection is
   the single most consequential mistake available here, since it turns a flagged pull request into
   one that looks clean.
-- **Clicking a row now SELECTS it, where it used to open the browser.** A deliberate reversal, and
-  the reason is in the old rule itself: opening GitHub was right while nothing local could show a
-  pull request. The verdict and its findings are on this machine now, so reading them is the
-  everyday gesture and the browser is the deliberate one, behind a button. It is also what the
-  Triage tab does, and two neighbouring master-detail tabs disagreeing about what a click means
-  would be worse than either answer.
-- **The third column is `.pulls--detail`, not a change to `.pulls`.** That class paints the Jira
-  panel too, so widening the grid there would have moved a column nobody touched.
+- **Clicking a row opens the pull request on GitHub, again, and the review is read on request.**
+  From the review's arrival until 2026-10-07 a click selected the row and a permanent third column
+  described it, on the grounds that the verdict was now local. Reversed on request: that column was
+  340px of "not reviewed yet" for most rows, so it was more column than the tab needed. The review
+  is still read here, never lost: `Read the review` in the row's menu opens the column, its `Close`
+  puts it away, and it closes by itself when the pull request leaves the list or its review is
+  removed. The Triage tab keeps its select-on-click, because there every row has an analysis to
+  read.
+- **The row's menu carries every review gesture**, which the column used to hold: `Review` (also
+  the row's play icon, the same call), `Read the review`, `Open as a workspace`, then `Approve`,
+  `Request changes` and `Comment` only on a postable review, `Retract on GitHub` only once posted,
+  and `Remove the review from the list`. The three writes are disabled with `writesBlocked` as their
+  hint, where the column showed them and let the main process refuse: the reason is known before
+  the click. `Request changes` and `Comment` post the review's text, which only the column shows,
+  and their hint says so.
+- **The third column is `.pulls--detail`, added by the renderer while a review is read.** Not a
+  change to `.pulls`, which paints the Jira panel too, and not set in the markup any more: without
+  it the grid has two tracks, so a hidden column leaves no empty one behind.
 - **`reviewWritesEnabled` is off by default**, which is what guarantees that installing an update
   cannot post anything before its owner has said, once, that the feature may exist. Every write path
   reads it and `review-gate.ts` refuses on it first. An empty `readViewerLogin()` disables the whole

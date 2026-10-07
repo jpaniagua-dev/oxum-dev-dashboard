@@ -42,25 +42,13 @@ export interface PullListActions {
   /**
    * Opens a pull request on GitHub.
    *
-   * What a click on a row does. The two gestures were the other way round until use decided it: the
-   * reflex in front of a pull request list is to go read the pull request, and the terminal is the
-   * deliberate move.
+   * What a click on a row does, again since 2026-10-07: see `buildPullRow`.
    */
   onOpenPull: (url: string) => void;
   /** Remembers which repository is selected, so a refresh does not jump back to the first. */
   onSelect: (projectId: ProjectId) => void;
   /** Switches between "the ones that need me" and "everything open here". */
   onSelectScope: (scope: PullScope) => void;
-  /**
-   * Remembers which pull request the overview describes.
-   *
-   * New with the review column, and it is what changed the meaning of a click on a row. Until there
-   * was something local to show, going to GitHub was the only thing a click could usefully do; now
-   * the reason for a verdict is on this machine, so reading it is the everyday gesture and the
-   * browser is the deliberate one, behind a button. Same reversal the Triage tab made, for the same
-   * reason and with the same grammar.
-   */
-  onSelectPull: (number: number) => void;
   /** Starts a review run. The target says which pull requests and how much of them. */
   onReview: (target: PullReviewTarget) => void;
   /** Stops the run at the next step it can stop at. */
@@ -68,9 +56,9 @@ export interface PullListActions {
   /**
    * Opens a pull request's own menu, from a right click on its row.
    *
-   * Where the state changes live (ready, draft), for the reason the Git tab puts its destructive
-   * entries behind one: this list is clicked all day to read verdicts, and a control that changes
-   * what the team sees has no business under a cursor that is browsing.
+   * Every gesture beyond opening it lives there: the review and reading it, the workspace, the three
+   * GitHub writes, the draft toggle. A control that changes what the team sees has no business under
+   * a cursor that is browsing, the reason the Git tab puts its destructive entries behind one.
    */
   onRowMenu: (pull: PullRequest, x: number, y: number) => void;
 }
@@ -455,7 +443,7 @@ function buildPullRow(
   actions: PullListActions,
 ): HTMLElement {
   const row = createElement('div', { className: 'pull' });
-  row.title = `${pull.title}\n${pull.branch}\n(click: read the review, right click: act)`;
+  row.title = `${pull.title}\n${pull.branch}\n(click: open on GitHub, right click: review, read, act)`;
 
   row.append(createElement('span', { className: 'pull__number', text: `#${pull.number}` }));
   // `textContent` everywhere: titles and branch names come from outside the app.
@@ -584,29 +572,24 @@ function buildPullRow(
   row.append(terminal);
 
   /*
-   * Clicking a row SELECTS it, where it used to open the browser.
+   * Clicking a row OPENS it on GitHub, which it did before the review column existed.
    *
-   * The reversal is deliberate and its reason is in the old rule: opening GitHub was the right
-   * gesture while nothing local could show a pull request. Now the verdict and its findings are on
-   * this machine, so reading them is the everyday move and the browser is the deliberate one,
-   * behind a button in the overview. Exactly the grammar of the Triage tab, which made the same
-   * choice for the same reason, and having the two neighbouring master-detail tabs disagree about
-   * what a click means would be worse than either answer.
+   * The column made a click select, so its text could be read; on 2026-10-07 it was found to be more
+   * column than most rows need, since most rows have no review to read. The review is now read on
+   * request, from the row's menu, and the click went back to the reflex in front of a list of pull
+   * requests: go and read the pull request.
    */
   row.addEventListener('contextmenu', (event) => {
     event.preventDefault();
-    // Selected first, for the reason the Triage tab's row menu does it: a menu acting on a row the
-    // overview is not describing would act out of sight of the text that justifies it.
-    actions.onSelectPull(pull.number);
     actions.onRowMenu(pull, event.clientX, event.clientY);
   });
 
   row.addEventListener('click', (event) => {
-    // Without this the row's own buttons would also select on their way out.
+    // Without this the row's own buttons would also open GitHub on their way out.
     if (hitsInteractive(event)) {
       return;
     }
-    actions.onSelectPull(pull.number);
+    actions.onOpenPull(pull.url);
   });
   return row;
 }
