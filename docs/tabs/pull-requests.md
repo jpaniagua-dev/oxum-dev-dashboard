@@ -7,7 +7,7 @@ to review; **All** every open one.
 Each row shows the title, the author, your involvement, the review state and the checks. `no review`
 means the repository requires none, not that it is approved. Click a row to open it on GitHub; the
 terminal icon opens a shell in that repository. **Right-click** a row for everything else: review it,
-read its review, open it as a workspace, approve or post, mark it draft or ready.
+read its review, open it as a workspace, approve or post, mark it draft or ready, or copy its link.
 
 ## The review
 

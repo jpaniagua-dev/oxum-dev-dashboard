@@ -1636,6 +1636,16 @@ class App {
               disabled: false,
               run: () => void window.api.openExternal(pull.url),
             },
+            // The one thing a pull request is asked for outside this app: a link pasted in a chat.
+            {
+              label: 'Copy the link',
+              hint: pull.url,
+              disabled: false,
+              run: () => {
+                void window.api.writeClipboard(pull.url);
+                this.stampMessage(`Copied the link to #${pull.number}`);
+              },
+            },
           ]);
         },
         onCancelReview: () => {
