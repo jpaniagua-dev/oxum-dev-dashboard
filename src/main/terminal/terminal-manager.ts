@@ -456,6 +456,49 @@ export class TerminalManager {
   }
 
   /**
+   * Reopens an agent tab from the previous run, on its conversation.
+   *
+   * The tab comes back as it was left: its title (a rename survives), its note, its folder, and for a
+   * handoff or a rule its project and reserved action id, which is what keeps it exempt from
+   * `reconcile`. A project that has since left the configuration turns it into a free agent tab, the
+   * shape `openAgent` gives, rather than a tab `reconcile` would close at the next save. The command
+   * resolved by the caller carries the resume arguments; the agent record is the first spawn's, so
+   * the Agents tab still says when the conversation began.
+   */
+  restoreAgent(options: {
+    title: string;
+    renamed: boolean;
+    project: Project | null;
+    actionId: string | null;
+    file: string;
+    args: readonly string[];
+    cwd: string;
+    size: TerminalSize;
+    profileId: string | null;
+    agent: SessionAgent;
+    note: string | null;
+  }): TerminalId | null {
+    const tied = options.project !== null && options.actionId !== null;
+    return this.spawn({
+      title: options.title,
+      renamed: options.renamed,
+      kind: tied ? 'project' : 'shell',
+      projectId: tied ? (options.project?.id ?? null) : null,
+      actionId: tied ? options.actionId : null,
+      // A handoff tab is a `task`, as `runProjectCommand` makes it; a free agent tab has no role.
+      role: tied ? 'task' : null,
+      profileId: options.profileId,
+      cwd: options.cwd,
+      file: options.file,
+      args: [...options.args],
+      size: options.size,
+      projectKind: null,
+      agent: options.agent,
+      note: options.note,
+    });
+  }
+
+  /**
    * Types bytes into a session's stdin, and says whether anything took them.
    *
    * The boolean was added for the vault and it is not a nicety. This was a silent no-op for an

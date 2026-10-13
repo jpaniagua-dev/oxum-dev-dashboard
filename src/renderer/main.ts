@@ -90,10 +90,7 @@ import { loadRestoredStrip, StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
 import { applyUiFontSize } from './ui/ui-font.js';
 import { appShortcut } from './ui/app-shortcuts.js';
-import {
-  attachBoardPreviewResizer,
-  BOARD_PREVIEW_DEFAULT_WIDTH,
-} from './ui/board-preview-resizer.js';
+import { attachBoardPreviewResizer } from './ui/board-preview-resizer.js';
 
 /**
  * Application shell.
@@ -418,8 +415,14 @@ class App {
     this.boardPreviewResizer = attachBoardPreviewResizer({
       handle: requireElement('terminal-board-resizer'),
       pane: requireElement('terminal-pane'),
-      initialWidth: BOARD_PREVIEW_DEFAULT_WIDTH,
+      initialRatio: bootstrap.settings.boardPreviewRatio,
       onResize: () => this.terminal?.refit(),
+      onCommit: (ratio) => {
+        if (this.settings !== null) {
+          this.settings = { ...this.settings, boardPreviewRatio: ratio };
+        }
+        void window.api.updateSettings({ boardPreviewRatio: ratio });
+      },
     });
 
     this.pulls = bootstrap.pulls;

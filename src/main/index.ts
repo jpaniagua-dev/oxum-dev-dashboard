@@ -62,7 +62,11 @@ import { DashboardWindow, loadRendererPage, preloadPath } from './window.js';
 import { quotePrompt } from '@shared/automation.js';
 import { AutomationRunner, forgetRule, forgetTarget } from './automation/automation-runner.js';
 import { AutomationStore } from './automation/automation-store.js';
-import { buildInteractiveCommand } from './triage/work-command.js';
+import { buildInteractiveCommand, newConversation } from './triage/work-command.js';
+import { AgentSessionStore } from './terminal/agent-session-store.js';
+import { restoreAgentSessions } from './terminal/agent-restore.js';
+import { agentRecordsFrom } from '@shared/agent-sessions.js';
+import type { TerminalGroup } from '@shared/contracts.js';
 import type { VaultState } from '@shared/vault.js';
 import { VaultBroker } from './vault/vault-broker.js';
 import { VaultFiles } from './vault/vault-files.js';
@@ -578,6 +582,19 @@ async function bootstrap(): Promise<void> {
     return { siteUrl, email, projectKeys: [...projectKeys], hasToken: hasJiraToken };
   };
 
+  /*
+   * The agent tabs to reopen at the next launch.
+   *
+   * Recomputed from what is on screen on every session and layout push, rather than told about each
+   * event, and frozen at the quit before the sessions are killed (see the store). Off, it records an
+   * empty list, so turning the setting off also forgets what the next launch would have reopened.
+   */
+  const agentSessions = new AgentSessionStore();
+  const previousAgents = await agentSessions.load();
+  const recordAgents = (sessions: readonly TerminalSession[], groups: readonly TerminalGroup[]): void => {
+    agentSessions.track(settingsStore.get().restoreAgentSessions ? agentRecordsFrom(sessions, groups) : []);
+  };
+
   const terminalManager = new TerminalManager({
     /*
      * Output goes to the dashboard alone, never broadcast: `TerminalPane.write` creates a view for
@@ -590,10 +607,14 @@ async function bootstrap(): Promise<void> {
     onParsed: (projectId, parsed) => projectMonitor.applyParsed(projectId, parsed),
     onProjectStartExit: (projectId, exitCode, stopped) =>
       projectMonitor.markExited(projectId, exitCode, stopped),
-    onSessionsChanged: (sessions: TerminalSession[]) =>
-      dashboardWindow.send(IpcChannel.TerminalsChanged, sessions),
-    onLayoutChanged: (layout: TerminalLayout) =>
-      dashboardWindow.send(IpcChannel.TerminalLayoutChanged, layout),
+    onSessionsChanged: (sessions: TerminalSession[]) => {
+      dashboardWindow.send(IpcChannel.TerminalsChanged, sessions);
+      recordAgents(sessions, terminalManager.layout().groups);
+    },
+    onLayoutChanged: (layout: TerminalLayout) => {
+      dashboardWindow.send(IpcChannel.TerminalLayoutChanged, layout);
+      recordAgents(terminalManager.sessions(), layout.groups);
+    },
   },
   // The stored grid, so the very first layout the dashboard is handed already has the right shape.
   settingsStore.get().terminalColumns,
@@ -645,9 +666,10 @@ async function bootstrap(): Promise<void> {
     if (project === undefined || profile === undefined) {
       return false;
     }
+    const conversation = newConversation(settings.agentProfile, false);
     const resolved = resolveShellCommand(
       profile,
-      `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel)} "${quotePrompt(prompt)}"`,
+      `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, conversation?.args)} "${quotePrompt(prompt)}"`,
     );
     const id = terminalManager.runProjectCommand({
       project,
@@ -672,6 +694,7 @@ async function bootstrap(): Promise<void> {
         model: settings.agentWorkModel,
         instructionFile: settings.agentProfile.instructionFile,
         startedAt: new Date().toISOString(),
+        ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: false } }),
       },
       note: prompt,
     });
@@ -996,6 +1019,28 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  /*
+   * The agents of the previous run come back before the window exists, so the dashboard receives them
+   * in its bootstrap like any session and opens no default shell over them.
+   */
+  if (settingsStore.get().restoreAgentSessions && previousAgents.length > 0) {
+    const settings = settingsStore.get();
+    const shells = mergeProfiles(detectProfiles(), settings.shellProfiles);
+    const reopened = restoreAgentSessions({
+      records: previousAgents,
+      terminals: terminalManager,
+      profile: settings.agentProfile,
+      shells,
+      defaultShell: resolveDefaultProfile(shells, settings.defaultShellProfileId),
+      projects: resolveProjects(settings.projects),
+      size: terminalSize,
+    });
+    console.log(`Reopened ${String(reopened)} of ${String(previousAgents.length)} agent session(s)`);
+  }
+  // Once, so a record dropped above (a folder gone, a conversation never started) leaves the file
+  // even when nothing was reopened and no session push follows.
+  recordAgents(terminalManager.sessions(), terminalManager.layout().groups);
+
   const window = await dashboardWindow.create({
     preloadPath: preloadPath(),
     backgroundColor: themeController.backgroundColor(),
@@ -1041,6 +1086,9 @@ async function bootstrap(): Promise<void> {
    * Nothing asynchronous is left to save, so it now runs straight through.
    */
   app.on('before-quit', () => {
+    // First: the kills below push session lists in which no agent is live any more, and recording
+    // those would empty the very list the next launch reopens.
+    agentSessions.freeze();
     projectMonitor.stop();
     pullMonitor.stop();
     jiraMonitor.stop();

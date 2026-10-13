@@ -155,8 +155,10 @@ exceptions:
   `notesHidden` with it; the tabs, zoom and `Clear` stay hidden because the card already exposes
   them. The note came back on 2026-09-28, on request: the sidebar is one terminal read on its own,
   which is the moment the grid's box was built for. Its separator keeps at least
-  280 px for the terminal and 360 px for the canvas, supports pointer capture and Left/Right keys,
-  and remembers its width for the renderer session. The pane isolates its existing container with
+  280 px for the terminal and 260 px for the canvas (one card), supports pointer capture and
+  Left/Right keys. The sidebar holds a SHARE of the pane, 80% by default (since 2026-10-13, on
+  request), so a resized window keeps the split; the share a drag leaves is stored
+  (`boardPreviewRatio`, local-only) when the gesture ends, never per `pointermove`. The pane isolates its existing container with
   the same grid placement as zoom, so no xterm is moved or reopened. Leaving Cards restores the grid
   and its earlier zoom.
 - **The wheel zooms the board, bare or with Ctrl, about the cursor.** A bare wheel was left alone
@@ -260,7 +262,8 @@ row. None of it can say what a session was opened FOR.
   sessions, and the next handoff rebuilds the note from the analysis still on disk. What is
   genuinely lost is a note typed by hand on a hand-opened shell, which is the accepted cost of not
   inventing a second, durable key for one field. Chosen deliberately over keying on the working
-  directory.
+  directory. The exception is an agent session: it is reopened on its conversation at the next
+  launch, and its note comes back with it (see "Restoring agent sessions").
 - **Clearing a note IS deleting it.** `trimNote` answers `null` for anything blank, so there is no
   second channel and no stored empty string: two ways to say "no note" would be two states to keep
   in step.
@@ -328,7 +331,8 @@ row. None of it can say what a session was opened FOR.
   list pushed for an identical note rebuilds every tab strip in both windows for no difference.
 
 - **Card positions and the board mode itself are renderer-only and ephemeral.** Sessions die with the
-  app, so positions keyed by session id have nothing to outlive. The mode is not persisted either,
+  app, so positions keyed by session id have nothing to outlive. A reopened agent is a new session
+  id, so it takes a default place too. The mode is not persisted either,
   unlike `terminalColumns`: which surface you happen to be looking at is not a preference, and
   coming back after a restart to a board with no terminals in sight is a launch that looks broken.
 - **The Jira searches include what is already done, and used not to.** The exclusion existed for a
@@ -1091,6 +1095,56 @@ its design choices are deliberately not copied, and each is a rule here.
   first, for both the daily and the interval form.
 - **The one guess this feature makes is stated**: an action with no project falls back to the first
   configured one, because a tab needs a folder and a rule can watch something with no repository.
+
+## Restoring agent sessions
+
+Added on 2026-10-13, on request: quitting killed every terminal and every agent had to be started
+again by hand, its conversation lost. **Agents only**, by decision: a shell is cheap to reopen and a
+dev server belongs to its project row, while an agent carries a conversation that is the work.
+
+- **The app names the conversation, it never reads it back.** Every interactive agent the app starts
+  (`Ctrl+N`, `Work on this` in its three modes, a rule's `agent` and `skill`) gets a UUID through the
+  profile's `sessionArgs` (`--session-id {session}`), kept on `SessionAgent.conversation` with the
+  spawn's other facts. The next launch reopens it through `resumeArgs` (`--resume {session}`). Reading
+  the id out of Claude Code's storage afterwards was the alternative and is refused: nothing promises
+  that layout, while an id handed in is known for certain from the first second. A resumed
+  conversation keeps its id, so one id carries a session across any number of restarts.
+- **Two profile fields, empty meaning "not resumable"**, migrated like `planArgs`: a stored profile
+  gets Claude Code's only if it runs the same program, since Claude's flags on Codex would be an
+  unknown option on every session. The id is whitelisted (`CONVERSATION_ID_PATTERN`) because it
+  lands in a shell line.
+- **Excluded on purpose**: the feedback pass, whose life cycle belongs to the watcher (`onExit`
+  chains `finish`, and a resumed tab has no such chain), and the Extensions `/schedule` tab, which
+  does not go through the profile.
+- **Plan mode resumes in plan mode.** `conversation.plan` sends a resumed session through
+  `planArgs`; resumed through the ordinary command it would skip the prompts the plan was opened to
+  keep. Read back with `=== true` for the same reason.
+- **One derivation, not a hook per event.** `agentRecordsFrom` recomputes the list from the session
+  and layout pushes (live agents with a conversation, in tab order) and `AgentSessionStore` writes it
+  to `agent-sessions.json` only when it changed. A closed tab and an agent ended with `/exit` leave
+  on their own; a rename or a note is kept; a crash leaves the last state written.
+- ⚠️ **The store is frozen first thing in `before-quit`.** `stopAll` kills every agent, each exit
+  pushes a list in which it is no longer live, and the derivation would empty the file at the exact
+  moment it has to survive.
+- **Restored before the window exists**, so the bootstrap carries the sessions and the renderer
+  opens no default shell over them. Title, `renamed`, note, folder, and for a handoff or a rule its
+  project and reserved action id (so `reconcile` leaves it alone) come back; a project that has left
+  the configuration turns the tab into a free agent tab. The `SessionAgent` is the first spawn's.
+  Nothing runs by itself: `--resume` reloads the history and waits.
+- **A conversation never spoken to is not reopened.** Measured on 2026-10-13: an interactive
+  session left idle writes no transcript, and `--resume` on it would open a tab on an error.
+  `claudeConversationExists` looks for `<id>.jsonl` by FILE NAME across `~/.claude/projects`,
+  never through `claudeProjectKey`, whose encoding is inferred. Another agent answers `null` and is
+  reopened, left to say for itself whether it remembers. A missing folder or a profile without
+  `resumeArgs` drops the record too, with a log line.
+- ⚠️ **The app strips a parent Claude Code session's markers from every pty**
+  (`terminalEnvironment`). Started from inside a session (`npm run dev` in an agent tab), the app
+  passed `CLAUDE_CODE_CHILD_SESSION` and its siblings to every terminal, and an agent started there
+  measured as saving no transcript at all: nothing it did could ever be resumed. Only the
+  per-session markers go; a `CLAUDE_CODE_*` variable set on purpose is configuration and stays.
+- **`restoreAgentSessions` turns it off**, and off records an empty list, so turning it off also
+  forgets what the next launch would have reopened. Card positions stay ephemeral: a restored
+  agent takes a default place on the board.
 
 ## Vault tab: secrets, and what it does not protect
 

@@ -66,6 +66,22 @@ describe('terminalEnvironment', () => {
     expect(env).not.toHaveProperty('FORCE_COLOR');
   });
 
+  it('drops the markers of a Claude Code session the app was started from, and keeps its configuration', () => {
+    const env = terminalEnvironment({
+      CLAUDECODE: '1',
+      CLAUDE_CODE_CHILD_SESSION: '1',
+      CLAUDE_CODE_SESSION_ID: 'parent',
+      CLAUDE_CODE_MESSAGING_TOKEN: 'secret',
+      CLAUDE_CODE_USE_BEDROCK: '1',
+      PATH: 'C:/bin',
+    });
+    expect(env).not.toHaveProperty('CLAUDECODE');
+    expect(env).not.toHaveProperty('CLAUDE_CODE_CHILD_SESSION');
+    expect(env).not.toHaveProperty('CLAUDE_CODE_SESSION_ID');
+    expect(env).not.toHaveProperty('CLAUDE_CODE_MESSAGING_TOKEN');
+    expect(env).toMatchObject({ CLAUDE_CODE_USE_BEDROCK: '1', PATH: 'C:/bin' });
+  });
+
   it('keeps project precedence when inherited color variable names use a different case', () => {
     const env = terminalEnvironment({ FORCE_COLOR: '0', Force_Color: '1' }, { FORCE_COLOR: '3' });
     expect(env.FORCE_COLOR).toBe('3');

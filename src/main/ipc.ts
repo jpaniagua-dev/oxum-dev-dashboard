@@ -106,7 +106,7 @@ import { findFreePort, withPort } from './projects/free-port.js';
 import type { PullReviewService } from './review/review-service.js';
 import type { AutoRunRecords } from './autorun/auto-run-store.js';
 import type { TriageService } from './triage/triage-service.js';
-import { buildInteractiveCommand, buildWorkCommand, resolveWorkspaceRoot } from './triage/work-command.js';
+import { buildInteractiveCommand, buildWorkCommand, newConversation, resolveWorkspaceRoot } from './triage/work-command.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -1060,6 +1060,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           },
         };
       }
+      // A conversation the app names, so this session can be reopened on it after a restart.
+      const conversation = newConversation(settings.agentProfile, mode === 'plan');
       const command = buildWorkCommand(
         keys,
         basename(project.path),
@@ -1071,6 +1073,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           skill: mode === 'auto' ? settings.handoffAuto : settings.handoffAsk,
           notes: deps.triageFile,
         },
+        conversation?.args,
       );
       const resolved = resolveShellCommand(profile, command);
 
@@ -1092,6 +1095,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           model: settings.agentWorkModel,
           instructionFile: settings.agentProfile.instructionFile,
           startedAt: new Date().toISOString(),
+          ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: conversation.plan } }),
         },
         /*
          * The session is born saying what it was sent to do, and this is what makes notes worth
@@ -1317,7 +1321,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
      * directly and lose the environment a login shell sets up, which is where `claude` lives on a
      * normal install.
      */
-    const command = buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel);
+    const conversation = newConversation(settings.agentProfile, false);
+    const command = buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, conversation?.args);
     const resolved = resolveShellCommand(shell, command);
     const terminalId = deps.terminals.openAgent({
       title: settings.agentProfile.label,
@@ -1333,6 +1338,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         model: settings.agentWorkModel,
         instructionFile: settings.agentProfile.instructionFile,
         startedAt: new Date().toISOString(),
+        ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: false } }),
       },
     });
     return {

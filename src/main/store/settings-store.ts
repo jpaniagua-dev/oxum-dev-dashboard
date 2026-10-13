@@ -10,6 +10,7 @@ import {
   withAssignedTagColors,
 } from '@shared/project-tags.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
+import { BOARD_PREVIEW_RATIO, sanitizePreviewRatio } from '@shared/board-preview.js';
 import {
   PANE_COLUMNS_AUTO,
   TERMINAL_FONT_SIZE,
@@ -56,6 +57,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pullScope: 'mine',
   ticketsLayout: 'list',
   updateCheck: true,
+  restoreAgentSessions: true,
   localTicketsDir: '',
   // Taller still, and on purpose: three columns ending in a diff is the one tab of this strip where
   // the user stops glancing and starts working. 250 pixels would show four lines of a diff.
@@ -87,6 +89,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // One row, however many panes: what this app did before the grid existed, so nobody who never
   // opens the picker sees their surface rearrange itself after an update.
   terminalColumns: PANE_COLUMNS_AUTO,
+  boardPreviewRatio: BOARD_PREVIEW_RATIO.default,
   uiFontSize: UI_FONT_SIZE.default,
   // Empty means the default folder. Resolved in the main process, never here: this module must not
   // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in CLAUDE.md.
@@ -230,6 +233,9 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     ticketsLayout: input.ticketsLayout === 'board' ? 'board' : 'list',
     // On unless switched off explicitly: a colleague left on an old build is the failure it prevents.
     updateCheck: input.updateCheck !== false,
+    // On unless explicitly off, like the update check: a file written before the setting means the
+    // feature as shipped, which is on.
+    restoreAgentSessions: input.restoreAgentSessions !== false,
     localTicketsDir: typeof input.localTicketsDir === 'string' ? input.localTicketsDir.trim() : '',
     stripCollapsed: input.stripCollapsed === true,
     // Clamped so a hand-edited value cannot hide the strip or swallow the terminal.
@@ -273,6 +279,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       TERMINAL_FONT_SIZE.max,
     ),
     terminalColumns: sanitizeColumns(input.terminalColumns),
+    boardPreviewRatio: sanitizePreviewRatio(input.boardPreviewRatio),
     // Clamped for exactly the reason above, only more so: this one sizes the settings window's own
     // text, so a hand-edited `4` would have to be fixed in a form that is no longer readable.
     uiFontSize: clamp(

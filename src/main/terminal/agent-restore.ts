@@ -1,0 +1,102 @@
+import { existsSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import {
+  CLAUDE_CODE_PROFILE,
+  conversationArgs,
+  splitCommand,
+  type AgentProfile,
+} from '@shared/agent-profile.js';
+import { restorable, type AgentSessionRecord } from '@shared/agent-sessions.js';
+import type { Project, ShellProfile, TerminalSize } from '@shared/contracts.js';
+import { buildInteractiveCommand, buildPlanCommand } from '../triage/work-command.js';
+import { resolveShellCommand, type TerminalManager } from './terminal-manager.js';
+
+/**
+ * Whether Claude Code kept a conversation under this id, or null for another agent.
+ *
+ * Looked up by FILE NAME across `~/.claude/projects`, never through `claudeProjectKey`: that
+ * folder encoding is inferred and lossy, while a transcript is named after its conversation id
+ * whatever folder it sits in. A conversation that was opened and never spoken to has no file, and
+ * reopening it would only show an error in a fresh tab. Read-only, like everything this app does in
+ * Claude Code's storage.
+ */
+export function claudeConversationExists(id: string, profile: AgentProfile): boolean | null {
+  const program = (template: string): string => (splitCommand(template)[0] ?? '').toLowerCase();
+  if (program(profile.interactive) !== program(CLAUDE_CODE_PROFILE.interactive)) {
+    return null;
+  }
+  const root = join(homedir(), '.claude', 'projects');
+  try {
+    return readdirSync(root, { withFileTypes: true }).some(
+      (entry) => entry.isDirectory() && existsSync(join(root, entry.name, `${id}.jsonl`)),
+    );
+  } catch {
+    // No storage to look in: say nothing rather than drop every session on a guess.
+    return null;
+  }
+}
+
+/**
+ * Reopens the agent tabs of the previous run, each on its conversation, and returns what came back.
+ *
+ * Run once, in the main process, before the dashboard window exists: the renderer then receives
+ * these sessions in its bootstrap like any others, and does not open its default shell over them.
+ * The command is today's profile with the stored model, plus the resume arguments; a session opened
+ * in plan mode resumes through the plan arguments, so it keeps the prompts it was opened to keep.
+ * Nothing runs by itself: a resumed conversation waits for its next message.
+ */
+export function restoreAgentSessions(options: {
+  records: readonly AgentSessionRecord[];
+  terminals: TerminalManager;
+  profile: AgentProfile;
+  shells: readonly ShellProfile[];
+  defaultShell: ShellProfile | undefined;
+  projects: readonly Project[];
+  size: TerminalSize;
+}): number {
+  const { keep, dropped } = restorable(options.records, {
+    folderExists: (path) => existsSync(path),
+    conversationExists: (id) => claudeConversationExists(id, options.profile),
+    canResume: options.profile.resumeArgs.trim().length > 0,
+  });
+  for (const { record, reason } of dropped) {
+    console.warn(`Not reopening "${record.title}": ${reason}`);
+  }
+
+  let reopened = 0;
+  for (const record of keep) {
+    const shell = options.shells.find((entry) => entry.id === record.profileId) ?? options.defaultShell;
+    if (shell === undefined) {
+      console.warn(`Not reopening "${record.title}": no shell profile to run it in`);
+      continue;
+    }
+    const { id, plan } = record.agent.conversation;
+    const resume = conversationArgs(options.profile.resumeArgs, id);
+    const command = plan
+      ? buildPlanCommand(options.profile, record.agent.model, resume)
+      : buildInteractiveCommand(options.profile, record.agent.model, resume);
+    if (command.length === 0) {
+      console.warn(`Not reopening "${record.title}": the agent profile has no plan mode any more`);
+      continue;
+    }
+    const resolved = resolveShellCommand(shell, command);
+    const terminalId = options.terminals.restoreAgent({
+      title: record.title,
+      renamed: record.renamed,
+      project: options.projects.find((project) => project.id === record.projectId) ?? null,
+      actionId: record.actionId,
+      file: resolved.file,
+      args: resolved.args,
+      cwd: record.cwd,
+      size: options.size,
+      profileId: shell.id,
+      agent: record.agent,
+      note: record.note,
+    });
+    if (terminalId !== null) {
+      reopened += 1;
+    }
+  }
+  return reopened;
+}

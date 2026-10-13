@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { BOARD_PREVIEW_RATIO, sanitizePreviewRatio } from '../src/shared/board-preview.js';
 import {
   clampBoardPreviewWidth,
+  previewWidthFor,
   resolveBoardPreviewWidth,
 } from '../src/renderer/ui/board-preview-resizer.js';
 
@@ -22,7 +24,8 @@ describe('resolveBoardPreviewWidth', () => {
 
   it('keeps both the terminal and the Cards canvas usable', () => {
     expect(resolveBoardPreviewWidth({ ...pane, pointerX: 5000 })).toBe(280);
-    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 0 })).toBe(640);
+    // One 240px card and its margin stay for the canvas.
+    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 0 })).toBe(740);
   });
 });
 
@@ -33,5 +36,24 @@ describe('clampBoardPreviewWidth', () => {
 
   it('gives the terminal priority when the window cannot satisfy both minimums', () => {
     expect(clampBoardPreviewWidth(420, 500)).toBe(280);
+  });
+});
+
+describe('the sidebar as a share of the pane', () => {
+  it('gives the terminal four fifths of the pane by default, at any width', () => {
+    expect(previewWidthFor(BOARD_PREVIEW_RATIO.default, 2000)).toBe(1600);
+    expect(previewWidthFor(BOARD_PREVIEW_RATIO.default, 1500)).toBe(1200);
+  });
+
+  it('gives way to the canvas reserve on a narrow pane rather than hide the cards', () => {
+    expect(previewWidthFor(0.8, 1000)).toBe(740);
+  });
+
+  it('reads a stored share back inside its bounds, and the default for anything else', () => {
+    expect(sanitizePreviewRatio(0.6)).toBe(0.6);
+    expect(sanitizePreviewRatio(0.05)).toBe(BOARD_PREVIEW_RATIO.min);
+    expect(sanitizePreviewRatio(1.5)).toBe(BOARD_PREVIEW_RATIO.max);
+    expect(sanitizePreviewRatio('0.6')).toBe(BOARD_PREVIEW_RATIO.default);
+    expect(sanitizePreviewRatio(Number.NaN)).toBe(BOARD_PREVIEW_RATIO.default);
   });
 });

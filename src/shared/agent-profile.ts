@@ -91,6 +91,22 @@ export interface AgentProfile {
    * `Work on this in plan mode` handoff being the first.
    */
   readonly planArgs: string;
+  /**
+   * Arguments that give a new interactive session a conversation id the app chose, with
+   * `{session}` where the id goes. Empty when the agent cannot be told one.
+   *
+   * The app picks the id rather than reading it back from the agent's own files afterwards: that
+   * storage is the agent's and nothing promises its layout, while an id handed in at the spawn is
+   * known for certain and from the first second. It is what lets a session be resumed after a
+   * restart (see `resumeArgs`).
+   */
+  readonly sessionArgs: string;
+  /**
+   * Arguments that reopen a conversation by its id, after the interactive command, with
+   * `{session}` where the id goes. Empty when the agent cannot resume one, and then no agent of
+   * this profile comes back after a restart.
+   */
+  readonly resumeArgs: string;
 }
 
 /**
@@ -123,6 +139,10 @@ export const CLAUDE_CODE_PROFILE: AgentProfile = {
   // Plan first, and the way to skip the prompts offered once the plan is accepted rather than on
   // from the start, which is what `--dangerously-skip-permissions` would do.
   planArgs: '{model} --permission-mode plan --allow-dangerously-skip-permissions',
+  // Verified against `claude --help`: a resumed conversation keeps its id unless `--fork-session`
+  // is passed, so one id carries a session across any number of restarts.
+  sessionArgs: '--session-id {session}',
+  resumeArgs: '--resume {session}',
 };
 
 /**
@@ -265,23 +285,47 @@ export function readProfile(value: unknown, fallback: AgentProfile = CLAUDE_CODE
     // Not empty-able, unlike the two flags above: every agent reads its instructions from somewhere,
     // and an empty name would make the Agents tab walk the tree looking for a file called nothing.
     instructionFile: text('instructionFile', fallback.instructionFile),
-    planArgs: readPlanArgs(raw, fallback),
+    planArgs: readSameProgramArgs(raw, fallback, 'planArgs'),
+    sessionArgs: readSameProgramArgs(raw, fallback, 'sessionArgs'),
+    resumeArgs: readSameProgramArgs(raw, fallback, 'resumeArgs'),
   };
 }
 
 /**
- * The plan mode arguments, or the fallback's for a profile stored before they existed.
+ * Arguments a profile may lack because it was stored before they existed: the plan mode ones and
+ * the two that carry a conversation id.
  *
- * The fallback's only when the profile runs the same program: Claude Code's plan flags handed to a
- * Codex profile would be an unknown option on every plan session. Another program starts with none,
- * which the app reports as "no plan mode configured" rather than launching a guess.
+ * The fallback's only when the profile runs the same program: Claude Code's flags handed to a Codex
+ * profile would be an unknown option on every session. Another program starts with none, which
+ * means "no plan mode" or "not resumable" rather than a launched guess.
  */
-function readPlanArgs(raw: Record<string, unknown>, fallback: AgentProfile): string {
-  if (typeof raw['planArgs'] === 'string') {
-    return raw['planArgs'].trim();
+function readSameProgramArgs(
+  raw: Record<string, unknown>,
+  fallback: AgentProfile,
+  key: 'planArgs' | 'sessionArgs' | 'resumeArgs',
+): string {
+  const stored = raw[key];
+  if (typeof stored === 'string') {
+    return stored.trim();
   }
   const program = (template: unknown): string =>
     typeof template === 'string' ? (splitCommand(template)[0] ?? '') : '';
   const own = program(raw['interactive']);
-  return own.length === 0 || own === program(fallback.interactive) ? fallback.planArgs : '';
+  return own.length === 0 || own === program(fallback.interactive) ? fallback[key] : '';
+}
+
+/** What a conversation id may look like: the UUID the app generates, and nothing a shell reads. */
+export const CONVERSATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A `sessionArgs` or `resumeArgs` template with its id filled in, or `''`.
+ *
+ * Empty when the template is, and when the id is not one this app would generate: the result lands
+ * in a shell command line, so the id is whitelisted rather than trusted, like a model name.
+ */
+export function conversationArgs(template: string, id: string): string {
+  if (template.trim().length === 0 || !CONVERSATION_ID_PATTERN.test(id)) {
+    return '';
+  }
+  return template.replace('{session}', id).replace(/\s+/g, ' ').trim();
 }

@@ -53,6 +53,13 @@ export const AppPaths = {
    * morning's worth of notifications and re-arm every rule.
    */
   automations: (): string => join(app.getPath('userData'), 'automations.json'),
+  /**
+   * The coding agent tabs to reopen at the next launch, with the conversation each one resumes.
+   *
+   * Its own file because it is rewritten whenever a session changes, which a settings save must
+   * never have to race.
+   */
+  agentSessions: (): string => join(app.getPath('userData'), 'agent-sessions.json'),
   /** The last routine list read from claude.ai: a whitelist of fields, never a routine's prompt. */
   routines: (): string => join(app.getPath('userData'), 'routines.json'),
   /** The default folder of the local tickets, one Markdown file each. */

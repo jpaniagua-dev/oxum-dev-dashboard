@@ -2,6 +2,7 @@ import { readProfile } from '@shared/agent-profile.js';
 import { isStripTab, type AppSettings } from '@shared/contracts.js';
 import { sanitizeTagColors } from '@shared/project-tags.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
+import { sanitizePreviewRatio } from '@shared/board-preview.js';
 
 /**
  * Settings the dashboard writes about its own geometry.
@@ -30,6 +31,8 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   // Picked from the dashboard's own header, so broadcasting it back would re-adopt the layout in the
   // middle of the click that changed it.
   'terminalColumns',
+  // Dragged on the dashboard's own separator, where an echo would refit the terminal mid-gesture.
+  'boardPreviewRatio',
 ]);
 
 /**
@@ -82,6 +85,9 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   }
   if (typeof input.localTicketsDir === 'string') patch.localTicketsDir = input.localTicketsDir;
   if (typeof input.updateCheck === 'boolean') patch.updateCheck = input.updateCheck;
+  if (typeof input.restoreAgentSessions === 'boolean') {
+    patch.restoreAgentSessions = input.restoreAgentSessions;
+  }
   if (typeof input.stripCollapsed === 'boolean') patch.stripCollapsed = input.stripCollapsed;
   if (typeof input.terminalFontSize === 'number') patch.terminalFontSize = input.terminalFontSize;
   // Coerced rather than merely type-checked, unlike its neighbours: the store clamps every other
@@ -89,6 +95,9 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   // become the default at the first gate rather than the second.
   if (typeof input.terminalColumns === 'number') {
     patch.terminalColumns = sanitizeColumns(input.terminalColumns);
+  }
+  if (typeof input.boardPreviewRatio === 'number') {
+    patch.boardPreviewRatio = sanitizePreviewRatio(input.boardPreviewRatio);
   }
   // Broadcast, and deliberately not in `LOCAL_ONLY_KEYS`: it is written by the settings window and has
   // to reach the dashboard, which is the window whose text it resizes.

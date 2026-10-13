@@ -47,6 +47,8 @@ Advanced:
 
 - **Default profile**: the shell new tabs open in.
 - **Font size**: 9 to 28 px, applied to every tab.
+- **Reopen my agents at launch**: on by default. The coding agent tabs open when you quit come back
+  on their conversation. See [the terminal](terminal.md).
 
 Advanced: one card per shell (name, program, arguments, starting folder). Shells installed on the
 machine are detected; a path you edit is kept over the detected one. **+ Shell** adds one.
@@ -78,7 +80,9 @@ Advanced, in three groups:
   They are templates, not shell lines: `{model}` becomes the **model option**. **Plan mode
   arguments** follow the program when a session starts in plan mode, such as **Work on this in plan
   mode**; for Claude Code, `{model} --permission-mode plan --allow-dangerously-skip-permissions`, and
-  empty means the agent has no plan mode. **Extra folder option** lets the review read your
+  empty means the agent has no plan mode. **New conversation id option** and **Resume option**
+  (`--session-id {session}` and `--resume {session}` for Claude Code) are what reopen agents at
+  launch; empty means this agent's sessions do not come back. **Extra folder option** lets the review read your
   standards beside the repository. **How the prompt is sent** and **Answer format** say how the
   background command is fed and read. Press Test after any change.
 - **Other programs**: the **Claude Code program** and the **Codex program** the Extensions tab runs. A

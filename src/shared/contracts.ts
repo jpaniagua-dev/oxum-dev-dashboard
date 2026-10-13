@@ -1095,6 +1095,24 @@ export interface SessionAgent {
   readonly instructionFile: string;
   /** When the process was spawned, ISO. */
   readonly startedAt: string;
+  /**
+   * The conversation this session can be reopened on after a restart, when it has one.
+   *
+   * Given by the app at the spawn through the profile's `sessionArgs`, never read back from the
+   * agent's files. Absent for an agent the profile cannot resume and for the runs whose life cycle
+   * belongs to something else (the feedback pass, a routine), which therefore never come back.
+   */
+  readonly conversation?: AgentConversation;
+}
+
+/** A resumable conversation: its id, and whether it was opened in plan mode. */
+export interface AgentConversation {
+  readonly id: string;
+  /**
+   * Plan mode, so a resumed session comes back through `planArgs`: resumed through the ordinary
+   * command it would skip every permission prompt the plan was opened to keep.
+   */
+  readonly plan: boolean;
 }
 
 /**
@@ -1120,7 +1138,8 @@ export interface AgentOpenResult {
  * It dies with the session, deliberately. A note keyed on a session id cannot outlive it, and the
  * seeded half comes back on its own: a restart kills the sessions, the next handoff rebuilds the
  * note from `triage.json`. What is genuinely lost is a note typed by hand on a hand-opened shell,
- * which is the accepted cost of not inventing a second, durable key for the same field.
+ * which is the accepted cost of not inventing a second, durable key for the same field. An agent
+ * session is the exception: it is reopened on its conversation, and its note with it.
  */
 export interface SessionNote {
   readonly text: string;
@@ -1850,6 +1869,11 @@ export interface AppSettings {
   /** Whether the app looks for a newer release on GitHub, at launch and every six hours. */
   updateCheck: boolean;
   /**
+   * Whether the coding agent tabs open at quit come back at the next launch, each on its
+   * conversation. On by default; off, nothing is recorded and nothing is reopened.
+   */
+  restoreAgentSessions: boolean;
+  /**
    * Height of the Git tab, and the tallest default of the four.
    *
    * Three columns ending in a diff cannot be read in the 250 pixels a status table is happy with:
@@ -1914,6 +1938,11 @@ export interface AppSettings {
    * grid at every launch is the kind of small friction that makes a feature go unused.
    */
   terminalColumns: number;
+  /**
+   * Share of the terminal pane the Cards sidebar takes, `BOARD_PREVIEW_RATIO` bounds. Written by
+   * the separator once a drag ends, so the split survives a restart and a resized window.
+   */
+  boardPreviewRatio: number;
   /** Font size of the interface, in pixels: the base every other size is a ratio of. */
   uiFontSize: number;
   /** User-declared shell profiles, merged over the detected ones by id. */

@@ -129,6 +129,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       'activeStrip',
       'agentsHeight',
       'automationsHeight',
+      'boardPreviewRatio',
       'explorerHeight',
       'extensionsHeight',
       'gitHeight',
@@ -155,6 +156,12 @@ describe('LOCAL_ONLY_KEYS', () => {
     // renderer will draw, so an impossible value has to become the default at the first gate.
     expect(asPatch({ terminalColumns: 9 })).toEqual({ terminalColumns: 0 });
     expect(asPatch({ terminalColumns: '2' })).toEqual({});
+  });
+
+  it('lets the dashboard remember the share of the Cards sidebar, clamped', () => {
+    expect(asPatch({ boardPreviewRatio: 0.7 })).toEqual({ boardPreviewRatio: 0.7 });
+    expect(asPatch({ boardPreviewRatio: 2 })).toEqual({ boardPreviewRatio: 0.9 });
+    expect(asPatch({ boardPreviewRatio: '0.7' })).toEqual({});
   });
 
   it('lets the dashboard persist the Triage tab height', () => {

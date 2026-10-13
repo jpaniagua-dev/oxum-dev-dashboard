@@ -159,7 +159,9 @@ function sameProfile(left: AgentProfile, right: AgentProfile): boolean {
     left.extraDirFlag === right.extraDirFlag &&
     left.promptVia === right.promptVia &&
     left.answerFormat === right.answerFormat &&
-    left.planArgs === right.planArgs
+    left.planArgs === right.planArgs &&
+    left.sessionArgs === right.sessionArgs &&
+    left.resumeArgs === right.resumeArgs
   );
 }
 
@@ -227,6 +229,7 @@ export class SettingsForm {
   private worktrees = { helper: '', root: '' };
   private handoffs = { ask: '', auto: '', feedback: '' };
   private updateCheck = true;
+  private restoreAgents = true;
   private themeMode: ThemeMode = 'system';
   /** Which pages' Advanced folds are open, kept across the repaints a change triggers. */
   private readonly advancedOpen = new Set<string>();
@@ -323,6 +326,7 @@ export class SettingsForm {
     this.roots = { projects: settings.projectsRoot, workspace: settings.workspaceRoot };
     this.worktrees = { helper: settings.worktreeHelper, root: settings.worktreesRoot };
     this.updateCheck = settings.updateCheck;
+    this.restoreAgents = settings.restoreAgentSessions;
     this.themeMode = settings.themeMode;
     this.handoffs = {
       ask: settings.handoffAsk,
@@ -883,7 +887,15 @@ export class SettingsForm {
    */
   private agentAdvanced(): HTMLElement[] {
     const profileField = (
-      key: 'label' | 'headless' | 'interactive' | 'planArgs' | 'modelFlag' | 'extraDirFlag',
+      key:
+        | 'label'
+        | 'headless'
+        | 'interactive'
+        | 'planArgs'
+        | 'sessionArgs'
+        | 'resumeArgs'
+        | 'modelFlag'
+        | 'extraDirFlag',
       label: string,
       placeholder: string,
       help: string,
@@ -927,6 +939,18 @@ export class SettingsForm {
         'Plan mode arguments',
         'none: no plan mode',
         'Put after the program whenever a session starts in plan mode. Empty if this agent has no plan mode.',
+      ),
+      profileField(
+        'sessionArgs',
+        'New conversation id option',
+        'none: sessions are not reopened',
+        'Gives each terminal session a conversation id the app chose, with {session} where the id goes. Needed, with the next one, for agents to come back at launch.',
+      ),
+      profileField(
+        'resumeArgs',
+        'Resume option',
+        'none: sessions are not reopened',
+        'Reopens a conversation by its id at launch, with {session} where the id goes. Empty if this agent cannot resume one.',
       ),
       profileField(
         'modelFlag',
@@ -2041,6 +2065,15 @@ export class SettingsForm {
       }),
     );
     this.hosts.terminal.append(row);
+    this.hosts.terminal.append(
+      this.describe(
+        this.checkbox('Reopen my agents at launch', this.restoreAgents, (checked) => {
+          this.restoreAgents = checked;
+          this.touch();
+        }),
+        'The coding agent tabs open when you quit come back on their conversation, with their title and note. Shells and dev servers do not.',
+      ),
+    );
 
     // Each shell's binary and arguments: detection gets them right, so they wait under Advanced.
     const cards: HTMLElement[] = [];
@@ -2263,6 +2296,7 @@ export class SettingsForm {
       handoffAuto: this.handoffs.auto,
       handoffFeedback: this.handoffs.feedback,
       updateCheck: this.updateCheck,
+      restoreAgentSessions: this.restoreAgents,
       tagColors: this.tagColors,
     });
     this.fontSize = saved.terminalFontSize;
@@ -2291,6 +2325,7 @@ export class SettingsForm {
     this.roots = { projects: saved.projectsRoot, workspace: saved.workspaceRoot };
     this.worktrees = { helper: saved.worktreeHelper, root: saved.worktreesRoot };
     this.updateCheck = saved.updateCheck;
+    this.restoreAgents = saved.restoreAgentSessions;
     this.handoffs = { ask: saved.handoffAsk, auto: saved.handoffAuto, feedback: saved.handoffFeedback };
     // Read back like the sizes and the models, and here it matters more than for either: the store
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would

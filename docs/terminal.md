@@ -38,6 +38,13 @@ keep the environment they started with.
 A shortcut the app acts on is not passed on to the program in the terminal. One it has nothing to do
 for (`Ctrl+B` with no terminal to show a note for) reaches the program as usual.
 
+## Agents come back after a restart
+
+The coding agents open when you quit (opened with `Ctrl+N`, **Work on this**, or a rule) reopen at
+the next launch on their conversation, with their title and note. Nothing runs by itself: each one
+waits for your next message. Shells and dev servers do not come back, and neither does an agent you
+never wrote to. Turn it off in Settings, Terminal, **Reopen my agents at launch**.
+
 ## Cards
 
 Watch and Server sessions have a rerun button on both their card and terminal tab. It stops the
@@ -45,7 +52,8 @@ current process, waits for the port to be released, and starts the same configur
 The same action is available from the card or tab context menu.
 
 `Ctrl+G` shows the sessions as cards on a canvas instead of tabs: one card per terminal, with what it
-is doing. Click a card to open its terminal in a sidebar beside the canvas, with the session's name
+is doing. Click a card to open its terminal in a sidebar beside the canvas (four fifths of the width by
+default; drag the separator to change it, and the app keeps your choice), with the session's name
 at the top left (double-click it to rename) and a close button at the top right once the session can
 be closed; double-click a card's title to rename it there too;
 drag cards to arrange them; the wheel zooms; the frame button brings every card into view. The canvas

@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { CLAUDE_CODE_PROFILE, splitCommand, type AgentProfile } from '@shared/agent-profile.js';
+import { CLAUDE_CODE_PROFILE, conversationArgs, splitCommand, type AgentProfile } from '@shared/agent-profile.js';
 import type { TriageHandoff } from '@shared/contracts.js';
 import { modelFlag } from '@shared/agent-model.js';
 
@@ -77,9 +78,13 @@ export function buildWorkCommand(
   profile: AgentProfile = CLAUDE_CODE_PROFILE,
   handoff: TriageHandoff = 'ask',
   options: HandoffOptions = { skill: '', notes: '' },
+  conversation = '',
 ): string {
   const prompt = handoffPrompt(keys, folder, handoff, options);
-  const base = handoff === 'plan' ? buildPlanCommand(profile, model) : buildInteractiveCommand(profile, model);
+  const base =
+    handoff === 'plan'
+      ? buildPlanCommand(profile, model, conversation)
+      : buildInteractiveCommand(profile, model, conversation);
 
   /*
    * The interactive template, with the prompt appended as a quoted argument.
@@ -100,14 +105,18 @@ export function buildWorkCommand(
  * session and its ordinary one always run the same binary. Shared by every caller that opens a
  * session in plan mode.
  */
-export function buildPlanCommand(profile: AgentProfile = CLAUDE_CODE_PROFILE, model = ''): string {
+export function buildPlanCommand(
+  profile: AgentProfile = CLAUDE_CODE_PROFILE,
+  model = '',
+  conversation = '',
+): string {
   const program = splitCommand(profile.interactive)[0] ?? '';
   if (program.length === 0 || profile.planArgs.trim().length === 0) {
     return '';
   }
   const args = profile.planArgs.replace('{model}', model.trim().length === 0 ? '' : modelFlag(model).trim());
   const quoted = /\s/.test(program) ? `"${program}"` : program;
-  return `${quoted} ${args}`.replace(/\s+/g, ' ').trim();
+  return `${quoted} ${args} ${conversation}`.replace(/\s+/g, ' ').trim();
 }
 
 /** What a handoff names instead of the built-in prompt, and where the triage notes are. */
@@ -180,12 +189,29 @@ export function handoffPrompt(
 export function buildInteractiveCommand(
   profile: AgentProfile = CLAUDE_CODE_PROFILE,
   model = '',
+  conversation = '',
 ): string {
   const command = profile.interactive.replace(
     '{model}',
     model.trim().length === 0 ? '' : modelFlag(model).trim(),
   );
-  return command.replace(/\s+/g, ' ').trim();
+  return `${command} ${conversation}`.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A fresh conversation for a new interactive session: the id, and the arguments that give it.
+ *
+ * Null when the profile cannot be told an id, and then the session is simply not resumable. The
+ * `conversation` parameter of the builders above is the `args` half; the id half goes on the
+ * session's `SessionAgent`, which is what the restart store reads.
+ */
+export function newConversation(profile: AgentProfile, plan: boolean): { args: string; id: string; plan: boolean } | null {
+  if (profile.resumeArgs.trim().length === 0) {
+    return null;
+  }
+  const id = randomUUID();
+  const args = conversationArgs(profile.sessionArgs, id);
+  return args.length === 0 ? null : { args, id, plan };
 }
 
 /**
