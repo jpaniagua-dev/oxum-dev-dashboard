@@ -1187,6 +1187,10 @@ body {
 /* The switch being off is the first thing the tab says, in the warning colour and above the form. */
 .automations__off {
   margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
   color: var(--warning);
   font-size: var(--font-sm);
   font-weight: 600;
@@ -1194,7 +1198,13 @@ body {
 
 .automations__bar {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+}
+
+.automations__count {
+  color: var(--text-faint);
+  font-size: var(--font-xs);
 }
 
 .automations__empty {
@@ -1207,7 +1217,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--warning);
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
 }
@@ -1220,9 +1231,15 @@ body {
 
 .automations__log {
   margin: 0;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
   color: var(--text-dim);
   font-size: var(--font-xs);
   overflow-wrap: anywhere;
+}
+
+.automations__log:last-child {
+  border-bottom: none;
 }
 
 .automations__recent-title {
@@ -1259,30 +1276,52 @@ body {
 
 .automations__list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 10px;
   align-items: start;
 }
 
 .automation {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px;
+  gap: 8px;
+  padding: 8px 10px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
 }
 
-/* A disabled rule is readable and quiet, never hidden: it is still a thing you configured. */
-.automation--off {
+/*
+ * A disabled rule is readable and quiet, never hidden: it is still a thing you configured.
+ *
+ * Only its form fades. The head keeps full contrast, because its name and its `Off` pill are what
+ * says the rule is off, and a faded pill reading "Off" is the one statement on the card that has to
+ * be read rather than guessed from the opacity.
+ */
+.automation--off .automation__grid,
+.automation--off .automation__foot {
   opacity: 0.6;
 }
 
 .automation__head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.automation__switch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.automation__switch:disabled {
+  cursor: default;
 }
 
 .automation__name {
@@ -1314,11 +1353,39 @@ body {
   background: var(--surface-raised);
 }
 
-.automation__row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+/* The pill of the projects table, one step smaller: it shares a line with a name, not a cell. */
+.automation__status {
+  flex: none;
+  padding: 1px 7px;
+  font-size: var(--font-2xs);
+}
+
+/* Quiet until the card is hovered, like the row icons of the lists: a cross on every card at full
+   contrast reads as the card's main action, and deleting is the rarest thing done here. */
+.automation__remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  opacity: 0.4;
+}
+
+.automation:hover .automation__remove,
+.automation__remove:focus-visible {
+  opacity: 1;
+}
+
+/*
+ * The form: labels in a column sized on the card's longest one, controls in the rest.
+ *
+ * Every label sits on the top line of its cell with the controls' own height as its line height, so
+ * a label beside a textarea reads against its first line and a label beside a select is centred on
+ * it, without a modifier for either.
+ */
+.automation__grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 6px;
 }
 
 .automation__label {
@@ -1327,8 +1394,25 @@ body {
   font-size: var(--font-xs);
 }
 
+.automation__grid > .automation__label {
+  line-height: 26px;
+}
+
+.automation__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.automation__unit {
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+}
+
 .automation__select {
-  flex: 1;
+  flex: 1 1 140px;
   min-width: 0;
   height: 26px;
   padding: 0 4px;
@@ -1338,10 +1422,6 @@ body {
   color: var(--text);
   font: inherit;
   font-size: var(--font-sm);
-}
-
-.automation__select--narrow {
-  flex: 1 1 130px;
 }
 
 /*
@@ -1354,8 +1434,9 @@ body {
 }
 
 .automation__day {
+  min-width: 28px;
   height: 26px;
-  padding: 0 6px;
+  padding: 0 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
@@ -1365,8 +1446,15 @@ body {
   cursor: pointer;
 }
 
-.automation__day--on {
+.automation__day:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.automation__day--on,
+.automation__day--on:hover:not(:disabled) {
   border-color: var(--primary);
+  background: var(--primary-soft);
   color: var(--primary);
   font-weight: 600;
 }
@@ -1374,20 +1462,6 @@ body {
 .automation__day:disabled {
   cursor: default;
   opacity: 0.6;
-}
-
-.automation__folder {
-  flex: 1 1 220px;
-  min-width: 0;
-  height: 26px;
-  padding: 0 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  font-family: var(--font-mono, monospace);
-  font-size: var(--font-xs);
 }
 
 .automation__clock,
@@ -1407,7 +1481,8 @@ body {
 }
 
 .automation__text {
-  width: 100%;
+  flex: 1 1 100%;
+  min-width: 0;
   padding: 4px 6px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1419,12 +1494,14 @@ body {
 }
 
 .automation__hint {
+  flex-basis: 100%;
   margin: 0;
   color: var(--text-faint);
   font-size: var(--font-2xs);
 }
 
 .automation__warn {
+  flex-basis: 100%;
   margin: 0;
   color: var(--warning);
   font-size: var(--font-2xs);
@@ -1435,6 +1512,13 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+/* In the foot the hint is a phrase beside a button, not a line of its own. */
+.automation__foot .automation__hint {
+  flex-basis: auto;
 }
 
 /* ------------------------------------------------------------------ *

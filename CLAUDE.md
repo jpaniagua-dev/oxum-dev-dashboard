@@ -1059,6 +1059,14 @@ its design choices are deliberately not copied, and each is a rule here.
   while the feature is off**, with the reason on screen: this is the only surface whose controls arm
   something that then runs unwatched, so a form that looked live would be the worst version of a
   button that does nothing.
+- **A card's head says whether the rule will act, in one pill** (since 2026-10-13). `ruleStatus`
+  reads the engine's own refusals rather than guessing: `Off`, `Arming` (an event rule before its
+  first check; a schedule never arms), `On`, `Never runs` (a schedule with neither a time nor an
+  interval) and `Will refuse` (a command under its closed switch, a skill naming none). A grid of
+  cards is read across, so that answer has to sit at the same place on each. The form below is a
+  two-column grid per card, a label column on `max-content` and the controls, so no select starts
+  on a pixel of its own; a switched-off rule fades its form and never its head. The output folder
+  shipped in 10.4.0 was removed the same day, on request.
 - **Fields commit on `change`, never on `input`.** A save broadcasts and the panel rebuilds, so a
   field rebuilt on every keystroke loses the caret. Same guard the project table's rename needs.
 - **`parseRule` reads `enabled` and `armed` as `=== true`.** A rule read from a file this version did
@@ -1081,15 +1089,6 @@ its design choices are deliberately not copied, and each is a rule here.
 - **A scheduled rule can be limited to week days** (`weekdays`, `Date.getDay` numbers). Empty means
   every day, which is also what every rule written before the field reads as. `isDue` checks the day
   first, for both the daily and the interval form.
-- **A rule can name an output folder, and its card opens the newest file there** (added on
-  2026-10-13, on request). The app starts a skill and never reads what it writes, so where the report
-  lands is a setting of the rule (`outputFolder`, absolute, checked when opened) rather than a
-  contract with the skill: any skill that writes a file can be followed without the app learning its
-  format, which is exactly what the reverted Testing tab got wrong. `pickLatestOutput` prefers a
-  report-like file (`.md`, `.html`, `.txt`, `.pdf`) over the newest one, because a run updates its
-  state file as it goes and writes its report last. The folder is read from the stored rule, never
-  from the renderer, and only the folder itself is listed. On the card and not on an Activity line:
-  those lines are plain text and do not know which rule wrote them.
 - **The one guess this feature makes is stated**: an action with no project falls back to the first
   configured one, because a tab needs a folder and a rule can watch something with no repository.
 

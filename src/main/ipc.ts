@@ -1,5 +1,5 @@
 import { homedir, release } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import {
   type AgentOpenResult,
@@ -114,7 +114,6 @@ import { resolveShellCommand, type TerminalManager } from './terminal/terminal-m
 import type { ThemeController } from './theme.js';
 import { noteFromTicket } from '@shared/session-note.js';
 import type { AutomationRule } from '@shared/automation.js';
-import { pickLatestOutput } from '@shared/automation.js';
 import type { AutomationState } from '@shared/contracts.js';
 import { parseRule } from './automation/automation-store.js';
 import type { VaultResult } from '@shared/contracts.js';
@@ -144,7 +143,7 @@ import type { EditorStart, TerminalSize } from '@shared/contracts.js';
 import type { LocalTicketStore } from './tickets/local-ticket-store.js';
 import { existingFolder, runFolder } from './projects/run-folder.js';
 import { existsSync } from 'node:fs';
-import { readdir, readFile as readTextFile, stat, writeFile as writeTextFile } from 'node:fs/promises';
+import { readFile as readTextFile, writeFile as writeTextFile } from 'node:fs/promises';
 import { planImport, toTeamConfig } from '@shared/team-config.js';
 import {
   createWorktree,
@@ -1536,41 +1535,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   ipcMain.handle(
     IpcChannel.AutomationsClearLog,
     async (): Promise<AutomationState> => deps.clearAutomationLog(),
-  );
-
-  /*
-   * Opens the newest file of a rule's output folder.
-   *
-   * The folder is read from the stored rule, never from the renderer: the channel carries an id, and
-   * what gets opened is a file the user pointed the rule at. Only the folder itself is listed.
-   */
-  ipcMain.handle(
-    IpcChannel.AutomationsOpenOutput,
-    async (_event, ruleId: unknown): Promise<{ ok: boolean; message: string }> => {
-      const rule = deps.automations().rules.find((entry) => entry.id === ruleId);
-      const folder = rule?.outputFolder ?? '';
-      if (folder.length === 0) {
-        return { ok: false, message: 'This rule has no output folder' };
-      }
-      try {
-        const entries = await readdir(folder, { withFileTypes: true });
-        const listed = await Promise.all(
-          entries.map(async (entry) => ({
-            name: entry.name,
-            isFile: entry.isFile(),
-            mtimeMs: entry.isFile() ? (await stat(join(folder, entry.name))).mtimeMs : 0,
-          })),
-        );
-        const latest = pickLatestOutput(listed);
-        if (latest === null) {
-          return { ok: false, message: `Nothing in ${folder} yet` };
-        }
-        const failure = await shell.openPath(join(folder, latest));
-        return failure.length === 0 ? { ok: true, message: `Opened ${latest}` } : { ok: false, message: failure };
-      } catch {
-        return { ok: false, message: `${folder} does not exist yet: the rule has not written anything` };
-      }
-    },
   );
 
   /**

@@ -14,9 +14,7 @@ import {
   fillTemplate,
   isDue,
   isScheduled,
-  pickLatestOutput,
   quotePrompt,
-  sanitizeOutputFolder,
   sanitizeSkillName,
   sanitizeWeekdays,
   skillPrompt,
@@ -115,7 +113,6 @@ function rule(over: Partial<AutomationRule> = {}): AutomationRule {
     atMinute: null,
     everyMinutes: null,
     weekdays: [],
-    outputFolder: '',
     action: { kind: 'notify', text: '{{repo}}#{{number}} approved', projectId: null, skill: '' },
     armed: true,
     ...over,
@@ -387,24 +384,6 @@ describe('skill actions', () => {
     expect(sanitizeSkillName('test-dev; rm -rf')).toBe('');
     expect(sanitizeSkillName('$(whoami)')).toBe('');
     expect(sanitizeSkillName(undefined)).toBe('');
-  });
-
-  it('opens the newest report of an output folder, and its newest file when there is no report', () => {
-    const entry = (name: string, mtimeMs: number, isFile = true): { name: string; mtimeMs: number; isFile: boolean } => ({
-      name,
-      mtimeMs,
-      isFile,
-    });
-    expect(pickLatestOutput([entry('state.json', 30), entry('2026-10-12.md', 10), entry('2026-10-13.md', 20)])).toBe(
-      '2026-10-13.md',
-    );
-    expect(pickLatestOutput([entry('state.json', 30), entry('log.json', 40)])).toBe('log.json');
-    expect(pickLatestOutput([entry('.hidden.md', 50), entry('sub', 60, false)])).toBeNull();
-  });
-
-  it('keeps an absolute output folder only', () => {
-    expect(sanitizeOutputFolder(' C:/Users/dev/reports ')).toBe('C:/Users/dev/reports');
-    expect(sanitizeOutputFolder('reports/test-dev')).toBe('');
   });
 
   it('builds the prompt from the skill and its arguments', () => {

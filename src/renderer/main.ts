@@ -812,10 +812,6 @@ class App {
             this.renderAutomations();
           });
         },
-        onOpenOutput: (ruleId) => {
-          void window.api.openRuleOutput(ruleId).then((result) => this.stampMessage(result.message));
-        },
-        onPickFolder: () => window.api.pickFolder('Folder the rule writes to'),
       },
     );
   }

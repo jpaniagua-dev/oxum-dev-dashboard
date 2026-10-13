@@ -130,14 +130,6 @@ export interface AutomationRule {
    * field means too.
    */
   readonly weekdays: readonly number[];
-  /**
-   * Where what the rule's run writes ends up (a skill's report folder), or empty.
-   *
-   * The app does not run the skill and cannot know where it writes, so the rule says it; the rule's
-   * card then opens the newest file there. A setting of the rule rather than a contract with the
-   * skill, so any skill that writes a file can be followed without the app learning its format.
-   */
-  readonly outputFolder: string;
   readonly action: AutomationAction;
   /**
    * False until the first evaluation has recorded what was already true.
@@ -373,34 +365,6 @@ export function sanitizeSkillName(value: unknown): string {
   }
   const name = value.trim().replace(/^\//, '');
   return /^[\w.:-]{1,80}$/.test(name) ? name : '';
-}
-
-/** An absolute folder path as typed, trimmed, or empty. Whether it exists is checked when opened. */
-export function sanitizeOutputFolder(value: unknown): string {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  const folder = value.trim();
-  const absolute = /^[a-zA-Z]:[\\/]/.test(folder) || folder.startsWith('\\\\') || folder.startsWith('/');
-  return absolute && folder.length <= 1024 ? folder : '';
-}
-
-/**
- * The file a rule's latest output is: the newest report-like file of the folder, else its newest
- * file, or null when it holds none.
- *
- * Report-like first, because a run writes its state as it goes and its report at the end: during a
- * run the newest file is often the state, which is not what "open the output" means. Hidden files
- * never count. Only the folder itself is read, never below it.
- */
-export function pickLatestOutput(
-  entries: readonly { name: string; isFile: boolean; mtimeMs: number }[],
-): string | null {
-  const files = entries.filter((entry) => entry.isFile && !entry.name.startsWith('.'));
-  const newest = (list: typeof files): string | null =>
-    list.length === 0 ? null : [...list].sort((left, right) => right.mtimeMs - left.mtimeMs)[0]?.name ?? null;
-  const reports = files.filter((entry) => /\.(md|html?|txt|pdf)$/i.test(entry.name));
-  return newest(reports) ?? newest(files);
 }
 
 /** The prompt a `skill` action sends: the slash command, then its arguments when there are any. */

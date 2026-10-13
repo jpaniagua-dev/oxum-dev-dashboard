@@ -23,10 +23,6 @@ export interface AutomationActions {
   readonly onForget: (ruleId: string, targetId: string | null) => void;
   /** Empties the activity list. The ledger is untouched: see the note on the channel. */
   readonly onClearLog: () => void;
-  /** Opens the newest file of a rule's output folder. */
-  readonly onOpenOutput: (ruleId: string) => void;
-  /** Asks for a folder, or null when the dialog was cancelled. */
-  readonly onPickFolder: () => Promise<string | null>;
 }
 
 export interface AutomationPanelState {
@@ -99,7 +95,6 @@ export function blankRule(): AutomationRule {
     atMinute: null,
     everyMinutes: null,
     weekdays: [],
-    outputFolder: '',
     action: { kind: 'notify', text: '', projectId: null, skill: '' },
     armed: false,
   };
@@ -163,6 +158,11 @@ export function renderAutomationPanel(
     actions.onSave([...state.rules, blankRule()]);
   });
   bar.append(add);
+  if (state.rules.length > 0) {
+    bar.append(
+      createElement('span', { className: 'automations__count', text: describeRuleCount(state.rules) }),
+    );
+  }
   main.append(bar);
 
   /*
@@ -247,6 +247,94 @@ export function renderAutomationPanel(
   }
 }
 
+/** `3 rules, 2 on`: how many there are and how many are live, beside the button that adds one. */
+export function describeRuleCount(rules: readonly AutomationRule[]): string {
+  const on = rules.filter((rule) => rule.enabled).length;
+  return `${String(rules.length)} rule${rules.length === 1 ? '' : 's'}, ${String(on)} on`;
+}
+
+/** What a rule's pill says, and in which of the table's four tones. */
+export interface RuleStatus {
+  readonly label: string;
+  readonly tone: 'neutral' | 'ok' | 'busy' | 'error';
+  readonly title: string;
+}
+
+/**
+ * The one-word state of a rule, for the pill in its head.
+ *
+ * Every case but `On` is a rule that will not do what its fields describe, and each of them used to
+ * be said, when it was said at all, by a sentence somewhere down the card. A grid of cards is read
+ * across, so the answer to "is this one live" has to sit at the same place on each of them. The
+ * refusals are the engine's own, read rather than guessed: an unnamed rule cannot be switched on, a
+ * schedule with neither a time nor an interval never runs, a skill action naming none and a command
+ * under a closed switch are refused at the moment they fire.
+ */
+export function ruleStatus(rule: AutomationRule, shellEnabled: boolean): RuleStatus {
+  if (!rule.enabled) {
+    return {
+      label: 'Off',
+      tone: 'neutral',
+      title:
+        rule.name.trim().length === 0
+          ? 'Name the rule, then switch it on'
+          : 'Switched off: it watches nothing until it is switched on',
+    };
+  }
+  if (rule.action.kind === 'shell' && !shellEnabled) {
+    return {
+      label: 'Will refuse',
+      tone: 'error',
+      title: 'Running a command from a rule is turned off in the settings',
+    };
+  }
+  if (rule.action.kind === 'skill' && rule.action.skill.length === 0) {
+    return { label: 'Will refuse', tone: 'error', title: 'Pick the skill this rule runs' };
+  }
+  if (isScheduled(rule.trigger)) {
+    return rule.atMinute === null && rule.everyMinutes === null
+      ? { label: 'Never runs', tone: 'error', title: 'Give it a time of day or an interval' }
+      : { label: 'On', tone: 'ok', title: 'Runs at its time, on its days' };
+  }
+  return rule.armed
+    ? { label: 'On', tone: 'ok', title: 'Acts on whatever becomes true from now on' }
+    : {
+        label: 'Arming',
+        tone: 'busy',
+        title: 'The next check records what is already true without acting on it',
+      };
+}
+
+/** The label of the text field, which is a different thing for each action. */
+export function textLabelFor(kind: AutomationRule['action']['kind']): string {
+  switch (kind) {
+    case 'notify':
+      return 'Message';
+    case 'agent':
+      return 'Prompt';
+    case 'shell':
+      return 'Command';
+    case 'skill':
+      return 'Arguments';
+  }
+}
+
+/**
+ * One line of a card's form: a label in the first column, its controls in the second.
+ *
+ * The rows used to be flex lines each starting with their own label, so `When`, `Then` and `At` were
+ * three different widths and no two selects started on the same pixel. A two-column grid per
+ * card is what lines them up, and `max-content` sizes the label column on the longest label the card
+ * actually shows rather than on a width guessed for all of them.
+ */
+function field(grid: HTMLElement, label: string, ...controls: HTMLElement[]): HTMLElement {
+  grid.append(createElement('span', { className: 'automation__label', text: label }));
+  const cell = createElement('div', { className: 'automation__controls' });
+  cell.append(...controls);
+  grid.append(cell);
+  return cell;
+}
+
 function buildRule(
   rule: AutomationRule,
   state: AutomationState,
@@ -276,6 +364,7 @@ function buildRule(
   const named = rule.name.trim().length > 0;
   const on = document.createElement('input');
   on.type = 'checkbox';
+  on.className = 'automation__switch';
   on.checked = rule.enabled;
   on.disabled = locked || !named;
   on.title = named ? 'Enable this rule' : 'Name the rule first: its name is what its tab is called';
@@ -304,10 +393,19 @@ function buildRule(
   });
   head.append(name);
 
+  const status = ruleStatus(rule, view.shellEnabled);
+  const pill = createElement('span', {
+    className: `pill pill--${status.tone} automation__status`,
+    title: status.title,
+  });
+  pill.append(createElement('span', { className: 'pill__dot' }));
+  pill.append(createElement('span', { text: status.label }));
+  head.append(pill);
+
   const remove = createIconButton('M4 4l8 8M12 4l-8 8', {
     label: 'Delete this rule',
     title: 'Delete this rule',
-    className: 'icon-button--row',
+    className: 'automation__remove',
   });
   remove.disabled = locked;
   remove.addEventListener('click', () => {
@@ -316,10 +414,10 @@ function buildRule(
   head.append(remove);
   card.append(head);
 
-  /* ------------------------------------------------------------- trigger */
-  const when = createElement('div', { className: 'automation__row' });
-  when.append(createElement('span', { className: 'automation__label', text: 'When' }));
+  const grid = createElement('div', { className: 'automation__grid' });
+  card.append(grid);
 
+  /* ------------------------------------------------------------- trigger */
   const trigger = document.createElement('select');
   trigger.className = 'automation__select';
   trigger.disabled = locked;
@@ -347,19 +445,15 @@ function buildRule(
       everyMinutes: isScheduled(kind) ? rule.everyMinutes : null,
     });
   });
-  when.append(trigger);
-  card.append(when);
+  field(grid, 'When', trigger);
 
   if (isScheduled(rule.trigger)) {
-    card.append(buildSchedule(rule, locked, replace));
+    buildSchedule(grid, rule, locked, replace);
   }
 
   /* -------------------------------------------------------------- action */
-  const does = createElement('div', { className: 'automation__row' });
-  does.append(createElement('span', { className: 'automation__label', text: 'Then' }));
-
   const kind = document.createElement('select');
-  kind.className = 'automation__select automation__select--narrow';
+  kind.className = 'automation__select';
   kind.disabled = locked;
   kind.setAttribute('aria-label', 'What this rule does');
   for (const [value, label] of [
@@ -379,31 +473,39 @@ function buildRule(
       kind.value === 'agent' || kind.value === 'shell' || kind.value === 'skill' ? kind.value : 'notify';
     replace({ ...rule, action: { ...rule.action, kind: next } });
   });
-  does.append(kind);
+  const then = field(grid, 'Then', kind);
 
-  const where = document.createElement('select');
-  where.className = 'automation__select automation__select--narrow';
-  where.disabled = locked || rule.action.kind === 'notify';
-  where.setAttribute('aria-label', 'Which project the tab opens in');
-  const any = document.createElement('option');
-  any.value = '';
-  any.textContent = 'The matching project';
-  any.selected = rule.action.projectId === null;
-  where.append(any);
-  for (const project of view.projects) {
-    const option = document.createElement('option');
-    option.value = project.id;
-    option.textContent = project.label;
-    option.selected = project.id === rule.action.projectId;
-    where.append(option);
-  }
-  where.addEventListener('change', () => {
-    replace({
-      ...rule,
-      action: { ...rule.action, projectId: where.value.length === 0 ? null : where.value },
+  /*
+   * The project only exists for an action that opens a tab.
+   *
+   * A notification has no folder, and the select used to sit there greyed out on every notifying
+   * rule: a control that can never be used on that card is not a disabled control, it is noise.
+   */
+  if (rule.action.kind !== 'notify') {
+    const where = document.createElement('select');
+    where.className = 'automation__select';
+    where.disabled = locked;
+    where.setAttribute('aria-label', 'Which project the tab opens in');
+    const any = document.createElement('option');
+    any.value = '';
+    any.textContent = 'The matching project';
+    any.selected = rule.action.projectId === null;
+    where.append(any);
+    for (const project of view.projects) {
+      const option = document.createElement('option');
+      option.value = project.id;
+      option.textContent = project.label;
+      option.selected = project.id === rule.action.projectId;
+      where.append(option);
+    }
+    where.addEventListener('change', () => {
+      replace({
+        ...rule,
+        action: { ...rule.action, projectId: where.value.length === 0 ? null : where.value },
+      });
     });
-  });
-  does.append(where);
+    then.append(where);
+  }
 
   /*
    * The skill, picked from what is installed rather than typed, when the action runs one.
@@ -413,7 +515,7 @@ function buildRule(
    */
   if (rule.action.kind === 'skill') {
     const skill = document.createElement('select');
-    skill.className = 'automation__select automation__select--narrow';
+    skill.className = 'automation__select';
     skill.disabled = locked || view.skills === null;
     skill.setAttribute('aria-label', 'Which skill this rule runs');
     const names = view.skills ?? [];
@@ -435,9 +537,8 @@ function buildRule(
     skill.addEventListener('change', () => {
       replace({ ...rule, action: { ...rule.action, skill: skill.value } });
     });
-    does.append(skill);
+    field(grid, 'Skill', skill);
   }
-  card.append(does);
 
   const text = document.createElement('textarea');
   text.className = 'automation__text';
@@ -453,62 +554,20 @@ function buildRule(
         : 'The text to send',
   );
   if (rule.action.kind === 'skill') {
-    text.placeholder = 'Arguments, if the skill takes any';
+    text.placeholder = 'If the skill takes any';
   }
   text.addEventListener('change', () => {
     replace({ ...rule, action: { ...rule.action, text: text.value } });
   });
-  card.append(text);
+  const textCell = field(grid, textLabelFor(rule.action.kind), text);
 
-  /*
-   * Where the run's output lands, and the gesture that opens it.
-   *
-   * Offered for the two actions whose run writes something a person reads afterwards, a skill and an
-   * agent. The folder is the rule's to know: the app starts the run but does not read what it writes.
-   */
-  if (rule.action.kind === 'skill' || rule.action.kind === 'agent') {
-    const output = createElement('div', { className: 'automation__row' });
-    output.append(createElement('span', { className: 'automation__label', text: 'Output' }));
-    const folder = document.createElement('input');
-    folder.type = 'text';
-    folder.className = 'automation__folder';
-    folder.value = rule.outputFolder;
-    folder.disabled = locked;
-    folder.placeholder = 'Folder the run writes its report to';
-    folder.setAttribute('aria-label', "Folder the rule's run writes to");
-    folder.addEventListener('change', () => {
-      replace({ ...rule, outputFolder: folder.value.trim() });
-    });
-    output.append(folder);
-    const browse = createElement('button', { className: 'button', text: 'Browse' });
-    browse.type = 'button';
-    browse.disabled = locked;
-    browse.addEventListener('click', () => {
-      void actions.onPickFolder().then((picked) => {
-        if (picked !== null) {
-          replace({ ...rule, outputFolder: picked });
-        }
-      });
-    });
-    output.append(browse);
-    const open = createElement('button', { className: 'button', text: 'Open the latest output' });
-    open.type = 'button';
-    open.disabled = rule.outputFolder.length === 0;
-    open.title =
-      rule.outputFolder.length === 0
-        ? 'Set the folder first'
-        : `Opens the newest report in ${rule.outputFolder}, in its default program`;
-    open.addEventListener('click', () => actions.onOpenOutput(rule.id));
-    output.append(open);
-    card.append(output);
-  }
-
+  // Under the field it applies to, which is the only place a template variable is typed.
   const fields = fieldsFor(rule.trigger);
   if (fields.length > 0) {
-    card.append(
+    textCell.append(
       createElement('p', {
         className: 'automation__hint',
-        text: `Available: ${fields.map((field) => `{{${field}}}`).join(' ')}`,
+        text: `Available: ${fields.map((entry) => `{{${entry}}}`).join(' ')}`,
       }),
     );
   }
@@ -521,7 +580,7 @@ function buildRule(
    * matches, and a rule nobody has triggered yet would be silent for days.
    */
   if (rule.action.kind === 'shell' && !view.shellEnabled) {
-    card.append(
+    textCell.append(
       createElement('p', {
         className: 'automation__warn',
         text: 'Running a command from a rule is turned off in the settings, so this rule will refuse.',
@@ -554,26 +613,16 @@ function buildRule(
     card.append(foot);
   }
 
-  if (!rule.armed && rule.enabled) {
-    card.append(
-      createElement('p', {
-        className: 'automation__hint',
-        text: 'Not armed yet: the next check records what is already true without acting on it.',
-      }),
-    );
-  }
-
   return card;
 }
 
+/** The schedule of a timed rule: two lines of the card's grid, when in the day and on which days. */
 function buildSchedule(
+  grid: HTMLElement,
   rule: AutomationRule,
   locked: boolean,
   replace: (next: AutomationRule) => void,
-): HTMLElement {
-  const row = createElement('div', { className: 'automation__row' });
-  row.append(createElement('span', { className: 'automation__label', text: 'At' }));
-
+): void {
   const clock = document.createElement('input');
   clock.type = 'text';
   clock.className = 'automation__clock';
@@ -587,9 +636,6 @@ function buildSchedule(
     // Better a rule that does not run than one that runs at an hour nobody typed.
     replace({ ...rule, atMinute: minutes, everyMinutes: minutes === null ? rule.everyMinutes : null });
   });
-  row.append(clock);
-
-  row.append(createElement('span', { className: 'automation__label', text: 'or every' }));
 
   const every = document.createElement('input');
   every.type = 'number';
@@ -603,32 +649,43 @@ function buildSchedule(
     const usable = Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : null;
     replace({ ...rule, everyMinutes: usable, atMinute: usable === null ? rule.atMinute : null });
   });
-  row.append(every);
-  row.append(createElement('span', { className: 'automation__label', text: 'minutes' }));
+
+  field(
+    grid,
+    'At',
+    clock,
+    createElement('span', { className: 'automation__unit', text: 'or every' }),
+    every,
+    createElement('span', { className: 'automation__unit', text: 'min' }),
+  );
 
   /*
    * The days it may run. None selected means every day, which is also what every rule written before
    * the days existed means. Monday first, the way a working week is read; stored as `Date.getDay`.
+   * Two letters on the key and the day in full for a screen reader: seven three-letter buttons did not
+   * fit beside a label in a card, and wrapped the week over two lines.
    */
   const days = createElement('div', { className: 'automation__days' });
   days.setAttribute('role', 'group');
   days.setAttribute('aria-label', 'Days the rule runs on. None means every day');
-  for (const [day, label] of [
-    [1, 'Mon'],
-    [2, 'Tue'],
-    [3, 'Wed'],
-    [4, 'Thu'],
-    [5, 'Fri'],
-    [6, 'Sat'],
-    [0, 'Sun'],
+  for (const [day, short, full] of [
+    [1, 'Mo', 'Monday'],
+    [2, 'Tu', 'Tuesday'],
+    [3, 'We', 'Wednesday'],
+    [4, 'Th', 'Thursday'],
+    [5, 'Fr', 'Friday'],
+    [6, 'Sa', 'Saturday'],
+    [0, 'Su', 'Sunday'],
   ] as const) {
     const on = rule.weekdays.includes(day);
     const button = createElement('button', {
       className: `automation__day${on ? ' automation__day--on' : ''}`,
-      text: label,
+      text: short,
+      title: full,
     });
     button.type = 'button';
     button.disabled = locked;
+    button.setAttribute('aria-label', full);
     button.setAttribute('aria-pressed', String(on));
     button.addEventListener('click', () => {
       const next = on ? rule.weekdays.filter((entry) => entry !== day) : [...rule.weekdays, day];
@@ -636,9 +693,8 @@ function buildSchedule(
     });
     days.append(button);
   }
-  row.append(days);
+  const cell = field(grid, 'On', days);
   if (rule.weekdays.length === 0) {
-    row.append(createElement('span', { className: 'automation__label', text: 'every day' }));
+    cell.append(createElement('span', { className: 'automation__unit', text: 'every day' }));
   }
-  return row;
 }
