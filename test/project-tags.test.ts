@@ -6,8 +6,10 @@ import {
   TAG_COLORS,
   addTag,
   hasTag,
+  matchesTagFilter,
   normalizeTag,
   parseTagInput,
+  pruneTagFilter,
   removeTag,
   sanitizeTagColors,
   sanitizeTags,
@@ -234,5 +236,29 @@ describe('tagColorOf / withTagColor', () => {
     const colors = { backend: 'blue' } as const;
     withTagColor(colors, 'backend', 'red');
     expect(colors.backend).toBe('blue');
+  });
+});
+
+describe('the Projects tag filter', () => {
+  it('shows everything with nothing selected', () => {
+    expect(matchesTagFilter([], new Set())).toBe(true);
+    expect(matchesTagFilter(['backend'], new Set())).toBe(true);
+  });
+
+  it('shows a project carrying ANY selected tag, compared by key', () => {
+    const selected = new Set(['backend', 'front']);
+    expect(matchesTagFilter(['Backend'], selected)).toBe(true);
+    expect(matchesTagFilter(['front', 'angular'], selected)).toBe(true);
+    expect(matchesTagFilter(['design system'], selected)).toBe(false);
+  });
+
+  it('hides the untagged projects while a filter is on', () => {
+    expect(matchesTagFilter([], new Set(['backend']))).toBe(false);
+  });
+
+  it('drops a selected tag no project carries any more', () => {
+    expect([...pruneTagFilter(new Set(['front', 'backend']), [{ tags: ['front'] }, { tags: [] }])]).toEqual([
+      'front',
+    ]);
   });
 });

@@ -5,6 +5,11 @@ row to reorder the table (the order is kept everywhere: settings, new-tab menu).
 Right-click a row and choose **Settings** to edit that project alone, without the other settings
 pages or the other projects.
 
+**Filter by tag** with the chips beside the `Project` heading: click a tag to show only the projects
+carrying it, click several to show the projects carrying any of them, and click a lit chip again to
+turn it off. Projects with no tag are hidden while a filter is on. The filter is not kept when the app
+closes, and it only hides rows: a hidden project's server keeps running.
+
 | Column | Shows |
 | --- | --- |
 | Server | the dev server's phase, read from its own output |

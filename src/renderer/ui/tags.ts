@@ -1,5 +1,5 @@
 import type { Project, ProjectId, TagColor, TagColors } from '@shared/contracts.js';
-import { TAG_COLORS, tagColorOf } from '@shared/project-tags.js';
+import { TAG_COLORS, tagColorOf, tagKey } from '@shared/project-tags.js';
 import { showContextMenu, type MenuItem } from './context-menu.js';
 import { createElement } from './dom.js';
 
@@ -198,3 +198,56 @@ export function buildTagDots(palette: TagPalette, projectId: ProjectId): HTMLEle
   return host;
 }
 
+
+/** What the tag filter needs to draw itself and to report a click. */
+export interface TagFilterView {
+  /** Every tag in use, in display spelling, alphabetical. */
+  readonly vocabulary: readonly string[];
+  readonly colors: TagColors;
+  /** Selected tag keys. */
+  readonly selected: ReadonlySet<string>;
+  readonly onToggle: (entry: string) => void;
+}
+
+/**
+ * The Projects tab's tag filter: one toggle per tag, in the tag's own colours.
+ *
+ * Toggles drawn as the chips the rows wear, so the word that filters is the word seen on the row,
+ * with `aria-pressed` saying which ones are on. Read in the `Project` column heading rather than as a
+ * bar of its own: the strip has to show every project without scrolling at its default height, and
+ * a bar would take a row from it. `null` when no project carries a tag, since then there is nothing
+ * to filter by.
+ *
+ * Session-local by decision (2026-10-13), like the Jira assignee filter: a filter that comes back
+ * on the next launch is rows hidden for a reason nobody remembers choosing. A filter is cleared by
+ * clicking its lit chips again; the `Untagged` chip and the "show all" link were removed the same
+ * day, on request.
+ */
+export function buildTagFilter(view: TagFilterView): HTMLElement | null {
+  if (view.vocabulary.length === 0) {
+    return null;
+  }
+  const host = createElement('span', { className: 'tag-filter' });
+  host.setAttribute('role', 'group');
+  host.setAttribute('aria-label', 'Show only the projects with these tags');
+
+  for (const tag of view.vocabulary) {
+    const entry = tagKey(tag);
+    const on = view.selected.has(entry);
+    const chip = createElement('button', {
+      className: `tag tag-filter__chip tag--${tagColorOf(view.colors, tag)}${on ? ' tag-filter__chip--on' : ''}`,
+      title: `Show the projects tagged ${tag}. Several tags show the projects carrying any of them.`,
+    });
+    chip.type = 'button';
+    chip.setAttribute('aria-pressed', String(on));
+    chip.append(createElement('span', { className: 'tag__dot' }));
+    chip.append(createElement('span', { text: tag }));
+    chip.addEventListener('click', (event) => {
+      // The heading cell is not a sort control today, but nothing in a heading should act twice.
+      event.stopPropagation();
+      view.onToggle(entry);
+    });
+    host.append(chip);
+  }
+  return host;
+}

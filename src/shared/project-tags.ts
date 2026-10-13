@@ -143,7 +143,7 @@ export function toggleTag(tags: readonly string[], tag: string): string[] {
 /**
  * Every tag in use, once each, in alphabetical order.
  *
- * This is the vocabulary: the suggestions offered while tagging, and what the filter bar will list.
+ * This is the vocabulary: the suggestions offered while tagging, and what the Projects tab's tag filter lists.
  * Sorted rather than left in project order, because it is read as a list of words and not as a
  * projection of the table. Duplicates fold by key and the first spelling met wins, which makes the
  * result depend on the project order and therefore stay stable between two calls.
@@ -161,6 +161,29 @@ export function tagVocabulary(
     }
   }
   return [...seen.values()].sort((left, right) => left.localeCompare(right));
+}
+
+/**
+ * Whether a project shows under the Projects tab's tag filter.
+ *
+ * Nothing selected shows everything. Otherwise a project shows when it carries ANY selected tag
+ * (decided on 2026-10-13: picking two families adds them to the view, it does not demand both), so a
+ * project with no tag is hidden while a filter is on: a filter shows exactly what it says.
+ */
+export function matchesTagFilter(tags: readonly string[], selected: ReadonlySet<string>): boolean {
+  return selected.size === 0 || tags.some((tag) => selected.has(tagKey(tag)));
+}
+
+/**
+ * The selection minus the tags no project carries any more. A selection holding only such tags
+ * would hide every row behind a chip that is no longer drawn.
+ */
+export function pruneTagFilter(
+  selected: ReadonlySet<string>,
+  projects: readonly { readonly tags: readonly string[] }[],
+): Set<string> {
+  const keys = new Set(tagVocabulary(projects).map(tagKey));
+  return new Set([...selected].filter((entry) => keys.has(entry)));
 }
 
 /**

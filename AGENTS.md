@@ -2898,7 +2898,7 @@ pattern are left ready.
 
 Added on 2026-09-01, when the table grew past what a strip can be read at: with the backend services
 watched alongside the fronts, the answer to "which stack am I looking at" had to be on the row. The
-filter bar that consumes them is **not** written yet, and the shape below is what it will read.
+Projects tab filters on them since 2026-10-13 (see the filter bullets below).
 
 - **A tag is a string a project carries, not an entity with an id.** There is no registry of tag
   *entities* in `settings.json` and there must not be one: it would mean a second shape to sanitise,
@@ -2971,9 +2971,25 @@ filter bar that consumes them is **not** written yet, and the shape below is wha
 - **A comma separates, a space does not.** `design system` is one tag; a dashboard whose tags cannot
   hold a space pushes the user to invent an encoding. That is also why the comma is stripped from a
   tag rather than kept: the editor splits on it, so a tag holding one would not survive a round trip.
-- **An absent list becomes no tags, never an inferred one.** An untagged project is visible under
-  every filter, so a migration that guessed a tag from a folder name would be a migration that hides
-  rows, and a wrong tag is worse than none precisely because the field exists to filter on.
+- **An absent list becomes no tags, never an inferred one.** A wrong tag is worse than none precisely
+  because the field exists to filter on: a migration that guessed a tag from a folder name would put
+  a project under a filter it does not belong to.
+- **The tag filter is in the `Project` heading, not a bar** (written on 2026-10-13, on request). The
+  strip must show every project without scrolling at its default height, and a bar of its own would
+  take a row from it; the heading cell may wrap, alone in the table, so a long vocabulary costs a
+  second heading line. One toggle per tag in the tag's colours, and nothing else: an `Untagged` chip
+  and a "N hidden · show all" link shipped with it and were removed the same day, on request. A
+  filter is cleared by clicking its lit chips again. `matchesTagFilter` and `pruneTagFilter` hold
+  the rules.
+- **Several tags show the projects carrying ANY of them**, decided over "all of them": picking two
+  families adds them to the view, and an intersection empties as fast as tags are added.
+- **An untagged project is hidden while a filter is on**, decided over the earlier intent of keeping
+  them under every filter: a filter shows exactly what it says.
+- **Session-local, never stored**, decided like the Jira assignee filter: a filter that comes back
+  at the next launch hides rows for a reason nobody remembers choosing. The selection is pruned on
+  every render, so a tag that left every project cannot keep hiding rows behind a chip no longer
+  drawn, and a filter hiding every row says so ("No project carries the selected tags") instead of
+  the first-launch greeting. It filters the view only: a hidden project keeps its server and polls.
 - **The tag editor repaints itself and never calls `render()`.** It is the only block of that form
   that does: every other edit is a keystroke in a field that survives its own handler, whereas adding
   a chip replaces a list of elements, and a full render would destroy the input mid-sentence. Tagging

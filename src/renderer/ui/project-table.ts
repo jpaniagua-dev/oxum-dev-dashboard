@@ -112,11 +112,16 @@ export function renderProjectTable(
    */
   pulls: PullsByProject,
   actions: TableActions,
+  /**
+   * Set while the tag filter hides every row, so the table says that rather than greeting the reader
+   * as on a first launch: "no project watched yet" over a filter is a wrong answer given confidently.
+   */
+  filteredOut?: { readonly onClear: () => void },
 ): void {
   clearChildren(tbody);
 
   if (rows.length === 0) {
-    tbody.append(buildEmptyState(actions));
+    tbody.append(filteredOut === undefined ? buildEmptyState(actions) : buildFilteredOut(filteredOut.onClear));
     return;
   }
 
@@ -127,6 +132,22 @@ export function renderProjectTable(
       buildRow(row, rows[index + 1]?.project.id ?? null, vocabulary, colors, pulls, actions),
     );
   }
+}
+
+/** What the table says when the tag filter hides every project, with the way back. */
+function buildFilteredOut(onClear: () => void): HTMLTableRowElement {
+  const row = createElement('tr');
+  const cell = createElement('td');
+  cell.colSpan = 7;
+  const box = createElement('div', { className: 'table-empty' });
+  box.append(createElement('p', { className: 'table-empty__hint', text: 'No project carries the selected tags.' }));
+  const clear = createElement('button', { className: 'button', text: 'Show all the projects' });
+  clear.type = 'button';
+  clear.addEventListener('click', onClear);
+  box.append(clear);
+  cell.append(box);
+  row.append(cell);
+  return row;
 }
 
 /**

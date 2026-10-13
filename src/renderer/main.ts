@@ -50,7 +50,14 @@ import {
 } from './ui/vault-panel.js';
 import { moveProject } from '@shared/project-order.js';
 import { type Flight, idleFlight, singleFlight } from '@shared/single-flight.js';
-import { addTag, removeTag, tagVocabulary, withTagColor } from '@shared/project-tags.js';
+import {
+  addTag,
+  matchesTagFilter,
+  pruneTagFilter,
+  removeTag,
+  tagVocabulary,
+  withTagColor,
+} from '@shared/project-tags.js';
 import { showContextMenu } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
@@ -85,6 +92,7 @@ import { findRun, renderPullList } from './ui/pull-list.js';
 import { renderReviewOverview } from './ui/review-overview.js';
 import { renderWorktreeList } from './ui/worktree-list.js';
 import type { TagPalette } from './ui/tags.js';
+import { buildTagFilter } from './ui/tags.js';
 import { TriagePanel } from './ui/triage-panel.js';
 import { loadRestoredStrip, StripTabs } from './ui/strip-tabs.js';
 import { TerminalPane } from './ui/terminal-pane.js';
@@ -1009,6 +1017,12 @@ class App {
 
   /* ---------------------------------------------------------------- render */
 
+  /**
+   * The tag keys the Projects tab is filtered on, empty for all.
+   * Session-local by decision, never stored: see `buildTagFilter`.
+   */
+  private tagFilter: ReadonlySet<string> = new Set();
+
   private renderTable(): void {
     if (this.editingRow || this.draggingRow) {
       // A rename is open, or a row is being dragged: the refresh is dropped rather than queued, since
@@ -1023,12 +1037,40 @@ class App {
      * Falls back to the rows before the bootstrap has landed, which is the one moment there are rows
      * and no settings.
      */
-    const vocabulary = tagVocabulary(
-      this.settings?.projects ?? this.rows.map((row) => row.project),
-    );
+    const configured = this.settings?.projects ?? this.rows.map((row) => row.project);
+    const vocabulary = tagVocabulary(configured);
+
+    /*
+     * The tag filter, applied to the rows and drawn in the `Project` heading.
+     *
+     * Pruned first, so a tag that has just left every project cannot keep hiding rows behind a chip
+     * that is no longer drawn. Only the view is filtered: a hidden project keeps its server running
+     * and its polls, and a drag among the visible rows lands before the visible neighbour.
+     */
+    this.tagFilter = pruneTagFilter(this.tagFilter, configured);
+    const visible = this.rows.filter((row) => matchesTagFilter(row.project.tags, this.tagFilter));
+    const filterHost = requireElement('project-filter');
+    clearChildren(filterHost);
+    const filter = buildTagFilter({
+      vocabulary,
+      colors: this.settings?.tagColors ?? {},
+      selected: this.tagFilter,
+      onToggle: (entry) => {
+        const next = new Set(this.tagFilter);
+        if (!next.delete(entry)) {
+          next.add(entry);
+        }
+        this.tagFilter = next;
+        this.renderTable();
+      },
+    });
+    if (filter !== null) {
+      filterHost.append(filter);
+    }
+
     renderProjectTable(
       requireElement('project-tbody'),
-      this.rows,
+      visible,
       vocabulary,
       this.settings?.tagColors ?? {},
       this.pullsByProject(),
@@ -1057,6 +1099,14 @@ class App {
         onOpenSettings: () => void window.api.openSettings(),
         onOpenProjectSettings: (projectId) => void window.api.openSettings(projectId),
       },
+      visible.length === 0 && this.rows.length > 0
+        ? {
+            onClear: () => {
+              this.tagFilter = new Set();
+              this.renderTable();
+            },
+          }
+        : undefined,
     );
   }
 

@@ -198,6 +198,49 @@ body {
   white-space: nowrap;
 }
 
+/*
+ * The tag filter, in the `Project` heading rather than in a bar of its own: the strip must show every
+ * project without scrolling at its default height, and a bar would take a row from it. The heading
+ * may wrap here, and only here, so a long vocabulary costs a second heading line and not a column
+ * wider than the table.
+ */
+.table__project-head {
+  white-space: normal;
+}
+
+.tag-filter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  vertical-align: middle;
+  /* The heading's eyebrow type is for its label, not for the words a person chose. */
+  letter-spacing: normal;
+  text-transform: none;
+  font-weight: 400;
+}
+
+/* A tag chip that is a toggle: quiet when off, tinted in its own colour when on. */
+.tag-filter__chip {
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0.65;
+}
+
+.tag-filter__chip:hover,
+.tag-filter__chip:focus-visible {
+  opacity: 1;
+}
+
+.tag-filter__chip--on {
+  opacity: 1;
+  background: color-mix(in srgb, var(--tag-colour, var(--border-strong)) 22%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+
 .table td {
   /* Compact on purpose: this is a status strip, so fitting more projects beats airy rows. */
   padding: 6px 10px;
