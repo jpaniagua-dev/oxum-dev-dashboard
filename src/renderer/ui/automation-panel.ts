@@ -1,6 +1,7 @@
 import type { AutomationRule, TriggerKind } from '@shared/automation.js';
 import { TRIGGER_KINDS, describeTrigger, isScheduled } from '@shared/automation.js';
 import type { AutomationState, Project } from '@shared/contracts.js';
+import type { ExtensionItem } from '@shared/extensions.js';
 import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
 
 /**
@@ -22,6 +23,10 @@ export interface AutomationActions {
   readonly onForget: (ruleId: string, targetId: string | null) => void;
   /** Empties the activity list. The ledger is untouched: see the note on the channel. */
   readonly onClearLog: () => void;
+  /** Opens the newest file of a rule's output folder. */
+  readonly onOpenOutput: (ruleId: string) => void;
+  /** Asks for a folder, or null when the dialog was cancelled. */
+  readonly onPickFolder: () => Promise<string | null>;
 }
 
 export interface AutomationPanelState {
@@ -29,6 +34,33 @@ export interface AutomationPanelState {
   readonly projects: readonly Project[];
   readonly enabled: boolean;
   readonly shellEnabled: boolean;
+  /**
+   * The skills a `Run a skill` action can pick, by name, or null while they are being read. Read off
+   * the same inventory as the Extensions tab, so the list is what is actually installed.
+   */
+  readonly skills: readonly string[] | null;
+}
+
+/**
+ * The Claude Code skills a rule can run, by name, sorted and once each.
+ *
+ * User, project and local skills only: those are invoked as `/<name>`. A plugin's skills are named
+ * through their plugin, and a synced or bundled one is not something a rule should depend on, so
+ * they are left out rather than offered under a name that would not resolve. Disabled ones too.
+ */
+export function skillNames(items: readonly ExtensionItem[]): string[] {
+  const names = new Set<string>();
+  for (const item of items) {
+    if (
+      item.kind === 'skills' &&
+      item.agent === 'claude' &&
+      item.enabled !== false &&
+      (item.scope === 'user' || item.scope === 'project' || item.scope === 'local')
+    ) {
+      names.add(item.name);
+    }
+  }
+  return [...names].sort((left, right) => left.localeCompare(right));
 }
 
 /** Minutes past midnight as `HH:MM`, and back. The stored form is a number; the field is a clock. */
@@ -66,7 +98,9 @@ export function blankRule(): AutomationRule {
     trigger: 'pull-approved',
     atMinute: null,
     everyMinutes: null,
-    action: { kind: 'notify', text: '', projectId: null },
+    weekdays: [],
+    outputFolder: '',
+    action: { kind: 'notify', text: '', projectId: null, skill: '' },
     armed: false,
   };
 }
@@ -332,6 +366,7 @@ function buildRule(
     ['notify', 'Notify me'],
     ['agent', 'Start an agent'],
     ['shell', 'Run a command'],
+    ['skill', 'Run a skill'],
   ] as const) {
     const option = document.createElement('option');
     option.value = value;
@@ -340,7 +375,8 @@ function buildRule(
     kind.append(option);
   }
   kind.addEventListener('change', () => {
-    const next = kind.value === 'agent' || kind.value === 'shell' ? kind.value : 'notify';
+    const next =
+      kind.value === 'agent' || kind.value === 'shell' || kind.value === 'skill' ? kind.value : 'notify';
     replace({ ...rule, action: { ...rule.action, kind: next } });
   });
   does.append(kind);
@@ -368,6 +404,39 @@ function buildRule(
     });
   });
   does.append(where);
+
+  /*
+   * The skill, picked from what is installed rather than typed, when the action runs one.
+   *
+   * A stored name that is no longer installed stays selected and says so, rather than silently
+   * switching to the first skill of the list: a rule must keep naming what its author chose.
+   */
+  if (rule.action.kind === 'skill') {
+    const skill = document.createElement('select');
+    skill.className = 'automation__select automation__select--narrow';
+    skill.disabled = locked || view.skills === null;
+    skill.setAttribute('aria-label', 'Which skill this rule runs');
+    const names = view.skills ?? [];
+    const options = rule.action.skill.length > 0 && !names.includes(rule.action.skill)
+      ? [rule.action.skill, ...names]
+      : names;
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = view.skills === null ? 'Reading the skills...' : 'Pick a skill';
+    none.selected = rule.action.skill.length === 0;
+    skill.append(none);
+    for (const name of options) {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = names.includes(name) ? `/${name}` : `/${name} (not installed)`;
+      option.selected = name === rule.action.skill;
+      skill.append(option);
+    }
+    skill.addEventListener('change', () => {
+      replace({ ...rule, action: { ...rule.action, skill: skill.value } });
+    });
+    does.append(skill);
+  }
   card.append(does);
 
   const text = document.createElement('textarea');
@@ -377,12 +446,62 @@ function buildRule(
   text.disabled = locked;
   text.setAttribute(
     'aria-label',
-    rule.action.kind === 'shell' ? 'The command to run' : 'The text to send',
+    rule.action.kind === 'shell'
+      ? 'The command to run'
+      : rule.action.kind === 'skill'
+        ? "The skill's arguments"
+        : 'The text to send',
   );
+  if (rule.action.kind === 'skill') {
+    text.placeholder = 'Arguments, if the skill takes any';
+  }
   text.addEventListener('change', () => {
     replace({ ...rule, action: { ...rule.action, text: text.value } });
   });
   card.append(text);
+
+  /*
+   * Where the run's output lands, and the gesture that opens it.
+   *
+   * Offered for the two actions whose run writes something a person reads afterwards, a skill and an
+   * agent. The folder is the rule's to know: the app starts the run but does not read what it writes.
+   */
+  if (rule.action.kind === 'skill' || rule.action.kind === 'agent') {
+    const output = createElement('div', { className: 'automation__row' });
+    output.append(createElement('span', { className: 'automation__label', text: 'Output' }));
+    const folder = document.createElement('input');
+    folder.type = 'text';
+    folder.className = 'automation__folder';
+    folder.value = rule.outputFolder;
+    folder.disabled = locked;
+    folder.placeholder = 'Folder the run writes its report to';
+    folder.setAttribute('aria-label', "Folder the rule's run writes to");
+    folder.addEventListener('change', () => {
+      replace({ ...rule, outputFolder: folder.value.trim() });
+    });
+    output.append(folder);
+    const browse = createElement('button', { className: 'button', text: 'Browse' });
+    browse.type = 'button';
+    browse.disabled = locked;
+    browse.addEventListener('click', () => {
+      void actions.onPickFolder().then((picked) => {
+        if (picked !== null) {
+          replace({ ...rule, outputFolder: picked });
+        }
+      });
+    });
+    output.append(browse);
+    const open = createElement('button', { className: 'button', text: 'Open the latest output' });
+    open.type = 'button';
+    open.disabled = rule.outputFolder.length === 0;
+    open.title =
+      rule.outputFolder.length === 0
+        ? 'Set the folder first'
+        : `Opens the newest report in ${rule.outputFolder}, in its default program`;
+    open.addEventListener('click', () => actions.onOpenOutput(rule.id));
+    output.append(open);
+    card.append(output);
+  }
 
   const fields = fieldsFor(rule.trigger);
   if (fields.length > 0) {
@@ -486,5 +605,40 @@ function buildSchedule(
   });
   row.append(every);
   row.append(createElement('span', { className: 'automation__label', text: 'minutes' }));
+
+  /*
+   * The days it may run. None selected means every day, which is also what every rule written before
+   * the days existed means. Monday first, the way a working week is read; stored as `Date.getDay`.
+   */
+  const days = createElement('div', { className: 'automation__days' });
+  days.setAttribute('role', 'group');
+  days.setAttribute('aria-label', 'Days the rule runs on. None means every day');
+  for (const [day, label] of [
+    [1, 'Mon'],
+    [2, 'Tue'],
+    [3, 'Wed'],
+    [4, 'Thu'],
+    [5, 'Fri'],
+    [6, 'Sat'],
+    [0, 'Sun'],
+  ] as const) {
+    const on = rule.weekdays.includes(day);
+    const button = createElement('button', {
+      className: `automation__day${on ? ' automation__day--on' : ''}`,
+      text: label,
+    });
+    button.type = 'button';
+    button.disabled = locked;
+    button.setAttribute('aria-pressed', String(on));
+    button.addEventListener('click', () => {
+      const next = on ? rule.weekdays.filter((entry) => entry !== day) : [...rule.weekdays, day];
+      replace({ ...rule, weekdays: [...new Set(next)].sort((left, right) => left - right) });
+    });
+    days.append(button);
+  }
+  row.append(days);
+  if (rule.weekdays.length === 0) {
+    row.append(createElement('span', { className: 'automation__label', text: 'every day' }));
+  }
   return row;
 }

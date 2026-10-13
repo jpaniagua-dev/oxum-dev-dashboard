@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import type { AutomationRule, TriggerKind } from '@shared/automation.js';
-import { TRIGGER_KINDS } from '@shared/automation.js';
+import { sanitizeOutputFolder, sanitizeSkillName, sanitizeWeekdays, TRIGGER_KINDS } from '@shared/automation.js';
 
 /**
  * The rules, their ledgers and when each scheduled one last ran.
@@ -67,10 +67,13 @@ export function parseRule(payload: unknown): AutomationRule | null {
     trigger,
     atMinute: asPositive(row['atMinute']),
     everyMinutes: asPositive(row['everyMinutes']),
+    weekdays: sanitizeWeekdays(row['weekdays']),
+    outputFolder: sanitizeOutputFolder(row['outputFolder']),
     action: {
-      kind: kind === 'agent' || kind === 'shell' ? kind : 'notify',
+      kind: kind === 'agent' || kind === 'shell' || kind === 'skill' ? kind : 'notify',
       text: asString(action['text']),
       projectId: typeof action['projectId'] === 'string' ? action['projectId'] : null,
+      skill: sanitizeSkillName(action['skill']),
     },
     /*
      * Unarmed unless the file says otherwise, which is also the safe direction.

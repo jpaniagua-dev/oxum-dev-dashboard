@@ -322,7 +322,9 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.AutomationsForget, ruleId, targetId),
 
   clearAutomationLog: (): Promise<AutomationState> =>
-    ipcRenderer.invoke(IpcChannel.AutomationsClearLog),
+    ipcRenderer.invoke(IpcChannel.AutomationsClearLog),
+  openRuleOutput: (ruleId: string): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.AutomationsOpenOutput, ruleId),
 
   readVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultRead),
 

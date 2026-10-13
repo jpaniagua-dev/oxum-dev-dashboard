@@ -40,7 +40,7 @@ import { jobRuns } from '@shared/job-run.js';
 import { isReviewCurrent } from '@shared/pull-review.js';
 import type { AutomationState } from '@shared/contracts.js';
 import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
-import { renderAutomationPanel } from './ui/automation-panel.js';
+import { renderAutomationPanel, skillNames } from './ui/automation-panel.js';
 import {
   bindVaultHost,
   hideCurrentReveal,
@@ -218,6 +218,8 @@ class App {
   private readonly worktreesFlight: Flight = idleFlight();
   private triage: TriageState | null = null;
   private automations: AutomationState | null = null;
+  /** The skills a rule can run, or null until the first read of the Rules tab. */
+  private automationSkills: readonly string[] | null = null;
   private vault: VaultState | null = null;
   /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
   private autoRuns: AutoRunRecord[] = [];
@@ -774,6 +776,11 @@ class App {
     this.renderAutomations();
     this.automations = await window.api.readAutomations();
     this.renderAutomations();
+    // The skills a rule can run, from the Extensions inventory. Read after the rules, so a slow read
+    // of a dozen skill folders never holds the list of rules back.
+    const extensions = await window.api.readExtensions();
+    this.automationSkills = skillNames(extensions.items);
+    this.renderAutomations();
   }
 
   private renderAutomations(): void {
@@ -784,6 +791,7 @@ class App {
         projects: this.projects,
         enabled: this.settings?.automationsEnabled ?? false,
         shellEnabled: this.settings?.automationShellEnabled ?? false,
+        skills: this.automationSkills,
       },
       {
         onSave: (rules) => {
@@ -804,6 +812,10 @@ class App {
             this.renderAutomations();
           });
         },
+        onOpenOutput: (ruleId) => {
+          void window.api.openRuleOutput(ruleId).then((result) => this.stampMessage(result.message));
+        },
+        onPickFolder: () => window.api.pickFolder('Folder the rule writes to'),
       },
     );
   }

@@ -82,7 +82,12 @@ export function isScheduled(kind: TriggerKind): boolean {
  * What a rule does
  * ------------------------------------------------------------------ */
 
-export type ActionKind = 'notify' | 'agent' | 'shell';
+/**
+ * What a firing does. `skill` is `agent` with the prompt built for you: a slash command chosen from
+ * the installed skills, followed by its arguments. It opens the same kind of tab, in the same folder,
+ * so the skill runs with the context every handoff gets.
+ */
+export type ActionKind = 'notify' | 'agent' | 'shell' | 'skill';
 
 export interface AutomationAction {
   readonly kind: ActionKind;
@@ -96,6 +101,11 @@ export interface AutomationAction {
   readonly text: string;
   /** Which project the tab opens in. Ignored by `notify`, and `null` means the first configured. */
   readonly projectId: string | null;
+  /**
+   * For `skill` only: the skill's name, without its slash (`test-dev`). `text` is then its arguments.
+   * Empty for every other kind, and a `skill` action with none is refused in words when it fires.
+   */
+  readonly skill: string;
 }
 
 export interface AutomationRule {
@@ -114,6 +124,20 @@ export interface AutomationRule {
   readonly atMinute: number | null;
   /** For `schedule` only, when `atMinute` is null. */
   readonly everyMinutes: number | null;
+  /**
+   * For `schedule` only: the days the rule may run, `0` for Sunday to `6` for Saturday, as
+   * `Date.getDay` counts them. Empty means every day, which is what every rule written before this
+   * field means too.
+   */
+  readonly weekdays: readonly number[];
+  /**
+   * Where what the rule's run writes ends up (a skill's report folder), or empty.
+   *
+   * The app does not run the skill and cannot know where it writes, so the rule says it; the rule's
+   * card then opens the newest file there. A setting of the rule rather than a contract with the
+   * skill, so any skill that writes a file can be followed without the app learning its format.
+   */
+  readonly outputFolder: string;
   readonly action: AutomationAction;
   /**
    * False until the first evaluation has recorded what was already true.
@@ -293,6 +317,10 @@ export function isDue(rule: AutomationRule, lastRunAt: string | null, now: Date)
   if (!canRun(rule) || rule.trigger !== 'schedule') {
     return false;
   }
+  // A day the rule is not set for is simply not a day it runs; the next allowed day picks it up.
+  if (rule.weekdays.length > 0 && !rule.weekdays.includes(now.getDay())) {
+    return false;
+  }
   const last = lastRunAt === null ? null : new Date(lastRunAt);
   const lastAt = last === null || Number.isNaN(last.getTime()) ? null : last;
 
@@ -319,6 +347,65 @@ export function isDue(rule: AutomationRule, lastRunAt: string | null, now: Date)
   // Neither shape set: a rule that cannot say when it wants to run never runs, rather than running
   // on every tick. The settings form refuses to save one, and this is the second gate.
   return false;
+}
+
+/** Week days as stored: integers 0 to 6, once each, in order. Anything else is dropped. */
+export function sanitizeWeekdays(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const days = new Set<number>();
+  for (const day of value) {
+    if (Number.isInteger(day) && day >= 0 && day <= 6) {
+      days.add(day as number);
+    }
+  }
+  return [...days].sort((left, right) => left - right);
+}
+
+/**
+ * A skill name as a slash command takes it (`test-dev`, `plugin:skill`), or empty. It lands in an
+ * agent's prompt inside a shell argument, so nothing but letters, digits and `-_.:` survives.
+ */
+export function sanitizeSkillName(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const name = value.trim().replace(/^\//, '');
+  return /^[\w.:-]{1,80}$/.test(name) ? name : '';
+}
+
+/** An absolute folder path as typed, trimmed, or empty. Whether it exists is checked when opened. */
+export function sanitizeOutputFolder(value: unknown): string {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const folder = value.trim();
+  const absolute = /^[a-zA-Z]:[\\/]/.test(folder) || folder.startsWith('\\\\') || folder.startsWith('/');
+  return absolute && folder.length <= 1024 ? folder : '';
+}
+
+/**
+ * The file a rule's latest output is: the newest report-like file of the folder, else its newest
+ * file, or null when it holds none.
+ *
+ * Report-like first, because a run writes its state as it goes and its report at the end: during a
+ * run the newest file is often the state, which is not what "open the output" means. Hidden files
+ * never count. Only the folder itself is read, never below it.
+ */
+export function pickLatestOutput(
+  entries: readonly { name: string; isFile: boolean; mtimeMs: number }[],
+): string | null {
+  const files = entries.filter((entry) => entry.isFile && !entry.name.startsWith('.'));
+  const newest = (list: typeof files): string | null =>
+    list.length === 0 ? null : [...list].sort((left, right) => right.mtimeMs - left.mtimeMs)[0]?.name ?? null;
+  const reports = files.filter((entry) => /\.(md|html?|txt|pdf)$/i.test(entry.name));
+  return newest(reports) ?? newest(files);
+}
+
+/** The prompt a `skill` action sends: the slash command, then its arguments when there are any. */
+export function skillPrompt(skill: string, args: string): string {
+  return `/${skill} ${args}`.trim();
 }
 
 function sameDay(a: Date, b: Date): boolean {

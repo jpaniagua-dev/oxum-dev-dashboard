@@ -2455,6 +2455,8 @@ export const IpcChannel = {
   AutomationsSave: 'automations:save',
   AutomationsForget: 'automations:forget',
   AutomationsClearLog: 'automations:clear-log',
+  /** invoke: (ruleId) => { ok, message }, opens the newest file of the rule's output folder */
+  AutomationsOpenOutput: 'automations:open-output',
   VaultRead: 'vault:read',
   VaultSave: 'vault:save',
   VaultDelete: 'vault:delete',
@@ -2824,6 +2826,8 @@ export interface RendererApi {
    * only this one is a cross.
    */
   clearAutomationLog(): Promise<AutomationState>;
+  /** Opens the newest file of a rule's output folder in its default program. */
+  openRuleOutput(ruleId: string): Promise<{ ok: boolean; message: string }>;
 
   /** The cards, never their values. */
   readVault(): Promise<VaultState>;

@@ -1068,6 +1068,28 @@ its design choices are deliberately not copied, and each is a rule here.
   what arrives is whatever reached the channel, and these rows decide whether an agent starts on its
   own. Same rule `tagColors` records: a whole object crossing the boundary is checked at the
   boundary.
+- **`skill` is the `agent` action with its prompt built for it**, added on 2026-10-08 on request,
+  to run a skill at a given time. The skill is picked from the Claude Code skills the Extensions
+  inventory reads (`skillNames`: user, project and local scopes, enabled only; a plugin's skills are
+  named through their plugin and left out), and the prompt is `/<skill> <arguments>` through the
+  same `runAgent` port, so it opens in the workspace with the context of any handoff. A stored name
+  no longer installed stays selected and says so. The name goes through `sanitizeSkillName` (letters,
+  digits, `-_.:`) because it lands inside a shell argument; a rule naming none is refused in words.
+  It replaced a dedicated Testing tab built and reverted the same week: the agent started in the
+  workspace already knows the environments and the skill carries the method, so a tab that rebuilt
+  both in TypeScript was the heavier answer to the same need.
+- **A scheduled rule can be limited to week days** (`weekdays`, `Date.getDay` numbers). Empty means
+  every day, which is also what every rule written before the field reads as. `isDue` checks the day
+  first, for both the daily and the interval form.
+- **A rule can name an output folder, and its card opens the newest file there** (added on
+  2026-10-13, on request). The app starts a skill and never reads what it writes, so where the report
+  lands is a setting of the rule (`outputFolder`, absolute, checked when opened) rather than a
+  contract with the skill: any skill that writes a file can be followed without the app learning its
+  format, which is exactly what the reverted Testing tab got wrong. `pickLatestOutput` prefers a
+  report-like file (`.md`, `.html`, `.txt`, `.pdf`) over the newest one, because a run updates its
+  state file as it goes and writes its report last. The folder is read from the stored rule, never
+  from the renderer, and only the folder itself is listed. On the card and not on an Activity line:
+  those lines are plain text and do not know which rule wrote them.
 - **The one guess this feature makes is stated**: an action with no project falls back to the first
   configured one, because a tab needs a folder and a rule can watch something with no repository.
 

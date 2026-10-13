@@ -1344,6 +1344,52 @@ body {
   flex: 1 1 130px;
 }
 
+/*
+ * The week days of a scheduled rule: seven small switches, lit when the rule may run that day. Lit in
+ * the accent like the other pressed toggles of the app, so "on" reads the same everywhere.
+ */
+.automation__days {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.automation__day {
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-xs);
+  cursor: pointer;
+}
+
+.automation__day--on {
+  border-color: var(--primary);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.automation__day:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.automation__folder {
+  flex: 1 1 220px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-xs);
+}
+
 .automation__clock,
 .automation__every {
   width: 64px;

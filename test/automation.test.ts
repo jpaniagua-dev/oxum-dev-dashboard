@@ -14,7 +14,12 @@ import {
   fillTemplate,
   isDue,
   isScheduled,
+  pickLatestOutput,
   quotePrompt,
+  sanitizeOutputFolder,
+  sanitizeSkillName,
+  sanitizeWeekdays,
+  skillPrompt,
   targetsFor,
 } from '../src/shared/automation.js';
 
@@ -109,7 +114,9 @@ function rule(over: Partial<AutomationRule> = {}): AutomationRule {
     trigger: 'pull-approved',
     atMinute: null,
     everyMinutes: null,
-    action: { kind: 'notify', text: '{{repo}}#{{number}} approved', projectId: null },
+    weekdays: [],
+    outputFolder: '',
+    action: { kind: 'notify', text: '{{repo}}#{{number}} approved', projectId: null, skill: '' },
     armed: true,
     ...over,
   };
@@ -202,7 +209,7 @@ describe('evaluate', () => {
     // was fixed, broke again, and said nothing the second time.
     const broken: AutomationWorld = { ...EMPTY, rows: [row('a', 'crashed')] };
     const healthy: AutomationWorld = { ...EMPTY, rows: [row('a', 'serving')] };
-    const crash = rule({ trigger: 'server-broken', action: { kind: 'notify', text: '{{project}} is {{phase}}', projectId: null } });
+    const crash = rule({ trigger: 'server-broken', action: { kind: 'notify', text: '{{project}} is {{phase}}', projectId: null, skill: '' } });
 
     const first = evaluate([crash], broken, {});
     expect(first.firings).toHaveLength(1);
@@ -269,6 +276,14 @@ describe('isDue', () => {
     const r = rule({ trigger: 'schedule', atMinute: 9 * 60 });
     expect(isDue(r, null, at(8, 59))).toBe(false);
     expect(isDue(r, null, at(9, 0))).toBe(true);
+  });
+
+  it('runs only on the week days it is set for, and every day when none is set', () => {
+    // 25 September 2026 is a Friday, day 5 for `Date.getDay`.
+    const friday = at(9, 0);
+    expect(isDue(rule({ trigger: 'schedule', everyMinutes: 30, weekdays: [1, 2, 3, 4] }), null, friday)).toBe(false);
+    expect(isDue(rule({ trigger: 'schedule', everyMinutes: 30, weekdays: [5] }), null, friday)).toBe(true);
+    expect(isDue(rule({ trigger: 'schedule', atMinute: 9 * 60, weekdays: [] }), null, friday)).toBe(true);
   });
 
   it('a daily rule that already ran today does not run again after a restart', () => {
@@ -357,5 +372,43 @@ describe('evaluate, naming', () => {
     };
     const decision = evaluate([rule({ name: 'Ping me on approval' })], world, {});
     expect(decision.firings[0]?.ruleName).toBe('Ping me on approval');
+  });
+});
+
+describe('skill actions', () => {
+  it('cleans a stored set of week days', () => {
+    expect(sanitizeWeekdays([5, 1, 1, 7, -1, 2.5, '3'])).toEqual([1, 5]);
+    expect(sanitizeWeekdays('weekdays')).toEqual([]);
+  });
+
+  it('keeps a skill name a slash command can carry, and nothing a shell could read', () => {
+    expect(sanitizeSkillName(' /test-dev ')).toBe('test-dev');
+    expect(sanitizeSkillName('plugin:skill')).toBe('plugin:skill');
+    expect(sanitizeSkillName('test-dev; rm -rf')).toBe('');
+    expect(sanitizeSkillName('$(whoami)')).toBe('');
+    expect(sanitizeSkillName(undefined)).toBe('');
+  });
+
+  it('opens the newest report of an output folder, and its newest file when there is no report', () => {
+    const entry = (name: string, mtimeMs: number, isFile = true): { name: string; mtimeMs: number; isFile: boolean } => ({
+      name,
+      mtimeMs,
+      isFile,
+    });
+    expect(pickLatestOutput([entry('state.json', 30), entry('2026-10-12.md', 10), entry('2026-10-13.md', 20)])).toBe(
+      '2026-10-13.md',
+    );
+    expect(pickLatestOutput([entry('state.json', 30), entry('log.json', 40)])).toBe('log.json');
+    expect(pickLatestOutput([entry('.hidden.md', 50), entry('sub', 60, false)])).toBeNull();
+  });
+
+  it('keeps an absolute output folder only', () => {
+    expect(sanitizeOutputFolder(' C:/Users/dev/reports ')).toBe('C:/Users/dev/reports');
+    expect(sanitizeOutputFolder('reports/test-dev')).toBe('');
+  });
+
+  it('builds the prompt from the skill and its arguments', () => {
+    expect(skillPrompt('test-dev', '')).toBe('/test-dev');
+    expect(skillPrompt('test-dev', 'PROJ-12')).toBe('/test-dev PROJ-12');
   });
 });

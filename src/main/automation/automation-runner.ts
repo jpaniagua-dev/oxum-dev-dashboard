@@ -3,7 +3,7 @@ import type {
   AutomationRule,
   AutomationWorld,
 } from '@shared/automation.js';
-import { evaluate, fillTemplate, isDue } from '@shared/automation.js';
+import { evaluate, fillTemplate, isDue, skillPrompt } from '@shared/automation.js';
 import type { AutomationData, AutomationStore } from './automation-store.js';
 
 /**
@@ -206,6 +206,15 @@ export class AutomationRunner {
         return this.ports.runShell(firing.text, where, firing.ruleName)
           ? { ok: true, message: `Ran a command for ${firing.target.label}` }
           : { ok: false, message: `Could not run the command for ${firing.target.label}` };
+      case 'skill':
+        // Refused in words, like a shell action under its switch: a rule set to run a skill it does
+        // not name would otherwise look like a rule that never matched.
+        if (firing.action.skill.length === 0) {
+          return { ok: false, message: 'This rule runs a skill but names none' };
+        }
+        return this.ports.runAgent(skillPrompt(firing.action.skill, firing.text), where, firing.ruleName)
+          ? { ok: true, message: `Started /${firing.action.skill} on ${firing.target.label}` }
+          : { ok: false, message: `Could not start /${firing.action.skill} on ${firing.target.label}` };
     }
   }
 }
