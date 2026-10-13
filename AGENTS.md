@@ -1096,6 +1096,44 @@ its design choices are deliberately not copied, and each is a rule here.
 - **The one guess this feature makes is stated**: an action with no project falls back to the first
   configured one, because a tab needs a folder and a rule can watch something with no repository.
 
+## Card groups
+
+Added on 2026-10-13, on request: frames on the Cards canvas that hold the cards put in them, each
+with a name and a colour, so the agents, servers, watches and shells that belong together sit
+together. `shared/board-groups.ts` holds every rule; the board draws and gestures.
+
+- ⚠️ **A group holds KEYS, never terminal ids.** A terminal id is minted per launch, so a group of
+  them would come back empty after every restart, the reopened agents included. `memberKeyOf`
+  files a card under its most durable fact: an agent under its conversation (`agent:`), a project
+  action under the project and action (`action:`, which a rerun lands on again), anything else under
+  its terminal id (`session:`), valid for one run and dropped by the settings store at launch. A
+  shell has nothing that outlives it, and it does not come back anyway.
+- **A card is in one frame at most**, held by `moveToGroup` and by `sanitizeBoardGroups`, which keeps
+  a key in the first group naming it. Job cards (triage, review) never join: no durable key, and they
+  leave when their run ends.
+- **The frame lays its cards out, two by two.** Free positions inside a frame were refused: cards
+  would hang over its edge and the frame would chase them. A grouped card is a child of its frame
+  with no position of its own (`board-card--grouped`), and is dragged by a TRANSFORM, never moved
+  out of its frame mid-drag: a node leaving the document drops its pointer capture, the failure this
+  surface has paid for four times.
+- **A dropped card is filed by the POINTER, not by its box**: the frame under the pointer, or none.
+  A card is wide and half of it can hang over a frame it was not aimed at. Leaving a frame keeps the
+  card where it was let go.
+- **Boxes are measured from the screen** (`canvasRect`), not from `offsetLeft`, which a card inside
+  a frame reads relative to the frame. The content box's top left is the canvas origin under any
+  pan and zoom, which is what makes the subtraction exact; `fitCards` and `revealCard` go through it.
+- **A new frame goes to the right of everything**, then the plane moves to show it: placed where the
+  reader is looking, it would land over cards it does not hold, which reads as cards it does.
+- **Coloured through the tag palette** (`tag--<colour>` sets `--tag-colour`), on the border and the
+  header with a 6% wash inside: the cards keep their own status colours. A new group takes the least
+  used colour.
+- **Stored as `boardGroups`, local-only, sanitised at both gates** like `tagColors`, since a whole
+  object crosses the boundary. Written when a gesture ends, never per pointer move, and applied on
+  the board at once (`updateGroups`) so a frame does not wait for the setting to come back.
+- **Repaints stop while a group's name is typed** (`editingGroup`), the editing guard the card
+  title and note already have, and the signature carries the groups. Deleting a frame frees its
+  cards and stops nothing.
+
 ## Restoring agent sessions
 
 Added on 2026-10-13, on request: quitting killed every terminal and every agent had to be started

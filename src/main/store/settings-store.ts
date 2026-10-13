@@ -11,6 +11,7 @@ import {
 } from '@shared/project-tags.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
 import { BOARD_PREVIEW_RATIO, sanitizePreviewRatio } from '@shared/board-preview.js';
+import { sanitizeBoardGroups } from '@shared/board-groups.js';
 import {
   PANE_COLUMNS_AUTO,
   TERMINAL_FONT_SIZE,
@@ -90,6 +91,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // opens the picker sees their surface rearrange itself after an update.
   terminalColumns: PANE_COLUMNS_AUTO,
   boardPreviewRatio: BOARD_PREVIEW_RATIO.default,
+  boardGroups: [],
   uiFontSize: UI_FONT_SIZE.default,
   // Empty means the default folder. Resolved in the main process, never here: this module must not
   // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in CLAUDE.md.
@@ -150,7 +152,10 @@ export class SettingsStore {
     }
     try {
       const raw: unknown = JSON.parse(await readFile(this.filePath, 'utf8'));
-      this.cache = migrateHandoffs(raw, sanitizeSettings(raw), this.hasSkill);
+      const loaded = migrateHandoffs(raw, sanitizeSettings(raw), this.hasSkill);
+      // At launch only: a `session:` key names a terminal id of the previous run, which now means
+      // another tab or nothing. During a run they are what files a shell in its frame.
+      this.cache = { ...loaded, boardGroups: sanitizeBoardGroups(loaded.boardGroups, true) };
     } catch (error) {
       console.error('[settings] unreadable file, using defaults', error);
     }
@@ -280,6 +285,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     ),
     terminalColumns: sanitizeColumns(input.terminalColumns),
     boardPreviewRatio: sanitizePreviewRatio(input.boardPreviewRatio),
+    boardGroups: sanitizeBoardGroups(input.boardGroups),
     // Clamped for exactly the reason above, only more so: this one sizes the settings window's own
     // text, so a hand-edited `4` would have to be fixed in a form that is no longer readable.
     uiFontSize: clamp(

@@ -38,6 +38,15 @@ keep the environment they started with.
 A shortcut the app acts on is not passed on to the program in the terminal. One it has nothing to do
 for (`Ctrl+B` with no terminal to show a note for) reaches the program as usual.
 
+### Groups
+
+Gather cards in a **group**: a frame with a name and a colour. **New group** in the canvas toolbar
+adds an empty one; right-click a card and pick **Move to a group** to file it, or drag the card onto
+a frame. Drag a card out of its frame, or use **Remove from the group**, to take it out. Drag a
+frame by its header to move it with its cards; double-click the header to rename it; right-click it
+to change its colour or delete it (its cards stay, and nothing is stopped). Agents, dev servers and
+watches find their group again after a restart; a shell is grouped until it closes.
+
 ## Agents come back after a restart
 
 The coding agents open when you quit (opened with `Ctrl+N`, **Work on this**, or a rule) reopen at

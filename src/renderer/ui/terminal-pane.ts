@@ -170,6 +170,8 @@ interface SessionMenuOptions {
   readonly onRename?: () => void;
   /** A positional tab command has no meaning on the freely arranged Cards canvas. */
   readonly includeCloseTabsToRight?: boolean;
+  /** Entries only the calling surface knows about, such as the Cards canvas's groups. */
+  readonly extraItems?: readonly MenuItem[];
 }
 
 /** Which side of a tab a drop lands on. */
@@ -1480,6 +1482,7 @@ export class TerminalPane {
           this.actions.onEditNote(session.id);
         },
       },
+      ...(options.extraItems ?? []),
       {
         label: 'Close the tab',
         hint: 'Alt+Shift+W on the active tab',

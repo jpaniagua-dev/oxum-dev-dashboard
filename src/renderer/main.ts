@@ -396,6 +396,13 @@ class App {
           this.stampMessage('Could not start the agent, see the console');
         });
       },
+      // Stored like the sidebar share: a local-only setting, so the board is not rebuilt by an echo.
+      onGroupsChange: (groups) => {
+        if (this.settings !== null) {
+          this.settings = { ...this.settings, boardGroups: groups };
+        }
+        void window.api.updateSettings({ boardGroups: groups });
+      },
     });
     // After the layout, never before: the strips are painted per pane, so a palette applied to a
     // surface with no panes yet would be a render thrown away.
@@ -927,6 +934,7 @@ class App {
       lastOutputAt: this.lastOutputAt,
       profiles: this.profiles,
       selectedId: this.boardPreviewId,
+      groups: this.settings?.boardGroups ?? [],
     });
   }
 
@@ -941,6 +949,8 @@ class App {
       onRename: () => this.board?.rename(session.id),
       // Cards can be moved freely, so there is no stable session "to the right" of another one.
       includeCloseTabsToRight: false,
+      // Frames exist on the canvas only, so a tab's own menu does not offer them.
+      extraItems: this.board?.groupMenuItems(session, x, y) ?? [],
     });
   }
 

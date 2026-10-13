@@ -4313,6 +4313,106 @@ body {
   border-color: var(--border-strong);
 }
 
+/*
+ * A group of cards: a frame that lays its cards out two by two.
+ *
+ * Coloured through `--tag-colour`, which the `tag--<colour>` class on the frame sets, so a frame and a
+ * project tag of one colour are the same colour by construction. The colour is on the border and the
+ * header, with only a faint wash inside: the cards keep their own status colours, which a filled frame
+ * would drown.
+ */
+.board-group {
+  position: absolute;
+  min-width: 260px;
+  border: 1px solid var(--tag-colour, var(--border-strong));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--tag-colour, var(--border)) 6%, transparent);
+}
+
+.board-group--dragging {
+  z-index: 2;
+  box-shadow: 0 6px 16px rgb(0 0 0 / 28%);
+}
+
+.board-group__head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--tag-colour, var(--border));
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: color-mix(in srgb, var(--tag-colour, var(--border)) 16%, var(--surface));
+  cursor: grab;
+  user-select: none;
+}
+
+.board-group--dragging .board-group__head {
+  cursor: grabbing;
+}
+
+/* The same 7px dot as a tag: the app says "which family" with a dot. */
+.board-group__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--tag-colour, var(--border-strong));
+}
+
+.board-group__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--font-md);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.board-group__rename {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid var(--primary-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+.board-group__count {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.board-group__cards {
+  display: grid;
+  grid-template-columns: repeat(2, 240px);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+}
+
+/* In a frame, a card is laid out by the grid and has no position of its own. */
+.board-card--grouped {
+  position: relative;
+}
+
+.board-group__empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 14px 4px;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  font-style: italic;
+  text-align: center;
+}
+
 /* The card whose live terminal occupies the sidebar. One accent, on the selection boundary only. */
 .board-card--selected {
   border-color: var(--primary);

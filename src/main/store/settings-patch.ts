@@ -3,6 +3,7 @@ import { isStripTab, type AppSettings } from '@shared/contracts.js';
 import { sanitizeTagColors } from '@shared/project-tags.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
 import { sanitizePreviewRatio } from '@shared/board-preview.js';
+import { sanitizeBoardGroups } from '@shared/board-groups.js';
 
 /**
  * Settings the dashboard writes about its own geometry.
@@ -33,6 +34,8 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'terminalColumns',
   // Dragged on the dashboard's own separator, where an echo would refit the terminal mid-gesture.
   'boardPreviewRatio',
+  // Edited on the canvas itself: an echo would rebuild the frames under the gesture.
+  'boardGroups',
 ]);
 
 /**
@@ -95,6 +98,11 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   // become the default at the first gate rather than the second.
   if (typeof input.terminalColumns === 'number') {
     patch.terminalColumns = sanitizeColumns(input.terminalColumns);
+  }
+  // Sanitised here as well as in the store, like the tag colours: a whole object crossing the
+  // boundary is checked at the boundary, before it is spread over the cache.
+  if (Array.isArray(input.boardGroups)) {
+    patch.boardGroups = sanitizeBoardGroups(input.boardGroups);
   }
   if (typeof input.boardPreviewRatio === 'number') {
     patch.boardPreviewRatio = sanitizePreviewRatio(input.boardPreviewRatio);

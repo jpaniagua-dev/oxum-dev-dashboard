@@ -129,6 +129,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       'activeStrip',
       'agentsHeight',
       'automationsHeight',
+      'boardGroups',
       'boardPreviewRatio',
       'explorerHeight',
       'extensionsHeight',
@@ -156,6 +157,14 @@ describe('LOCAL_ONLY_KEYS', () => {
     // renderer will draw, so an impossible value has to become the default at the first gate.
     expect(asPatch({ terminalColumns: 9 })).toEqual({ terminalColumns: 0 });
     expect(asPatch({ terminalColumns: '2' })).toEqual({});
+  });
+
+  it('lets the dashboard store its card groups, cleaned at the gate', () => {
+    const groups = [{ id: 'g1', name: 'Fiscal year', color: 'green', x: 10, y: 20, members: ['action:web-app/start', 'junk'] }];
+    expect(asPatch({ boardGroups: groups })).toEqual({
+      boardGroups: [{ id: 'g1', name: 'Fiscal year', color: 'green', x: 10, y: 20, members: ['action:web-app/start'] }],
+    });
+    expect(asPatch({ boardGroups: 'nope' })).toEqual({});
   });
 
   it('lets the dashboard remember the share of the Cards sidebar, clamped', () => {

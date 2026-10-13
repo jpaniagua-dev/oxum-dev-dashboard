@@ -1,3 +1,4 @@
+import type { BoardGroup } from './board-groups.js';
 import type { AgentProfile } from './agent-profile.js';
 import type { AutomationRule } from './automation.js';
 import type { ExtensionAction, ExtensionsResult, ExtensionsView } from './extensions.js';
@@ -1943,6 +1944,11 @@ export interface AppSettings {
    * the separator once a drag ends, so the split survives a restart and a resized window.
    */
   boardPreviewRatio: number;
+  /**
+   * The frames of the Cards canvas: name, colour, position and the cards filed in each, by a key
+   * that outlives a terminal id (see `board-groups.ts`). Written by the board itself, so local-only.
+   */
+  boardGroups: BoardGroup[];
   /** Font size of the interface, in pixels: the base every other size is a ratio of. */
   uiFontSize: number;
   /** User-declared shell profiles, merged over the detected ones by id. */

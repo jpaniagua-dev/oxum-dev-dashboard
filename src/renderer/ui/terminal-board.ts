@@ -5,7 +5,21 @@ import type {
   TerminalId,
   TerminalSession,
 } from '@shared/contracts.js';
-import { showContextMenu } from './context-menu.js';
+import { showContextMenu, type MenuItem } from './context-menu.js';
+import type { TagColor } from '@shared/contracts.js';
+import {
+  cleanName,
+  groupAt,
+  groupOf,
+  memberKeyOf,
+  moveToGroup,
+  newGroup,
+  nextGroupColor,
+  type BoardGroup,
+  type GroupRect,
+  type MemberKey,
+} from '@shared/board-groups.js';
+import { TAG_COLORS } from '@shared/project-tags.js';
 import { clearChildren, createElement, createIcon } from './dom.js';
 import { AGENT_ICON, RERUN_ICON } from './icons.js';
 import type { JobKind, JobRun } from '@shared/job-run.js';
@@ -269,6 +283,12 @@ export interface TerminalBoardActions {
    */
   onNote: (terminalId: TerminalId, text: string) => void;
   onRename: (terminalId: TerminalId, title: string) => void;
+  /**
+   * The groups after a gesture changed them: a frame created, renamed, recoloured, moved or deleted,
+   * a card filed or taken out. Reported once the gesture is over, never per pointer move, since the
+   * caller stores them.
+   */
+  onGroupsChange: (groups: BoardGroup[]) => void;
 }
 
 /** What the board needs to know about the world, handed in on every render. */
@@ -289,7 +309,19 @@ export interface TerminalBoardState {
   readonly profiles: readonly ShellProfile[];
   /** Session currently shown in the terminal sidebar. */
   readonly selectedId: TerminalId | null;
+  /** The frames, from the settings. */
+  readonly groups: readonly BoardGroup[];
 }
+
+/** One colour entry of a frame's menu, by the name the tags use. */
+const COLOUR_LABELS: Record<TagColor, string> = {
+  blue: 'Blue',
+  green: 'Green',
+  yellow: 'Yellow',
+  orange: 'Orange',
+  red: 'Red',
+  grey: 'Grey',
+};
 
 const SERVER_ICON = 'M2.5 3h11v4h-11zM2.5 9h11v4h-11zM4.5 5h.1M4.5 11h.1M7 5h4.5M7 11h4.5';
 const BUILD_ICON = 'M2.5 2.5h4.5v4.5h-4.5zM9 2.5h4.5v4.5h-4.5zM5.75 9h4.5v4.5h-4.5z';
@@ -314,6 +346,7 @@ export class TerminalBoard {
     lastOutputAt: new Map(),
     profiles: [],
     selectedId: null,
+    groups: [],
   };
   private readonly content: HTMLElement;
   private readonly toolbar: HTMLElement;
@@ -329,6 +362,10 @@ export class TerminalBoard {
    * typed since the last poll.
    */
   private editing: TerminalId | null = null;
+  /** The group whose name is being typed, which holds repaints off exactly like `editing`. */
+  private editingGroup: string | null = null;
+  /** The last plain click on a frame's title, to recognise a double click the way a card does. */
+  private lastGroupClick: { id: string; at: number } | null = null;
   /**
    * The last plain click on a card title, which is how a double click is recognised.
    *
@@ -416,6 +453,15 @@ export class TerminalBoard {
     pick.append(createIcon('M3.5 6l4.5 4.5L12.5 6', { paint: 'stroke' }));
     this.pickShell = pick;
     toolbar.append(pick);
+    /*
+     * The visible door to groups. Right-clicking a card and dragging it onto a frame are the quick
+     * gestures, and neither tells anyone that frames exist.
+     */
+    toolbar.append(
+      this.toolbarButton('New group of cards', 'M2.5 4.5h4l1.5 1.5h5.5v7h-11zM8 8.5v3M6.5 10h3', () => {
+        this.createGroup(null);
+      }),
+    );
     toolbar.append(this.rule());
 
     toolbar.append(
@@ -556,11 +602,11 @@ export class TerminalBoard {
   private paint(force = false): void {
     // Never under a pointer that is carrying a card, and never under an open editor: the first
     // drops the pointer capture mid-gesture, the second throws away what is being typed.
-    if (this.carrying || this.editing !== null) {
+    if (this.carrying || this.editing !== null || this.editingGroup !== null) {
       return;
     }
     const now = Date.now();
-    const next = `${this.signature(now)}\u0003${this.jobSignature(now)}`;
+    const next = `${this.signature(now)}\u0003${this.jobSignature(now)}\u0003${JSON.stringify(this.state.groups)}`;
     if (!force && next === this.painted) {
       return;
     }
@@ -581,7 +627,24 @@ export class TerminalBoard {
       return;
     }
 
-    this.state.sessions.forEach((session, index) => {
+    /*
+     * Frames first, so a free card dragged over one is drawn above it, then the cards that are in no
+     * group. A card filed in a group is drawn INSIDE its frame and laid out by it: free positions
+     * inside a frame would let cards overlap its edge and the frame would have to chase them.
+     */
+    const filed = new Set<TerminalId>();
+    for (const group of this.state.groups) {
+      const members = group.members
+        .map((key) => this.state.sessions.find((session) => memberKeyOf(session) === key))
+        .filter((session): session is TerminalSession => session !== undefined);
+      for (const member of members) {
+        filed.add(member.id);
+      }
+      this.content.append(this.buildGroup(group, members, now));
+    }
+
+    const free = this.state.sessions.filter((session) => !filed.has(session.id));
+    free.forEach((session, index) => {
       const point = this.points.get(session.id) ?? defaultPoint(index);
       this.content.append(this.buildCard(session, point, now));
     });
@@ -589,9 +652,323 @@ export class TerminalBoard {
     // After the sessions in the default layout, so a run starting while four terminals are open
     // lands in the next free slot rather than on top of one of them.
     this.state.jobs.forEach((job, index) => {
-      const point = this.points.get(job.id) ?? defaultPoint(this.state.sessions.length + index);
+      const point = this.points.get(job.id) ?? defaultPoint(free.length + index);
       this.content.append(this.buildJobCard(job, point, now));
     });
+  }
+
+  /* ---------------------------------------------------------------- groups */
+
+  /**
+   * One frame: a header holding its name, and its cards laid out two by two.
+   *
+   * Coloured through the tag classes, so a frame and a project tag of the same colour are the same
+   * colour by construction. On the border and the header only: the cards inside keep their own
+   * status colours, and a filled frame would wash them out.
+   */
+  private buildGroup(group: BoardGroup, members: readonly TerminalSession[], now: number): HTMLElement {
+    const frame = createElement('section', { className: `board-group tag--${group.color}` });
+    frame.dataset['group'] = group.id;
+    frame.style.left = `${group.x}px`;
+    frame.style.top = `${group.y}px`;
+    frame.setAttribute('aria-label', `Group ${group.name}`);
+
+    const head = createElement('div', {
+      className: 'board-group__head',
+      title: `${group.name}\n(drag to move the group, double-click to rename, right click for its colour)`,
+    });
+    head.append(createElement('span', { className: 'board-group__dot' }));
+    head.append(createElement('span', { className: 'board-group__title', text: group.name }));
+    head.append(createElement('span', { className: 'board-group__count', text: String(members.length) }));
+    frame.append(head);
+
+    const cards = createElement('div', { className: 'board-group__cards' });
+    if (members.length === 0) {
+      cards.append(
+        createElement('p', {
+          className: 'board-group__empty',
+          text: 'Drop cards here, or right click a card and move it to this group.',
+        }),
+      );
+    }
+    for (const session of members) {
+      cards.append(this.buildCard(session, null, now));
+    }
+    frame.append(cards);
+
+    head.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openGroupMenu(group, event.clientX, event.clientY);
+    });
+    this.attachGroupDrag(head, frame, group);
+    return frame;
+  }
+
+  /** Moving a frame by its header, renaming it on a double click. Same guards as a card's drag. */
+  private attachGroupDrag(head: HTMLElement, frame: HTMLElement, group: BoardGroup): void {
+    const THRESHOLD = 4;
+    const DOUBLE_CLICK_MS = 400;
+    let origin: CardPoint | null = null;
+    let moved = false;
+
+    head.addEventListener('pointerdown', (event) => {
+      // The primary button only, for the reason a card checks it: a right click captured here would
+      // read its `pointerup` as a click.
+      if (event.button !== 0 || (event.target as HTMLElement).closest('input') !== null) {
+        return;
+      }
+      origin = { x: event.clientX, y: event.clientY };
+      moved = false;
+      head.setPointerCapture(event.pointerId);
+      event.stopPropagation();
+    });
+
+    head.addEventListener('pointermove', (event) => {
+      if (origin === null) {
+        return;
+      }
+      const dx = event.clientX - origin.x;
+      const dy = event.clientY - origin.y;
+      if (!moved && Math.abs(dx) < THRESHOLD && Math.abs(dy) < THRESHOLD) {
+        return;
+      }
+      if (!moved) {
+        moved = true;
+        this.carrying = true;
+        frame.classList.add('board-group--dragging');
+      }
+      frame.style.left = `${group.x + dx / this.zoom}px`;
+      frame.style.top = `${group.y + dy / this.zoom}px`;
+    });
+
+    const end = (event: PointerEvent): void => {
+      if (origin === null) {
+        return;
+      }
+      const dx = event.clientX - origin.x;
+      const dy = event.clientY - origin.y;
+      origin = null;
+      this.carrying = false;
+      frame.classList.remove('board-group--dragging');
+      if (head.hasPointerCapture(event.pointerId)) {
+        head.releasePointerCapture(event.pointerId);
+      }
+      if (moved) {
+        this.updateGroups(
+          this.state.groups.map((entry) =>
+            entry.id === group.id
+              ? { ...entry, x: Math.round(group.x + dx / this.zoom), y: Math.round(group.y + dy / this.zoom) }
+              : entry,
+          ),
+        );
+        return;
+      }
+      const last = this.lastGroupClick;
+      if (last !== null && last.id === group.id && event.timeStamp - last.at < DOUBLE_CLICK_MS) {
+        this.lastGroupClick = null;
+        this.renameGroup(group.id);
+        return;
+      }
+      this.lastGroupClick = { id: group.id, at: event.timeStamp };
+    };
+    head.addEventListener('pointerup', end);
+    head.addEventListener('pointercancel', end);
+  }
+
+  /** Rename, colour and delete: everything a frame offers, on its header's right click. */
+  private openGroupMenu(group: BoardGroup, x: number, y: number): void {
+    showContextMenu(x, y, [
+      { label: 'Rename', run: () => this.renameGroup(group.id) },
+      {
+        label: 'Colour',
+        hint: `${COLOUR_LABELS[group.color]} now`,
+        // A second menu at the same spot, the app's standing answer to a submenu. The current colour
+        // is left out rather than shown disabled, which would read as a colour that is unavailable.
+        run: () =>
+          showContextMenu(
+            x,
+            y,
+            TAG_COLORS.filter((color) => color !== group.color).map((color) => ({
+              label: COLOUR_LABELS[color],
+              run: () =>
+                this.updateGroups(
+                  this.state.groups.map((entry) => (entry.id === group.id ? { ...entry, color } : entry)),
+                ),
+            })),
+          ),
+      },
+      {
+        label: 'Delete the group',
+        hint: 'Its cards stay on the board and every session keeps running',
+        run: () => this.updateGroups(this.state.groups.filter((entry) => entry.id !== group.id)),
+      },
+    ]);
+  }
+
+  /**
+   * The entries a card's menu offers about groups, for the shared session menu to append.
+   *
+   * Built here because the board is what knows the frames; the menu belongs to the pane, and the
+   * app keeps one menu for a card and its tab.
+   */
+  groupMenuItems(session: TerminalSession, x: number, y: number): MenuItem[] {
+    const key = memberKeyOf(session);
+    const current = groupOf(this.state.groups, key);
+    const items: MenuItem[] = [
+      {
+        label: 'Move to a group',
+        hint: current === undefined ? 'Groups this card with others in a frame' : `In ${current.name} now`,
+        run: () =>
+          showContextMenu(x, y, [
+            ...this.state.groups
+              .filter((group) => group.id !== current?.id)
+              .map((group) => ({
+                label: group.name,
+                run: () => this.updateGroups(moveToGroup(this.state.groups, key, group.id)),
+              })),
+            { label: 'New group', run: () => this.createGroup(key) },
+          ]),
+      },
+    ];
+    if (current !== undefined) {
+      items.push({
+        label: 'Remove from the group',
+        hint: `Takes it out of ${current.name}; the session keeps running`,
+        run: () => {
+          this.placeFreed(session.id);
+          this.updateGroups(moveToGroup(this.state.groups, key, null));
+        },
+      });
+    }
+    return items;
+  }
+
+  /**
+   * Adds a frame to the right of everything on the canvas, holding one card when given one, and
+   * brings it into view. To the right rather than where the reader is looking, so a new frame never
+   * lands over cards it does not hold, which would read as cards it does.
+   */
+  private createGroup(first: MemberKey | null): void {
+    const bounds = this.contentBounds();
+    const at = bounds === null ? { x: 20, y: 20 } : { x: bounds.x + bounds.width + 40, y: bounds.y };
+    const group = newGroup(this.state.groups, at, nextGroupColor(this.state.groups, TAG_COLORS));
+    const groups = [...this.state.groups, group];
+    this.updateGroups(first === null ? groups : moveToGroup(groups, first, group.id));
+    this.revealElement(this.content.querySelector<HTMLElement>(`[data-group="${group.id}"]`));
+  }
+
+  /** Applies groups at once and reports them, so the frame is drawn before the setting comes back. */
+  private updateGroups(groups: BoardGroup[]): void {
+    this.state = { ...this.state, groups };
+    this.paint(true);
+    this.actions.onGroupsChange(groups);
+  }
+
+  /**
+   * Gives a card leaving a frame through the menu a free spot just right of that frame, level with
+   * where it was, instead of a grid slot nobody chose. Outside the frame on purpose: a free card
+   * drawn over a frame reads as one of its cards.
+   */
+  private placeFreed(id: TerminalId): void {
+    const card = this.content.querySelector<HTMLElement>(`[data-card="${id}"]`);
+    const frame = card?.closest<HTMLElement>('.board-group') ?? null;
+    if (card === null || frame === null) {
+      return;
+    }
+    const cardRect = this.canvasRect(card);
+    const frameRect = this.canvasRect(frame);
+    this.points.set(id, { x: frameRect.x + frameRect.width + 20, y: cardRect.y });
+  }
+
+  private renameGroup(id: string): void {
+    const frame = this.content.querySelector<HTMLElement>(`[data-group="${id}"]`);
+    const title = frame?.querySelector('.board-group__title');
+    const group = this.state.groups.find((entry) => entry.id === id);
+    if (frame === null || frame === undefined || title === null || title === undefined || group === undefined) {
+      return;
+    }
+    this.editingGroup = id;
+    const field = document.createElement('input');
+    field.className = 'board-group__rename';
+    field.value = group.name;
+    field.setAttribute('aria-label', 'Rename this group');
+    field.addEventListener('pointerdown', (event) => event.stopPropagation());
+    let done = false;
+    const finish = (commit: boolean): void => {
+      if (done) {
+        return;
+      }
+      done = true;
+      this.editingGroup = null;
+      const name = cleanName(field.value);
+      if (commit && name !== group.name) {
+        this.updateGroups(this.state.groups.map((entry) => (entry.id === id ? { ...entry, name } : entry)));
+        return;
+      }
+      this.paint(true);
+    };
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      }
+    });
+    field.addEventListener('blur', () => finish(true));
+    title.replaceWith(field);
+    void Promise.resolve().then(() => {
+      field.focus();
+      field.select();
+    });
+  }
+
+  /** The frames on screen, in canvas units, for dropping a card on one. */
+  private frameRects(): { id: string; rect: GroupRect }[] {
+    return [...this.content.querySelectorAll<HTMLElement>('.board-group')].map((frame) => ({
+      id: frame.dataset['group'] ?? '',
+      rect: { x: frame.offsetLeft, y: frame.offsetTop, width: frame.offsetWidth, height: frame.offsetHeight },
+    }));
+  }
+
+  /**
+   * An element's box in canvas units, wherever it is nested.
+   *
+   * From the screen rather than from `offsetLeft`, which is relative to the nearest positioned
+   * ancestor: a card inside a frame would read its offset in the frame. The content box's own top
+   * left is the canvas origin under any pan and zoom, which is what makes the subtraction exact.
+   */
+  private canvasRect(element: HTMLElement): BoardRect {
+    const origin = this.content.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    return {
+      x: (box.left - origin.left) / this.zoom,
+      y: (box.top - origin.top) / this.zoom,
+      width: box.width / this.zoom,
+      height: box.height / this.zoom,
+    };
+  }
+
+  /** The box around every card and frame, in canvas units, or null on an empty board. */
+  private contentBounds(): BoardRect | null {
+    const items = [...this.content.querySelectorAll<HTMLElement>('.board-card, .board-group')];
+    if (items.length === 0) {
+      return null;
+    }
+    let left = Infinity;
+    let top = Infinity;
+    let right = -Infinity;
+    let bottom = -Infinity;
+    for (const item of items) {
+      const rect = this.canvasRect(item);
+      left = Math.min(left, rect.x);
+      top = Math.min(top, rect.y);
+      right = Math.max(right, rect.x + rect.width);
+      bottom = Math.max(bottom, rect.y + rect.height);
+    }
+    return { x: left, y: top, width: right - left, height: bottom - top };
   }
 
   /**
@@ -673,7 +1050,7 @@ export class TerminalBoard {
    * `<pre>` showed was every frame of that redraw stacked on top of each other. Honouring those is
    * implementing a terminal, which is what the grid one click away already is.
    */
-  private buildCard(session: TerminalSession, point: CardPoint, now: number): HTMLElement {
+  private buildCard(session: TerminalSession, point: CardPoint | null, now: number): HTMLElement {
     const activity = activityOf(session.running, this.state.lastOutputAt.get(session.id), now);
     const project = this.state.rows.find((row) => row.project.id === session.projectId);
     const kind = sessionCardKind(session, project?.project.kind ?? null);
@@ -684,6 +1061,8 @@ export class TerminalBoard {
         `board-card--${activity}`,
         `board-card--${kind}`,
         selected ? 'board-card--selected' : '',
+        // In a frame, which lays it out: no position of its own.
+        point === null ? 'board-card--grouped' : '',
       ]
         .filter(Boolean)
         .join(' '),
@@ -691,8 +1070,10 @@ export class TerminalBoard {
     card.dataset['card'] = session.id;
     card.dataset['boardId'] = session.id;
     card.setAttribute('aria-current', selected ? 'true' : 'false');
-    card.style.left = `${point.x}px`;
-    card.style.top = `${point.y}px`;
+    if (point !== null) {
+      card.style.left = `${point.x}px`;
+      card.style.top = `${point.y}px`;
+    }
     card.title = `${session.title}\n${session.cwd}\n(drag to move it, click to preview it, right click to act)`;
 
     /*
@@ -801,6 +1182,7 @@ export class TerminalBoard {
       () => {
         this.rename(session.id);
       },
+      memberKeyOf(session),
     );
     return card;
   }
@@ -827,9 +1209,11 @@ export class TerminalBoard {
   private attachCardDrag(
     card: HTMLElement,
     id: CardId,
-    from: CardPoint,
+    from: CardPoint | null,
     onClick: () => void,
     onTitleDoubleClick?: () => void,
+    /** What a session card is filed under; a job card has none and cannot join a frame. */
+    memberKey?: MemberKey,
   ): void {
     const THRESHOLD = 4;
     const DOUBLE_CLICK_MS = 400;
@@ -891,6 +1275,12 @@ export class TerminalBoard {
       }
       // Divided by the zoom: a card has to follow the pointer on screen, and the canvas it lives on
       // is scaled, so screen pixels and canvas units are not the same length.
+      if (from === null) {
+        // In a frame: it follows the pointer by a transform and stays a child of its frame. Moving
+        // the node out would end the pointer capture, which dies with a node leaving the document.
+        card.style.transform = `translate(${dx / this.zoom}px, ${dy / this.zoom}px)`;
+        return;
+      }
       this.points.set(id, { x: from.x + dx / this.zoom, y: from.y + dy / this.zoom });
       card.style.left = `${from.x + dx / this.zoom}px`;
       card.style.top = `${from.y + dy / this.zoom}px`;
@@ -924,6 +1314,9 @@ export class TerminalBoard {
         onClick();
         return;
       }
+      if (memberKey !== undefined && this.dropCard(card, id, memberKey, event)) {
+        return;
+      }
       // Forced: the card was moved by writing to its style, so the signature of what is on screen
       // and the signature of what should be on screen have drifted. Also catches every change the
       // poll wanted to draw while the pointer was down.
@@ -931,6 +1324,30 @@ export class TerminalBoard {
     };
     card.addEventListener('pointerup', end);
     card.addEventListener('pointercancel', end);
+  }
+
+  /**
+   * Files a dropped card by where the POINTER is: in the frame under it, or in none.
+   *
+   * The pointer and not the card's box, because the pointer is what the reader aimed: a card is wide
+   * and half of it can hang over a frame it was not meant for. Returns false when nothing changed
+   * (dropped back in its own frame, or a free card dropped on the open canvas), and the caller then
+   * repaints as for any drag. A card leaving a frame stays where it was let go.
+   */
+  private dropCard(card: HTMLElement, id: CardId, key: MemberKey, event: PointerEvent): boolean {
+    const origin = this.content.getBoundingClientRect();
+    const pointer = { x: (event.clientX - origin.left) / this.zoom, y: (event.clientY - origin.top) / this.zoom };
+    const target = groupAt(pointer, this.frameRects());
+    const current = groupOf(this.state.groups, key)?.id ?? null;
+    if (target === current) {
+      return false;
+    }
+    if (target === null) {
+      const rect = this.canvasRect(card);
+      this.points.set(id, { x: rect.x, y: rect.y });
+    }
+    this.updateGroups(moveToGroup(this.state.groups, key, target));
+    return true;
   }
 
   /**
@@ -1146,19 +1563,20 @@ export class TerminalBoard {
     const card = [...this.content.querySelectorAll<HTMLElement>('.board-card')].find(
       (entry) => entry.dataset['boardId'] === id,
     );
-    if (card === undefined) {
+    this.revealElement(card ?? null);
+  }
+
+  /** Brings a card or a frame on screen when it is not entirely, by moving the plane. */
+  private revealElement(card: HTMLElement | null): void {
+    if (card === null) {
       return;
     }
 
     const margin = 24;
     // The toolbar floats above the canvas and is therefore not part of its usable area.
     const head = this.toolbar.offsetTop + this.toolbar.offsetHeight + 12;
-    const rect: BoardRect = {
-      x: card.offsetLeft,
-      y: card.offsetTop,
-      width: card.offsetWidth,
-      height: card.offsetHeight,
-    };
+    // From the screen, since a card in a frame has its offsets in the frame.
+    const rect = this.canvasRect(card);
     const viewport: BoardRect = {
       x: margin,
       y: head,
@@ -1188,31 +1606,19 @@ export class TerminalBoard {
    * a share of the width that changes as it is dragged.
    */
   private fitCards(): void {
-    // The class and not `data-card`, which only session cards carry: a running job is a card too.
-    const cards = [...this.content.querySelectorAll<HTMLElement>('.board-card')];
-    if (cards.length === 0) {
+    // Every card, a running job included, and every frame, an empty one too.
+    const bounds = this.contentBounds();
+    if (bounds === null) {
       this.pan = { x: 0, y: 0 };
       this.zoom = 1;
       this.applyTransform();
       return;
     }
-    let left = Infinity;
-    let top = Infinity;
-    let right = -Infinity;
-    let bottom = -Infinity;
-    for (const card of cards) {
-      // `offsetLeft` and `offsetWidth` are layout values, untouched by the plane's transform, so
-      // they are already in canvas units.
-      left = Math.min(left, card.offsetLeft);
-      top = Math.min(top, card.offsetTop);
-      right = Math.max(right, card.offsetLeft + card.offsetWidth);
-      bottom = Math.max(bottom, card.offsetTop + card.offsetHeight);
-    }
     const margin = 24;
     // The toolbar floats over the top of the plane, so the frame starts below it.
     const head = this.toolbar.offsetTop + this.toolbar.offsetHeight + 12;
     const view = fitView(
-      { x: left, y: top, width: right - left, height: bottom - top },
+      bounds,
       {
         x: margin,
         y: head,
