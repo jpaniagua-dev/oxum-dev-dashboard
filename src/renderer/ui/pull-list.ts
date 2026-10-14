@@ -383,7 +383,7 @@ function renderScopes(
  */
 function emptyMessage(repo: RepoPulls, scope: PullScope): string {
   if (repo.checkedAt === null) {
-    return 'Reading...';
+    return 'Reading…';
   }
   if (scope === 'all') {
     return 'No open PR in this repository.';

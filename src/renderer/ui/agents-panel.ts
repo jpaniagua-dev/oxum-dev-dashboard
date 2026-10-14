@@ -207,7 +207,7 @@ export function renderAgentsPanel(
   hosts.detail.append(head);
 
   if (context === null) {
-    hosts.detail.append(createElement('p', { className: 'pulls__empty', text: 'Reading...' }));
+    hosts.detail.append(createElement('p', { className: 'pulls__empty', text: 'Reading…' }));
     return;
   }
 

@@ -110,7 +110,7 @@ export function renderVaultPanel(
   host.append(buildVaultHelp(view, actions));
   const state = view.state;
   if (state === null) {
-    host.append(createElement('p', { className: 'vault__empty', text: 'Opening the vault...' }));
+    host.append(createElement('p', { className: 'vault__empty', text: 'Opening the vault…' }));
     return;
   }
 

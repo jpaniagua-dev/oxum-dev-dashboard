@@ -235,7 +235,7 @@ export function renderGitPanel(
 
   const repo = state.repo;
   if (repo === null) {
-    hosts.list.append(createElement('p', { className: 'pulls__empty', text: 'Reading...' }));
+    hosts.list.append(createElement('p', { className: 'pulls__empty', text: 'Reading…' }));
     return;
   }
   if (repo.error !== null) {
@@ -1448,7 +1448,7 @@ function renderDiff(host: HTMLElement, state: GitPanelState, actions: GitPanelAc
 
   const diff = state.diff;
   if (diff === null) {
-    host.append(createElement('p', { className: 'pulls__empty', text: 'Reading the diff...' }));
+    host.append(createElement('p', { className: 'pulls__empty', text: 'Reading the diff…' }));
     return;
   }
 

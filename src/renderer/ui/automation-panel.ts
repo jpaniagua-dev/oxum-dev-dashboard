@@ -146,7 +146,7 @@ export function renderAutomationPanel(
 
   const state = view.state;
   if (state === null) {
-    main.append(createElement('p', { className: 'automations__empty', text: 'Loading rules...' }));
+    main.append(createElement('p', { className: 'automations__empty', text: 'Reading the rules…' }));
     return;
   }
 
@@ -524,7 +524,7 @@ function buildRule(
       : names;
     const none = document.createElement('option');
     none.value = '';
-    none.textContent = view.skills === null ? 'Reading the skills...' : 'Pick a skill';
+    none.textContent = view.skills === null ? 'Reading the skills…' : 'Pick a skill';
     none.selected = rule.action.skill.length === 0;
     skill.append(none);
     for (const name of options) {

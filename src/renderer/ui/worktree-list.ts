@@ -287,7 +287,7 @@ export function renderWorktreeList(
   if (repos === null) {
     // Never read yet, which is a different statement from "there are none": the first is about the
     // app, the second about the workspace, and one sentence for both would be the useless one.
-    hosts.bar.append(createElement('span', { className: 'strip__meta', text: 'Reading...' }));
+    hosts.bar.append(createElement('span', { className: 'strip__meta', text: 'Reading…' }));
     return;
   }
 
