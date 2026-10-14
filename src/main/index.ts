@@ -65,6 +65,7 @@ import { AutomationStore } from './automation/automation-store.js';
 import { buildInteractiveCommand, newConversation } from './triage/work-command.js';
 import { AgentSessionStore } from './terminal/agent-session-store.js';
 import { restoreAgentSessions } from './terminal/agent-restore.js';
+import { ConversationTracker } from './terminal/conversation-tracker.js';
 import { agentRecordsFrom } from '@shared/agent-sessions.js';
 import type { TerminalGroup } from '@shared/contracts.js';
 import type { VaultState } from '@shared/vault.js';
@@ -1041,6 +1042,17 @@ async function bootstrap(): Promise<void> {
   // even when nothing was reopened and no session push follows.
   recordAgents(terminalManager.sessions(), terminalManager.layout().groups);
 
+  /*
+   * Each agent tab follows the conversation its process is really writing, which stops being the id
+   * the app handed in as soon as somebody types `/resume` or `/clear` in it. A change comes back as a
+   * session push, so the record of the next launch follows it too.
+   */
+  const conversationTracker = new ConversationTracker({
+    sessions: () => terminalManager.sessions(),
+    setConversation: (terminalId, conversationId) => terminalManager.setConversation(terminalId, conversationId),
+  });
+  conversationTracker.start();
+
   const window = await dashboardWindow.create({
     preloadPath: preloadPath(),
     backgroundColor: themeController.backgroundColor(),
@@ -1089,6 +1101,7 @@ async function bootstrap(): Promise<void> {
     // First: the kills below push session lists in which no agent is live any more, and recording
     // those would empty the very list the next launch reopens.
     agentSessions.freeze();
+    conversationTracker.stop();
     projectMonitor.stop();
     pullMonitor.stop();
     jiraMonitor.stop();

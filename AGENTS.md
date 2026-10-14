@@ -1140,13 +1140,23 @@ Added on 2026-10-13, on request: quitting killed every terminal and every agent 
 again by hand, its conversation lost. **Agents only**, by decision: a shell is cheap to reopen and a
 dev server belongs to its project row, while an agent carries a conversation that is the work.
 
-- **The app names the conversation, it never reads it back.** Every interactive agent the app starts
+- **The app names the conversation at the spawn.** Every interactive agent the app starts
   (`Ctrl+N`, `Work on this` in its three modes, a rule's `agent` and `skill`) gets a UUID through the
   profile's `sessionArgs` (`--session-id {session}`), kept on `SessionAgent.conversation` with the
-  spawn's other facts. The next launch reopens it through `resumeArgs` (`--resume {session}`). Reading
-  the id out of Claude Code's storage afterwards was the alternative and is refused: nothing promises
-  that layout, while an id handed in is known for certain from the first second. A resumed
-  conversation keeps its id, so one id carries a session across any number of restarts.
+  spawn's other facts. The next launch reopens it through `resumeArgs` (`--resume {session}`). A
+  resumed conversation keeps its id, so one id carries a session across any number of restarts.
+- ⚠️ **...and then follows the process, because that id stops being true.** Found on 2026-10-14 from a
+  restore that failed with "No conversation found with session ID": once the person types `/resume`
+  (or `/clear`) in the tab, the process writes ANOTHER conversation, and the file named after the
+  handed-in id holds one `bridge-session` line and nothing else. Claude Code keeps
+  `~/.claude/sessions/<pid>.json`, whose `sessionId` is the conversation the process writes now.
+  `ConversationTracker` reads that folder every 10 s (file reads, no spawn), learns each tab's pid
+  from the file still showing the handed-in id, then follows that pid; `setConversation` is the one
+  place a `SessionAgent` changes after its spawn. Matching by folder or start time was refused: every
+  agent starts in the same workspace, several at once on a restore. Undocumented storage, so an
+  unreadable or missing registry is no information, and the handed-in id stands. The known gap: a tab
+  whose person switched conversation before the first pass (10 s) is never bound, and keeps its
+  first id.
 - **Two profile fields, empty meaning "not resumable"**, migrated like `planArgs`: a stored profile
   gets Claude Code's only if it runs the same program, since Claude's flags on Codex would be an
   unknown option on every session. The id is whitelisted (`CONVERSATION_ID_PATTERN`) because it
@@ -1172,7 +1182,8 @@ dev server belongs to its project row, while an agent carries a conversation tha
 - **A conversation never spoken to is not reopened.** Measured on 2026-10-13: an interactive
   session left idle writes no transcript, and `--resume` on it would open a tab on an error.
   `claudeConversationExists` looks for `<id>.jsonl` by FILE NAME across `~/.claude/projects`,
-  never through `claudeProjectKey`, whose encoding is inferred. Another agent answers `null` and is
+  never through `claudeProjectKey`, whose encoding is inferred, and reads its first 256 KiB for a
+  message (`holdsConversation`): a file holding only the bookkeeping line counts as none. Another agent answers `null` and is
   reopened, left to say for itself whether it remembers. A missing folder or a profile without
   `resumeArgs` drops the record too, with a log line.
 - ⚠️ **The app strips a parent Claude Code session's markers from every pty**

@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +8,7 @@ import {
   type AgentProfile,
 } from '@shared/agent-profile.js';
 import { restorable, type AgentSessionRecord } from '@shared/agent-sessions.js';
+import { holdsConversation } from '@shared/claude-sessions.js';
 import type { Project, ShellProfile, TerminalSize } from '@shared/contracts.js';
 import { buildInteractiveCommand, buildPlanCommand } from '../triage/work-command.js';
 import { resolveShellCommand, type TerminalManager } from './terminal-manager.js';
@@ -28,12 +29,28 @@ export function claudeConversationExists(id: string, profile: AgentProfile): boo
   }
   const root = join(homedir(), '.claude', 'projects');
   try {
-    return readdirSync(root, { withFileTypes: true }).some(
-      (entry) => entry.isDirectory() && existsSync(join(root, entry.name, `${id}.jsonl`)),
-    );
+    // A file is not enough: Claude Code writes a one-line bookkeeping file for a session id that never
+    // held a conversation (one the person `/resume`d away from), and `--resume` on it fails with "No
+    // conversation found". The head of the file has to show a message.
+    return readdirSync(root, { withFileTypes: true }).some((entry) => {
+      const file = join(root, entry.name, `${id}.jsonl`);
+      return entry.isDirectory() && existsSync(file) && holdsConversation(readHead(file));
+    });
   } catch {
     // No storage to look in: say nothing rather than drop every session on a guess.
     return null;
+  }
+}
+
+/** The first 256 KiB of a file, which is where a conversation's first message is. */
+function readHead(file: string): string {
+  const fd = openSync(file, 'r');
+  try {
+    const buffer = Buffer.alloc(256 * 1024);
+    const read = readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, read).toString('utf8');
+  } finally {
+    closeSync(fd);
   }
 }
 

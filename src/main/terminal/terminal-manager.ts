@@ -727,6 +727,31 @@ export class TerminalManager {
     this.hooks.onSessionsChanged(this.sessions());
   }
 
+  /**
+   * Points an agent tab at the conversation its process is now writing.
+   *
+   * The one place a `SessionAgent` changes after its spawn, and on purpose: the id handed in at the
+   * spawn stops naming the conversation once the person types `/resume` or `/clear` in the tab, and a
+   * restart reopening the stale id finds nothing (see `claude-sessions.ts`). Everything else on the
+   * record stays as the spawn captured it. Nothing is broadcast when the id did not move.
+   */
+  setConversation(terminalId: TerminalId, conversationId: string): void {
+    const entry = this.entries.get(terminalId);
+    const agent = entry?.session.agent;
+    const conversation = agent?.conversation;
+    if (entry === undefined || agent === null || agent === undefined || conversation === undefined) {
+      return;
+    }
+    if (conversation.id === conversationId) {
+      return;
+    }
+    this.entries.set(terminalId, {
+      ...entry,
+      session: { ...entry.session, agent: { ...agent, conversation: { ...conversation, id: conversationId } } },
+    });
+    this.hooks.onSessionsChanged(this.sessions());
+  }
+
   /** Stops if needed, then forgets the tab entirely. */
   close(terminalId: TerminalId): void {
     const entry = this.entries.get(terminalId);
