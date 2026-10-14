@@ -176,7 +176,7 @@ describe('describeAge', () => {
   it('counts in minutes, then hours, then days', () => {
     expect(describeAge('2026-08-04T17:30:00Z', now)).toBe('30 min');
     expect(describeAge('2026-08-04T12:00:00Z', now)).toBe('6 h');
-    expect(describeAge('2026-08-01T18:00:00Z', now)).toBe('3 j');
+    expect(describeAge('2026-08-01T18:00:00Z', now)).toBe('3 d');
   });
 
   it('says nothing about an unparseable date', () => {

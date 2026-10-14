@@ -1106,7 +1106,7 @@ export class TerminalBoard {
     if (canRerunSession(session)) {
       const rerun = createElement('button', {
         className: 'board-card__rerun',
-        title: 'Rerun this Watch/Server',
+        title: 'Run this action again',
       });
       rerun.type = 'button';
       rerun.setAttribute('aria-label', `Rerun ${session.title}`);

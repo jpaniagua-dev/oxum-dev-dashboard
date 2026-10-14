@@ -240,9 +240,9 @@
             </div>
 
             <!--
-          One column, no master-detail: a rule is six fields and fits beside its neighbours, so a
-          third column for something readable in a line would be the Git tab's grammar applied where
-          it buys nothing.
+          Rule cards in a grid and the Activity column beside them, no master-detail: a rule is a few
+          fields and fits beside its neighbours, so a detail column for something readable in a card
+          would be the Git tab's grammar applied where it buys nothing.
         -->
             <div class="automations" id="strip-panel-automations" role="tabpanel" hidden></div>
 
@@ -385,8 +385,8 @@
 
           A sibling of the surface and not a child. The board fills the pane until a card is selected;
           it then shares the pane with the existing terminal surface as a resizable right sidebar.
-          Only xterm is shown there: tabs, pane actions and notes stay out because the board already
-          owns those controls. The terminal is isolated by grid placement and never moved into a
+          The xterm is shown there under a reduced strip (the title and the note button); tabs and
+          pane actions stay out because the board already owns those controls. The terminal is isolated by grid placement and never moved into a
           card, because `open()` refuses to re-attach an xterm that already has an element.
         -->
             <div class="terminal__board" id="terminal-board" hidden></div>

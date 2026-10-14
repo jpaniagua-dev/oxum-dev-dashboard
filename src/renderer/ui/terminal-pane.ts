@@ -1421,7 +1421,7 @@ export class TerminalPane {
       ? [
           {
             label: 'Rerun',
-            hint: 'Stop this Watch/Server, wait for its port, then run it again',
+            hint: 'Stops the process, waits for its port, then runs the action again',
             run: () => this.actions.onRerun(session),
           },
         ]
@@ -1751,7 +1751,7 @@ export class TerminalPane {
     if (canRerunSession(session)) {
       const rerun = createElement('button', {
         className: 'terminal__tab-rerun',
-        title: 'Rerun this Watch/Server',
+        title: 'Run this action again',
       });
       rerun.type = 'button';
       rerun.setAttribute('aria-label', `Rerun ${session.title}`);

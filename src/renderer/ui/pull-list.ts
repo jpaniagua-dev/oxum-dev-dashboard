@@ -468,7 +468,7 @@ function buildPullRow(
   }
 
   if (pull.isDraft) {
-    row.append(createElement('span', { className: 'badge-warn', text: 'brouillon' }));
+    row.append(createElement('span', { className: 'badge-warn', text: 'draft' }));
   }
 
   /*
@@ -613,5 +613,5 @@ export function describeAge(iso: string, now: number = Date.now()): string {
   if (hours < 24) {
     return `${hours} h`;
   }
-  return `${Math.round(hours / 24)} j`;
+  return `${Math.round(hours / 24)} d`;
 }

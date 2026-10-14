@@ -571,7 +571,7 @@ export function buildRepoMenuItems(
       run: () => actions.onSync('fetch'),
     },
     {
-      label: 'Pull (fast-forward seulement)',
+      label: 'Pull (fast-forward only)',
       hint: 'git pull --ff-only. A diverged branch has to go through the terminal: this tab cannot finish a rebase.',
       disabled: state.busy,
       run: () => actions.onSync('pull'),

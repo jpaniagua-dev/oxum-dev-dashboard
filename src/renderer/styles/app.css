@@ -324,9 +324,9 @@ body {
 /*
  * A tag, in the table and in the settings alike.
  *
- * Deliberately the same pill as `.settings-entry__badge`, greyscale and bordered: colour in this app
- * says something is not as it should be, and a tag says nothing of the kind. Set in the interface
- * face, not the mono one, because a tag is a word a person chose, like a project's name.
+ * A bordered pill whose colour is the tag's own, on the border and the dot only, so it never reads
+ * as a status pill (those carry their colour in the text). Set in the interface face, not the mono
+ * one, because a tag is a word a person chose, like a project's name.
  */
 .tag {
   display: inline-flex;
@@ -621,8 +621,8 @@ body {
 }
 
 .pill--ok {
-  background: var(--primary-soft);
-  border-color: var(--primary-border);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
   color: var(--success);
 }
 
@@ -799,6 +799,9 @@ body {
 
 .pull:hover .icon-button--row,
 .git__repo-line:hover .icon-button--row,
+.vault__card:hover .icon-button--row,
+.automations__aside:hover .icon-button--row,
+.icon-button--row:hover,
 .icon-button--row:focus-visible {
   opacity: 1;
 }
@@ -981,13 +984,6 @@ body {
   flex-direction: column;
   min-height: 0;
   gap: 6px;
-}
-
-/* The filter row of the Jira tab: outside the scroller, so it stays put as the list moves. */
-.pulls__bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .jira__filter-select {
@@ -1627,7 +1623,7 @@ body {
 .vault__toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
 }
 
 .vault__new-variable {
@@ -1642,7 +1638,7 @@ body {
 }
 
 .vault__info[aria-expanded='true'] {
-  border-color: var(--primary);
+  background: var(--surface-inset);
   color: var(--primary);
 }
 
@@ -2007,7 +2003,6 @@ body {
 }
 
 .vault__secret-action:hover {
-  border-color: var(--border-strong);
   background: var(--surface-raised);
 }
 
@@ -2252,8 +2247,8 @@ body {
 .card__head {
   display: flex;
   align-items: center;
-  /* One child now, and it belongs on the right: `space-between` would put a lone cross on the left. */
-  justify-content: flex-end;
+  /* The key on the left, the status pill (when there is one) on the right. */
+  justify-content: space-between;
   gap: 6px;
 }
 
@@ -2671,15 +2666,10 @@ body {
  * a form that drifts to the middle of a maximised window puts a label and its Delete button a screen
  * apart. The rule between sections is the only separator any of them needs.
  */
+/* One page at a time: a section is shown alone, so none of them needs a rule under it. */
 .settings__section {
   max-width: 760px;
   padding: 24px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-/* One page at a time: a section is shown alone, so none of them needs a rule under it. */
-.settings__section {
-  border-bottom: 0;
 }
 
 .settings__section[hidden] {
@@ -2977,7 +2967,7 @@ body {
  */
 .settings-entry--error {
   padding-left: 12px;
-  box-shadow: inset 2px 0 0 var(--primary);
+  box-shadow: inset 2px 0 0 var(--danger);
 }
 
 .settings-entry__header {
@@ -3959,10 +3949,6 @@ body {
 
 /* --------------------------------------------------------- tab reordering */
 
-.terminal__tab-label {
-  cursor: grab;
-}
-
 /* A row opens its repository's terminal, so it has to look like it does something. */
 .table__row {
   cursor: pointer;
@@ -4479,20 +4465,6 @@ body {
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
-/*
- * The unfolded card.
- *
- * Wider, because what it unfolds to show is terminal output and a terminal line is eighty characters:
- * at the folded 240px the preview would be an ellipsis with nothing before it. Raised above its
- * neighbours for the same reason a dragged card is, it now overlaps them.
- */
-/*
- * The output itself: the last lines, read-only.
- *
- * A session owns exactly one xterm element and that element is never moved, so the live terminal
- * cannot be shown here. This is the text the main process already keeps, which answers "what is it
- * doing" without pretending you can type at it.
- */
 /* Lifted while carried, so it is visibly above the cards it crosses rather than tangled with them. */
 .board-card--dragging {
   z-index: 3;
@@ -4678,8 +4650,7 @@ body {
  * A headless run's card: wider, because its subject is a sentence and not a tab title.
  *
  * `web-app#588: reading list.component.ts` is the whole reason to look at one of these, and at the
- * session width it would be two ellipses stacked. Still narrower than an unfolded session card,
- * which is 440px and holds fifteen lines of terminal.
+ * session width it would be two ellipses stacked.
  */
 .board-card--job {
   width: 300px;
@@ -4740,8 +4711,6 @@ body {
   color: var(--text-faint);
   cursor: default;
 }
-
-/* ------------------------------------------------------------- format bar */
 
 /* ------------------------------------------------------------------- git */
 
@@ -5308,7 +5277,16 @@ body {
   gap: 6px;
 }
 
+/*
+ * The title takes a line of its own, after everything else on the head: a `Close` placed after a
+ * full-width title wrapped onto a third line of its own.
+ */
+.triage__overview-head > .triage__overview-summary {
+  order: 1;
+}
+
 .triage__overview-key {
+  font-size: var(--font-md);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text);
@@ -5392,18 +5370,6 @@ body {
   white-space: pre-wrap;
 }
 
-/*
- * The scope switch, at the top of the sprint column.
- *
- * `position: sticky` because it lives INSIDE the scroller, the same arrangement as the Jira tab's
- * sortable header and for a related reason: pulled out into a box of its own it would sit above a
- * column that scrolls under it, and the border would have to be drawn twice. It needs an opaque
- * background of its own to sit over the rows it stays above, and `flex: none` so a long sprint list
- * cannot squeeze it.
- *
- * The bottom border is what separates "what will be read" from "which sprint": two questions, one
- * column, and no line between them would read as one list with two odd entries at the top.
- */
 .triage__state {
   display: inline-grid;
   place-items: center;
@@ -5954,9 +5920,9 @@ body {
  * scroller and never shows anything, and content placed above a scrollport is **clipped** by the very
  * `overflow` that makes sticky work, so it only sliced the top off the headings.
  *
- * `background: var(--surface)`, which is what `body` is painted with and what `.issue--head` uses. It
- * has to be opaque, the rows scrolling under it, and it cannot be `var(--bg)`: there is no such token,
- * so that resolved to nothing and left the header transparent.
+ * `background: var(--surface-raised)`, the panel's own ground, since every tab sits in a raised box.
+ * It has to be opaque, the rows scrolling under it, and it cannot be `var(--bg)`: there is no such
+ * token, so that resolved to nothing and left the header transparent.
  */
 .worktree-row--head {
   position: sticky;
@@ -5968,7 +5934,7 @@ body {
   padding-top: 2px;
   padding-bottom: 3px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--text-faint);
   cursor: default;
 }
@@ -6003,7 +5969,7 @@ body {
  * only thing shared with a row is the geometry.
  */
 .worktree--head:hover {
-  background: var(--surface);
+  background: var(--surface-raised);
   border-color: transparent;
   border-bottom-color: var(--border);
 }
@@ -6069,7 +6035,7 @@ body {
   min-width: 0;
 }
 
-/* Counts then badges, pushed against the terminal button so they line up down the list. */
+/* Counts then badges, pushed against the end of the row so they line up down the list. */
 .worktree__state {
   display: flex;
   align-items: center;
@@ -6436,7 +6402,7 @@ textarea.tickets__input {
 
 /*
  * The Explorer tab: projects on the left, one folder (or the search results) in the middle, the
- * selected file read-only on the right. Built on `.pulls--detail` like the Extensions tab; only what is
+ * selected file's editor on the right. Built on `.pulls--detail` like the Extensions tab; only what is
  * its own is here.
  */
 .explorer__rail {
