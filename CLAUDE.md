@@ -1904,9 +1904,9 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   dimmed drawing. `pull-list` keeps its glyph because there the terminal genuinely is a *second*
   gesture, on a row whose own click opens a browser.
 - **`.worktree__menu` sets its own 22px, and that width is load-bearing.** `.icon-button` defaults to
-  26px while the wrapper's track is 22px, so an icon button left at its default size overflows by four
+  24px while the wrapper's track is 22px, so an icon button left at its default size overflows by two
   pixels; `.pulls__list` scrolls on one axis, CSS resolves the other from `visible` to `auto` when it
-  does, and those four pixels come back as a horizontal scrollbar under the whole tab. It does not take
+  does, and those pixels come back as a horizontal scrollbar under the whole tab. It does not take
   the `.icon-button--row` class that would size it, because that class's other half is the hover fade
   this button deliberately refuses. Anything given a fixed grid track here has to be measured, not
   assumed.
@@ -3178,7 +3178,7 @@ drawing and share none of the plumbing, deliberately, `AppSettings.tagColors` be
 by word, and the word `backend` existing in both.
 
 - **The chip does not travel; the dot does.** All three surfaces are fixed-width and read down their
-  length: 190px for the pull request repositories, 170px for the Git ones, a 104px grid track for a
+  length: 190px for the pull request and Git repositories, a 104px grid track for a
   worktree's project. A labelled chip in any of them has to be paid for by widening the column the
   strip is actually read in, and the question these rows ask is "which stack is this line", not "what
   is this tag called". So the word stays in the projects table, which is the permanent legend, and what
@@ -3411,6 +3411,47 @@ seconds over a 30 s idle window against 3.73 for the main process).
   was evaluated: `projectsRoot` went out empty, the seeding scanned a non-existent path, and the
   dashboard started with an empty table and not a single error. Those values live in
   `projects/project-id.ts`, which imports nothing.
+
+## Visual grammar
+
+Set on 2026-10-13 by a design pass over every surface, on request, after an audit found the colours
+held (no literal colour, every size a token) while the grammar had drifted: six ways to say
+"selected", three hover gestures, five row heights, three button heights. What follows is the
+grammar; a new surface follows it rather than inventing a seventh way.
+
+- **One keyboard ring, everywhere**: a 2px `--primary` outline at 1px offset, on a zero-specificity
+  `:where(...)` rule at the top of `app.css`. It existed in the settings window only. A control with
+  a deliberate indicator of its own (a resizer that lights up, a rename field) keeps it by being more
+  specific, and the xterm is left out, its pane frame already saying where the keyboard is.
+- **`color-scheme` follows the theme** (`tokens.css`), so native scrollbars, select popups and
+  checkboxes are dark in the dark theme.
+- **Two corners**: controls (buttons, inputs, selects, tabs, icon buttons) take `--radius-sm`,
+  containers (cards, group frames, panels, menus) take `--radius`. Dots are `50%`, pills `999px`.
+- **Icon buttons come in three sizes, by place**: 24px square in the chrome and the board toolbar,
+  22px with a 13px glyph in a pane's strip (surface controls, zoom and note alike), 22px faded until
+  hovered on a list row (`.icon-button--row`, which now also wakes on its own hover and on the Vault
+  card and Activity column it sits in).
+- **Disabled is 0.45 opacity**, for buttons, icon buttons and day toggles alike.
+- **`.button + .button` adds 4px only in inline flow**: the rows that space their children with a
+  flex `gap` reset it, or the two spacings added up.
+- **A list says "hovered" with the ground and "selected" with the ground plus a 2px `--primary` edge**
+  on its leading side: `--surface-hover` for the first, `--surface-inset` and an inset box-shadow for
+  the second, never a border and never a weight change, so a row's text does not move when it is
+  picked. The settings rail and a selected board card already said "this one" on that edge.
+- **Nothing changes weight on becoming active**: tabs, suggestion buttons and filter chips keep their
+  weight, and an active tab keeps its look under the cursor.
+- **Two row heights**: 3px vertical padding for the dense lists (Git files, Explorer), 5px for every
+  other list. Rails are 190px (the Agents rail, a facts column, is the one exception).
+- **One column heading recipe**, the table's: `--font-2xs`, 600, 0.06em, uppercase, `--text-faint`.
+  The settings window is the exception on purpose: its labels are sentences.
+- **One empty-state look** (`--text-faint`, `--font-sm`, line height 1.5) and one loading spelling,
+  `Reading…` with the ellipsis character.
+- **`--text-faint` is darker in the light theme** (#6b6b6b, 5.3:1 on white) and is not a palette
+  value: grey-500 was 3.6:1 and sets most of the small print. The dark theme keeps grey-500.
+- **A healthy pill is green on a green tint**; it was green on the primary's red tint.
+- **On the board**, the badge keeps the accent for an agent only (a server's and a watch's are
+  neutral), a quiet session is a filled faint dot and an ended one an empty ring, and a card has the
+  same corner as a group frame.
 
 ## Typography
 

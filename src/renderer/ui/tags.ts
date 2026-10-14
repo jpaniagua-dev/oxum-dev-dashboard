@@ -22,7 +22,7 @@ import { createElement } from './dom.js';
  *   table, the one surface with room for it and the only one where a tag can be edited.
  * - **The dot carries the colour alone**, and it belongs on the dense rows of the other tabs, where
  *   the question is "which stack is this line" rather than "what is this tag called". Every one of
- *   those surfaces is a fixed-width column (190px for the pull request repositories, 170px for the Git
+ *   those surfaces is a fixed-width column (190px for the pull request repositories, 190px for the Git
  *   ones, a 104px grid track for a worktree's project), so a chip there would have to be paid for by
  *   widening the columns the strip is actually read in. The word is not lost: it is in the `title`, and
  *   the projects table is the legend the vocabulary was learned from.

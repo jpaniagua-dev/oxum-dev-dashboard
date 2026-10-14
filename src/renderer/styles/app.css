@@ -3668,6 +3668,17 @@ body {
   height: 13px;
 }
 
+/* Carried into the board's toolbar, they match its own buttons rather than the strip's. */
+.board-canvas__toolbar .terminal__controls .icon-button {
+  width: 24px;
+  height: 24px;
+}
+
+.board-canvas__toolbar .terminal__controls .icon-button svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* A hairline between the surface controls and the ones that act on this pane or on its active tab. */
 .terminal__controls + .terminal__strip-zoom,
 .terminal__controls + .terminal__strip-clear {
@@ -3743,7 +3754,14 @@ body {
  * centimetres away, so a second mark saying it is there is a mark that means nothing.
  */
 .terminal__note-button {
+  width: 22px;
+  height: 22px;
   opacity: 0.45;
+}
+
+.terminal__note-button svg {
+  width: 13px;
+  height: 13px;
 }
 
 .terminal__note-button:hover:not(:disabled),
@@ -3879,13 +3897,13 @@ body {
  * copies of a full-size button is a row of chrome competing with the terminal it introduces.
  */
 .terminal__strip-zoom {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
 }
 
 .terminal__strip-zoom svg {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
 }
 
 /* Dropping on the strip itself, away from any tab, appends to that pane. */
@@ -4349,7 +4367,7 @@ body {
   width: 240px;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
   font-size: var(--font-md);
@@ -4505,6 +4523,12 @@ body {
   height: 18px;
 }
 
+.board-card--server .board-card__avatar,
+.board-card--build .board-card__avatar {
+  background: var(--surface-inset);
+  color: var(--text-dim);
+}
+
 .board-card__head {
   display: flex;
   align-items: center;
@@ -4523,7 +4547,7 @@ body {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--border-strong);
+  background: var(--text-faint);
 }
 
 .board-card--working .board-card__dot {
@@ -4531,7 +4555,8 @@ body {
 }
 
 .board-card--exited .board-card__dot {
-  background: var(--text-faint);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--border-strong);
 }
 
 .board-card__title {

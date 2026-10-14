@@ -1613,13 +1613,13 @@ export class TerminalPane {
        * Last because of the ordering this row already follows, widest scope first: the surface
        * controls, then the pane's zoom, then `Clear`, then this, which like `Clear` acts on the
        * active tab alone. Being last is also what puts it directly above its own box, which is
-       * anchored to the right edge.
+       * anchored to the right edge. It is appended after `Clear`, below, and was appended first
+       * for a while, which left the comment saying one thing and the strip another.
        *
        * It reads the pane's ACTIVE session, the one whose terminal fills the cell below: the
        * question this answers is "what is this thing showing me for", which in the grid is always
        * about what is on screen rather than about a tab sitting in the background.
        */
-      actions.append(this.buildNoteControl(group));
 
       /*
        * Widest scope first: the surface controls, then this pane's zoom, then `Clear`, which acts on
@@ -1663,6 +1663,7 @@ export class TerminalPane {
         this.clear(group.active);
       });
       actions.append(clear);
+      actions.append(this.buildNoteControl(group));
       strip.append(actions);
     });
 
