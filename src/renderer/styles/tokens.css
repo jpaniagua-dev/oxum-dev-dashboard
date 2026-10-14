@@ -5,12 +5,16 @@
  * main process resolves which is active (including "follow the OS") and stamps the attribute,
  * so the window background and the page can never disagree.
  *
- * Every colour below is a brand palette value. The dark set is not invented: it reuses the
+ * The brand, status and tag colours below are brand palette values; the surfaces, the faint text
+ * and the code and diff tints are interface steps between them. The dark set is not invented: it reuses the
  * palette's own lighter tints, because the saturated red that anchors the light theme vibrates
  * against near-black and loses legibility. Same family, appropriate weight for the background.
  */
 
 :root {
+  /* Native controls (scrollbars, select popups, checkboxes) follow the theme too. */
+  color-scheme: light;
+
   /* --- brand ramp, identical in both themes ------------------------------ */
   --brand-primary: #e61e3c;
   --brand-primary-light: #ea515b;
@@ -46,7 +50,10 @@
 
   --text: #1f1f1f;
   --text-dim: var(--grey-700);
-  --text-faint: var(--grey-500);
+  /* Not a palette value, deliberately (2026-10-13): grey-500 is 3.6:1 on white and this token sets
+     most of the small print, so the light theme takes a step between grey-700 and grey-500 that
+     reaches 5.3:1 on white and 4.6:1 on the inset surface. The dark theme keeps grey-500. */
+  --text-faint: #6b6b6b;
   --text-on-primary: var(--white);
 
   --primary: var(--brand-primary);
@@ -156,6 +163,7 @@
 }
 
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --surface: #131313;
   --surface-raised: #1b1b1b;
   --surface-inset: #0e0e0e;

@@ -22,6 +22,21 @@ body {
   user-select: none;
 }
 
+/*
+ * One keyboard ring for the whole app (2026-10-13).
+ *
+ * It existed in the settings window only, so tabbing through the dashboard showed the browser's
+ * black ring on some controls and nothing on others. Zero specificity through `:where`, so a control
+ * with a deliberate indicator of its own (a resizer that lights up, a rename field) keeps it. The
+ * terminal is left out: its pane frame already says which one has the keyboard.
+ */
+:where(button, a, summary, select, input, textarea, [role='tab'], [tabindex]):where(
+    :not(.xterm, .xterm *)
+  ):focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
 .app {
   display: flex;
   flex-direction: column;
@@ -238,7 +253,6 @@ body {
   opacity: 1;
   background: color-mix(in srgb, var(--tag-colour, var(--border-strong)) 22%, transparent);
   color: var(--text);
-  font-weight: 600;
 }
 
 .table td {
@@ -664,7 +678,7 @@ body {
 .button {
   padding: 4px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
@@ -678,7 +692,7 @@ body {
 }
 
 .button:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -703,10 +717,25 @@ body {
   margin-left: 4px;
 }
 
+/* Rows that space their children with `gap` must not get the margin on top of it. */
+:is(
+    .projects__header-actions,
+    .settings__footer,
+    .settings__row-actions,
+    .settings-inline,
+    .automation__foot,
+    .automations__bar,
+    .table-empty__actions
+  )
+  > .button
+  + .button {
+  margin-left: 0;
+}
+
 .icon-button {
   display: grid;
   place-items: center;
-  width: 26px;
+  width: 24px;
   height: 24px;
   padding: 0;
   border: none;
@@ -733,7 +762,7 @@ body {
 
 .icon-button:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
 .icon-button svg {
@@ -808,7 +837,8 @@ body {
   color: var(--text);
 }
 
-.strip__tab--active {
+.strip__tab--active,
+.strip__tab--active:hover {
   background: var(--surface);
   border-color: var(--border);
   color: var(--primary);
@@ -1504,7 +1534,7 @@ body {
 
 .automation__day:disabled {
   cursor: default;
-  opacity: 0.6;
+  opacity: 0.45;
 }
 
 .automation__clock,
@@ -1814,7 +1844,6 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 2%);
 }
 
 .vault__file--editing {
@@ -2311,7 +2340,7 @@ body {
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--border-strong);
 }
 
@@ -2820,7 +2849,6 @@ body {
   border-color: var(--border-strong);
   background: var(--surface-inset);
   color: var(--text);
-  font-weight: 600;
 }
 
 .settings-suggestion:focus-visible {
@@ -2920,18 +2948,6 @@ body {
  * bordered cards each holding three more bordered fields is four frames deep before any content
  * appears. The rule separates; nothing else has to.
  */
-/*
- * One ring for the whole window.
- *
- * The fields draw a brand ring, and without this the buttons between them kept the browser's black
- * one: tabbing through a project alternated two different focus indicators. Scoped to this page
- * because `.button` is the dashboard's button too, and that is not what was asked for here.
- */
-.settings-page .button:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
-}
-
 .settings-entry {
   display: flex;
   flex-direction: column;
@@ -3111,7 +3127,6 @@ body {
 
 .settings-tags__input:focus {
   border-color: var(--primary);
-  outline: none;
 }
 
 .settings-tags__input:disabled {
@@ -3827,7 +3842,6 @@ body {
 }
 
 .terminal__note-field:focus-visible {
-  outline: none;
   border-color: var(--primary);
 }
 
@@ -3926,17 +3940,18 @@ body {
 }
 
 /* On screen, but not necessarily where the keyboard goes: with a split, several tabs are visible. */
-.terminal__tab--visible {
+.terminal__tab--visible,
+.terminal__tab--visible:hover {
   background: var(--surface);
   border-color: var(--border);
   color: var(--text);
 }
 
-.terminal__tab--active {
+.terminal__tab--active,
+.terminal__tab--active:hover {
   background: var(--surface);
   border-color: var(--border);
   color: var(--primary);
-  font-weight: 600;
 }
 
 /* --------------------------------------------------------- tab reordering */
@@ -3998,7 +4013,7 @@ body {
   width: 110px;
   padding: 1px 4px;
   border: 1px solid var(--primary);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -4026,7 +4041,7 @@ body {
   height: 16px;
   padding: 0;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-faint);
   font-size: var(--font-xl);
@@ -4374,7 +4389,7 @@ body {
 
 .board-group--dragging {
   z-index: 2;
-  box-shadow: 0 6px 16px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow);
 }
 
 .board-group__head {
@@ -4479,7 +4494,7 @@ body {
 /* Lifted while carried, so it is visibly above the cards it crosses rather than tangled with them. */
 .board-card--dragging {
   z-index: 3;
-  box-shadow: 0 6px 16px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow);
   cursor: grabbing;
 }
 
@@ -4533,7 +4548,7 @@ body {
   flex: none;
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--border-strong);
 }
 
@@ -5756,7 +5771,7 @@ body {
 
 /* No project, nothing to create a worktree in. Dimmed rather than hidden, so the gesture stays findable. */
 .worktrees__new:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: default;
 }
 
@@ -6270,7 +6285,6 @@ textarea.extensions__input {
 
 .extensions__input:focus-visible,
 .extensions__filter:focus-visible {
-  outline: none;
   border-color: var(--primary);
 }
 
@@ -6329,7 +6343,6 @@ textarea.tickets__input {
 }
 
 .tickets__input:focus-visible {
-  outline: none;
   border-color: var(--primary);
 }
 
@@ -6483,7 +6496,6 @@ textarea.tickets__input {
 }
 
 .explorer__search:focus-visible {
-  outline: none;
   border-color: var(--primary);
 }
 
