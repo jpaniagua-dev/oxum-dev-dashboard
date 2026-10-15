@@ -25,8 +25,10 @@ import {
   type AppSettings,
   type BootstrapState,
   type GeneratedCommit,
+  type GitCommitDetail,
   type GitDiff,
   type GitDiffTarget,
+  type GitMergeMode,
   type GitRepoState,
   type GitNotice,
   type GitResult,
@@ -152,6 +154,9 @@ const api: RendererApi = {
   gitDiff: (projectId: ProjectId, target: GitDiffTarget): Promise<GitDiff> =>
     ipcRenderer.invoke(IpcChannel.GitDiff, projectId, target),
 
+  gitCommitDetail: (projectId: ProjectId, sha: string): Promise<GitCommitDetail> =>
+    ipcRenderer.invoke(IpcChannel.GitCommitDetail, projectId, sha),
+
   gitGenerateMessage: (projectId: ProjectId, amend: boolean): Promise<GeneratedCommit> =>
     ipcRenderer.invoke(IpcChannel.GitGenerateMessage, projectId, amend),
 
@@ -180,6 +185,19 @@ const api: RendererApi = {
 
   gitCherryPick: (projectId: ProjectId, sha: string, noCommit: boolean): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitCherryPick, projectId, sha, noCommit),
+
+  gitUndo: (projectId: ProjectId): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitUndo, projectId),
+
+  gitCheckoutRemote: (projectId: ProjectId, remoteRef: string): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitCheckoutRemote, projectId, remoteRef),
+
+  gitMerge: (
+    projectId: ProjectId,
+    sourceRef: string,
+    mode: GitMergeMode,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }> =>
+    ipcRenderer.invoke(IpcChannel.GitMerge, projectId, sourceRef, mode),
 
   gitSequencer: (projectId: ProjectId, op: GitSequencerOp): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitSequencer, projectId, op),

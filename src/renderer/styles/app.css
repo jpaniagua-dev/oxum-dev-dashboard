@@ -799,6 +799,8 @@ body {
 
 .pull:hover .icon-button--row,
 .git__repo-line:hover .icon-button--row,
+.git__section:hover .icon-button--row,
+.git__row:hover .icon-button--row,
 .vault__card:hover .icon-button--row,
 .automations__aside:hover .icon-button--row,
 .icon-button--row:hover,
@@ -4740,28 +4742,39 @@ body {
 /* ------------------------------------------------------------------- git */
 
 /*
- * Three columns instead of the two the pull requests use: repositories, the working area, and the
- * diff. The diff gets `1fr` because it is the one that has to be *read* rather than scanned, and the
- * middle column is fixed so a long file path cannot squeeze it.
+ * Laid out like a graph client inside the strip (2026-10-15): two full-width rows (the repository
+ * tabs, the toolbar) over three columns (refs, the graph or a diff, the detail of the selection).
+ *
+ * The detail panel's width is a custom property so the separator can drive it: a grid *track* cannot
+ * be given a width from a drag, but the property that sizes it can. The centre is `1fr` and absorbs
+ * every window resize, spare width being worth something to a graph and its diffs.
  *
  * Each column scrolls on its own, `min-height: 0` on every one of them: without it a grid item
  * refuses to shrink below its content and a long branch list would push the terminal off screen.
  */
 .git {
   display: grid;
-  /*
-   * The working column's width is a custom property so the separator can drive it: a grid *track*
-   * cannot be given a width from a drag, but the property that sizes it can. The fallback matters —
-   * it is what the layout uses for the frame before the resizer has applied the stored value.
-   */
-  grid-template-columns: 190px var(--git-list-width, 460px) 5px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 190px minmax(0, 1fr) 5px var(--git-detail-width, 320px);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 6px;
   flex: 1;
   min-height: 0;
-  padding: 8px 10px 10px;
+  padding: 6px 10px 10px;
 }
 
-/* Same grammar as the other separator of this app, on the horizontal axis. */
+/* Same trap as `.pulls` and `.terminal__view`: a class setting `display` beats `[hidden]`. */
+.git[hidden] {
+  display: none;
+}
+
+.git__repos,
+.git__toolbar {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+/* Same grammar as the other separators of this app, on the horizontal axis. */
 .git__resizer {
   background: var(--border);
   cursor: ew-resize;
@@ -4773,58 +4786,60 @@ body {
   outline: none;
 }
 
-/* Same trap as `.pulls` and `.terminal__view`: a class setting `display` beats `[hidden]`. */
-.git[hidden] {
-  display: none;
+/*
+ * The repository tabs.
+ *
+ * A row of sub-tabs in the strip's own grammar (no weight change when active, a primary underline),
+ * scrolling sideways when there are more repositories than room rather than wrapping onto a second
+ * line the graph would pay for.
+ */
+.git__repos {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
 }
 
-/*
- * One repository line: the selectable row, plus its terminal icon beside it.
- *
- * The icon is a sibling and not a child because the row is a real `<button>` (see `buildRepoTerminal`),
- * so the line has to be a flex row rather than the row itself. `min-width: 0` on the row is what lets
- * the name give way instead of pushing the icon out of a 190px column.
- */
+/* One tab and its terminal icon, siblings because the tab is a button (see `buildRepoTerminal`). */
 .git__repo-line {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 2px;
 }
 
-.git__repo-line > .pulls__repo {
-  flex: 1;
-  min-width: 0;
-}
-
-/*
- * Faded until its line is hovered, exactly like the pull request list's `Terminal` button and for the
- * same reason: a column of repository names should read as names, and one control per line at full
- * contrast turns it into a toolbar. Reachable by keyboard all the same, hence the `:focus-visible`.
- */
-
-/*
- * The middle column is itself a grid, in rows: header, sub-tabs, list, commit form.
- * Only the list is `1fr`, so the form keeps its height and the list absorbs whatever is left.
- */
-/* No border on this side any more: the draggable separator is now the divider, and having both
-   would draw two lines a few pixels apart. */
-.git__main {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 6px;
-  min-height: 0;
-}
-
-.git__header-row,
-.git__bar {
+.git__repo-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  padding: 4px 6px 4px 9px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-md);
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.git__bar {
-  padding-bottom: 4px;
+.git__repo-tab:hover {
+  color: var(--text);
+}
+
+.git__repo-line--active .git__repo-tab {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+}
+
+/* The toolbar: status on the left, the verbs as icons on the right. */
+.git__toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 /* Pushes what follows to the right edge without a margin rule per button. */
@@ -4832,24 +4847,28 @@ body {
   flex: 1;
 }
 
-/*
- * The fetch / pull / push line, at the end of the header row.
- *
- * A pill like the branch's own badges, so it sits in a shape the row already uses, but clickable:
- * a failure has no timer and goes when it is dismissed. `max-width` with an ellipsis because git's
- * refusals run long (`Updates were rejected because the remote contains work...`) and a header that
- * grows with the message would push the branch name out of the row it belongs to. The whole text is
- * in the tooltip.
- */
-.git__notice {
-  max-width: 420px;
-  overflow: hidden;
-  cursor: pointer;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.git__toolbar-gap {
+  flex: none;
+  width: 6px;
+}
+
+/* The pane-strip size of the visual grammar: 22 px with a 13 px glyph. */
+.git__tool {
+  width: 22px;
+  height: 22px;
+}
+
+.git__tool svg {
+  width: 13px;
+  height: 13px;
 }
 
 .git__branch {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   font-size: var(--font-md);
   color: var(--text);
@@ -4858,69 +4877,22 @@ body {
 }
 
 /*
- * The row of sub-tabs of a panel, in the Git tab and in the pull requests tab alike.
- *
- * One rule for both, in the spirit of `.icon-button--row`: two panels that both say "here are the
- * readings of what is selected" have no business looking slightly different, and two blocks differing
- * only by a gap nobody chose is exactly how they end up doing so.
+ * The fetch / pull / push line. A pill like the branch's own badges, clickable, a failure having no
+ * timer. `max-width` with an ellipsis because git's refusals run long, and a toolbar that grows with
+ * the message would push the icons out; the whole text is in the tooltip.
  */
-.git__views,
-.pulls__views {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  border-bottom: 1px solid var(--border);
-}
-
-/*
- * The network actions sit at the end of the tab row, slightly dimmer than the tabs.
- *
- * `align-self: center` rather than stretching: an icon button as tall as a tab would read as a fourth
- * tab, which is exactly what it must not be — these three do something, the tabs only switch a view.
- */
-.git__sync {
-  align-self: center;
-  height: 22px;
-}
-
-/*
- * A sub-tab: the Git tab's views and the pull requests tab's scopes.
- *
- * Named for what it is rather than for where it first appeared, which is the whole reason the Git
- * tab's `.git__view` was renamed to it: a class named after one panel is a class the next panel
- * copies instead of reusing.
- */
-.subtab {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-md);
+.git__notice {
+  max-width: 420px;
+  min-width: 0;
+  overflow: hidden;
   cursor: pointer;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.subtab:hover {
-  color: var(--text);
-}
+/* -------------------------------------------------------------- git refs */
 
-.subtab--active {
-  color: var(--text);
-  border-bottom-color: var(--primary);
-  font-weight: 600;
-}
-
-.subtab__count {
-  color: var(--text-faint);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--font-xs);
-}
-
-.git__list {
+.git__refs {
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -4928,12 +4900,537 @@ body {
   overflow-y: auto;
 }
 
+.git__section {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.git__section:not(:first-child) {
+  margin-top: 6px;
+}
+
+/* A section heading, in the one recipe the visual grammar sets for column headings. */
+.git__section-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git__section-toggle:hover {
+  background: var(--surface-hover);
+}
+
+.git__chevron {
+  width: 9px;
+  flex: none;
+}
+
+.git__section-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* A remote inside the REMOTE section: folds on its own, named in normal case. */
+.git__group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px 3px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.git__group-toggle:hover {
+  background: var(--surface-hover);
+}
+
+/* A ref: the dense row height of the grammar, the selected look of the grammar. */
+.git__ref {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.git__ref:hover {
+  background: var(--surface-hover);
+}
+
+.git__ref--selected {
+  background: var(--surface-inset);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.git__ref-mark {
+  flex: none;
+  width: 10px;
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+  text-align: center;
+}
+
+/* Remote branches sit under their remote's heading, one step in. */
+.git__ref-mark--remote {
+  width: 22px;
+}
+
+.git__ref--current .git__ref-mark {
+  color: var(--primary);
+}
+
+.git__ref-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+/* A stash's subject is prose, not an identifier. */
+.git__ref-name--prose {
+  font-family: inherit;
+}
+
+.git__refs-empty {
+  margin: 0;
+  padding: 3px 8px;
+  color: var(--text-faint);
+  font-size: var(--font-sm);
+}
+
+.git__inline-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 2px 6px;
+}
+
+.git__inline-form--stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.git__inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* ------------------------------------------------------------- git graph */
+
+.git__center {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.git__graph {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* As tall as every row together, so the scrollbar tells the truth about a windowed list. */
+.git__graph-canvas {
+  position: relative;
+  width: 100%;
+}
+
+/*
+ * One row of the graph: chips, lanes, subject, author, date.
+ *
+ * The chips have a column of their own, left of the lanes as in any graph client: hung on the right
+ * of the subject they would make every labelled row's subject start somewhere else.
+ */
+.git__graph-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: 136px var(--git-graph-lanes-width, 20px) minmax(0, 1fr) 24px 40px;
+  align-items: center;
+  column-gap: 6px;
+  height: 22px;
+  padding-right: 6px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-sm);
+  cursor: pointer;
+}
+
+.git__graph-row:hover {
+  background: var(--surface-hover);
+}
+
+.git__graph-row--selected {
+  background: var(--surface-inset);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.git__graph-chips {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/*
+ * A ref on a commit. Its left edge carries the colour of the commit's lane, which is what ties the
+ * label to its line; the text stays the reading colour, a label being read and not decoded.
+ */
+.git__chip {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git__chip--current {
+  background: var(--primary-soft);
+  border-top-color: var(--primary-border);
+  border-right-color: var(--primary-border);
+  border-bottom-color: var(--primary-border);
+}
+
+.git__chip--tag {
+  border-style: dashed;
+  border-left-style: solid;
+}
+
+.git__chip--head {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.git__chip[draggable='true'] {
+  cursor: grab;
+}
+
+.git__chip-remote {
+  margin-left: 4px;
+  color: var(--text-faint);
+}
+
+.git__chip-more {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+}
+
+.git__graph-lanes {
+  display: block;
+  overflow: hidden;
+}
+
+.git__graph-lanes path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.git__lane-stroke--dashed {
+  stroke-dasharray: 2 2;
+}
+
+/* The node sits on a ring of the row's own background, so the lines stop short of it. */
+.git__node {
+  stroke: var(--surface-raised);
+  stroke-width: 1.5;
+}
+
+.git__node--head {
+  stroke: var(--text);
+}
+
+.git__graph-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.git__graph-subject--wip {
+  display: flex;
+  gap: 8px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.git__graph-counts {
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: var(--font-xs);
+}
+
+.git__graph-author {
+  justify-self: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-inset);
+  color: var(--text-dim);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+}
+
+.git__graph-author:empty {
+  background: none;
+}
+
+.git__graph-date {
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.git__graph-note {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  padding-left: 148px;
+  color: var(--text-faint);
+  font-size: var(--font-xs);
+  line-height: 22px;
+}
+
+/* Where a dragged branch can be dropped to merge it, lit while it hovers there. */
+.git__drop--over {
+  background: var(--primary-soft);
+  outline: 2px dashed var(--primary);
+  outline-offset: -2px;
+}
+
+/* The eight lane colours, one class per use so the SVG takes them without inline styles. */
+.git__lane-stroke--0 {
+  stroke: var(--lane-1);
+}
+.git__lane-stroke--1 {
+  stroke: var(--lane-2);
+}
+.git__lane-stroke--2 {
+  stroke: var(--lane-3);
+}
+.git__lane-stroke--3 {
+  stroke: var(--lane-4);
+}
+.git__lane-stroke--4 {
+  stroke: var(--lane-5);
+}
+.git__lane-stroke--5 {
+  stroke: var(--lane-6);
+}
+.git__lane-stroke--6 {
+  stroke: var(--lane-7);
+}
+.git__lane-stroke--7 {
+  stroke: var(--lane-8);
+}
+.git__lane-fill--0 {
+  fill: var(--lane-1);
+}
+.git__lane-fill--1 {
+  fill: var(--lane-2);
+}
+.git__lane-fill--2 {
+  fill: var(--lane-3);
+}
+.git__lane-fill--3 {
+  fill: var(--lane-4);
+}
+.git__lane-fill--4 {
+  fill: var(--lane-5);
+}
+.git__lane-fill--5 {
+  fill: var(--lane-6);
+}
+.git__lane-fill--6 {
+  fill: var(--lane-7);
+}
+.git__lane-fill--7 {
+  fill: var(--lane-8);
+}
+.git__lane-border--0 {
+  border-left-color: var(--lane-1);
+}
+.git__lane-border--1 {
+  border-left-color: var(--lane-2);
+}
+.git__lane-border--2 {
+  border-left-color: var(--lane-3);
+}
+.git__lane-border--3 {
+  border-left-color: var(--lane-4);
+}
+.git__lane-border--4 {
+  border-left-color: var(--lane-5);
+}
+.git__lane-border--5 {
+  border-left-color: var(--lane-6);
+}
+.git__lane-border--6 {
+  border-left-color: var(--lane-7);
+}
+.git__lane-border--7 {
+  border-left-color: var(--lane-8);
+}
+
+/* After the lane colours, so a working tree's node stays hollow whatever its lane. */
+.git__node--wip {
+  fill: var(--surface-raised);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 1.5;
+}
+
+/* ------------------------------------------------------------ git detail */
+
+/*
+ * The detail panel does not scroll as a whole: its lists do. In the working-tree view the two file
+ * lists share what the commit form leaves, half each, so neither can push the form out of the strip.
+ */
+.git__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.git__detail-heading {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* The column-heading recipe of the visual grammar. */
+.git__detail-label {
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.git__files {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 44px;
+  overflow-y: auto;
+}
+
+.git__files--grow {
+  min-height: 0;
+}
+
+.git__detail-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.git__detail-sha {
+  flex: none;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--font-sm);
+}
+
+.git__detail-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git__detail-message {
+  flex: none;
+  max-height: 40%;
+  overflow-y: auto;
+  /* The body of this app is `user-select: none`; a commit message is worth copying. */
+  user-select: text;
+}
+
+.git__detail-subject {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-md);
+  font-weight: 600;
+}
+
+.git__detail-body {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  white-space: pre-wrap;
+}
+
+.git__detail-parents {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
 .git__row {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 3px 8px;
-  border: 1px solid transparent;
+  padding: 3px 4px 3px 8px;
   border-radius: var(--radius-sm);
   font-size: var(--font-md);
   color: var(--text);
@@ -4944,24 +5441,13 @@ body {
   background: var(--surface-hover);
 }
 
-/*
- * A branch row is not clickable, and must not pretend to be: checkout is its button, deliberately, so
- * that changing what is on disk is never one stray click away in a list.
- */
-.git__branch-row {
-  cursor: default;
-}
-
 .git__row--selected {
   background: var(--surface-inset);
-  border-color: transparent;
   box-shadow: inset 2px 0 0 var(--primary);
   color: var(--text);
 }
 
 /*
- * The untracked switch of the stash form.
- *
  * A `<label>` wrapping its own checkbox, so the text is part of the hit target: a checkbox this small
  * with its caption outside is a control you miss twice before hitting it.
  */
@@ -4988,8 +5474,7 @@ body {
  *
  * `direction: rtl` is what moves the ellipsis to the front, and `unicode-bidi: plaintext` is the part
  * that makes it safe: without it the box's direction also governs the text, and a path's leading or
- * trailing punctuation gets reordered to the wrong end. `plaintext` derives the run's direction from
- * its own first strong character, so the path reads normally inside a right-anchored box.
+ * trailing punctuation gets reordered to the wrong end.
  */
 .path-clip-start {
   overflow: hidden;
@@ -5007,58 +5492,12 @@ body {
   font-size: var(--font-sm);
 }
 
-/*
- * A branch name or a commit subject truncates from the right, the ordinary way.
- *
- * Deliberately not `.git__path`: those two are read from the start (`PROJ-412-…`, "feat: …"), so the
- * rule that helps a path actively hurts them.
- */
-.git__label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-sm);
-}
-
-/* A branch name is an identifier, so it keeps the mono face; a subject is prose and does not. */
-.git__branch-row .git__label {
-  font-family: var(--font-mono);
-}
-
 /* Always two or three characters (`↑2 ↓11`), so it never needs to shrink. */
 .git__track {
   flex: none;
   color: var(--text-faint);
   font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
-}
-
-/*
- * Decorations, which have to yield to the subject.
- *
- * `flex: none` was wrong here and it showed the moment a commit carried real refs: a merge on `main`
- * reads `HEAD -> main, origin/main, origin/HEAD`, and an unshrinkable badge that long left the
- * subject exactly one character wide. The subject is what the row is *for*; the refs are context, so
- * they shrink first and are capped. The full list stays in the row's tooltip.
- */
-.git__refs {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 38%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-faint);
-  font-size: var(--font-xs);
-}
-
-.git__sha {
-  flex: none;
-  color: var(--text-faint);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
 }
 
 .git__input {
@@ -5070,7 +5509,7 @@ body {
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: var(--font-md);
+  font-size: var(--font-sm);
   font-family: var(--font-mono);
 }
 
@@ -5082,8 +5521,11 @@ body {
 
 .git__commit {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 5px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
 }
 
 .git__message {
@@ -5115,10 +5557,7 @@ body {
   font-weight: 600;
 }
 
-/*
- * The count at the left, the two buttons together at the right. It was `space-between` across five
- * children, which spread one gesture over the whole width of the form.
- */
+/* The count at the left, the two buttons together at the right. */
 .git__commit-actions {
   display: flex;
   align-items: center;
@@ -5158,24 +5597,41 @@ body {
   height: 10px;
 }
 
+/* -------------------------------------------------------------- git diff */
+
 .git__diff {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-height: 0;
-  overflow: auto;
+}
+
+.git__diff-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 4px;
 }
 
 .git__diff-title {
+  flex: 0 1 auto;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--font-sm);
   color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.git__diff-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 /*
  * The diff itself.
  *
- * `min-content` width on the grid so a long line scrolls the pane horizontally instead of wrapping:
+ * `max-content` width on the grid so a long line scrolls the pane horizontally instead of wrapping:
  * a wrapped diff line breaks the alignment between the gutters and the code, which is the only thing
  * making the two columns of numbers readable.
  */
@@ -5236,6 +5692,49 @@ body {
 
 .diff__line--meta .diff__text {
   color: var(--text-faint);
+}
+
+/* ------------------------------------------------------------- sub-tabs */
+
+/*
+ * The row of sub-tabs of a panel: the pull requests tab's scopes. It served the Git tab's views too
+ * until 11.0.0, which is why it is named for what it is rather than for where it first appeared.
+ */
+.pulls__views {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.subtab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: var(--font-md);
+  cursor: pointer;
+}
+
+.subtab:hover {
+  color: var(--text);
+}
+
+/* No weight change on becoming active, the grammar's rule: the label would move when it is clicked. */
+.subtab--active {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+}
+
+.subtab__count {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--font-xs);
 }
 
 /* ------------------------------------------------------------------ triage */

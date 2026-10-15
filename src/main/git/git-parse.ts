@@ -1,4 +1,12 @@
-import type { GitBranch, GitChange, GitCommit, GitDiffLine, GitStash } from '@shared/contracts.js';
+import type {
+  GitChange,
+  GitCommit,
+  GitCommitFile,
+  GitDiffLine,
+  GitRef,
+  GitRefKind,
+  GitStash,
+} from '@shared/contracts.js';
 
 /**
  * Field separator asked of `git log --format`.
@@ -51,28 +59,54 @@ export function parseStatusZ(stdout: string): GitChange[] {
   return changes;
 }
 
+/** The three namespaces the graph shows, with the prefix each one strips for display. */
+const REF_NAMESPACES: readonly (readonly [GitRefKind, string])[] = [
+  ['local', 'refs/heads/'],
+  ['remote', 'refs/remotes/'],
+  ['tag', 'refs/tags/'],
+];
+
 /**
- * Reads the `for-each-ref` format used by `readBranches`.
+ * Reads the `for-each-ref` format used by `readRefs`.
  *
- * Fields: name, HEAD marker, upstream, track, committer date. The track field is git's own
- * `[ahead 2, behind 1]` prose, parsed with two independent searches rather than one pattern: it can
- * carry either half alone, both, or `[gone]`, and a single regex covering all four shapes is a good
- * way to silently return zeros for a branch that is in fact behind.
+ * Fields: full name, HEAD marker, upstream, track, date, object, peeled object. The track field is
+ * git's own `[ahead 2, behind 1]` prose, parsed with two independent searches rather than one
+ * pattern: it can carry either half alone, both, or `[gone]`, and a single regex covering all four
+ * shapes is a good way to silently return zeros for a branch that is in fact behind.
+ *
+ * - **The display name is the full name minus its namespace**, not `%(refname:short)`: git shortens
+ *   to `heads/x` as soon as a tag of the same name exists, and to `origin` for `origin/HEAD`, so
+ *   its short form depends on what else is in the repository.
+ * - **`<remote>/HEAD` is dropped.** It is a pointer to another remote branch, not a branch, and
+ *   listing it would put a second `origin/main` chip on the same commit under another name.
+ * - **An annotated tag is peeled**: `%(objectname)` is the tag object, which no commit of the graph
+ *   carries; `%(*objectname)` is the commit it points to, and is empty on everything else.
  */
-export function parseBranchLines(stdout: string): GitBranch[] {
-  const branches: GitBranch[] = [];
+export function parseRefLines(stdout: string): GitRef[] {
+  const refs: GitRef[] = [];
 
   for (const line of stdout.split(/\r?\n/)) {
     if (line.trim().length === 0) {
       continue;
     }
-    const [name, head, upstream, track, date] = line.split(FIELD_SEPARATOR);
-    if (name === undefined || name.length === 0) {
+    const [ref, head, upstream, track, date, object, peeled] = line.split(FIELD_SEPARATOR);
+    if (ref === undefined || ref.length === 0) {
+      continue;
+    }
+    const namespace = REF_NAMESPACES.find(([, prefix]) => ref.startsWith(prefix));
+    if (namespace === undefined) {
+      continue;
+    }
+    const [kind, prefix] = namespace;
+    if (kind === 'remote' && ref.endsWith('/HEAD')) {
       continue;
     }
     const marks = track ?? '';
-    branches.push({
-      name,
+    refs.push({
+      ref,
+      name: ref.slice(prefix.length),
+      kind,
+      sha: peeled !== undefined && peeled.length > 0 ? peeled : (object ?? ''),
       current: head === '*',
       upstream: upstream !== undefined && upstream.length > 0 ? upstream : null,
       ahead: readCount(/ahead (\d+)/.exec(marks)),
@@ -82,29 +116,32 @@ export function parseBranchLines(stdout: string): GitBranch[] {
     });
   }
 
-  return branches;
+  return refs;
 }
 
 /**
  * Reads the `git log --format` output used by `readCommits`.
  *
- * Fields: sha, author, date, refs, subject. The subject comes **last** on purpose: it is the only
- * field a user writes freely, so putting it at the end means a stray separator inside it can only
- * damage itself, never shift a date or a sha into the wrong column.
+ * Fields: sha, parents, author, date, refs, subject. The subject comes **last** on purpose: it is the
+ * only field a user writes freely, so putting it at the end means a stray separator inside it can
+ * only damage itself, never shift a date or a sha into the wrong column. `%P` is space-separated and
+ * empty on a root commit, which has to become an empty list and not `['']`: a lane waiting for a
+ * parent called `''` would never close.
  */
-export function parseLogLines(stdout: string): GitCommit[] {
+export function parseGraphLines(stdout: string): GitCommit[] {
   const commits: GitCommit[] = [];
 
   for (const line of stdout.split(/\r?\n/)) {
     if (line.trim().length === 0) {
       continue;
     }
-    const [sha, author, date, refs, ...rest] = line.split(FIELD_SEPARATOR);
+    const [sha, parents, author, date, refs, ...rest] = line.split(FIELD_SEPARATOR);
     if (sha === undefined || sha.length === 0) {
       continue;
     }
     commits.push({
       sha,
+      parents: (parents ?? '').split(' ').filter((parent) => parent.length > 0),
       author: author ?? '',
       date: date ?? '',
       refs: refs ?? '',
@@ -115,6 +152,44 @@ export function parseLogLines(stdout: string): GitCommit[] {
   }
 
   return commits;
+}
+
+/**
+ * Reads `git show --format= -z --name-status`.
+ *
+ * Same reason for `-z` as `parseStatusZ`: raw paths, no quoting to undo. Each record is a status
+ * then a path, and a rename or a copy carries a **score** in its status (`R087`) and **two** paths,
+ * the old one first. Failing to consume the second one would add a phantom file and pair every
+ * following status with the wrong path. A status is trimmed on the left because `git show` may
+ * open its output with the blank line that separates an (empty) header from the file list.
+ */
+export function parseCommitFilesZ(stdout: string): GitCommitFile[] {
+  const parts = stdout.split('\0');
+  const files: GitCommitFile[] = [];
+
+  for (let i = 0; i < parts.length; i += 1) {
+    const status = parts[i]?.trimStart();
+    if (status === undefined || status.length === 0) {
+      continue;
+    }
+    const letter = status[0] ?? '';
+    if (letter === 'R' || letter === 'C') {
+      const from = parts[i + 1];
+      const path = parts[i + 2];
+      i += 2;
+      if (from !== undefined && path !== undefined) {
+        files.push({ path, status: letter, from });
+      }
+      continue;
+    }
+    const path = parts[i + 1];
+    i += 1;
+    if (path !== undefined && path.length > 0) {
+      files.push({ path, status: letter, from: null });
+    }
+  }
+
+  return files;
 }
 
 /**

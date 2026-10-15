@@ -43,10 +43,10 @@ describe('asPatch', () => {
     // A fourth tab is one more branch in a union that is checked by hand in three places: here, the
     // settings store's `asStrip`, and the renderer's height lookup. Missing it here would silently
     // send the user back to the projects tab at every restart.
-    expect(asPatch({ activeStrip: 'git', gitHeight: 500, gitListWidth: 520 })).toEqual({
+    expect(asPatch({ activeStrip: 'git', gitHeight: 500, gitDetailWidth: 520 })).toEqual({
       activeStrip: 'git',
       gitHeight: 500,
-      gitListWidth: 520,
+      gitDetailWidth: 520,
     });
   });
 
@@ -133,8 +133,8 @@ describe('LOCAL_ONLY_KEYS', () => {
       'boardPreviewRatio',
       'explorerHeight',
       'extensionsHeight',
+      'gitDetailWidth',
       'gitHeight',
-      'gitListWidth',
       'jiraHeight',
       'projectsHeight',
       'pullScope',

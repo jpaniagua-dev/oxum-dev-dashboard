@@ -1,350 +1,173 @@
 import type {
-  GitBranch,
   GitChange,
   GitCommit,
-  GitDiff,
-  GitDiffTarget,
-  GitNotice,
+  GitRef,
   GitRepoState,
-  GitSequencer,
-  GitSequencerOp,
   GitStash,
-  GitStashOp,
   GitSyncOp,
   Project,
   ProjectId,
-  TagColors,
 } from '@shared/contracts.js';
-import { hasStagedChanges, hasWorktreeChange, isDeletedOnDisk, isStaged } from '@shared/git-changes.js';
-import type { ExplorerTarget } from '@shared/explorer.js';
-import { clearChildren, createElement, createIcon, createIconButton, hitsInteractive } from './dom.js';
-import { showContextMenu } from './context-menu.js';
-import { CHEVRON_DOWN_ICON, TERMINAL_ICON } from './icons.js';
+import { isDeletedOnDisk, isStaged } from '@shared/git-changes.js';
+import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
+import { renderDetail } from './git-detail.js';
+import { renderCenter } from './git-graph-view.js';
+import {
+  SEQUENCER_LABELS,
+  currentBranch,
+  defaultTargetFor,
+  writesBlocked,
+  type GitMenuItem,
+  type GitPanelActions,
+  type GitPanelHosts,
+  type GitPanelState,
+} from './git-panel-model.js';
+import { renderRefs } from './git-refs.js';
+import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
-import { presentChange, presentTrack } from './presenters.js';
+import { remoteBranchName, undoStateFor } from './presenters.js';
 import { buildTagDots, type TagPalette } from './tags.js';
 
-/**
- * Which working area the middle column shows.
- *
- * Three views rather than three panels, for the same reason the strip has tabs: they answer three
- * separate questions ("what have I changed", "where am I", "what happened") and only one of them is
- * ever being asked. The diff column serves all three, which is what keeps them one tab.
- */
-export type GitViewId = 'changes' | 'branches' | 'history' | 'stashes';
+export {
+  defaultTargetFor,
+  describeDay,
+  type GitCreating,
+  type GitPanelActions,
+  type GitPanelHosts,
+  type GitPanelState,
+  type GitSectionKey,
+  type GitSelection,
+} from './git-panel-model.js';
 
-export const GIT_VIEWS: readonly { id: GitViewId; label: string }[] = [
-  { id: 'changes', label: 'Changes' },
-  { id: 'branches', label: 'Branches' },
-  { id: 'history', label: 'History' },
-  /*
-   * The stash list, added last and on the right for a reason: it is the view you go to on purpose,
-   * whereas the first three are where the tab lands.
-   *
-   * It is also the one thing this tab used to refuse to do, and the refusal deserves its epitaph. The
-   * argument was that a stash leaves the repository in a state the strip can neither show nor finish —
-   * which was true of the *gesture* nobody wanted (an automatic stash behind a checkout) and false of
-   * the object: a stash is a named, listed, complete snapshot, and creating one leaves a clean tree.
-   * The states that argument really protects against are conflicts and rebases, and those are still
-   * out. What did have to come with this view is the way back out of a conflicted `pop`, which is what
-   * `sequencer` is for.
-   */
-  { id: 'stashes', label: 'Stash' },
-];
+/*
+ * The Git tab, laid out like a graph client inside a 460 px strip (redesigned on 2026-10-15):
+ *
+ *   [ repository tabs, each with its uncommitted count ]
+ *   [ branch, distance, notices ............ undo · fetch pull push · branch stash pop · ⋯ ]
+ *   [ refs ][ graph, or the diff in its place      ][ detail: staging + commit, or a commit ]
+ *
+ * This module draws the two rows on top and hands the three columns to their own modules. Every
+ * write keeps the gesture the earlier tab gave it, for the reasons recorded there and in CLAUDE.md:
+ * checkout is deliberate (now a double-click), history-changing writes are behind a right-click,
+ * discarding is confirmed by the main process. What the redesign added is listed in CLAUDE.md under
+ * the Git tab: the graph, the refs panel, Undo, the merge by drag.
+ */
 
 /**
- * How many diff lines are painted.
+ * Icons of the toolbar.
  *
- * A generated lockfile or a bulk rename runs to tens of thousands of lines, and one element per line
- * is what makes the strip freeze. The cap is announced in the view rather than applied quietly: a
- * diff silently cut in half is worse than one that says it was cut.
+ * Fetch, pull and push kept their drawings from the earlier tab (a circular arrow for the one that
+ * changes nothing on disk, two mirrored arrows over a baseline for the two that do). The arrowheads
+ * are sized against the rendered 14 px icon, not against the geometry: at 1.3 units of a 16-unit box
+ * the first fetch arrow came out as a hairline and the icon read as a "C".
  */
-const MAX_DIFF_LINES = 4000;
+const ICONS = {
+  fetch: 'M12.4 8A4.4 4.4 0 1 1 8 3.6M6 1.6L8.2 3.6L6 5.6',
+  pull: 'M8 2.5L8 9.7M5.3 7L8 9.7L10.7 7M3.5 13L12.5 13',
+  push: 'M8 9.7L8 2.5M5.3 5.2L8 2.5L10.7 5.2M3.5 13L12.5 13',
+  undo: 'M5.5 3.5L2.5 6.5L5.5 9.5M2.5 6.5L10 6.5A3.5 3.5 0 0 1 10 13.5L7 13.5',
+  branch: 'M5 2.5L5 13.5M5 9.5C5 7 11 8 11 5.5M11 5.5L11 2.5M11 13.5L11 10.5M9.5 12L12.5 12',
+  stash: 'M2.5 9.5L2.5 13.5L13.5 13.5L13.5 9.5M8 2.5L8 9.5M5.3 6.8L8 9.5L10.7 6.8',
+  pop: 'M2.5 9.5L2.5 13.5L13.5 13.5L13.5 9.5M8 9.5L8 2.5M5.3 5.2L8 2.5L10.7 5.2',
+} as const;
 
-export interface GitPanelHosts {
-  readonly repos: HTMLElement;
-  readonly header: HTMLElement;
-  readonly views: HTMLElement;
-  readonly list: HTMLElement;
-  readonly commit: HTMLElement;
-  readonly diff: HTMLElement;
-}
+const SYNC_HINTS: Record<GitSyncOp, string> = {
+  fetch: 'Fetch: updates the remote branches (git fetch --prune)',
+  pull: 'Pull: git pull --ff-only. A diverged branch is merged by dropping its remote onto it, or in a terminal.',
+  push: 'Push: git push',
+};
 
-export interface GitPanelState {
-  /** Every watched project: the Git tab follows all of them, not just the ones with pull requests. */
-  readonly projects: readonly Project[];
-  /**
-   * `tagKey -> colour`, for the dots beside the names in the repository column.
-   *
-   * The words come off `projects`, which already carries them; only the colour map has to be handed
-   * over, and it is the whole map rather than a per-project slice because the colour belongs to the
-   * tag and one row cannot be told what a word is painted anywhere else.
-   */
-  readonly tagColors: TagColors;
-  /**
-   * Files not committed, per project, from the poll that already reads every repository.
-   *
-   * The column used to badge the **selected** repository only, on the argument that reading the
-   * others would mean a git call per row on every paint. That argument was about a read nobody makes:
-   * the project poll already runs `git status --porcelain=v2` on every project for the Projects tab,
-   * so the number was on the other side of the app the whole time, and finding out where work is
-   * waiting meant clicking each repository in turn or leaving the tab.
-   *
-   * `undefined` for a project the poll has not answered for yet, which is not the same as zero and
-   * must not be drawn as a clean repository.
-   */
-  readonly changedByProject: Readonly<Record<ProjectId, number | undefined>>;
-  readonly selectedProject: ProjectId | null;
-  /** Null while the first read of the selected repository is still in flight. */
-  readonly repo: GitRepoState | null;
-  readonly view: GitViewId;
-  readonly target: GitDiffTarget | null;
-  readonly diff: GitDiff | null;
-  /**
-   * Draft commit message.
-   *
-   * Held by the application rather than left in the textarea, because the panel is rebuilt whole on
-   * every refresh. The refresh is also suppressed while a field has focus, so this only ever has to
-   * survive a rebuild that happened between two bursts of typing, never one during a keystroke.
-   */
-  readonly message: string;
-  /**
-   * Whether the commit form is amending the HEAD commit instead of creating a new one.
-   *
-   * Held here like the message, and reset with it when the repository changes: an amend armed on
-   * one project must not survive onto another, where it would rewrite an unrelated commit.
-   */
-  readonly amend: boolean;
-  /** Draft branch name, held for the same reason. */
-  readonly branchDraft: string;
-  /** Draft stash label, held for the same reason. */
-  readonly stashDraft: string;
-  /** Whether a new stash should sweep up untracked files. Off by default: see `buildStashForm`. */
-  readonly stashUntracked: boolean;
-  /** True while a write is in flight, so a double click cannot launch two checkouts. */
-  readonly busy: boolean;
-  /**
-   * True while `Generate` is waiting on Claude Code.
-   *
-   * Its own flag rather than `busy`, and the difference is not cosmetic: `busy` disables the whole
-   * form because a write is touching the repository, whereas a generation touches nothing and only
-   * has to stop a second run from starting. Folding it into `busy` would grey out the textarea, which
-   * is precisely where the answer is about to land and the one place still worth typing in while the
-   * run takes its minute.
-   */
-  readonly generating: boolean;
-  /**
-   * The outcome of the last write that had nothing to show for itself, or `null`.
-   *
-   * Fetch, pull and push all end in a one-line stamp at the top of the window, four seconds, far from
-   * the button that was pressed: the honest reading of "the push did nothing" is that nothing on
-   * screen said it did anything. This is that answer, next to the branch it is about.
-   *
-   * Only those three, and not every write in the tab. Staging, discarding and checking out all change
-   * something the panel is already showing, so the list repainting **is** the confirmation; a push
-   * moves nothing on screen, which is exactly why it needs a line of its own.
-   */
-  readonly notice: GitNotice | null;
-}
-
-export interface GitPanelActions {
-  onSelectProject: (projectId: ProjectId) => void;
-  onSelectView: (view: GitViewId) => void;
-  /** Shows something in the diff column: a file of the working tree, or a whole commit. */
-  onSelectTarget: (target: GitDiffTarget) => void;
-  onStage: (paths: string[], staged: boolean) => void;
-  /**
-   * Throws the changes to those paths away: back to HEAD, or deleted when untracked.
-   *
-   * The one action of this tab that destroys work, so it is behind a right-click **and** behind a
-   * confirmation raised by the main process. Neither guard is redundant: the gesture keeps it out of
-   * reach of a stray click in a list, the dialog names the files before anything is touched.
-   */
-  onDiscard: (paths: string[]) => void;
-  /** Opens a changed file in the editor set in Settings: the Explorer's panel, or a window of its own. */
-  onEditFile: (path: string, target: ExplorerTarget) => void;
-  onCheckout: (name: string) => void;
-  onCreateBranch: (name: string) => void;
-  /** Commits in a terminal tab. With `push`, a `git push` follows a commit that exited cleanly. */
-  onCommit: (push: boolean) => void;
-  onMessage: (value: string) => void;
-  /**
-   * Asks Claude Code for a commit message and puts it in the field.
-   *
-   * Fills the form; it never commits. The answer is a draft like anything else typed there, and the
-   * commit stays the separate, deliberate click it already was.
-   */
-  onGenerateMessage: () => void;
-  /** Arms or disarms the amend. Ticking it pre-fills the form with the message being replaced. */
-  onAmend: (amend: boolean) => void;
-  onBranchDraft: (value: string) => void;
-  onSync: (op: GitSyncOp) => void;
-  /** Replays a commit onto the current branch. `noCommit` is `-n`: staged, not committed. */
-  onCherryPick: (sha: string, noCommit: boolean) => void;
-  /** Finishes or abandons whatever git left half-done. Only offered when something is. */
-  onSequencer: (op: GitSequencerOp) => void;
-  onStashDraft: (value: string) => void;
-  onStashUntracked: (include: boolean) => void;
-  /** Stashes the working tree under the current draft label. */
-  onStashPush: () => void;
-  /** Applies, pops or drops a stash. Named by sha, never by its position in the list. */
-  onStash: (stash: GitStash, op: GitStashOp) => void;
-  /** Puts a short sha on the clipboard: the one thing a commit row is asked for outside this app. */
-  onCopy: (text: string) => void;
-  /** Opens a new terminal tab in the repository, same gesture as everywhere else in the app. */
-  onNewTerminal: (projectId: ProjectId) => void;
-  /** Clears the fetch/pull/push line, from a click on it. */
-  onDismissNotice: () => void;
-  /** Opens the repository's action menu, from the `⋯` button or from a right-click on the header. */
-  onMenu: (x: number, y: number) => void;
-  /** Opens a commit's action menu, from a right-click on its row in the history. */
-  onCommitMenu: (commit: GitCommit, x: number, y: number) => void;
-  /** Opens a stash's action menu, from a right-click on its row. */
-  onStashMenu: (stash: GitStash, x: number, y: number) => void;
-  /** Opens a changed file's action menu, from a right-click on its row in the Changes view. */
-  onChangeMenu: (change: GitChange, x: number, y: number) => void;
-  /**
-   * Reports that a text field has the focus.
-   *
-   * The panel is rebuilt on every git poll, so a refresh landing mid-sentence would replace the
-   * textarea under the cursor. Same guard, and the same reason, as the project table's inline rename.
-   */
-  onEditing: (editing: boolean) => void;
-}
-
-/** Paints the whole tab: repositories, working area, diff. */
+/** Paints the whole tab: repositories, toolbar, refs, graph, detail. */
 export function renderGitPanel(
   hosts: GitPanelHosts,
   state: GitPanelState,
   actions: GitPanelActions,
 ): void {
-  renderRepos(hosts.repos, state, actions);
-
-  clearChildren(hosts.header);
-  clearChildren(hosts.views);
-  clearChildren(hosts.list);
-  clearChildren(hosts.commit);
-  clearChildren(hosts.diff);
+  renderRepoTabs(hosts.repos, state, actions);
+  clearChildren(hosts.toolbar);
+  clearChildren(hosts.refs);
+  clearChildren(hosts.center);
+  clearChildren(hosts.detail);
 
   if (state.projects.length === 0) {
-    hosts.list.append(
+    hosts.center.append(
       createElement('p', { className: 'pulls__empty', text: 'No project configured.' }),
     );
     return;
   }
-
   const repo = state.repo;
   if (repo === null) {
-    hosts.list.append(createElement('p', { className: 'pulls__empty', text: 'Reading…' }));
+    hosts.center.append(createElement('p', { className: 'pulls__empty', text: 'Reading…' }));
     return;
   }
+  hosts.toolbar.append(buildToolbar(repo, state, actions));
   if (repo.error !== null) {
-    hosts.header.append(buildHeader(repo, state, actions));
-    hosts.list.append(createElement('p', { className: 'pulls__error', text: repo.error }));
+    hosts.center.append(createElement('p', { className: 'pulls__error', text: repo.error }));
     return;
   }
 
-  hosts.header.append(buildHeader(repo, state, actions));
-  renderViews(hosts.views, repo, state, actions);
-
-  switch (state.view) {
-    case 'changes':
-      renderChanges(hosts.list, repo, state, actions);
-      renderCommitForm(hosts.commit, repo, state, actions);
-      break;
-    case 'branches':
-      renderBranches(hosts.list, repo, state, actions);
-      break;
-    case 'history':
-      renderHistory(hosts.list, repo, state, actions);
-      break;
-    case 'stashes':
-      renderStashes(hosts.list, repo, state, actions);
-      break;
-  }
-
-  renderDiff(hosts.diff, state, actions);
+  renderRefs(hosts.refs, repo, state, actions);
+  renderCenter(hosts.center, repo, state, actions);
+  renderDetail(hosts.detail, repo, state, actions);
 }
 
-/* ---------------------------------------------------------------- columns */
+/* ------------------------------------------------------------ repo tabs */
 
 /**
- * The repository column.
+ * One tab per repository, each badged with its uncommitted file count.
  *
- * Every project, not only the ones following pull requests: `followPulls` says whether GitHub should
- * be polled for a repository, which has nothing to do with whether you might want to commit in it.
- * The badge counts changed files, so the column answers "where do I have work in progress" on its own.
+ * Every tab carries its count, not only the selected one: the selected repository's comes from the
+ * on-demand read (so it agrees with the files listed on the right), the others' from the project poll
+ * that already reads every repository for the Projects tab. A repository the poll has not answered for
+ * gets no badge rather than a dash, which here means "nothing to commit" and would report a clean tree
+ * for one that may be full of work.
+ *
+ * The terminal icon is the tab's **sibling**, not its child: the tab is a real button, and a button
+ * inside a button is invalid HTML that browsers rearrange. Opening a terminal therefore does not
+ * select the repository, and so sets off no git read of a repository nobody opened.
  */
-function renderRepos(host: HTMLElement, state: GitPanelState, actions: GitPanelActions): void {
+function renderRepoTabs(host: HTMLElement, state: GitPanelState, actions: GitPanelActions): void {
   clearChildren(host);
-
   const palette: TagPalette = { projects: state.projects, colors: state.tagColors };
 
   for (const project of state.projects) {
     const active = project.id === state.selectedProject;
-    // The wrapper exists only so the terminal icon can be a sibling of the row; see `buildRepoTerminal`.
-    const line = createElement('div', { className: 'git__repo-line' });
-    const row = createElement('button', {
-      className: `pulls__repo${active ? ' pulls__repo--active' : ''}`,
+    const line = createElement('div', {
+      className: `git__repo-line${active ? ' git__repo-line--active' : ''}`,
     });
-    row.type = 'button';
-    // Before the name, same as in the pull request column and for the same reason: the dots of every
-    // row then start on one edge, which is what makes a column of them scannable.
+    const tab = createElement('button', { className: 'git__repo-tab' });
+    tab.type = 'button';
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', String(active));
     const dots = buildTagDots(palette, project.id);
     if (dots !== null) {
-      row.append(dots);
+      tab.append(dots);
     }
-    row.append(createElement('span', { className: 'pulls__repo-name', text: project.label }));
+    tab.append(createElement('span', { className: 'git__repo-name', text: project.label }));
 
-    /*
-     * Every row carries its count, not only the selected one.
-     *
-     * The selected repository's comes from the on-demand read, the others' from the project poll, and
-     * the order matters: the badge beside the open repository has to agree with the list of files
-     * right next to it, and the poll can be a whole interval out of date. Everywhere else the poll is
-     * the only number there is, and it is the one the Projects tab has been showing all along, which
-     * is the trip this badge saves.
-     *
-     * A project the poll has not answered for yet gets no badge rather than an empty-value mark. That
-     * mark means "nothing to commit" here, and drawing it over an unread repository would report a
-     * clean tree for one that may be full of work.
-     */
     const count = repoFileCount(project.id, active, state);
     if (count !== null) {
-      row.append(
+      tab.append(
         createElement('span', {
           className: `pulls__repo-count${count > 0 ? ' pulls__repo-count--dirty' : ''}`,
           text: count === 0 ? '—' : String(count),
         }),
       );
     }
-    row.title =
+    tab.title =
       active && state.repo !== null && state.repo.error === null
-        ? `${state.repo.branch}
-${count ?? 0} uncommitted file(s)`
+        ? `${state.repo.branch}\n${count ?? 0} uncommitted file(s)`
         : count === null
           ? project.path
-          : `${project.path}
-${count} uncommitted file(s)`;
+          : `${project.path}\n${count} uncommitted file(s)`;
+    tab.addEventListener('click', () => actions.onSelectProject(project.id));
 
-    row.addEventListener('click', () => actions.onSelectProject(project.id));
-    line.append(row, buildRepoTerminal(project, actions));
+    line.append(tab, buildRepoTerminal(project, actions));
     host.append(line);
   }
 }
 
-/**
- * The number on one repository row, or `null` when nothing has read it yet.
- *
- * The selected repository answers from `state.repo`, which the tab reads on demand and which the file
- * list below is drawn from: two numbers side by side that disagree would make the reader trust
- * neither. Every other row answers from the poll, whose count is a count of **files** and not the sum
- * of the three per-state counts the Projects tab shows, a file being able to be staged and modified
- * at once.
- *
- * A repository git could not read (`error`) falls through to the poll, which reports that failure as
- * an absent count: no badge rather than a zero.
- */
+/** The number on one repository tab, or `null` when nothing has read it yet. */
 function repoFileCount(projectId: ProjectId, active: boolean, state: GitPanelState): number | null {
   if (active && state.repo !== null && state.repo.error === null) {
     return state.repo.changes.length;
@@ -352,23 +175,9 @@ function repoFileCount(projectId: ProjectId, active: boolean, state: GitPanelSta
   return state.changedByProject[projectId] ?? null;
 }
 
-/**
- * The per-repository terminal shortcut, next to the project's name.
- *
- * A **sibling** of the row rather than a child of it, and that is the whole reason this column grew a
- * wrapper element. The row is a real `<button>`, so it is reachable by Tab and answers Enter; nesting
- * a button inside a button is invalid HTML that browsers silently rearrange, which is the same reason
- * a pull request row is a `div`. Here the row keeps its semantics and the icon is a control in its own
- * right, so neither has to give anything up.
- *
- * Being outside the row also settles what the gesture means: opening a terminal does **not** select
- * the repository, so it cannot set off a git read of a repo nobody asked to look at. And it is not
- * disabled by `state.busy`, unlike every other control of this tab — it runs no git command, exactly
- * like the same entry in the repository menu.
- */
+/** Not disabled by `busy`, like the same entry of the repository menu: it runs no git command. */
 function buildRepoTerminal(project: Project, actions: GitPanelActions): HTMLButtonElement {
   const button = createIconButton(TERMINAL_ICON, {
-    // The name has to say which project: there is one of these per row.
     label: `Open a terminal in ${project.label}`,
     title: `Open a new terminal tab in ${project.path}`,
     className: 'icon-button--row',
@@ -377,28 +186,29 @@ function buildRepoTerminal(project: Project, actions: GitPanelActions): HTMLButt
   return button;
 }
 
+/* -------------------------------------------------------------- toolbar */
+
 /**
- * Branch, distance from the upstream, and the way into the repository's actions.
+ * The status of the repository on the left, its verbs on the right.
  *
- * Fetch, pull, push and "open a terminal here" used to be four buttons across this row. They are a
- * menu now, and the row is better for it: a status strip is read at a glance, and four controls
- * competing with the branch name is not a glance. The menu is reached by right-clicking the row —
- * the gesture anyone tries on a repository line — with a `⋯` button kept for the same reason the
- * strip kept its chevron next to the double-click: the power gesture does not have to be the
- * discoverable one, but *something* has to be.
+ * The left half is read at a glance: the branch, how far it stands from its upstream, a half-done
+ * operation said out loud, and the line where fetch, pull and push report what they did (they are the
+ * only writes that move nothing on screen). The right half is the toolbar a graph client has, as
+ * icons: undo, the three network operations, a new branch, stash and pop, and the `⋯` menu, which a
+ * right-click anywhere on the row opens too.
  */
-function buildHeader(
+function buildToolbar(
   repo: GitRepoState,
   state: GitPanelState,
   actions: GitPanelActions,
 ): HTMLElement {
-  const header = createElement('div', { className: 'git__header-row' });
-  header.addEventListener('contextmenu', (event) => {
+  const bar = createElement('div', { className: 'git__toolbar-row' });
+  bar.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     actions.onMenu(event.clientX, event.clientY);
   });
 
-  header.append(
+  bar.append(
     createElement('span', {
       className: 'git__branch',
       text: repo.branch,
@@ -406,144 +216,165 @@ function buildHeader(
     }),
   );
 
-  if (repo.hasUpstream) {
-    const marks: string[] = [];
-    if (repo.ahead > 0) {
-      marks.push(`↑${repo.ahead}`);
-    }
-    if (repo.behind > 0) {
-      marks.push(`↓${repo.behind}`);
-    }
-    if (marks.length > 0) {
-      header.append(
+  if (repo.error === null) {
+    if (repo.hasUpstream) {
+      const marks: string[] = [];
+      if (repo.ahead > 0) {
+        marks.push(`↑${repo.ahead}`);
+      }
+      if (repo.behind > 0) {
+        marks.push(`↓${repo.behind}`);
+      }
+      if (marks.length > 0) {
+        bar.append(
+          buildPill({
+            label: marks.join(' '),
+            tone: repo.behind > 0 ? 'busy' : 'info',
+            title: `${repo.ahead} commit(s) ahead, ${repo.behind} behind`,
+          }),
+        );
+      }
+    } else if (currentBranch(repo) !== undefined) {
+      bar.append(
         buildPill({
-          label: marks.join(' '),
-          tone: repo.behind > 0 ? 'busy' : 'info',
-          title: `${repo.ahead} commit(s) ahead, ${repo.behind} behind`,
+          label: 'no upstream',
+          tone: 'neutral',
+          // Not an error: the state of every branch before its first push, which Push fixes.
+          title: 'The branch has never been pushed. Push will publish it with -u origin.',
         }),
       );
     }
-  } else {
-    header.append(
-      buildPill({
-        label: 'no upstream',
-        tone: 'neutral',
-        // Not an error: it is simply the state of every branch before its first push, and `Push`
-        // below is precisely the button that fixes it.
-        title: 'The branch has never been pushed. "Push" will publish it with -u origin.',
-      }),
-    );
-  }
 
-  /*
-   * A half-finished operation is said out loud, right next to the branch.
-   *
-   * This is the state where every other button of the tab fails for a reason that has nothing to do
-   * with what was clicked: mid-cherry-pick, a checkout refuses, a commit commits the wrong thing, and
-   * git's message talks about a sequencer nobody mentioned. The pill is `error`-toned on purpose — it
-   * is not a mode you meant to be in, and the way out is one right-click away in the repository menu.
-   */
-  if (repo.sequencer !== 'none') {
-    header.append(
-      buildPill({
+    /*
+     * A half-finished operation, said out loud beside the branch, `error`-toned: it is the state where
+     * every other button fails for a reason unrelated to what was clicked. The way out is first in the
+     * repository menu, `--abort` before `--continue`.
+     */
+    if (repo.sequencer !== 'none') {
+      const pill = buildPill({
         label: `${SEQUENCER_LABELS[repo.sequencer]} in progress`,
         tone: 'error',
-        title: `The repository is in the middle of a ${SEQUENCER_LABELS[repo.sequencer]}. Continue or abort from the repository menu (right click).`,
-      }),
-    );
+        title: `The repository is in the middle of a ${SEQUENCER_LABELS[repo.sequencer]}. Abort or continue from the ⋯ menu.`,
+      });
+      bar.append(pill);
+    }
   }
 
-  header.append(createElement('span', { className: 'git__spacer' }));
+  bar.append(createElement('span', { className: 'git__spacer' }));
 
   /*
-   * What the last fetch, pull or push actually did, beside the branch it did it to.
-   *
-   * Those three are the tab's invisible writes: everything else repaints the list that is already on
-   * screen, whereas a successful push moves nothing at all and a refused one moves nothing either.
-   * They were reported in the window header's stamp, four seconds, at the other end of the window
-   * from the button, which in use reads as a button that does nothing.
-   *
-   * On the right of the header rather than next to the button that started it, because the menu is
-   * gone by the time the answer arrives, and because `Commit and push` starts its push from a
-   * terminal tab minutes later: one place for the answer, whichever of the two asked the question.
+   * What the last fetch, pull or push did. A success clears itself after a few seconds; a failure
+   * stays until clicked, being the one that must not be missed.
    */
   if (state.notice !== null && state.notice.projectId === repo.projectId) {
     const notice = buildPill({
       label: state.notice.message,
       tone: state.notice.ok ? 'ok' : 'error',
-      title: state.notice.ok ? 'Click to dismiss' : `${state.notice.message}
-Click to dismiss`,
+      title: state.notice.ok ? 'Click to dismiss' : `${state.notice.message}\nClick to dismiss`,
     });
     notice.classList.add('git__notice');
-    // Dismissable, because a failure stays put: it is the one that must not be missed, and the one
-    // whose text is worth keeping on screen while you decide what to do about it.
     notice.addEventListener('click', () => actions.onDismissNotice());
-    header.append(notice);
+    bar.append(notice);
+  }
+
+  if (repo.error === null) {
+    const undo = undoStateFor(repo);
+    bar.append(
+      toolButton('undo', 'Undo the last commit', undo.reason, state.busy || !undo.enabled, () =>
+        actions.onUndo(),
+      ),
+      createElement('span', { className: 'git__toolbar-gap' }),
+    );
+    for (const op of ['fetch', 'pull', 'push'] as const) {
+      const title =
+        op === 'push' && !repo.hasUpstream
+          ? `Push and publish the branch: git push -u origin ${repo.branch}`
+          : SYNC_HINTS[op];
+      bar.append(toolButton(op, op[0]?.toUpperCase() + op.slice(1), title, state.busy, () => actions.onSync(op)));
+    }
+    bar.append(createElement('span', { className: 'git__toolbar-gap' }));
+
+    const stashable = repo.changes.some((change) => !change.untracked);
+    const latest = repo.stashes[0];
+    bar.append(
+      toolButton('branch', 'New branch', 'New branch from HEAD', state.busy, () =>
+        actions.onCreating('branch'),
+      ),
+      toolButton(
+        'stash',
+        'Stash',
+        stashable
+          ? 'Stash the tracked changes (git stash push). The stashes panel names one or takes untracked files.'
+          : 'Nothing tracked to stash. The + of the stashes panel can include untracked files.',
+        writesBlocked(state) || !stashable,
+        () => actions.onStashPush(),
+      ),
+      toolButton(
+        'pop',
+        'Pop',
+        latest === undefined
+          ? 'No stash to pop'
+          : `Pop the latest stash, ${latest.ref} "${latest.subject}" (git stash pop)`,
+        writesBlocked(state) || latest === undefined,
+        () => {
+          if (latest !== undefined) {
+            actions.onStash(latest, 'pop');
+          }
+        },
+      ),
+    );
   }
 
   const menu = createElement('button', {
     className: 'button button--quiet git__menu-button',
     text: '⋯',
-    title: 'Repository actions: fetch, pull, push, terminal (or right click this row)',
+    title: 'Repository actions (or right click this row)',
   });
   menu.type = 'button';
   menu.disabled = state.busy;
   menu.setAttribute('aria-label', 'Repository actions');
   menu.addEventListener('click', (event) => {
-    /*
-     * `stopPropagation` is what makes this button work at all.
-     *
-     * `showContextMenu` closes on any `click` reaching `document`, which is right for every other
-     * caller: they all open from `contextmenu`, and a right-click fires no `click` at all. This is the
-     * first menu opened by a **left** click, so without this the opening click carried on to the
-     * document listener and shut the menu in the same tick — a button that looked completely dead.
-     */
+    // `stopPropagation`, or the opening click reaches the document listener that closes menus and
+    // shuts this one in the same tick: a button that looks completely dead.
     event.stopPropagation();
-    // Anchored under the button rather than at the pointer, so the menu lands in the same place
-    // whether it was opened by click or by keyboard.
     const box = menu.getBoundingClientRect();
     actions.onMenu(box.left, box.bottom + 2);
   });
-  header.append(menu);
-
-  return header;
+  bar.append(menu);
+  return bar;
 }
 
-/**
- * How each half-finished operation is named to the user.
- *
- * git's own words, not translations: `cherry-pick` and `rebase` are what the command prints and what
- * every answer found online calls them, so renaming them here would make the message harder to act on
- * rather than friendlier.
- */
-const SEQUENCER_LABELS: Record<Exclude<GitSequencer, 'none'>, string> = {
-  'cherry-pick': 'cherry-pick',
-  merge: 'merge',
-  revert: 'revert',
-  rebase: 'rebase',
-};
+function toolButton(
+  icon: keyof typeof ICONS,
+  label: string,
+  title: string,
+  disabled: boolean,
+  run: () => void,
+): HTMLButtonElement {
+  const button = createElement('button', { className: 'icon-button git__tool' });
+  button.type = 'button';
+  button.disabled = disabled;
+  button.title = title;
+  button.setAttribute('aria-label', label);
+  button.append(createIcon(ICONS[icon], { paint: 'stroke' }));
+  button.addEventListener('click', run);
+  return button;
+}
+
+/* ---------------------------------------------------------------- menus */
 
 /**
  * The repository's actions, as a menu.
  *
- * Built here rather than in `main.ts` so the labels and the reasons stay next to the view that
- * explains them. `hint` carries what the button tooltips used to say, which is where the two
- * deliberate limitations of this tab are written down: pull is fast-forward only, and push publishes
- * a new branch with `-u` on its first run.
+ * The way out of a half-finished operation comes first when there is one, `--abort` before
+ * `--continue`: you open this menu because something went wrong, and abort is the one that cannot
+ * make it worse.
  */
 export function buildRepoMenuItems(
   repo: GitRepoState,
   state: GitPanelState,
   actions: GitPanelActions,
-): { label: string; hint: string; disabled: boolean; run: () => void }[] {
-  /*
-   * The way out of a half-finished operation, first in the list when there is one.
-   *
-   * First because in that state it is the only thing worth doing: fetch, pull and push all fail from
-   * there, and a menu that opens on them is a menu that wastes a click. Abandoning comes before
-   * continuing, which is the reverse of how they read but the right order for how they are used — you
-   * open this menu because something went wrong, and `--abort` is the one that cannot make it worse.
-   */
+): GitMenuItem[] {
   const sequencer =
     repo.sequencer === 'none'
       ? []
@@ -561,7 +392,7 @@ export function buildRepoMenuItems(
             run: () => actions.onSequencer('continue'),
           },
         ];
-
+  const undo = undoStateFor(repo);
   return [
     ...sequencer,
     {
@@ -572,7 +403,7 @@ export function buildRepoMenuItems(
     },
     {
       label: 'Pull (fast-forward only)',
-      hint: 'git pull --ff-only. A diverged branch has to go through the terminal: this tab cannot finish a rebase.',
+      hint: 'git pull --ff-only. A diverged branch: drop its remote branch onto it to merge, or use a terminal.',
       disabled: state.busy,
       run: () => actions.onSync('pull'),
     },
@@ -581,6 +412,12 @@ export function buildRepoMenuItems(
       hint: repo.hasUpstream ? 'git push' : `git push -u origin ${repo.branch}`,
       disabled: state.busy,
       run: () => actions.onSync('push'),
+    },
+    {
+      label: 'Undo the last commit',
+      hint: undo.reason,
+      disabled: state.busy || !undo.enabled,
+      run: () => actions.onUndo(),
     },
     {
       label: 'Open a terminal here',
@@ -592,546 +429,35 @@ export function buildRepoMenuItems(
 }
 
 /**
- * Icons for the three network operations.
- *
- * A circular arrow for fetch, and two mirrored arrows over a baseline for pull and push: the line is
- * the local repository, down brings work in, up sends it out. Fetch gets a different *silhouette*
- * rather than a third arrow on purpose — it is the one that changes nothing on disk, and three
- * variations of the same arrow would make the harmless one look like the other two.
- */
-const SYNC_ICONS: Record<GitSyncOp, string> = {
-  /*
-   * A three-quarter circle opening at the top right, with the arrowhead at twelve o'clock pointing
-   * into that gap.
-   *
-   * The arrowhead is deliberately large — 2.2 units of a 16-unit box. The first version drew it at
-   * 1.3 units, which after the 14px render is barely one pixel per barb: it came out as a hairline
-   * stub and the icon read as a plain "C". An arrowhead has to be sized against the *rendered* icon,
-   * not against the geometry that looks balanced in the editor.
-   */
-  fetch: 'M12.4 8A4.4 4.4 0 1 1 8 3.6M6 1.6L8.2 3.6L6 5.6',
-  pull: 'M8 2.5L8 9.7M5.3 7L8 9.7L10.7 7M3.5 13L12.5 13',
-  push: 'M8 9.7L8 2.5M5.3 5.2L8 2.5L10.7 5.2M3.5 13L12.5 13',
-};
-
-const SYNC_LABELS: Record<GitSyncOp, { label: string; hint: string }> = {
-  fetch: { label: 'Fetch', hint: 'Fetches the remote refs (git fetch --prune)' },
-  pull: {
-    label: 'Pull',
-    hint: 'git pull --ff-only. A diverged branch has to go through the terminal: this tab cannot finish a rebase.',
-  },
-  push: { label: 'Push', hint: 'git push' },
-};
-
-/**
- * The three sub-tabs, each carrying its own count, and the network actions on the right.
- *
- * The actions sit in this row rather than in the header because this is the row of controls: the
- * header is a status line (branch, distance from upstream) and mixing verbs into it is what made it
- * unreadable when they were four labelled buttons. As icons at the far end of the tab row they are
- * one click away without competing with anything for attention.
- */
-function renderViews(
-  host: HTMLElement,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): void {
-  for (const view of GIT_VIEWS) {
-    const active = view.id === state.view;
-    const button = createElement('button', {
-      className: `subtab${active ? ' subtab--active' : ''}`,
-    });
-    button.type = 'button';
-    button.setAttribute('role', 'tab');
-    button.setAttribute('aria-selected', String(active));
-    button.append(createElement('span', { text: view.label }));
-
-    const count = countFor(view.id, repo);
-    if (count !== null) {
-      button.append(createElement('span', { className: 'subtab__count', text: String(count) }));
-    }
-
-    button.addEventListener('click', () => actions.onSelectView(view.id));
-    host.append(button);
-  }
-
-  host.append(createElement('span', { className: 'git__spacer' }));
-  for (const op of ['fetch', 'pull', 'push'] as const) {
-    host.append(buildSyncIcon(op, repo, state, actions));
-  }
-}
-
-function buildSyncIcon(
-  op: GitSyncOp,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): HTMLButtonElement {
-  const { label, hint } = SYNC_LABELS[op];
-  const button = createElement('button', { className: 'icon-button git__sync' });
-  button.type = 'button';
-  button.disabled = state.busy;
-  // The label lives in the tooltip and in `aria-label`: an icon alone says nothing to a screen
-  // reader, and `push -u` is worth spelling out the first time a branch is published.
-  button.title =
-    op === 'push' && !repo.hasUpstream
-      ? `Push and publish the branch: git push -u origin ${repo.branch}`
-      : `${label} — ${hint}`;
-  button.setAttribute('aria-label', label);
-  button.append(createIcon(SYNC_ICONS[op], { paint: 'stroke' }));
-  button.addEventListener('click', () => actions.onSync(op));
-  return button;
-}
-
-function countFor(view: GitViewId, repo: GitRepoState): number | null {
-  switch (view) {
-    case 'changes':
-      return repo.changes.length;
-    case 'branches':
-      return repo.branches.length;
-    case 'stashes':
-      // Shown even at zero, unlike the history: "how many stashes do I have here" is exactly the
-      // question this view answers, and the answer is often none.
-      return repo.stashes.length;
-    case 'history':
-      return null;
-  }
-}
-
-/* ---------------------------------------------------------------- changes */
-
-/**
- * The changed files, each with a staging checkbox.
- *
- * The checkbox is the staging gesture and the row is the diff gesture, which is why the row-level
- * click is guarded by `hitsInteractive`: ticking a box must not also swap the diff column, or every
- * staging action would move the view out from under the file being staged.
- */
-function renderChanges(
-  host: HTMLElement,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): void {
-  if (repo.changes.length === 0) {
-    host.append(
-      createElement('p', { className: 'pulls__empty', text: 'Nothing to commit, everything is clean.' }),
-    );
-    return;
-  }
-
-  host.append(buildStagingBar(repo, state, actions));
-
-  for (const change of repo.changes) {
-    host.append(buildChangeRow(change, state, actions));
-  }
-}
-
-/** "Stage all" / "Unstage all", the two gestures a per-file checkbox makes tedious. */
-function buildStagingBar(
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): HTMLElement {
-  const bar = createElement('div', { className: 'git__bar' });
-
-  const unstaged = repo.changes.filter((change) => !isStaged(change) || hasWorktreeChange(change));
-  const staged = repo.changes.filter(isStaged);
-
-  const addAll = createElement('button', {
-    className: 'button button--quiet',
-    text: `Stage all (${unstaged.length})`,
-    title: 'git add on every modified file',
-  });
-  addAll.type = 'button';
-  addAll.disabled = state.busy || unstaged.length === 0;
-  addAll.addEventListener('click', () =>
-    actions.onStage(unstaged.map((change) => change.path), true),
-  );
-
-  const removeAll = createElement('button', {
-    className: 'button button--quiet',
-    text: `Unstage all (${staged.length})`,
-    title: 'git restore --staged on the whole index',
-  });
-  removeAll.type = 'button';
-  removeAll.disabled = state.busy || staged.length === 0;
-  removeAll.addEventListener('click', () =>
-    actions.onStage(staged.map((change) => change.path), false),
-  );
-
-  bar.append(addAll, removeAll);
-  return bar;
-}
-
-function buildChangeRow(
-  change: GitChange,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): HTMLElement {
-  const label = presentChange(change);
-  const selected =
-    state.target?.kind === 'file' && state.target.path === change.path
-      ? ' git__row--selected'
-      : '';
-  const row = createElement('div', { className: `git__row git__change${selected}` });
-  row.title = `${change.path}\n${label.title}\n(click: see the diff, right click: act)`;
-
-  /*
-   * Discarding is behind a right-click, like cherry-pick and every stash operation.
-   *
-   * The same judgement those two record, at its strongest: this row is clicked all day to read a
-   * diff, and the action being added to it is the only one in the app that destroys work outright. A
-   * button here would put it one stray click away from the gesture people make constantly, which is
-   * precisely the arrangement `Checkout` was made a button to avoid in the other direction.
-   */
-  row.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
-    actions.onChangeMenu(change, event.clientX, event.clientY);
-  });
-
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.className = 'git__check';
-  box.checked = isStaged(change);
-  box.disabled = state.busy;
-  box.title = box.checked ? 'Unstage' : 'Stage';
-  box.addEventListener('change', () => actions.onStage([change.path], box.checked));
-  row.append(box);
-
-  row.append(buildPill(label));
-  // `textContent` throughout: a path comes from the file system, not from this app.
-  row.append(createElement('span', { className: 'git__path path-clip-start', text: change.path }));
-
-  row.addEventListener('click', (event) => {
-    if (hitsInteractive(event)) {
-      return;
-    }
-    actions.onSelectTarget(defaultTargetFor(change));
-  });
-
-  return row;
-}
-
-/**
- * The commit form.
- *
- * The button is disabled when nothing is staged, using the same `hasStagedChanges` the main process
- * would: an enabled button that produces "nothing added to commit" in a terminal tab teaches nothing.
- * **Amending lifts that rule**: `git commit --amend` with an empty index is a reword, which is half
- * of what an amend is for.
- *
- * The amend is a checkbox rather than a second button, and that is a judgement call in line with the
- * cherry-pick one: an amend rewrites history, so it must not be reachable by the same single click
- * that commits. Arming it first, watching the button change name, then clicking, is the deliberate
- * two-step gesture. Ticking it pre-fills the form with the message being replaced (`headMessage`),
- * because an amend that silently drops the old body would lose what it promised to edit.
- *
- * Laid out as the gesture runs: a header naming the message with the amend at its right, since
- * arming the amend changes what the message is; the message; then the buttons together at the right,
- * `Generate` beside a split `Commit` whose chevron holds `Commit and push`. The buttons used to be
- * spread across the whole width, so the eye travelled from one end of the form to the other between
- * two halves of one gesture.
- */
-function renderCommitForm(
-  host: HTMLElement,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): void {
-  const area = document.createElement('textarea');
-  area.className = 'git__message';
-  area.id = 'git-commit-message';
-  area.rows = 3;
-  area.placeholder = 'Commit message';
-  area.value = state.message;
-  area.addEventListener('input', () => actions.onMessage(area.value));
-  // The panel is rebuilt on every poll; while this has the focus, the refresh holds off.
-  area.addEventListener('focus', () => actions.onEditing(true));
-  area.addEventListener('blur', () => actions.onEditing(false));
-
-  const staged = hasStagedChanges(repo.changes);
-  const head = repo.commits[0];
-
-  const heading = createElement('label', { className: 'git__commit-label', text: 'Commit message' });
-  heading.htmlFor = area.id;
-
-  const toggle = createElement('label', { className: 'git__toggle' });
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.className = 'git__check';
-  box.checked = state.amend;
-  box.disabled = state.busy || head === undefined;
-  box.addEventListener('change', () => actions.onAmend(box.checked));
-  toggle.append(box, createElement('span', { text: 'Amend' }));
-  // The tooltip names the commit about to be rewritten, and says when that rewrite will need a
-  // force push: with nothing ahead, HEAD is exactly what the upstream has.
-  toggle.title =
-    head === undefined
-      ? 'No commit to amend yet'
-      : `git commit --amend: rewrites ${head.sha} "${head.subject}".${
-          repo.hasUpstream && repo.ahead === 0
-            ? '\nAlready pushed: the next push will have to be forced.'
-            : ''
-        }`;
-
-  /*
-   * `Generate`, which asks Claude Code for the message rather than writing one from a template.
-   *
-   * Secondary and to the left of `Commit`, in the order the gesture happens. It obeys the same
-   * staged-or-amending rule as the commit button, and for the same reason: with an empty index there
-   * is no diff, so a run would take its minute and come back with an invented message. `busy` blocks
-   * it because a write is in flight; `generating` blocks it because one is already running.
-   *
-   * It does **not** care whether the textarea already has something in it. Regenerating over a draft
-   * is a normal thing to want, and a button that refused would be one you have to clear a field to
-   * use. The answer replacing a draft is why this is a button and not something that fires on its own.
-   */
-  const generate = createElement('button', {
-    className: 'button',
-    text: state.generating ? 'Generating…' : 'Generate',
-  });
-  generate.type = 'button';
-  generate.disabled = state.busy || state.generating || (!staged && !state.amend);
-  generate.title = state.generating
-    ? 'The agent is reading the diff'
-    : staged || state.amend
-      ? "Write the message from the staged diff, following this repository's conventions"
-      : 'Nothing staged: tick at least one file';
-  generate.addEventListener('click', () => actions.onGenerateMessage());
-
-  const button = createElement('button', {
-    className: 'button button--primary',
-    text: state.amend ? 'Amend' : 'Commit',
-  });
-  button.type = 'button';
-  button.disabled =
-    state.busy || state.message.trim().length === 0 || (!staged && !state.amend);
-  button.title = state.amend
-    ? 'git commit --amend -F, launched in a terminal tab so the hooks stay visible'
-    : staged
-      ? 'git commit -F, launched in a terminal tab so the hooks stay visible'
-      : 'Nothing staged: tick at least one file';
-  button.addEventListener('click', () => actions.onCommit(false));
-
-  /*
-   * `Commit and push`, the everyday gesture in two clicks: the chevron, then the entry.
-   *
-   * In the menu of a primary `Commit`, and not the other way round: the primary is the one that
-   * touches the local repository only, and the one that publishes to a branch other people read is
-   * named in full rather than inherited by muscle memory. The push runs from the main process once
-   * the commit's own process exits, so a pre-commit hook that refuses stops it dead, and the outcome
-   * lands in the header line rather than in the tab, which by then shows a finished commit.
-   *
-   * Refused on an amend that is **already upstream**, the one case where a plain push cannot work:
-   * the branch has been rewritten under a remote that still has the old commit, and git will refuse
-   * without `--force`. An entry whose only possible outcome is a refusal is a trap, and forcing from
-   * a menu is not something this tab is going to offer. The entry stays in the menu, disabled, with
-   * its reason as a tooltip, because an entry that vanishes takes the knowledge that it exists with it.
-   *
-   * The chevron is disabled whenever `Commit` is: with nothing to commit there is nothing to push
-   * either, and a menu whose only entry is greyed out is a click that answers nothing.
-   */
-  const amendPushed = state.amend && repo.hasUpstream && repo.ahead === 0;
-  const pushLabel = state.amend ? 'Amend and push' : 'Commit and push';
-  const more = createElement('button', { className: 'button button--primary git__commit-more' });
-  more.type = 'button';
-  more.append(createIcon(CHEVRON_DOWN_ICON, { paint: 'stroke' }));
-  more.disabled = button.disabled;
-  more.title = pushLabel;
-  more.setAttribute('aria-label', 'More commit actions');
-  more.setAttribute('aria-haspopup', 'menu');
-  more.addEventListener('click', (event) => {
-    event.stopPropagation();
-    const box = split.getBoundingClientRect();
-    showContextMenu(box.left, box.bottom + 4, [
-      {
-        label: pushLabel,
-        disabled: amendPushed,
-        hint: amendPushed
-          ? 'The commit being amended is already on the remote: the push would need --force, which this menu does not do'
-          : `${button.title}\nThen git push, from here, if and only if the commit exits cleanly`,
-        run: () => actions.onCommit(true),
-      },
-    ]);
-  });
-
-  const split = createElement('div', { className: 'git__commit-split' });
-  split.append(button, more);
-
-  const header = createElement('div', { className: 'git__commit-head' });
-  header.append(heading, toggle);
-
-  const footer = createElement('div', { className: 'git__commit-actions' });
-  footer.append(
-    createElement('span', {
-      className: 'strip__meta',
-      text: staged
-        ? `${repo.changes.filter(isStaged).length} staged file(s)`
-        : state.amend
-          ? 'Empty index: rewords the last commit'
-          : 'Empty index',
-    }),
-    generate,
-    split,
-  );
-
-  host.append(header, area, footer);
-}
-
-/* --------------------------------------------------------------- branches */
-
-/**
- * The branch list, newest first, with the creation field above it.
- *
- * Checkout is a button rather than a click on the row: switching branch changes what is on disk, and
- * it is the one gesture in this tab that must not be reachable by a stray click on a list.
- */
-function renderBranches(
-  host: HTMLElement,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): void {
-  host.append(buildBranchForm(state, actions));
-
-  if (repo.branches.length === 0) {
-    host.append(createElement('p', { className: 'pulls__empty', text: 'No local branch.' }));
-    return;
-  }
-
-  for (const branch of repo.branches) {
-    host.append(buildBranchRow(branch, state, actions));
-  }
-}
-
-function buildBranchForm(state: GitPanelState, actions: GitPanelActions): HTMLElement {
-  const bar = createElement('div', { className: 'git__bar' });
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'git__input';
-  input.placeholder = 'PROJ-000-description';
-  input.value = state.branchDraft;
-  input.addEventListener('input', () => actions.onBranchDraft(input.value));
-  input.addEventListener('focus', () => actions.onEditing(true));
-  input.addEventListener('blur', () => actions.onEditing(false));
-  // Enter is the gesture people use in a single-field form, and the button stays for discoverability.
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' && input.value.trim().length > 0) {
-      actions.onCreateBranch(input.value);
-    }
-  });
-
-  const create = createElement('button', {
-    className: 'button',
-    text: 'Create and switch',
-    title: 'git checkout -b, from the current branch. The name is validated by git itself.',
-  });
-  create.type = 'button';
-  create.disabled = state.busy || state.branchDraft.trim().length === 0;
-  create.addEventListener('click', () => actions.onCreateBranch(state.branchDraft));
-
-  bar.append(input, create);
-  return bar;
-}
-
-function buildBranchRow(
-  branch: GitBranch,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): HTMLElement {
-  const row = createElement('div', {
-    className: `git__row git__branch-row${branch.current ? ' git__row--selected' : ''}`,
-  });
-  row.title = branch.upstream === null ? branch.name : `${branch.name} → ${branch.upstream}`;
-
-  row.append(createElement('span', { className: 'git__label', text: branch.name }));
-
-  const track = presentTrack(branch);
-  if (track.length > 0) {
-    row.append(
-      createElement('span', {
-        className: 'git__track',
-        text: track,
-      }),
-    );
-  }
-
-  if (branch.current) {
-    row.append(createElement('span', { className: 'badge-warn', text: 'courante' }));
-  } else {
-    const checkout = createElement('button', {
-      className: 'button button--quiet',
-      text: 'Checkout',
-      title: `git checkout ${branch.name}`,
-    });
-    checkout.type = 'button';
-    checkout.disabled = state.busy;
-    checkout.addEventListener('click', () => actions.onCheckout(branch.name));
-    row.append(checkout);
-  }
-
-  return row;
-}
-
-/* -------------------------------------------------------------- history */
-
-/** The last commits, each opening its own diff in the third column. */
-function renderHistory(
-  host: HTMLElement,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): void {
-  if (repo.commits.length === 0) {
-    host.append(createElement('p', { className: 'pulls__empty', text: 'No commit.' }));
-    return;
-  }
-
-  for (const commit of repo.commits) {
-    host.append(buildCommitRow(commit, repo, state, actions));
-  }
-}
-
-/**
  * A commit's own actions, as a menu.
  *
- * A right-click and not a button, and that is the same judgement the checkout button records in
- * reverse: a checkout changes the disk, so it must not be reachable by a stray click on a list; a
- * cherry-pick changes the *history*, so it must not be reachable at all without asking for it. The
- * history column is scrolled and clicked all day to read diffs, and a visible `Cherry-pick` sitting on
- * every row of it would be one mis-click away from a commit nobody wanted.
- *
- * Rebuilt at each opening like the repository menu, because it too depends on live state: the target
- * branch is in the labels, and a menu built once would name the branch you have since left. Exported
- * for the same reason `buildRepoMenuItems` is — the labels and the reasons belong next to the view.
+ * A right-click and not a button: a cherry-pick changes the *history*, so it must not be reachable
+ * without asking for it, and the graph is scrolled and clicked all day. Undo appears on the HEAD
+ * commit only, the one it applies to.
  */
 export function buildCommitMenuItems(
   commit: GitCommit,
   repo: GitRepoState,
   state: GitPanelState,
   actions: GitPanelActions,
-): { label: string; hint: string; disabled: boolean; run: () => void }[] {
-  // A cherry-pick onto a dirty tree is refused by git itself, and the refusal is worth pre-empting:
-  // the item says why rather than letting the button produce an error two clicks later.
+): GitMenuItem[] {
+  // A cherry-pick onto a dirty tree is refused by git itself; the item says so beforehand.
   const dirty = repo.changes.length > 0;
-  const blocked = state.busy || repo.sequencer !== 'none';
-
-  return [
+  const blocked = writesBlocked(state);
+  const short = commit.sha.slice(0, 7);
+  const items: GitMenuItem[] = [
     {
       label: `Cherry-pick onto ${repo.branch}`,
       hint: dirty
         ? 'git cherry-pick, but the working tree is not clean: git will refuse.'
-        : `git cherry-pick ${commit.sha}: replays this commit on the current branch.`,
-      disabled: blocked,
+        : `git cherry-pick ${short}: replays this commit on the current branch.`,
+      disabled: blocked || commit.sha === repo.headSha,
       run: () => actions.onCherryPick(commit.sha, false),
     },
     {
       label: 'Cherry-pick without committing',
-      hint: `git cherry-pick -n ${commit.sha}: the changes land in the index, committing is up to you.`,
-      disabled: blocked,
+      hint: `git cherry-pick -n ${short}: the changes land in the index, committing is up to you.`,
+      disabled: blocked || commit.sha === repo.headSha,
       run: () => actions.onCherryPick(commit.sha, true),
     },
     {
@@ -1141,220 +467,100 @@ export function buildCommitMenuItems(
       run: () => actions.onCopy(commit.sha),
     },
     {
-      label: 'See the diff',
-      hint: 'Same as clicking the row.',
+      label: 'See the whole diff',
+      hint: 'Every file of this commit in one diff, against its first parent.',
       disabled: false,
-      run: () => actions.onSelectTarget({ kind: 'commit', sha: commit.sha }),
+      run: () => actions.onOpenDiff({ kind: 'commit', sha: commit.sha }),
     },
   ];
-}
-
-function buildCommitRow(
-  commit: GitCommit,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): HTMLElement {
-  const selected =
-    state.target?.kind === 'commit' && state.target.sha === commit.sha
-      ? ' git__row--selected'
-      : '';
-  const row = createElement('div', { className: `git__row git__commit-row${selected}` });
-  // The refs are in the tooltip because the badge is capped: on a merge commit the decoration is
-  // longer than the row, and truncating it in the view must not make it unreadable altogether.
-  const refs = commit.refs.length > 0 ? `\n${commit.refs}` : '';
-  row.title = `${commit.subject}\n${commit.author}, ${commit.date}${refs}\n(click: see the diff, right click: act)`;
-
-  row.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
-    actions.onCommitMenu(commit, event.clientX, event.clientY);
-  });
-
-  row.append(createElement('span', { className: 'git__sha', text: commit.sha }));
-  row.append(createElement('span', { className: 'git__label', text: commit.subject }));
-
-  if (commit.refs.length > 0) {
-    row.append(createElement('span', { className: 'git__refs', text: commit.refs }));
+  if (commit.sha === repo.headSha) {
+    const undo = undoStateFor(repo);
+    items.push({
+      label: 'Undo this commit',
+      hint: undo.reason,
+      disabled: state.busy || !undo.enabled,
+      run: () => actions.onUndo(),
+    });
   }
-  row.append(createElement('span', { className: 'pull__age', text: describeDay(commit.date) }));
-
-  row.addEventListener('click', (event) => {
-    if (hitsInteractive(event)) {
-      return;
-    }
-    actions.onSelectTarget({ kind: 'commit', sha: commit.sha });
-  });
-
-  return row;
-}
-
-/* --------------------------------------------------------------- stashes */
-
-/**
- * The stash list, with the creation form above it.
- *
- * Same shape as the branches view (a form, then the list) because it is the same grammar: a list of
- * named things you can create one of. What differs is that every action on an entry is behind a
- * right-click rather than a button — `pop` and `drop` both *remove* the entry, and `drop` removes it
- * with nothing on screen able to bring it back, so neither belongs on a row that is also clicked to
- * read a diff.
- */
-function renderStashes(
-  host: HTMLElement,
-  repo: GitRepoState,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): void {
-  host.append(buildStashForm(repo, state, actions));
-
-  if (repo.stashes.length === 0) {
-    host.append(
-      createElement('p', {
-        className: 'pulls__empty',
-        text: 'No stash. The form above sets aside what is modified.',
-      }),
-    );
-    return;
-  }
-
-  for (const stash of repo.stashes) {
-    host.append(buildStashRow(stash, state, actions));
-  }
+  return items;
 }
 
 /**
- * The creation form: a label, the untracked switch, and the button.
+ * What a branch or a tag offers on a right-click.
  *
- * The label is optional and the placeholder says so, because git writes a perfectly usable
- * `WIP on <branch>: <sha> <subject>` by itself; forcing a name would be asking for one at the moment
- * someone is in a hurry to switch branches, which is when a stash is made.
- *
- * `--include-untracked` is a **choice and off by default**, and that is the load-bearing half. A
- * checkout already refuses to overwrite tracked changes, so those are the ones a stash is for; new
- * files are the ones a checkout carries across happily, so sweeping them away by default would move
- * work nobody asked to move. Off, the count next to the button says how many files are being left
- * behind, which is the honest way to offer the switch.
+ * Checkout is here as well as on the double-click, because the expert gesture does not have to be the
+ * discoverable one but there has to be one; for the same reason the merge a drag starts is offered
+ * here too, through the same menu the drop opens.
  */
-function buildStashForm(
+export function buildRefMenuItems(
+  ref: GitRef,
   repo: GitRepoState,
   state: GitPanelState,
   actions: GitPanelActions,
-): HTMLElement {
-  const bar = createElement('div', { className: 'git__bar' });
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'git__input';
-  input.placeholder = 'Stash name (optional)';
-  input.value = state.stashDraft;
-  input.addEventListener('input', () => actions.onStashDraft(input.value));
-  input.addEventListener('focus', () => actions.onEditing(true));
-  input.addEventListener('blur', () => actions.onEditing(false));
-
-  const untracked = repo.changes.filter((change) => change.untracked).length;
-  const tracked = repo.changes.length - untracked;
-
-  const toggle = createElement('label', { className: 'git__toggle' });
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.className = 'git__check';
-  box.checked = state.stashUntracked;
-  box.disabled = state.busy || untracked === 0;
-  box.addEventListener('change', () => actions.onStashUntracked(box.checked));
-  toggle.append(box, createElement('span', { text: `+ untracked (${untracked})` }));
-  toggle.title =
-    untracked === 0
-      ? 'No untracked file to include'
-      : 'git stash push --include-untracked: also takes the files git does not track yet';
-
-  // Untracked files count towards "is there anything to stash" only when they are included: with the
-  // box unticked, a repository whose only changes are new files has nothing for `git stash` to take.
-  const stashable = state.stashUntracked ? repo.changes.length : tracked;
-  const push = createElement('button', {
-    className: 'button',
-    text: 'Stash',
-    title:
-      stashable === 0
-        ? 'Nothing to set aside'
-        : `git stash push on ${stashable} file(s). The working tree goes back to HEAD.`,
-  });
-  push.type = 'button';
-  push.disabled = state.busy || stashable === 0;
-  push.addEventListener('click', () => actions.onStashPush());
-
-  bar.append(input, toggle, push);
-  return bar;
-}
-
-function buildStashRow(
-  stash: GitStash,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): HTMLElement {
-  const selected =
-    state.target?.kind === 'stash' && state.target.sha === stash.sha
-      ? ' git__row--selected'
-      : '';
-  const row = createElement('div', { className: `git__row git__stash-row${selected}` });
-  const from = stash.branch.length > 0 ? `\nDepuis ${stash.branch}` : '';
-  row.title = `${stash.ref} · ${stash.subject}${from}\n${stash.date}\n(click: see the diff, right click: apply, pop, drop)`;
-
-  // The ref is shown because it is what `git stash` prints and what the user would type in a terminal,
-  // and it is shown *knowing* it is positional: everything this app does with the entry goes by sha.
-  row.append(createElement('span', { className: 'git__sha', text: stash.ref }));
-  row.append(createElement('span', { className: 'git__label', text: stash.subject }));
-
-  if (stash.branch.length > 0) {
-    row.append(createElement('span', { className: 'git__refs', text: stash.branch }));
+  merge: (x: number, y: number) => void,
+  at: { x: number; y: number },
+): GitMenuItem[] {
+  const items: GitMenuItem[] = [
+    {
+      label: 'Show the commit',
+      hint: `${ref.sha.slice(0, 7)}, selected in the graph.`,
+      disabled: false,
+      run: () => actions.onSelect({ kind: 'commit', sha: ref.sha }),
+    },
+  ];
+  if (ref.kind === 'local') {
+    items.push({
+      label: ref.current ? 'Checked out' : `Check out ${ref.name}`,
+      hint: ref.current
+        ? 'This is the current branch.'
+        : `git checkout ${ref.name}. Nothing is stashed: local changes in the way make git refuse. Double-click does the same.`,
+      disabled: ref.current || state.busy,
+      run: () => actions.onCheckout(ref),
+    });
   }
-  row.append(createElement('span', { className: 'pull__age', text: describeDay(stash.date) }));
-
-  row.addEventListener('click', (event) => {
-    if (hitsInteractive(event)) {
-      return;
-    }
-    actions.onSelectTarget({ kind: 'stash', sha: stash.sha, ref: stash.ref });
+  if (ref.kind === 'remote') {
+    const local = remoteBranchName(ref);
+    const exists = repo.refs.some((entry) => entry.kind === 'local' && entry.name === local);
+    items.push({
+      label: exists ? `Check out ${local}` : `Check out as ${local}`,
+      hint: exists
+        ? `${local} already exists: it is checked out as it is. Pull brings it up to date.`
+        : `git checkout -b ${local} --track ${ref.name}. Double-click does the same.`,
+      disabled: state.busy,
+      run: () => actions.onCheckout(ref),
+    });
+  }
+  const current = currentBranch(repo);
+  if (ref.kind !== 'tag' && !ref.current && current !== undefined) {
+    items.push({
+      label: `Merge into ${current.name}…`,
+      hint: 'Opens the merge choices, the same as dropping this branch onto the current one.',
+      disabled: writesBlocked(state),
+      run: () => merge(at.x, at.y),
+    });
+  }
+  items.push({
+    label: 'Copy the name',
+    hint: ref.name,
+    disabled: false,
+    run: () => actions.onCopy(ref.name),
   });
-  row.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
-    actions.onStashMenu(stash, event.clientX, event.clientY);
-  });
-
-  return row;
+  return items;
 }
 
-/**
- * A stash's actions, as a menu.
- *
- * Three verbs that are easy to confuse and easy to regret, so each hint says what happens to the entry
- * itself and not only to the working tree. `drop` is last and says it cannot be undone: git keeps the
- * commit reachable through its reflog for a while, but nothing in this tab can find it again, and
- * promising a recovery it does not offer would be worse than saying it is final.
- */
 /**
  * What a changed file offers on a right-click.
  *
- * The diff, the editor, the staging toggle the checkbox already carries, and the one gesture that has
- * nowhere else to live. The first two are repeated deliberately, since a menu
- * holding a single destructive item is a menu whose only purpose is that item, and it invites the
- * click it should be making people think about.
- *
- * The discard label says what will happen to **this** file rather than a generic "discard": an
- * untracked file is deleted, and someone who has read the word "discard" as "unstage" has to be told
- * before the dialog, not by it. The staging half of the same idea is why the label reads `Unstage`
- * only for something actually in the index.
- *
- * Rebuilt on every open, like the repository and stash menus: every label here depends on the row's
- * current state, and a menu built once would eventually describe the file as it was.
+ * The diff, the editor, the staging toggle, and the one gesture that has nowhere else to live:
+ * discard. The discard label says what will happen to **this** file, because an untracked file is
+ * deleted, and someone who read "discard" as "unstage" has to be told before the dialog.
  */
 export function buildChangeMenuItems(
   change: GitChange,
   state: GitPanelState,
   actions: GitPanelActions,
-): { label: string; hint: string; disabled: boolean; run: () => void }[] {
-  // Same guard as the stash menu, spelled out for the same reason: a repository half-way through a
-  // cherry-pick refuses every one of these for a cause that has nothing to do with the click.
-  const blocked = state.busy || (state.repo !== null && state.repo.sequencer !== 'none');
+): GitMenuItem[] {
+  const blocked = writesBlocked(state);
   const staged = isStaged(change);
   const deleted = isDeletedOnDisk(change);
   return [
@@ -1362,19 +568,23 @@ export function buildChangeMenuItems(
       label: 'See the diff',
       hint: 'The same thing a click on the row does.',
       disabled: false,
-      run: () => actions.onSelectTarget(defaultTargetFor(change)),
+      run: () => actions.onOpenDiff(defaultTargetFor(change)),
     },
-    // Not `blocked`: opening a file runs no git command, so a busy repository or a half-done
-    // cherry-pick is no reason to refuse it. A conflict is precisely the file one wants to edit.
+    // Not `blocked`: opening a file runs no git command, and a conflict is precisely the file one
+    // wants to edit.
     {
       label: 'Edit',
-      hint: deleted ? 'Deleted on disk: there is no file to open.' : 'Opens it in the Explorer tab, in the editor set in Settings.',
+      hint: deleted
+        ? 'Deleted on disk: there is no file to open.'
+        : 'Opens it in the Explorer tab, in the editor set in Settings.',
       disabled: deleted,
       run: () => actions.onEditFile(change.path, 'panel'),
     },
     {
       label: 'Edit in a window',
-      hint: deleted ? 'Deleted on disk: there is no file to open.' : 'Opens it in a window of its own, and this tab stays on screen.',
+      hint: deleted
+        ? 'Deleted on disk: there is no file to open.'
+        : 'Opens it in a window of its own, and this tab stays on screen.',
       disabled: deleted,
       run: () => actions.onEditFile(change.path, 'window'),
     },
@@ -1395,16 +605,30 @@ export function buildChangeMenuItems(
   ];
 }
 
+/**
+ * A stash's actions. `drop` says it cannot be undone: git keeps the commit in its reflog for a while,
+ * but nothing in this tab can find it again, and promising a recovery it does not offer would be
+ * worse than saying it is final.
+ */
 export function buildStashMenuItems(
   stash: GitStash,
   state: GitPanelState,
   actions: GitPanelActions,
-): { label: string; hint: string; disabled: boolean; run: () => void }[] {
-  // Blocked mid-operation, and spelled out rather than written as `state.repo?.sequencer !== 'none'`:
-  // that form also blocks when there is no repository at all, which happens to be right here and would
-  // be wrong the first time someone reuses it.
-  const blocked = state.busy || (state.repo !== null && state.repo.sequencer !== 'none');
+): GitMenuItem[] {
+  const blocked = writesBlocked(state);
   return [
+    {
+      label: 'Show what it holds',
+      hint: 'Its files in the panel on the right.',
+      disabled: false,
+      run: () => actions.onSelect({ kind: 'stash', sha: stash.sha, ref: stash.ref }),
+    },
+    {
+      label: 'See the whole diff',
+      hint: 'git stash show -p, in the centre.',
+      disabled: false,
+      run: () => actions.onOpenDiff({ kind: 'stash', sha: stash.sha, ref: stash.ref }),
+    },
     {
       label: 'Apply (and keep)',
       hint: `git stash apply: the changes come back into the working tree, ${stash.ref} stays in the list.`,
@@ -1424,139 +648,4 @@ export function buildStashMenuItems(
       run: () => actions.onStash(stash, 'drop'),
     },
   ];
-}
-
-/* ------------------------------------------------------------------ diff */
-
-/**
- * The diff column.
- *
- * One view for a working-tree file and for a commit, because both are unified diffs and the reader's
- * question is the same. The line numbers are shown in two gutters rather than one: a diff is a
- * statement about two files at once, and a single column would have to lie about one of them.
- */
-function renderDiff(host: HTMLElement, state: GitPanelState, actions: GitPanelActions): void {
-  if (state.target === null) {
-    host.append(
-      createElement('p', {
-        className: 'pulls__empty',
-        text: 'Select a file or a commit to see its diff.',
-      }),
-    );
-    return;
-  }
-
-  const diff = state.diff;
-  if (diff === null) {
-    host.append(createElement('p', { className: 'pulls__empty', text: 'Reading the diff…' }));
-    return;
-  }
-
-  host.append(buildDiffHeader(diff, state, actions));
-
-  if (diff.note !== null) {
-    host.append(createElement('p', { className: 'pulls__empty', text: diff.note }));
-    return;
-  }
-
-  const body = createElement('div', { className: 'diff' });
-  for (const line of diff.lines.slice(0, MAX_DIFF_LINES)) {
-    const row = createElement('div', { className: `diff__line diff__line--${line.kind}` });
-    row.append(
-      createElement('span', {
-        className: 'diff__gutter',
-        text: line.oldLine === null ? '' : String(line.oldLine),
-      }),
-      createElement('span', {
-        className: 'diff__gutter',
-        text: line.newLine === null ? '' : String(line.newLine),
-      }),
-      createElement('span', { className: 'diff__text', text: line.text }),
-    );
-    body.append(row);
-  }
-  host.append(body);
-
-  if (diff.lines.length > MAX_DIFF_LINES) {
-    // Announced rather than silent: a truncated diff that says nothing reads as a complete one.
-    host.append(
-      createElement('p', {
-        className: 'pulls__empty',
-        text: `Diff truncated: ${MAX_DIFF_LINES} lines out of ${diff.lines.length}. Open it in the terminal for the rest.`,
-      }),
-    );
-  }
-}
-
-/**
- * The diff's heading, plus the index/disk switch when both sides exist.
- *
- * That switch only appears for a file that is staged **and** modified again, which is the one case
- * where "the diff of this file" has two different answers and picking one silently would hide the
- * other. Everywhere else there is nothing to choose and no button.
- */
-function buildDiffHeader(
-  diff: GitDiff,
-  state: GitPanelState,
-  actions: GitPanelActions,
-): HTMLElement {
-  const header = createElement('div', { className: 'git__bar' });
-  header.append(createElement('span', { className: 'git__diff-title', text: diff.title }));
-
-  const target = state.target;
-  if (target === null || target.kind !== 'file') {
-    return header;
-  }
-
-  const change = state.repo?.changes.find((entry) => entry.path === target.path);
-  if (change === undefined || !isStaged(change) || !hasWorktreeChange(change)) {
-    return header;
-  }
-
-  header.append(createElement('span', { className: 'git__spacer' }));
-  const toggle = createElement('button', {
-    className: 'button button--quiet',
-    text: target.staged ? 'Show the disk' : 'Show the index',
-    title: target.staged
-      ? 'Shows the unstaged changes (git diff)'
-      : 'Shows what is staged (git diff --cached)',
-  });
-  toggle.type = 'button';
-  toggle.addEventListener('click', () =>
-    actions.onSelectTarget({ kind: 'file', path: target.path, staged: !target.staged }),
-  );
-  header.append(toggle);
-  return header;
-}
-
-/**
- * Which side of a change the diff column should open on.
- *
- * Shared by the click on a row and by the preselection made when the tab opens, so the two cannot
- * drift: the working-tree side whenever there is one, the index otherwise. For a file that is staged
- * *and* edited again, what is on disk is the version still being worked on, and it is also the only
- * choice that is never empty — `git diff` on a file with nothing unstaged returns nothing at all.
- */
-export function defaultTargetFor(change: GitChange): GitDiffTarget {
-  return {
-    kind: 'file',
-    path: change.path,
-    staged: !hasWorktreeChange(change) && isStaged(change),
-  };
-}
-
-/**
- * A commit's date, short enough for a list.
- *
- * Absolute rather than relative, unlike a pull request's age: the question in front of a history is
- * "when was this", and "34 days ago" is a worse answer to it than a date.
- */
-export function describeDay(iso: string): string {
-  const at = Date.parse(iso);
-  if (Number.isNaN(at)) {
-    return '';
-  }
-  // en-GB for the same reason as the refresh clock: day before month, which is what the
-  // rest of the strip and every branch name in this window already assume.
-  return new Date(at).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' });
 }

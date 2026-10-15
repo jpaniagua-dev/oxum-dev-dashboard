@@ -1,25 +1,29 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { VIEW_CONCURRENCY, allWithLimit } from '../concurrency.js';
-import type {
-  GitBranch,
-  GitChange,
-  GitCommit,
-  GitDiff,
-  GitDiffTarget,
-  GitRepoState,
-  GitResult,
-  GitSequencer,
-  GitSequencerOp,
-  GitStash,
-  GitStashOp,
-  GitSyncOp,
-  Project,
+import {
+  GIT_GRAPH_LIMIT,
+  type GitChange,
+  type GitCommit,
+  type GitCommitDetail,
+  type GitDiff,
+  type GitDiffTarget,
+  type GitMergeMode,
+  type GitRef,
+  type GitRepoState,
+  type GitResult,
+  type GitSequencer,
+  type GitSequencerOp,
+  type GitStash,
+  type GitStashOp,
+  type GitSyncOp,
+  type Project,
 } from '@shared/contracts.js';
 import {
   FIELD_SEPARATOR as SEP,
-  parseBranchLines,
-  parseLogLines,
+  parseCommitFilesZ,
+  parseGraphLines,
+  parseRefLines,
   parseStashLines,
   parseStatusZ,
   parseUnifiedDiff,
@@ -33,12 +37,12 @@ import {
 } from './run-git.js';
 
 /**
- * How many commits the history column shows.
+ * A hexadecimal sha and nothing else, abbreviated or full.
  *
- * A window, not the whole log: the column is a few hundred pixels tall and reading ten thousand
- * commits to display forty of them is work nobody asked for. Raising it costs one number.
+ * The guard for every command that takes a revision rather than a path: those have no `--` to hide
+ * a value starting with `-` behind, so the value itself has to be checked.
  */
-const LOG_LIMIT = 60;
+const SHA_PATTERN = /^[0-9a-f]{4,40}$/i;
 
 /* ------------------------------------------------------------------ reads */
 
@@ -74,7 +78,7 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
     projectId: project.id,
     label: project.label,
     path: project.path,
-    branches: [] as GitBranch[],
+    refs: [] as GitRef[],
     changes: [] as GitChange[],
     commits: [] as GitCommit[],
     stashes: [] as GitStash[],
@@ -83,12 +87,12 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
   };
 
   try {
-    const [branches, changes, commits, stashes, headMessage] = await allWithLimit(
+    const [refs, changes, commits, stashes, headMessage] = await allWithLimit(
       // `VIEW_CONCURRENCY` and not the poll's limit: this read answers a click as well as the poll,
       // and at four its five calls needed two waves, which measured 1068 ms against 173 ms. See the
       // table on that constant.
       VIEW_CONCURRENCY,
-      () => readBranches(project.path),
+      () => readRefs(project.path),
       () => readChanges(project.path),
       () => readCommits(project.path),
       () => readStashes(project.path),
@@ -98,10 +102,11 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
     // sixty-byte read.
     const sequencer = readSequencer(project.path);
 
-    const current = branches.find((branch) => branch.current);
+    const current = refs.find((ref) => ref.current);
     return {
       ...empty,
-      branches,
+      headSha: current?.sha ?? findHeadSha(commits),
+      refs,
       changes,
       commits,
       stashes,
@@ -125,6 +130,7 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
     return {
       ...empty,
       branch: '?',
+      headSha: null,
       ahead: 0,
       behind: 0,
       hasUpstream: false,
@@ -134,24 +140,39 @@ export async function readRepoState(project: Project): Promise<GitRepoState> {
   }
 }
 
-/** Local branches, most recently committed first. */
-export async function readBranches(repoPath: string): Promise<GitBranch[]> {
+/**
+ * Local branches, remote-tracking branches and tags, most recently touched first.
+ *
+ * One `for-each-ref` for the three namespaces rather than one per kind: the graph needs all of them
+ * to hang labels on its commits, and `readRepoState` is at five processes in a pool of six.
+ */
+export async function readRefs(repoPath: string): Promise<GitRef[]> {
   const format = [
-    '%(refname:short)',
+    '%(refname)',
     '%(HEAD)',
     '%(upstream:short)',
     '%(upstream:track)',
-    '%(committerdate:iso-strict)',
+    '%(creatordate:iso-strict)',
+    '%(objectname)',
+    '%(*objectname)',
   ].join(SEP);
-  // Sorted by git rather than by us: `-committerdate` is exactly "the branches I have touched
-  // lately", which is the order a branch list is actually searched in.
+  // Sorted by git rather than by us: most recent first is exactly "the branches I have touched
+  // lately", which is the order a branch list is actually searched in. `creatordate` and not
+  // `committerdate`: an annotated tag is a tag object with no committer, and sorts by its tagging.
   const out = await git(repoPath, [
     'for-each-ref',
-    '--sort=-committerdate',
+    '--sort=-creatordate',
     `--format=${format}`,
     'refs/heads',
+    'refs/remotes',
+    'refs/tags',
   ]);
-  return parseBranchLines(out);
+  return parseRefLines(out);
+}
+
+/** Local branches only, for the callers that create or switch to one by name. */
+export async function readBranches(repoPath: string): Promise<GitRef[]> {
+  return (await readRefs(repoPath)).filter((ref) => ref.kind === 'local');
 }
 
 /** Changed files, staged and unstaged alike. */
@@ -162,11 +183,95 @@ export async function readChanges(repoPath: string): Promise<GitChange[]> {
   return parseStatusZ(out);
 }
 
-/** The last commits of the current branch. */
+/**
+ * The commit graph: every local branch, remote-tracking branch and tag, plus HEAD.
+ *
+ * - **`--topo-order`**, not the default date order: it guarantees every child comes before its
+ *   parents and keeps a branch's commits together, which is what lets a lane run straight down
+ *   instead of zig-zagging between two branches committed on the same afternoon.
+ * - **`HEAD` is named explicitly** besides the namespaces: a detached HEAD belongs to none of them,
+ *   and the commit being worked on is the last one that may go missing from the graph.
+ * - **`%H` and `%P`, full shas**: the layout matches each parent against a sha it has seen, and an
+ *   abbreviation is only unique as of the moment git printed it.
+ *
+ * A repository with no commit yet makes `git log` fail; that is a normal row here, read as an empty
+ * graph rather than as an error.
+ */
 export async function readCommits(repoPath: string): Promise<GitCommit[]> {
-  const format = ['%h', '%an', '%aI', '%D', '%s'].join(SEP);
-  const out = await git(repoPath, ['log', `-n${LOG_LIMIT}`, `--format=${format}`]);
-  return parseLogLines(out);
+  const format = ['%H', '%P', '%an', '%aI', '%D', '%s'].join(SEP);
+  try {
+    const out = await git(repoPath, [
+      'log',
+      '--topo-order',
+      `-n${GIT_GRAPH_LIMIT}`,
+      `--format=${format}`,
+      '--branches',
+      '--remotes',
+      '--tags',
+      'HEAD',
+    ]);
+    return parseGraphLines(out);
+  } catch (error) {
+    if (await hasNoCommit(repoPath)) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+/** True in a freshly initialised repository, where HEAD names a branch with no commit yet. */
+async function hasNoCommit(repoPath: string): Promise<boolean> {
+  return !(await tryGit(repoPath, ['rev-parse', '--verify', '--quiet', 'HEAD'])).ok;
+}
+
+/**
+ * The sha of HEAD, found among the commits already read.
+ *
+ * Only reached on a detached HEAD, which no branch names: `%D` then starts with a bare `HEAD`, and
+ * with `HEAD -> ` on a branch. Exported for testing.
+ */
+export function findHeadSha(commits: readonly GitCommit[]): string | null {
+  const head = commits.find((commit) =>
+    commit.refs.split(', ').some((ref) => ref === 'HEAD' || ref.startsWith('HEAD -> ')),
+  );
+  return head?.sha ?? null;
+}
+
+/**
+ * The full message and the files of one commit, for the detail panel.
+ *
+ * - **Files against the first parent** (`--diff-merges=first-parent`). By default `git show` prints
+ *   no file at all for a merge, which reads as "this merge changed nothing"; `diff-tree -m` lists
+ *   one diff per parent, and `diff-tree` **ignores** `--first-parent`, a revision-walk option: the
+ *   merge then lists the files of both sides, verified on a real repository. The first parent is the
+ *   branch the merge landed on, so its diff is what the merge brought in.
+ * - **`git show` and not `diff-tree`** also covers the root commit, listed against the empty tree
+ *   where `diff-tree` needs `--root` to say anything.
+ * - The sha comes from our own graph and is validated anyway: there is no `--` to hide a value
+ *   starting with `-` behind, the same reason `cherryPick` checks it.
+ */
+export async function readCommitDetail(repoPath: string, sha: string): Promise<GitCommitDetail> {
+  if (!SHA_PATTERN.test(sha)) {
+    return { sha, message: '', files: [], error: 'Not a commit' };
+  }
+  try {
+    const [message, files] = await allWithLimit(
+      VIEW_CONCURRENCY,
+      () => git(repoPath, ['show', '-s', '--format=%B', sha]),
+      () =>
+        git(repoPath, [
+          'show',
+          '--format=',
+          '-z',
+          '--name-status',
+          '--diff-merges=first-parent',
+          sha,
+        ]),
+    );
+    return { sha, message: message.trim(), files: parseCommitFilesZ(files), error: null };
+  } catch (error) {
+    return { sha, message: '', files: [], error: describeGitError(error) };
+  }
 }
 
 /**
@@ -302,14 +407,30 @@ export async function readDiff(repoPath: string, target: GitDiffTarget): Promise
       return buildDiff(target.ref, out);
     }
 
+    // Both commit shapes compare against the first parent, for the reason `readCommitDetail` does:
+    // `git show` prints nothing for a merge unless told which parent to diff against.
     if (target.kind === 'commit') {
       const out = await gitDiffOutput(repoPath, [
         'show',
         '--format=',
         '--no-color',
+        '--diff-merges=first-parent',
         target.sha,
       ]);
       return buildDiff(target.sha, out);
+    }
+
+    if (target.kind === 'commit-file') {
+      const out = await gitDiffOutput(repoPath, [
+        'show',
+        '--format=',
+        '--no-color',
+        '--diff-merges=first-parent',
+        target.sha,
+        '--',
+        target.path,
+      ]);
+      return buildDiff(target.path, out);
     }
 
     if (target.staged) {
@@ -405,8 +526,167 @@ export async function checkoutBranch(repoPath: string, name: string): Promise<Gi
   if (trimmed.length === 0) {
     return { ok: false, message: 'No branch given' };
   }
-  const result = await tryGit(repoPath, ['checkout', trimmed]);
+  // A branch name cannot start with a dash, so one that does is an option in disguise. The trailing
+  // `--` is the other half: without it, a name that is also a file in the working tree makes git
+  // hesitate between switching branch and restoring that file, and a double-click in a list must
+  // only ever mean the first.
+  if (trimmed.startsWith('-')) {
+    return { ok: false, message: `Not a branch: ${trimmed}` };
+  }
+  const result = await tryGit(repoPath, ['checkout', trimmed, '--']);
   return { ok: result.ok, message: result.ok ? `On branch ${trimmed}` : result.message };
+}
+
+/**
+ * Checks out a remote-tracking branch, as the local branch that follows it.
+ *
+ * Switching to `origin/feat` itself would detach HEAD, and a commit made there belongs to no branch:
+ * what a double-click on a remote branch means is "let me work on this", which is a local branch with
+ * that branch as its upstream. When that local branch already exists it is simply checked out, and
+ * left where it is: fast-forwarding it is what `Pull` is for, and doing it silently here would be a
+ * second write behind one gesture.
+ *
+ * The ref is re-read rather than trusted: the list it was double-clicked in can be a poll old, and a
+ * `fetch --prune` in between removes branches.
+ */
+export async function checkoutRemoteBranch(repoPath: string, remoteRef: string): Promise<GitResult> {
+  const refs = await readRefs(repoPath);
+  const remote = refs.find((ref) => ref.kind === 'remote' && ref.ref === remoteRef);
+  if (remote === undefined) {
+    return { ok: false, message: 'That remote branch no longer exists: fetch, then try again' };
+  }
+  const slash = remote.name.indexOf('/');
+  const local = slash === -1 ? remote.name : remote.name.slice(slash + 1);
+  if (refs.some((ref) => ref.kind === 'local' && ref.name === local)) {
+    return checkoutBranch(repoPath, local);
+  }
+  const valid = await tryGit(repoPath, ['check-ref-format', '--branch', local]);
+  if (!valid.ok) {
+    return { ok: false, message: `Invalid branch name: ${local}` };
+  }
+  const result = await tryGit(repoPath, ['checkout', '-b', local, '--track', remote.ref]);
+  return {
+    ok: result.ok,
+    message: result.ok ? `On branch ${local}, following ${remote.name}` : result.message,
+  };
+}
+
+/**
+ * Undoes the last commit and keeps its changes staged.
+ *
+ * `reset --soft HEAD~1`: the branch moves back one commit, the index and the files on disk do not
+ * move at all, so everything the commit contained is staged again and nothing is lost. Committing
+ * again is one click away, the panel having put the message back in the form.
+ *
+ * Every condition is read again here rather than taken from the panel, which only disabled its button
+ * on the state of its last read:
+ * - **no half-done operation**: a reset in the middle of a cherry-pick or a merge leaves git's own
+ *   markers pointing at a history that has just moved;
+ * - **not the first commit**, which has no `HEAD~1` to go back to;
+ * - **not a merge**: its first parent is only one of the two histories it joined, and the changes it
+ *   would stage are the whole other branch;
+ * - **not on any remote-tracking branch**: a commit someone can fetch is one rewriting would pull from
+ *   under them, whichever branch it was pushed with. `--contains` answers that for every remote at
+ *   once, which `@{upstream}` would only answer for one.
+ */
+export async function undoLastCommit(repoPath: string): Promise<GitResult> {
+  const sequencer = readSequencer(repoPath);
+  if (sequencer !== 'none') {
+    return { ok: false, message: `Finish or abort the ${sequencer} first` };
+  }
+  const parents = await tryGit(repoPath, ['rev-list', '--parents', '-n1', 'HEAD']);
+  if (!parents.ok) {
+    return { ok: false, message: 'Nothing to undo: there is no commit yet' };
+  }
+  const [head = '', ...parentShas] = parents.stdout.trim().split(' ');
+  if (parentShas.length === 0) {
+    return { ok: false, message: 'The first commit of a repository has nothing to go back to' };
+  }
+  if (parentShas.length > 1) {
+    return { ok: false, message: 'A merge cannot be undone here: use a terminal' };
+  }
+  const published = await tryGit(repoPath, [
+    'for-each-ref',
+    '--contains',
+    'HEAD',
+    '--format=%(refname:short)',
+    'refs/remotes',
+  ]);
+  const remotes = published.stdout.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (!published.ok || remotes.length > 0) {
+    return {
+      ok: false,
+      message: published.ok
+        ? `Already pushed to ${remotes[0] ?? 'a remote'}: undoing it would rewrite a published branch`
+        : published.message,
+    };
+  }
+  const result = await tryGit(repoPath, ['reset', '--soft', 'HEAD~1']);
+  return {
+    ok: result.ok,
+    message: result.ok ? `Undid ${head.slice(0, 7)}: its changes are staged` : result.message,
+  };
+}
+
+/**
+ * Checks a merge request against the repository as it is now, and gives the arguments to run.
+ *
+ * Separate from running it because the merge runs in a terminal tab, which this module does not
+ * own: it decides, the IPC layer launches. Refused, with a sentence, when:
+ * - git has an operation half-done, which a merge would pile onto;
+ * - HEAD is detached, where a merge commit would belong to no branch;
+ * - the source is not a branch of this repository as of this read, or is the current branch itself.
+ *
+ * The source travels as its **short** name, because git writes the merge message from whatever it is
+ * given: the full `refs/heads/feat` produced `Merge branch 'refs/heads/feat'`, verified on a real
+ * repository. A short name is safe on two conditions, both checked: it does not start with a dash, so
+ * it cannot be read as an option, and no other ref shares it, since git resolves a tag before a branch
+ * of the same name and would merge the tag.
+ */
+export async function planMerge(
+  repoPath: string,
+  sourceRef: string,
+  mode: GitMergeMode,
+): Promise<{ ok: true; args: string[]; source: string; target: string } | GitResult> {
+  const sequencer = readSequencer(repoPath);
+  if (sequencer !== 'none') {
+    return { ok: false, message: `Finish or abort the ${sequencer} first` };
+  }
+  const refs = await readRefs(repoPath);
+  const current = refs.find((ref) => ref.current);
+  if (current === undefined) {
+    return { ok: false, message: 'HEAD is detached: check out a branch to merge into first' };
+  }
+  const source = refs.find(
+    (ref) => ref.ref === sourceRef && (ref.kind === 'local' || ref.kind === 'remote'),
+  );
+  if (source === undefined) {
+    return { ok: false, message: 'That branch no longer exists: fetch, then try again' };
+  }
+  if (source.ref === current.ref) {
+    return { ok: false, message: `${source.name} is the branch checked out` };
+  }
+  if (source.name.startsWith('-')) {
+    return { ok: false, message: `Not a branch: ${source.name}` };
+  }
+  if (refs.some((ref) => ref.name === source.name && ref.ref !== source.ref)) {
+    return {
+      ok: false,
+      message: `${source.name} is ambiguous: another ref has the same name. Merge it from a terminal`,
+    };
+  }
+  return {
+    ok: true,
+    source: source.name,
+    target: current.name,
+    // `--no-edit`: the merge runs in a pty, where git would otherwise open `core.editor` on the
+    // message and wait for an editor nobody asked for.
+    args: [
+      'merge',
+      ...(mode === 'ff-only' ? ['--ff-only'] : mode === 'no-ff' ? ['--no-ff', '--no-edit'] : ['--no-edit']),
+      source.name,
+    ],
+  };
 }
 
 /**
@@ -543,7 +823,7 @@ export async function cherryPick(
    * guard has to be the value itself. It costs nothing: this sha is one the app printed from its own
    * `git log`, so anything that fails this test did not come from the history column.
    */
-  if (!/^[0-9a-f]{4,40}$/i.test(trimmed)) {
+  if (!SHA_PATTERN.test(trimmed)) {
     return { ok: false, message: 'Invalid commit sha' };
   }
 
@@ -742,6 +1022,8 @@ function describeTarget(target: GitDiffTarget): string {
   switch (target.kind) {
     case 'commit':
       return target.sha;
+    case 'commit-file':
+      return target.path;
     case 'stash':
       return target.ref;
     case 'file':

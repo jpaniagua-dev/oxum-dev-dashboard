@@ -78,7 +78,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   automationShellEnabled: false,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
   // 340 was not. The diff keeps the rest, and the separator is there to change the balance.
-  gitListWidth: 460,
+  gitDetailWidth: 320,
   // Two network searches per pass, so the slowest loop of the three.
   jiraPollSeconds: 300,
   jira: { siteUrl: '', email: '', projectKeys: [] },
@@ -271,7 +271,7 @@ export function sanitizeSettings(raw: unknown): AppSettings {
     // feature that starts agents by itself with the string "false".
     automationsEnabled: input.automationsEnabled === true,
     automationShellEnabled: input.automationShellEnabled === true,
-    gitListWidth: clamp(asNumber(input.gitListWidth, DEFAULT_SETTINGS.gitListWidth), 240, 1400),
+    gitDetailWidth: clamp(asNumber(input.gitDetailWidth, DEFAULT_SETTINGS.gitDetailWidth), 240, 1400),
     defaultShellProfileId: asString(
       input.defaultShellProfileId,
       DEFAULT_SETTINGS.defaultShellProfileId,

@@ -23,7 +23,7 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'vaultHeight',
   'extensionsHeight',
   'explorerHeight',
-  'gitListWidth',
+  'gitDetailWidth',
   'activeStrip',
   'pullScope',
   // Switched from the Tickets tab itself, like the pull request scope.
@@ -75,7 +75,7 @@ export function asPatch(value: unknown): Partial<AppSettings> {
     patch.automationsEnabled = input.automationsEnabled;
   if (typeof input.automationShellEnabled === 'boolean')
     patch.automationShellEnabled = input.automationShellEnabled;
-  if (typeof input.gitListWidth === 'number') patch.gitListWidth = input.gitListWidth;
+  if (typeof input.gitDetailWidth === 'number') patch.gitDetailWidth = input.gitDetailWidth;
   // Kept in step with `asStrip` in `settings-store.ts`: a tab this list accepts and that one drops is
   // saved as `projects` on its way to disk, which is how the Triage tab spent a version not being
   // remembered. Two gates, one list of tabs.

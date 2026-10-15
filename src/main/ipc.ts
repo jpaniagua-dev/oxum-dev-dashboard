@@ -4,6 +4,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import {
   type AgentOpenResult,
   GIT_COMMIT_ACTION_ID,
+  GIT_MERGE_ACTION_ID,
   IpcChannel,
   ISSUE_KEY_PATTERN,
   RESERVED_ACTION_PREFIX,
@@ -13,6 +14,7 @@ import {
   WORKTREE_ACTION_ID,
   type AppSettings,
   type BootstrapState,
+  type GitCommitDetail,
   type GitDiff,
   type GitDiffTarget,
   type GitRepoState,
@@ -50,10 +52,13 @@ import {
 import {
   applyStash,
   checkoutBranch,
+  checkoutRemoteBranch,
   cherryPick,
   createBranch,
   discardPaths,
+  planMerge,
   readBranches,
+  readCommitDetail,
   readDiff,
   readRepoState,
   readSequencer,
@@ -61,6 +66,7 @@ import {
   stagePaths,
   stashPush,
   sync,
+  undoLastCommit,
 } from './git/git-commands.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
 import type { AgentContext } from '@shared/agent-context.js';
@@ -691,6 +697,18 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     },
   );
 
+  ipcMain.handle(
+    IpcChannel.GitCommitDetail,
+    async (_event, projectId: unknown, sha: unknown): Promise<GitCommitDetail> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const value = typeof sha === 'string' ? sha : '';
+      if (project === undefined) {
+        return { sha: value, message: '', files: [], error: 'Project not found' };
+      }
+      return readCommitDetail(project.path, value);
+    },
+  );
+
   /*
    * Writes a commit message from the staged diff, with a headless Claude Code run.
    *
@@ -889,6 +907,66 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       // branch has an upstream, and a stale answer is what turns a first push into a puzzling refusal.
       const state = await readRepoState(project);
       return sync(project.path, operation, state.branch, state.hasUpstream);
+    },
+  );
+
+  ipcMain.handle(IpcChannel.GitUndo, async (_event, projectId: unknown): Promise<GitResult> => {
+    const project = resolveProject(deps.projects(), projectId);
+    return project === undefined
+      ? { ok: false, message: 'Project not found' }
+      : undoLastCommit(project.path);
+  });
+
+  ipcMain.handle(
+    IpcChannel.GitCheckoutRemote,
+    async (_event, projectId: unknown, remoteRef: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined || typeof remoteRef !== 'string') {
+        return { ok: false, message: 'Project or branch not found' };
+      }
+      return checkoutRemoteBranch(project.path, remoteRef);
+    },
+  );
+
+  /*
+   * Merges a dropped branch into the current one, in a terminal tab.
+   *
+   * A tab for the reasons the commit has one: a merge commit fires the same hooks, and a merge that
+   * stops on a conflict prints the files in conflict, which is what to read next. `planMerge` decides
+   * and refuses; only a plan it accepted reaches the pty.
+   */
+  ipcMain.handle(
+    IpcChannel.GitMerge,
+    async (
+      _event,
+      projectId: unknown,
+      sourceRef: unknown,
+      mode: unknown,
+    ): Promise<{ terminalId: TerminalId | null; result: GitResult }> => {
+      const project = resolveProject(deps.projects(), projectId);
+      const merge = mode === 'ff-only' || mode === 'merge' || mode === 'no-ff' ? mode : null;
+      if (project === undefined || typeof sourceRef !== 'string' || merge === null) {
+        return { terminalId: null, result: { ok: false, message: 'Unknown merge' } };
+      }
+      const plan = await planMerge(project.path, sourceRef, merge);
+      if (!('args' in plan)) {
+        return { terminalId: null, result: plan };
+      }
+      const terminalId = deps.terminals.runProjectCommand({
+        project,
+        actionId: GIT_MERGE_ACTION_ID,
+        title: `${project.label} · merge ${plan.source}`,
+        file: GIT_PTY_FILE,
+        args: plan.args,
+        size: deps.terminalSize(),
+      });
+      return {
+        terminalId,
+        result:
+          terminalId === null
+            ? { ok: false, message: 'Could not open the merge tab' }
+            : { ok: true, message: `Merging ${plan.source} into ${plan.target} in a tab` },
+      };
     },
   );
 
@@ -2389,6 +2467,15 @@ function asDiffTarget(value: unknown): GitDiffTarget | null {
   const input = value as Record<string, unknown>;
   if (input.kind === 'commit' && typeof input.sha === 'string' && input.sha.length > 0) {
     return { kind: 'commit', sha: input.sha };
+  }
+  if (
+    input.kind === 'commit-file' &&
+    typeof input.sha === 'string' &&
+    input.sha.length > 0 &&
+    typeof input.path === 'string' &&
+    input.path.length > 0
+  ) {
+    return { kind: 'commit-file', sha: input.sha, path: input.path };
   }
   if (input.kind === 'file' && typeof input.path === 'string' && input.path.length > 0) {
     return { kind: 'file', path: input.path, staged: input.staged === true };

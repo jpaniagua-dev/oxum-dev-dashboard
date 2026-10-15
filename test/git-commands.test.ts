@@ -305,6 +305,19 @@ function freshRepo(): string {
   return path;
 }
 
+/**
+ * One field of HEAD, asked of git directly.
+ *
+ * `readCommits` is the graph of every branch, so its first row is the newest commit **anywhere**,
+ * not HEAD: a test asking "where does the branch stand" asks git, not the graph.
+ */
+function head(path: string, format: string): string {
+  return execFileSync('git', ['-C', path, 'log', '-1', `--format=${format}`], {
+    windowsHide: true,
+    encoding: 'utf8',
+  }).trim();
+}
+
 describe('stashes', () => {
   let sandbox = '';
   const local = (args: string[]): void => {
@@ -426,11 +439,11 @@ describe('cherry-pick', () => {
     writeFileSync(join(sandbox, 'apporte.ts'), 'const apporte = 1;\n', 'utf8');
     local(['add', '.']);
     local(['commit', '-m', 'feat: a reprendre']);
-    const [source] = await readCommits(sandbox);
+    const source = head(sandbox, '%H');
     local(['checkout', 'main']);
 
-    expect(await cherryPick(sandbox, source?.sha ?? '', false)).toMatchObject({ ok: true });
-    expect((await readCommits(sandbox))[0]?.subject).toBe('feat: a reprendre');
+    expect(await cherryPick(sandbox, source, false)).toMatchObject({ ok: true });
+    expect(head(sandbox, '%s')).toBe('feat: a reprendre');
     expect(readSequencer(sandbox)).toBe('none');
   });
 
@@ -439,13 +452,13 @@ describe('cherry-pick', () => {
     writeFileSync(join(sandbox, 'apporte.ts'), 'const apporte = 2;\n', 'utf8');
     local(['add', '.']);
     local(['commit', '-m', 'feat: seconde passe']);
-    const [source] = await readCommits(sandbox);
+    const source = head(sandbox, '%H');
     local(['checkout', 'main']);
 
-    expect(await cherryPick(sandbox, source?.sha ?? '', true)).toMatchObject({ ok: true });
+    expect(await cherryPick(sandbox, source, true)).toMatchObject({ ok: true });
     // In the index, and the branch tip has not moved.
     expect((await readChanges(sandbox)).map((change) => change.index)).toEqual(['M']);
-    expect((await readCommits(sandbox))[0]?.subject).toBe('feat: a reprendre');
+    expect(head(sandbox, '%s')).toBe('feat: a reprendre');
 
     /*
      * `-n` still records `CHERRY_PICK_HEAD`, so `git commit` can reuse the original message — which is
@@ -473,14 +486,14 @@ describe('cherry-pick', () => {
     writeFileSync(join(sandbox, 'base.ts'), 'const base = "source";\n', 'utf8');
     local(['add', '.']);
     local(['commit', '-m', 'feat: conflit']);
-    const [conflicting] = await readCommits(sandbox);
+    const conflicting = head(sandbox, '%H');
 
     local(['checkout', 'main']);
     writeFileSync(join(sandbox, 'base.ts'), 'const base = "main";\n', 'utf8');
     local(['add', '.']);
     local(['commit', '-m', 'feat: divergence']);
 
-    const result = await cherryPick(sandbox, conflicting?.sha ?? '', false);
+    const result = await cherryPick(sandbox, conflicting, false);
     expect(result.ok).toBe(false);
     expect(result.message).toContain('Conflict');
     expect(readSequencer(sandbox)).toBe('cherry-pick');

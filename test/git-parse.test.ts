@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   FIELD_SEPARATOR as SEP,
   describeStash,
-  parseBranchLines,
-  parseLogLines,
+  parseCommitFilesZ,
+  parseGraphLines,
+  parseRefLines,
   parseStashLines,
   parseStatusZ,
   parseUnifiedDiff,
@@ -56,68 +57,150 @@ describe('parseStatusZ', () => {
   });
 });
 
-describe('parseBranchLines', () => {
+describe('parseRefLines', () => {
   const line = (fields: string[]): string => fields.join(SEP);
+  const SHA = 'a'.repeat(40);
 
   it('reads the current branch, its upstream and its distance', () => {
-    const branches = parseBranchLines(
+    const refs = parseRefLines(
       [
-        line(['main', '*', 'origin/main', '[ahead 2, behind 1]', '2026-08-07T10:00:00+02:00']),
-        line(['PROJ-1601', ' ', '', '', '2026-08-01T09:00:00+02:00']),
+        line([
+          'refs/heads/main',
+          '*',
+          'origin/main',
+          '[ahead 2, behind 1]',
+          '2026-08-07T10:00:00+02:00',
+          SHA,
+          '',
+        ]),
+        line(['refs/heads/PROJ-1601', ' ', '', '', '2026-08-01T09:00:00+02:00', SHA, '']),
       ].join('\n'),
     );
 
-    expect(branches[0]).toMatchObject({
+    expect(refs[0]).toMatchObject({
+      ref: 'refs/heads/main',
       name: 'main',
+      kind: 'local',
+      sha: SHA,
       current: true,
       upstream: 'origin/main',
       ahead: 2,
       behind: 1,
       gone: false,
     });
-    expect(branches[1]).toMatchObject({ name: 'PROJ-1601', current: false, upstream: null });
+    expect(refs[1]).toMatchObject({ name: 'PROJ-1601', current: false, upstream: null });
   });
 
   it('reads each half of the track field on its own', () => {
     // The reason the two counts are searched separately: git prints either half alone.
-    const [ahead] = parseBranchLines(line(['a', ' ', 'origin/a', '[ahead 3]', '']));
-    const [behind] = parseBranchLines(line(['b', ' ', 'origin/b', '[behind 4]', '']));
+    const [ahead] = parseRefLines(line(['refs/heads/a', ' ', 'origin/a', '[ahead 3]', '', SHA]));
+    const [behind] = parseRefLines(line(['refs/heads/b', ' ', 'origin/b', '[behind 4]', '', SHA]));
 
     expect([ahead?.ahead, ahead?.behind]).toEqual([3, 0]);
     expect([behind?.ahead, behind?.behind]).toEqual([0, 4]);
   });
 
   it('flags an upstream that no longer exists', () => {
-    const [branch] = parseBranchLines(line(['old', ' ', 'origin/old', '[gone]', '']));
+    const [branch] = parseRefLines(line(['refs/heads/old', ' ', 'origin/old', '[gone]', '', SHA]));
 
     expect(branch?.gone).toBe(true);
   });
+
+  it('names each kind without its namespace, whatever else the repository holds', () => {
+    // `%(refname:short)` would print `heads/v1` here, a tag of the same name existing.
+    const refs = parseRefLines(
+      [
+        line(['refs/heads/v1', ' ', '', '', '', SHA, '']),
+        line(['refs/remotes/origin/feat/x', ' ', '', '', '', SHA, '']),
+        line(['refs/tags/v1', ' ', '', '', '', SHA, '']),
+      ].join('\n'),
+    );
+
+    expect(refs.map((ref) => [ref.kind, ref.name])).toEqual([
+      ['local', 'v1'],
+      ['remote', 'origin/feat/x'],
+      ['tag', 'v1'],
+    ]);
+  });
+
+  it('drops a remote HEAD, which is a pointer and not a branch', () => {
+    const refs = parseRefLines(line(['refs/remotes/origin/HEAD', ' ', '', '', '', SHA, '']));
+
+    expect(refs).toEqual([]);
+  });
+
+  it('peels an annotated tag to the commit it points to', () => {
+    const commit = 'c'.repeat(40);
+    const [tag] = parseRefLines(line(['refs/tags/v2', ' ', '', '', '', 't'.repeat(40), commit]));
+
+    expect(tag?.sha).toBe(commit);
+  });
 });
 
-describe('parseLogLines', () => {
-  it('reads the fields of a commit', () => {
-    const [commit] = parseLogLines(
-      ['abc1234', 'Sam', '2026-08-07T10:00:00+02:00', 'HEAD -> main', 'feat: add the Git tab'].join(
-        SEP,
-      ),
+describe('parseGraphLines', () => {
+  const PARENT = 'b'.repeat(40);
+  const OTHER = 'c'.repeat(40);
+
+  it('reads the fields of a commit, parents first parent first', () => {
+    const [commit] = parseGraphLines(
+      [
+        'a'.repeat(40),
+        `${PARENT} ${OTHER}`,
+        'Sam',
+        '2026-08-07T10:00:00+02:00',
+        'HEAD -> main',
+        'Merge branch feat',
+      ].join(SEP),
     );
 
     expect(commit).toEqual({
-      sha: 'abc1234',
+      sha: 'a'.repeat(40),
+      parents: [PARENT, OTHER],
       author: 'Sam',
       date: '2026-08-07T10:00:00+02:00',
       refs: 'HEAD -> main',
-      subject: 'feat: add the Git tab',
+      subject: 'Merge branch feat',
     });
+  });
+
+  it('gives a root commit no parent at all, not an empty one', () => {
+    // A lane waiting for a parent named '' would never close.
+    const [commit] = parseGraphLines(['a'.repeat(40), '', 'Sam', '', '', 'init'].join(SEP));
+
+    expect(commit?.parents).toEqual([]);
   });
 
   it('keeps a subject containing the separator whole', () => {
     // Why the subject is the last field and is rejoined rather than taken as `rest[0]`.
-    const [commit] = parseLogLines(
-      ['abc1234', 'Sam', '', '', `fix: remove one${SEP}character`].join(SEP),
+    const [commit] = parseGraphLines(
+      ['a'.repeat(40), PARENT, 'Sam', '', '', `fix: remove one${SEP}character`].join(SEP),
     );
 
     expect(commit?.subject).toBe(`fix: remove one${SEP}character`);
+  });
+});
+
+describe('parseCommitFilesZ', () => {
+  it('pairs every status with its path', () => {
+    expect(parseCommitFilesZ('M\0src/a.ts\0A\0src/b.ts\0D\0old.ts\0')).toEqual([
+      { path: 'src/a.ts', status: 'M', from: null },
+      { path: 'src/b.ts', status: 'A', from: null },
+      { path: 'old.ts', status: 'D', from: null },
+    ]);
+  });
+
+  it('consumes both paths of a rename and drops its score', () => {
+    // Missing the second path would pair `M` with `src/new.ts` and invent a phantom file.
+    expect(parseCommitFilesZ('R087\0src/old.ts\0src/new.ts\0M\0b.ts\0')).toEqual([
+      { path: 'src/new.ts', status: 'R', from: 'src/old.ts' },
+      { path: 'b.ts', status: 'M', from: null },
+    ]);
+  });
+
+  it('keeps a path with spaces and accents raw', () => {
+    expect(parseCommitFilesZ('A\0docs/cr\u00e9ation finale.md\0')).toEqual([
+      { path: 'docs/cr\u00e9ation finale.md', status: 'A', from: null },
+    ]);
   });
 });
 

@@ -78,6 +78,21 @@
   --tag-red: var(--brand-primary);
   --tag-grey: var(--grey-500);
 
+  /* --- graph lanes -------------------------------------------------------
+     The Git graph's branch colours. NOT palette values, deliberately (2026-10-15): a graph needs
+     eight hues that tell adjacent lanes apart, the ramp above has six of which red is `--primary`,
+     the selection accent a lane must never be mistaken for. Each one clears 3:1 (the WCAG floor for
+     graphical objects) on the raised surface and on the inset one a selected row uses: 3.3:1 at
+     worst in this theme, 6.9:1 in the dark one. */
+  --lane-1: #2f6bd8;
+  --lane-2: #1b8a5a;
+  --lane-3: #c8681a;
+  --lane-4: #7c4fd6;
+  --lane-5: #0b8aa0;
+  --lane-6: #c2378c;
+  --lane-7: #8a6d0b;
+  --lane-8: #5f6b7a;
+
   --selection: var(--brand-primary-extra-light);
   --active-line: #00000005;
   --shadow: 0 3px 5px #0000000a, 0 0 2px #0000000d, 0 1px 4px #00000014;
@@ -201,6 +216,16 @@
   --tag-orange: var(--brand-warning-light);
   --tag-red: var(--brand-primary-light);
   --tag-grey: var(--grey-400);
+
+  /* Lighter steps of the same eight hues: the light theme's values sink into #1b1b1b. */
+  --lane-1: #7aa7ff;
+  --lane-2: #4fd1a0;
+  --lane-3: #f2a65a;
+  --lane-4: #b69cff;
+  --lane-5: #4dd0e1;
+  --lane-6: #f07cc2;
+  --lane-7: #e0c35c;
+  --lane-8: #a3abb8;
 
   --selection: #3a1f26;
   --active-line: #ffffff06;

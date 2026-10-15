@@ -292,23 +292,21 @@
             </div>
 
             <!--
-          The same master-detail grammar again, with one column more: repositories, then the working
-          area (changes, branches or history), then the diff. Three columns rather than two because
-          the third one is a diff, and a diff read in the width left over by a list is not read at all.
+          Laid out like a graph client, inside the strip: the repositories as tabs, a toolbar, then
+          three columns. The refs on the left, the graph in the centre (a diff takes its place when a
+          file is opened), and the detail of the selection on the right: the staging area and the
+          commit form for the working tree, the message and files of a commit otherwise.
 
-          Every child is filled by `git-panel.ts` with `textContent`: branch names, commit subjects and
-          diff bodies are all text from outside the app.
+          Every child is filled by the `git-*.ts` modules with `textContent`: branch names, commit
+          subjects and diff bodies are all text from outside the app.
         -->
             <div class="git" id="strip-panel-git" role="tabpanel" hidden>
-              <div class="pulls__repos" id="git-repos"></div>
-              <div class="git__main" id="git-main">
-                <div class="git__header" id="git-header"></div>
-                <div class="git__views" id="git-views" role="tablist"></div>
-                <div class="git__list" id="git-list"></div>
-                <div class="git__commit" id="git-commit"></div>
-              </div>
+              <div class="git__repos" id="git-repos" role="tablist" aria-label="Repositories"></div>
+              <div class="git__toolbar" id="git-toolbar"></div>
+              <div class="git__refs" id="git-refs" aria-label="Branches, stashes and tags"></div>
+              <div class="git__center" id="git-center"></div>
               <!--
-            The share between the working column and the diff. Its own element rather than a border on
+            The share between the graph and the detail panel. Its own element rather than a border on
             a column: a grid track cannot be dragged, and the width it drives is a property of the grid.
           -->
               <div
@@ -316,10 +314,10 @@
                 id="git-resizer"
                 role="separator"
                 aria-orientation="vertical"
-                aria-label="Resize the diff"
+                aria-label="Resize the detail panel"
                 tabindex="0"
               ></div>
-              <div class="git__diff" id="git-diff"></div>
+              <div class="git__detail" id="git-detail"></div>
             </div>
           </section>
 

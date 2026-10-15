@@ -1,6 +1,9 @@
 import type {
-  GitBranch,
   GitChange,
+  GitCommit,
+  GitMergeMode,
+  GitRef,
+  GitRepoState,
   GitState,
   PrReview,
   PullRequest,
@@ -427,7 +430,7 @@ export function presentChange(change: GitChange): Pill {
 
   const staged = isStaged(change);
   const dirty = hasWorktreeChange(change);
-  const source = change.from === null ? '' : ` (depuis ${change.from})`;
+  const source = change.from === null ? '' : ` (from ${change.from})`;
 
   if (staged && dirty) {
     return {
@@ -448,9 +451,9 @@ export function presentChange(change: GitChange): Pill {
  * Empty when there is nothing to say, so the caller can skip the element entirely: a badge reading
  * "up to date" on every line of a list is noise that hides the two lines that are not.
  */
-export function presentTrack(branch: GitBranch): string {
+export function presentTrack(branch: GitRef): string {
   if (branch.upstream === null) {
-    return 'locale';
+    return 'local';
   }
   if (branch.gone) {
     return 'upstream gone';
@@ -463,6 +466,328 @@ export function presentTrack(branch: GitBranch): string {
     marks.push(`↓${branch.behind}`);
   }
   return marks.join(' ');
+}
+
+/**
+ * A label hung on a commit of the graph.
+ *
+ * A local branch and its remote-tracking twin on the **same commit** are one chip, not two: `main`
+ * and `origin/main` side by side on every synced commit would double the labels for no information,
+ * whereas "this branch is pushed and up to date" is exactly what one chip with a remote mark says.
+ * Once they diverge, they sit on different commits and get a chip each.
+ */
+export interface RefChip {
+  /** `main`, `origin/feat` for a remote branch with no local twin here, `v1.2.0`, or `HEAD`. */
+  readonly label: string;
+  readonly kind: 'branch' | 'tag' | 'head';
+  /** The local branch, when there is one on this commit. */
+  readonly local: GitRef | null;
+  /** The remote-tracking branches of the same name on this commit, or the remote branch itself. */
+  readonly remotes: readonly GitRef[];
+  readonly tag: GitRef | null;
+  /** The branch checked out, which is the one drawn as the anchor of the working tree. */
+  readonly current: boolean;
+}
+
+/**
+ * Groups the repository's refs into chips, per commit sha.
+ *
+ * Order within a commit: the checked-out branch, the other local branches, the remote-only ones,
+ * then tags. A detached HEAD gets a chip of its own, there being no branch to say where it stands.
+ */
+export function refChipsBySha(
+  refs: readonly GitRef[],
+  headSha: string | null,
+): Map<string, RefChip[]> {
+  const bySha = new Map<string, GitRef[]>();
+  for (const ref of refs) {
+    bySha.set(ref.sha, [...(bySha.get(ref.sha) ?? []), ref]);
+  }
+
+  const chips = new Map<string, RefChip[]>();
+  for (const [sha, list] of bySha) {
+    const locals = list.filter((ref) => ref.kind === 'local');
+    const remotes = list.filter((ref) => ref.kind === 'remote');
+    const twinned = new Set<GitRef>();
+    const branchChips = locals.map((local): RefChip => {
+      const twins = remotes.filter((remote) => remoteBranchName(remote) === local.name);
+      twins.forEach((twin) => twinned.add(twin));
+      return {
+        label: local.name,
+        kind: 'branch',
+        local,
+        remotes: twins,
+        tag: null,
+        current: local.current,
+      };
+    });
+    const remoteChips = remotes
+      .filter((remote) => !twinned.has(remote))
+      .map(
+        (remote): RefChip => ({
+          label: remote.name,
+          kind: 'branch',
+          local: null,
+          remotes: [remote],
+          tag: null,
+          current: false,
+        }),
+      );
+    const tagChips = list
+      .filter((ref) => ref.kind === 'tag')
+      .map(
+        (tag): RefChip => ({
+          label: tag.name,
+          kind: 'tag',
+          local: null,
+          remotes: [],
+          tag,
+          current: false,
+        }),
+      );
+    branchChips.sort((left, right) => Number(right.current) - Number(left.current));
+    chips.set(sha, [...branchChips, ...remoteChips, ...tagChips]);
+  }
+
+  const detached = headSha !== null && !refs.some((ref) => ref.current);
+  if (detached) {
+    const head: RefChip = {
+      label: 'HEAD',
+      kind: 'head',
+      local: null,
+      remotes: [],
+      tag: null,
+      current: true,
+    };
+    chips.set(headSha, [head, ...(chips.get(headSha) ?? [])]);
+  }
+  return chips;
+}
+
+/** `origin/feat/x` without its remote: the name a local branch tracking it would carry. */
+export function remoteBranchName(remote: GitRef): string {
+  const slash = remote.name.indexOf('/');
+  return slash === -1 ? remote.name : remote.name.slice(slash + 1);
+}
+
+/** The remote a remote-tracking branch belongs to: `origin` for `origin/feat/x`. */
+export function remoteOf(remote: GitRef): string {
+  const slash = remote.name.indexOf('/');
+  return slash === -1 ? remote.name : remote.name.slice(0, slash);
+}
+
+/** What the refs panel lists, section by section. */
+export interface RefSections {
+  /** Local branches, by name, so a branch is found where the alphabet says rather than by date. */
+  readonly local: readonly GitRef[];
+  /** Remote-tracking branches, grouped under their remote, each group sorted by name. */
+  readonly remotes: readonly { readonly remote: string; readonly refs: readonly GitRef[] }[];
+  /** Tags, newest first: the one being looked for is nearly always the last release. */
+  readonly tags: readonly GitRef[];
+}
+
+export function refSections(refs: readonly GitRef[]): RefSections {
+  const byName = (left: GitRef, right: GitRef): number => left.name.localeCompare(right.name);
+  const remotes = new Map<string, GitRef[]>();
+  for (const ref of refs) {
+    if (ref.kind === 'remote') {
+      const remote = remoteOf(ref);
+      remotes.set(remote, [...(remotes.get(remote) ?? []), ref]);
+    }
+  }
+  return {
+    local: refs.filter((ref) => ref.kind === 'local').sort(byName),
+    remotes: [...remotes.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([remote, list]) => ({ remote, refs: [...list].sort(byName) })),
+    tags: refs
+      .filter((ref) => ref.kind === 'tag')
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+  };
+}
+
+/**
+ * One or two letters standing for an author on a graph row.
+ *
+ * The first letter of the first and last words: `Sam Doe` is `SD`, `dependabot[bot]` is `D`. Upper
+ * case so two rows by the same person always read the same, whatever case their git config uses.
+ */
+export function initialsOf(author: string): string {
+  const words = author
+    .replace(/\[bot\]$/i, '')
+    .split(/[\s._-]+/)
+    .filter((word) => word.length > 0);
+  const first = words[0]?.[0] ?? '';
+  const last = words.length > 1 ? (words[words.length - 1]?.[0] ?? '') : '';
+  return `${first}${last}`.toUpperCase() || '?';
+}
+
+/**
+ * Whether a commit is reachable from a remote-tracking branch, as far as the graph read shows.
+ *
+ * That is what "already pushed" means for a commit, whichever branch it was pushed with: a commit
+ * other people can fetch is one rewriting would pull from under them. Walked over the parents the
+ * graph already holds rather than asked of git, so the toolbar can disable its Undo with a reason
+ * without a process; the main process asks git again at click time, this answer being only as fresh
+ * as the last read.
+ */
+export function isPublished(
+  sha: string,
+  refs: readonly GitRef[],
+  commits: readonly GitCommit[],
+): boolean {
+  return refs.some((ref) => ref.kind === 'remote' && isAncestor(sha, ref.sha, commits));
+}
+
+/**
+ * Whether `ancestor` is reachable from `descendant` through the parents the graph holds.
+ *
+ * A commit counts as its own ancestor, which is git's own convention (`merge-base --is-ancestor A A`
+ * succeeds). An answer of `false` can also mean "beyond what was read", which is why the merge menu
+ * only uses it to offer something and never to refuse it: git decides at click time.
+ */
+export function isAncestor(
+  ancestor: string,
+  descendant: string,
+  commits: readonly GitCommit[],
+): boolean {
+  const parents = new Map(commits.map((commit) => [commit.sha, commit.parents]));
+  const seen = new Set<string>();
+  const queue = [descendant];
+  while (queue.length > 0) {
+    const next = queue.pop();
+    if (next === undefined || seen.has(next)) {
+      continue;
+    }
+    if (next === ancestor) {
+      return true;
+    }
+    seen.add(next);
+    queue.push(...(parents.get(next) ?? []));
+  }
+  return false;
+}
+
+/** One entry of the menu a dropped branch opens, before it is bound to an action. */
+export interface MergeOption {
+  readonly label: string;
+  readonly hint: string;
+  readonly disabled: boolean;
+  /** The merge to run, or null for an entry that only explains why there is nothing to do. */
+  readonly mode: GitMergeMode | null;
+}
+
+/**
+ * What dropping `source` on the current branch can do, worded for the menu.
+ *
+ * Read off the graph rather than asked of git, so the menu opens at once; the main process checks
+ * again before running anything. Three situations:
+ * - **already merged** (the source is an ancestor of HEAD): one disabled entry saying so, because a
+ *   drop that silently does nothing reads as a gesture that did not work;
+ * - **a fast-forward is possible** (HEAD is an ancestor of the source): `Fast-forward` first, the
+ *   gesture that adds no commit, and a `--no-ff` merge for a branch whose history should stay visible;
+ * - **diverged**: a merge, which will create a commit and may stop on a conflict, said so in the hint.
+ */
+export function mergeOptionsFor(repo: GitRepoState, source: GitRef): MergeOption[] {
+  const target = repo.refs.find((ref) => ref.current);
+  if (target === undefined || repo.headSha === null) {
+    return [
+      {
+        label: 'Check out a branch first',
+        hint: 'HEAD is detached: a merge commit would belong to no branch.',
+        disabled: true,
+        mode: null,
+      },
+    ];
+  }
+  if (repo.sequencer !== 'none') {
+    return [
+      {
+        label: `Finish or abort the ${repo.sequencer} first`,
+        hint: 'git refuses to start a merge while another operation is half-done.',
+        disabled: true,
+        mode: null,
+      },
+    ];
+  }
+  if (isAncestor(source.sha, repo.headSha, repo.commits)) {
+    return [
+      {
+        label: `${source.name} is already in ${target.name}`,
+        hint: 'Every commit of that branch is already reachable from HEAD: nothing to merge.',
+        disabled: true,
+        mode: null,
+      },
+    ];
+  }
+  if (isAncestor(repo.headSha, source.sha, repo.commits)) {
+    return [
+      {
+        label: `Fast-forward ${target.name} to ${source.name}`,
+        hint: `git merge --ff-only ${source.name}: ${target.name} moves forward, no commit is created.`,
+        disabled: false,
+        mode: 'ff-only',
+      },
+      {
+        label: `Merge ${source.name} into ${target.name} (merge commit)`,
+        hint: `git merge --no-ff ${source.name}: a merge commit even though a fast-forward was possible.`,
+        disabled: false,
+        mode: 'no-ff',
+      },
+    ];
+  }
+  return [
+    {
+      label: `Merge ${source.name} into ${target.name}`,
+      hint: `git merge ${source.name}, in a terminal tab: creates a merge commit, and stops on a conflict if there is one.`,
+      disabled: false,
+      mode: 'merge',
+    },
+  ];
+}
+
+/** Whether the Undo button can run, and what its tooltip says either way. */
+export interface UndoState {
+  readonly enabled: boolean;
+  readonly reason: string;
+}
+
+/**
+ * What undoing the last commit would do here, or why it cannot.
+ *
+ * Undo is `git reset --soft HEAD~1`: the commit goes, its changes come back staged, nothing on disk
+ * moves. It is refused on the four commits where that is either impossible or harmful: the very first
+ * one (no parent to go back to), a merge (its first parent is only one of the two histories it
+ * joined), anything already pushed (it would rewrite a branch other people have), and any repository
+ * where git has an operation half-done.
+ */
+export function undoStateFor(repo: GitRepoState): UndoState {
+  if (repo.headSha === null) {
+    return { enabled: false, reason: 'Nothing to undo: there is no commit yet' };
+  }
+  if (repo.sequencer !== 'none') {
+    return { enabled: false, reason: `Finish or abort the ${repo.sequencer} first` };
+  }
+  const head = repo.commits.find((commit) => commit.sha === repo.headSha);
+  if (head === undefined) {
+    return { enabled: false, reason: 'HEAD is not in the graph that was read' };
+  }
+  if (head.parents.length === 0) {
+    return { enabled: false, reason: 'The first commit of a repository has nothing to go back to' };
+  }
+  if (head.parents.length > 1) {
+    return { enabled: false, reason: 'A merge cannot be undone here: use a terminal' };
+  }
+  if (isPublished(head.sha, repo.refs, repo.commits)) {
+    return {
+      enabled: false,
+      reason: `${head.sha.slice(0, 7)} is already pushed: undoing it would rewrite a published branch`,
+    };
+  }
+  return {
+    enabled: true,
+    reason: `Undo ${head.sha.slice(0, 7)} "${head.subject}": its changes go back to the index, nothing is lost`,
+  };
 }
 
 /**

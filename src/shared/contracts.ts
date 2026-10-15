@@ -308,11 +308,27 @@ export type GitSequencer = 'none' | 'cherry-pick' | 'merge' | 'revert' | 'rebase
 /** The two ways out of a half-finished operation, both non-interactive. */
 export type GitSequencerOp = 'continue' | 'abort';
 
-/** A local branch, with how far it stands from its upstream. */
-export interface GitBranch {
+/** Which namespace a ref lives in, which decides what a click, a double-click or a drag can do. */
+export type GitRefKind = 'local' | 'remote' | 'tag';
+
+/**
+ * A local branch, a remote-tracking branch or a tag, with where it points.
+ *
+ * One shape for the three because the graph needs all of them on the same footing: every ref is a
+ * label hung on a commit, and the panel on the left is the same list grouped by `kind`. The fields
+ * that only mean something for a local branch (`current`, the upstream and its gap) are simply empty
+ * on the other two, which is what git itself reports for them.
+ */
+export interface GitRef {
+  /** Full name, `refs/heads/main`, which is what a write passes to git: it cannot start with `-`. */
+  readonly ref: string;
+  /** Display name, the full name without its namespace: `main`, `origin/main`, `v1.2.0`. */
   readonly name: string;
+  readonly kind: GitRefKind;
+  /** Full sha of the commit it designates, an annotated tag being peeled to its commit. */
+  readonly sha: string;
   readonly current: boolean;
-  /** `origin/x`, or null when the branch was never pushed. */
+  /** `origin/x`, or null when the branch was never pushed. Always null on a remote or a tag. */
   readonly upstream: string | null;
   readonly ahead: number;
   readonly behind: number;
@@ -322,15 +338,51 @@ export interface GitBranch {
   readonly updatedAt: string;
 }
 
-/** One commit of the history, reduced to what a strip can show on a line. */
+/**
+ * How many commits the graph reads.
+ *
+ * A window, not the whole log: the strip shows about seventeen rows, and a repository with ten
+ * thousand commits would be ten thousand rows built for nothing. Shared because the renderer has to
+ * announce the cut: a graph that stops in silence reads like a repository that starts there.
+ */
+export const GIT_GRAPH_LIMIT = 400;
+
+/** One commit of the graph, reduced to what a row can show and what a lane layout needs. */
 export interface GitCommit {
-  /** Abbreviated sha, which is what the user copies and what `git show` takes. */
+  /** Full sha: the lane layout matches parents against it, and an abbreviation can collide. */
   readonly sha: string;
+  /** Full shas of the parents, first parent first. Empty on a root commit, two or more on a merge. */
+  readonly parents: readonly string[];
   readonly subject: string;
   readonly author: string;
   readonly date: string;
   /** Decorations pointing at it, e.g. `HEAD -> main, origin/main`. Empty when there are none. */
   readonly refs: string;
+}
+
+/** One file a commit touched, as `git diff-tree --name-status` reports it. */
+export interface GitCommitFile {
+  readonly path: string;
+  /** git's status letter: `A`, `M`, `D`, `R`, `C`, `T`. A rename's similarity score is dropped. */
+  readonly status: string;
+  /** Previous path of a rename or a copy. */
+  readonly from: string | null;
+}
+
+/**
+ * What the detail panel shows for a commit, read only once it is selected.
+ *
+ * Not part of `GitRepoState`: a full message and a file list for four hundred commits would be four
+ * hundred processes for the one row somebody clicks.
+ */
+export interface GitCommitDetail {
+  readonly sha: string;
+  /** Subject, blank line and body, as `%B` gives them. */
+  readonly message: string;
+  /** Against the **first** parent on a merge, which is what the merge brought into its branch. */
+  readonly files: readonly GitCommitFile[];
+  /** Set when git failed; the files are then empty. */
+  readonly error: string | null;
 }
 
 /**
@@ -362,6 +414,8 @@ export interface GitDiffLine {
 export type GitDiffTarget =
   | { readonly kind: 'file'; readonly path: string; readonly staged: boolean }
   | { readonly kind: 'commit'; readonly sha: string }
+  /** One file of a commit, against its first parent, opened from the detail panel's file list. */
+  | { readonly kind: 'commit-file'; readonly sha: string; readonly path: string }
   /**
    * A stash entry, read by its **sha**.
    *
@@ -392,15 +446,19 @@ export interface GitRepoState {
   readonly path: string;
   /** Current branch, or `detached@<sha>`. */
   readonly branch: string;
-  readonly branches: readonly GitBranch[];
+  /** Full sha of HEAD, null in a repository with no commit yet. */
+  readonly headSha: string | null;
+  /** Local branches, remote-tracking branches and tags, most recently committed first. */
+  readonly refs: readonly GitRef[];
   readonly changes: readonly GitChange[];
+  /** The graph, in topological order, capped at `GIT_GRAPH_LIMIT`. */
   readonly commits: readonly GitCommit[];
   readonly stashes: readonly GitStash[];
   /**
    * Full message of the HEAD commit, subject and body, empty when the repository has no commit.
    *
    * Read for the amend gesture: ticking "Amend" pre-fills the form with the message being
-   * replaced, and `commits[0]` only carries the subject line.
+   * replaced, and a graph row only carries the subject line.
    */
   readonly headMessage: string;
   /** `none` unless git has left a cherry-pick, a merge, a revert or a rebase half-finished. */
@@ -439,6 +497,15 @@ export interface GitNotice extends GitResult {
   readonly projectId: ProjectId;
 }
 
+/**
+ * The merges dropping a branch onto the current one can start.
+ *
+ * - `ff-only`: move the branch forward, never create a commit, refuse otherwise.
+ * - `merge`: git's default, a fast-forward when possible and a merge commit when not.
+ * - `no-ff`: always a merge commit, for a branch whose history should stay visible as a branch.
+ */
+export type GitMergeMode = 'ff-only' | 'merge' | 'no-ff';
+
 /** A network operation of the Git tab, all three sharing one channel and one budget. */
 export type GitSyncOp = 'fetch' | 'pull' | 'push';
 
@@ -456,6 +523,9 @@ export const RESERVED_ACTION_PREFIX = 'git:';
 
 /** Action id of the commit tab, one per project so a rerun reuses it. */
 export const GIT_COMMIT_ACTION_ID = `${RESERVED_ACTION_PREFIX}commit`;
+
+/** Action id of the merge tab, its own so a merge never lands in a commit's tab or the reverse. */
+export const GIT_MERGE_ACTION_ID = `${RESERVED_ACTION_PREFIX}merge`;
 
 /**
  * Action id **prefix** of the tabs where the Triage tab hands tickets to Claude Code.
@@ -1895,13 +1965,15 @@ export interface AppSettings {
    */
   worktreesHeight: number;
   /**
-   * Width of the Git tab's working column, in pixels. The diff column takes what is left.
+   * Width of the Git tab's detail panel, on the right, in pixels. The graph takes what is left.
    *
-   * Stored on the **list** side rather than the diff side, and that is the load-bearing half of the
-   * choice: whichever column is not stored absorbs every window resize, and leftover width is worth
-   * something to a diff (long lines of code) and nothing to a column of file paths.
+   * Stored on the **detail** side rather than the graph side, and that is the load-bearing half of
+   * the choice: whichever column is not stored absorbs every window resize, and leftover width is
+   * worth something to the graph and its diffs (long subjects, long lines of code) and nothing to a
+   * column of file paths and a commit form. Replaced `gitListWidth` in 11.0.0, whose stored value
+   * sized the other side of a layout that no longer exists and is dropped rather than converted.
    */
-  gitListWidth: number;
+  gitDetailWidth: number;
   /** Seconds between Jira refreshes. Two JQL searches per pass, so the slowest loop of all. */
   jiraPollSeconds: number;
   /** Jira connection, token excluded. */
@@ -2313,6 +2385,8 @@ export const IpcChannel = {
   GitState: 'git:state',
   /** invoke: (projectId, target: GitDiffTarget) => GitDiff, a file's changes or a whole commit */
   GitDiff: 'git:diff',
+  /** invoke: (projectId, sha) => GitCommitDetail, the full message and files of one commit */
+  GitCommitDetail: 'git:commit-detail',
   /**
    * invoke: (projectId, amend: boolean) => GeneratedCommit
    *
@@ -2353,6 +2427,17 @@ export const IpcChannel = {
   GitSync: 'git:sync',
   /** invoke: (projectId, sha, noCommit: boolean) => GitResult, replays a commit onto the branch */
   GitCherryPick: 'git:cherry-pick',
+  /** invoke: (projectId) => GitResult, `reset --soft HEAD~1` on an unpushed, non-merge commit */
+  GitUndo: 'git:undo',
+  /** invoke: (projectId, remoteRef) => GitResult, the local branch that follows a remote one */
+  GitCheckoutRemote: 'git:checkout-remote',
+  /**
+   * invoke: (projectId, sourceRef, mode: GitMergeMode) => { terminalId, result }
+   *
+   * Merges a branch into the current one, in a terminal tab like the commit: hooks and conflicts
+   * have to be readable, and a conflict leaves the repository mid-merge, which the sequencer reads.
+   */
+  GitMerge: 'git:merge',
   /** invoke: (projectId, op: GitSequencerOp) => GitResult, finishes or abandons a half-done operation */
   GitSequencer: 'git:sequencer',
   /** invoke: (projectId, message, includeUntracked: boolean) => GitResult, creates a stash */
@@ -2758,6 +2843,13 @@ export interface RendererApi {
   /** The diff of one working-tree file, or of a whole commit. */
   gitDiff(projectId: ProjectId, target: GitDiffTarget): Promise<GitDiff>;
   /**
+   * The full message and the files of one commit, for the detail panel.
+   *
+   * Asked when a commit is selected, never as part of `gitState`: four hundred rows would be four
+   * hundred reads for the one somebody clicks.
+   */
+  gitCommitDetail(projectId: ProjectId, sha: string): Promise<GitCommitDetail>;
+  /**
    * Writes a commit message from the staged diff, and returns it for the form.
    *
    * `amend` decides what the message has to describe: the index alone, or the last commit plus
@@ -2806,6 +2898,24 @@ export interface RendererApi {
    * `GitRepoState.sequencer` exists and why the header grows a way out of it.
    */
   gitCherryPick(projectId: ProjectId, sha: string, noCommit: boolean): Promise<GitResult>;
+  /**
+   * Undoes the last commit, its changes staged again. Refused on a merge, the first commit, a commit
+   * already on a remote branch and in the middle of an operation, all re-read at click time.
+   */
+  gitUndo(projectId: ProjectId): Promise<GitResult>;
+  /** Checks out the local branch following a remote one, creating it with `--track` if needed. */
+  gitCheckoutRemote(projectId: ProjectId, remoteRef: string): Promise<GitResult>;
+  /**
+   * Merges a branch, named by its full ref, into the current one, in a terminal tab.
+   *
+   * Returns the tab so the caller can bring it forward: a merge that stops on a conflict says so
+   * there, and the sequencer badge takes over once the tab is read.
+   */
+  gitMerge(
+    projectId: ProjectId,
+    sourceRef: string,
+    mode: GitMergeMode,
+  ): Promise<{ terminalId: TerminalId | null; result: GitResult }>;
   /** Finishes (`--continue --no-edit`) or abandons (`--abort`) whatever git left half-done. */
   gitSequencer(projectId: ProjectId, op: GitSequencerOp): Promise<GitResult>;
   /** Stashes the working tree. An empty message lets git write its own `WIP on <branch>`. */

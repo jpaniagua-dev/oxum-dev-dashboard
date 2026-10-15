@@ -2,8 +2,11 @@ import type {
   TicketsLayout,
   UpdateNotice,
   AppSettings,
+  GitCommitDetail,
   GitDiff,
   GitDiffTarget,
+  GitMergeMode,
+  GitRef,
   GitRepoState,
   GitNotice,
   GitSyncOp,
@@ -69,15 +72,20 @@ import { canRerunSession } from '@shared/session-actions.js';
 import {
   buildChangeMenuItems,
   buildCommitMenuItems,
+  buildRefMenuItems,
   buildRepoMenuItems,
   buildStashMenuItems,
-  defaultTargetFor,
   renderGitPanel,
+  type GitCreating,
   type GitPanelActions,
   type GitPanelState,
-  type GitViewId,
+  type GitSectionKey,
+  type GitSelection,
 } from './ui/git-panel.js';
+import { GRAPH_ROW_HEIGHT, graphEntries } from './ui/git-graph-view.js';
 import { attachGitSplitter } from './ui/git-split.js';
+import { mergeOptionsFor } from './ui/presenters.js';
+import { scrollToReveal } from './ui/virtual-window.js';
 import { boardUrl, renderJiraBoard, transitionTo, withLocalTickets } from './ui/jira-board.js';
 import {
   LOCAL_STAGES,
@@ -261,9 +269,32 @@ class App {
    */
   private gitProject: ProjectId | null = null;
   private gitRepo: GitRepoState | null = null;
-  private gitView: GitViewId = 'changes';
+  /**
+   * What the detail panel describes: the working tree, a commit or a stash.
+   *
+   * `null` until the first read of a repository lands, when it defaults to the working tree if there
+   * is anything in it and to HEAD otherwise (see `defaultGitSelection`).
+   */
+  private gitSelection: GitSelection | null = null;
+  /** Message and files of the selected commit or stash, read when it is selected. */
+  private gitDetail: GitCommitDetail | null = null;
+  /** The diff shown in the graph's place, or null for the graph. */
   private gitTarget: GitDiffTarget | null = null;
   private gitDiff: GitDiff | null = null;
+  /** Where the graph is scrolled, so a rebuild on the poll does not throw the reader back to the top. */
+  private gitScrollTop = 0;
+  /** The folded sections of the refs panel. Session-local: a view preference, not a setting. */
+  private readonly gitCollapsed = new Set<GitSectionKey>(['tags']);
+  /** The inline creation form open in the refs panel. */
+  private gitCreating: GitCreating = null;
+  /**
+   * Raised while a ref is being dragged towards the current branch.
+   *
+   * Same rule as the Jira board and the project table: nothing is rebuilt during a drag, because
+   * removing the element under the pointer cancels the drag the browser is tracking, and the drop
+   * would land on nothing.
+   */
+  private gitDragging = false;
   private gitMessage = '';
   /** Whether the next commit amends HEAD. Reset with the drafts on every repository change. */
   private gitAmend = false;
@@ -1008,8 +1039,11 @@ class App {
     if (!this.projects.some((project) => project.id === this.gitProject)) {
       this.gitProject = null;
       this.gitRepo = null;
+      this.gitSelection = null;
+      this.gitDetail = null;
       this.gitTarget = null;
       this.gitDiff = null;
+      this.gitScrollTop = 0;
     }
     this.renderGit();
     this.stampRefresh();
@@ -1753,14 +1787,18 @@ class App {
   /* -------------------------------------------------------------------- git */
 
   private renderGit(): void {
+    // Nothing is rebuilt under a drag: the element being dragged, or the one it is about to be dropped
+    // on, would be replaced and the browser would cancel the drag. The drag's end repaints.
+    if (this.gitDragging) {
+      return;
+    }
     renderGitPanel(
       {
         repos: requireElement('git-repos'),
-        header: requireElement('git-header'),
-        views: requireElement('git-views'),
-        list: requireElement('git-list'),
-        commit: requireElement('git-commit'),
-        diff: requireElement('git-diff'),
+        toolbar: requireElement('git-toolbar'),
+        refs: requireElement('git-refs'),
+        center: requireElement('git-center'),
+        detail: requireElement('git-detail'),
       },
       this.gitPanelState(),
       this.gitPanelActions(),
@@ -1770,8 +1808,8 @@ class App {
   /**
    * The Git tab's state, as one object.
    *
-   * Extracted because the action menu needs the very same snapshot as the panel: two places assembling
-   * it would eventually disagree about, say, whether a write is in flight, and the menu would offer a
+   * Extracted because the menus need the very same snapshot as the panel: two places assembling it
+   * would eventually disagree about, say, whether a write is in flight, and a menu would offer a
    * `Push` the panel has already disabled.
    */
   private gitPanelState(): GitPanelState {
@@ -1780,9 +1818,13 @@ class App {
       tagColors: this.settings?.tagColors ?? {},
       selectedProject: this.gitProject,
       repo: this.gitRepo,
-      view: this.gitView,
+      selection: this.gitSelection ?? { kind: 'wip' },
+      detail: this.gitDetail,
       target: this.gitTarget,
       diff: this.gitDiff,
+      scrollTop: this.gitScrollTop,
+      collapsed: this.gitCollapsed,
+      creating: this.gitCreating,
       message: this.gitMessage,
       amend: this.gitAmend,
       branchDraft: this.gitBranchDraft,
@@ -1790,9 +1832,7 @@ class App {
       stashUntracked: this.gitStashUntracked,
       busy: this.gitBusy,
       generating: this.gitGenerating,
-      // Straight off the poll's rows, which already read every repository for the Projects tab. The
-      // Git tab used to badge the selected repository alone, so finding where work was waiting meant
-      // clicking each one in turn.
+      // Straight off the poll's rows, which already read every repository for the Projects tab.
       changedByProject: Object.fromEntries(
         this.rows.map((row) => [
           row.project.id,
@@ -1810,11 +1850,16 @@ class App {
           return;
         }
         this.gitProject = projectId;
-        // The diff and the drafts belong to the repository that was open, not to this one: keeping
-        // a message typed for another project is how a commit ends up in the wrong place.
+        // The selection, the diff and the drafts belong to the repository that was open, not to
+        // this one: keeping a message typed for another project is how a commit ends up in the
+        // wrong place.
         this.gitRepo = null;
+        this.gitSelection = null;
+        this.gitDetail = null;
         this.gitTarget = null;
         this.gitDiff = null;
+        this.gitScrollTop = 0;
+        this.gitCreating = null;
         this.gitMessage = '';
         this.gitAmend = false;
         this.gitBranchDraft = '';
@@ -1822,31 +1867,24 @@ class App {
         this.renderGit();
         void this.loadGit();
       },
-      onSelectView: (view) => {
-        this.gitView = view;
-        this.renderGit();
-      },
-      onSelectTarget: (target) => {
+      onSelect: (selection) => this.selectGit(selection),
+      onOpenDiff: (target) => {
         this.gitTarget = target;
         this.gitDiff = null;
         this.renderGit();
         void this.loadGitDiff();
       },
+      onCloseDiff: () => this.closeGitDiff(),
       onStage: (paths, staged) =>
         void this.runGitWrite(() => window.api.gitStage(this.requireGitProject(), paths, staged)),
       /*
-       * The confirmation is **not** here.
-       *
-       * It is raised by the main process, on the window, before a single file is touched: a page
-       * under this CSP has no dialog worth the name, and a modal of our own is the pattern that got
-       * the settings modal removed. A cancel comes back as an ordinary failed write, which is what
-       * it is from here.
+       * The confirmation is **not** here: it is raised by the main process, on the window, before a
+       * single file is touched. A cancel comes back as an ordinary failed write.
        */
       onDiscard: (paths) =>
         void this.runGitWrite(() => window.api.gitDiscard(this.requireGitProject(), paths)),
       /*
-       * The Explorer's editor, not a second one: its two gates check the path, it tracks unsaved
-       * changes, and a file is never open twice. The tab is shown BEFORE the open, so the panel's
+       * The Explorer's editor, not a second one. The tab is shown BEFORE the open, so the panel's
        * terminal is measured at the size the editor will keep.
        */
       onEditFile: (path, target) => {
@@ -1858,13 +1896,28 @@ class App {
         }
         this.explorer?.edit(this.gitProject, path, target);
       },
-      onCheckout: (name) =>
-        void this.runGitWrite(() => window.api.gitCheckout(this.requireGitProject(), name)),
+      onCheckout: (ref) => void this.checkoutGitRef(ref),
+      onCreating: (creating) => {
+        this.gitCreating = creating;
+        // The form lives in its section, so a folded section is unfolded to show it.
+        if (creating === 'branch') {
+          this.gitCollapsed.delete('local');
+        } else if (creating === 'stash') {
+          this.gitCollapsed.delete('stashes');
+        }
+        this.renderGit();
+        // Opened on purpose, so the field takes the focus here, once: focusing it from the render
+        // would steal the focus back on every poll.
+        if (creating !== null) {
+          requireElement('git-refs').querySelector<HTMLInputElement>('.git__input')?.focus();
+        }
+      },
       onCreateBranch: (name) => {
         void this.runGitWrite(async () => {
           const result = await window.api.gitCreateBranch(this.requireGitProject(), name, true);
           if (result.ok) {
             this.gitBranchDraft = '';
+            this.gitCreating = null;
           }
           return result;
         });
@@ -1877,10 +1930,8 @@ class App {
       },
       onGenerateMessage: () => void this.generateCommitMessage(),
       onAmend: (amend) => {
-        // Arming the amend puts the message being replaced in the form, since that is the text
-        // the gesture edits — but never over a draft already typed. Disarming takes the pre-fill
-        // back out, and only the pre-fill: an untouched old message left behind would otherwise
-        // become a brand-new commit that *looks* like the previous one.
+        // Arming the amend puts the message being replaced in the form, never over a draft already
+        // typed. Disarming takes the pre-fill back out, and only the pre-fill.
         const head = this.gitRepo?.headMessage ?? '';
         if (amend && this.gitMessage.trim().length === 0) {
           this.gitMessage = head;
@@ -1894,6 +1945,14 @@ class App {
         this.gitBranchDraft = value;
       },
       onSync: (op) => void this.syncGit(op),
+      onUndo: () => void this.undoGit(),
+      onDrop: (source, x, y) => this.openMergeMenu(source, x, y),
+      onDragging: (dragging) => {
+        this.gitDragging = dragging;
+        if (!dragging) {
+          this.renderGit();
+        }
+      },
       onCherryPick: (sha, noCommit) =>
         void this.runGitWrite(() =>
           window.api.gitCherryPick(this.requireGitProject(), sha, noCommit),
@@ -1905,19 +1964,22 @@ class App {
       },
       onStashUntracked: (include) => {
         this.gitStashUntracked = include;
-        // Re-rendered, unlike a text draft: the switch changes the button's own label and enablement,
-        // so the panel has to be repainted for the checkbox to mean anything.
+        // Re-rendered, unlike a text draft: the switch changes the button's own label and enablement.
         this.renderGit();
       },
       onStashPush: () => {
         void this.runGitWrite(async () => {
+          // The toolbar's button stashes the tracked changes under git's own message; the form of the
+          // stashes panel is where a name and the untracked files are chosen.
+          const fromForm = this.gitCreating === 'stash';
           const result = await window.api.gitStashPush(
             this.requireGitProject(),
-            this.gitStashDraft,
-            this.gitStashUntracked,
+            fromForm ? this.gitStashDraft : '',
+            fromForm && this.gitStashUntracked,
           );
-          if (result.ok) {
+          if (result.ok && fromForm) {
             this.gitStashDraft = '';
+            this.gitCreating = null;
           }
           return result;
         });
@@ -1951,6 +2013,34 @@ class App {
           buildChangeMenuItems(change, this.gitPanelState(), this.gitPanelActions()),
         );
       },
+      onRefMenu: (ref, x, y) => {
+        if (this.gitRepo === null || this.gitRepo.error !== null) {
+          return;
+        }
+        showContextMenu(
+          x,
+          y,
+          buildRefMenuItems(
+            ref,
+            this.gitRepo,
+            this.gitPanelState(),
+            this.gitPanelActions(),
+            (atX, atY) => this.openMergeMenu(ref, atX, atY),
+            { x, y },
+          ),
+        );
+      },
+      onToggleSection: (key) => {
+        if (this.gitCollapsed.has(key)) {
+          this.gitCollapsed.delete(key);
+        } else {
+          this.gitCollapsed.add(key);
+        }
+        this.renderGit();
+      },
+      onScroll: (scrollTop) => {
+        this.gitScrollTop = scrollTop;
+      },
       onDismissNotice: () => {
         this.gitNotice = null;
         if (this.gitNoticeTimer !== null) {
@@ -1966,11 +2056,11 @@ class App {
   }
 
   /**
-   * The repository's actions: the three network operations and a terminal.
+   * The repository's actions: sequencer, network, undo and a terminal.
    *
-   * Rebuilt at each opening rather than held, for the same reason the Jira transitions are read when
-   * their menu opens: the labels depend on live state (`Push` becomes `Push and publish the branch`
-   * without an upstream) and a menu built once would eventually offer the wrong one.
+   * Rebuilt at each opening rather than held: the labels depend on live state (`Push` becomes
+   * `Push and publish the branch` without an upstream) and a menu built once would eventually offer
+   * the wrong one.
    */
   private openGitMenu(x: number, y: number): void {
     if (this.gitRepo === null || this.gitRepo.error !== null) {
@@ -1981,6 +2071,74 @@ class App {
       y,
       buildRepoMenuItems(this.gitRepo, this.gitPanelState(), this.gitPanelActions()),
     );
+  }
+
+  /**
+   * The menu a branch dropped on the current one opens: what merging it would do, worded.
+   *
+   * A menu and not a write (decided on 2026-10-15): a merge changes the branch, so the drop is a
+   * question and the menu is the answer, Escape being the way out. The Jira board's drop writes at
+   * once, and that is a status field; this is history.
+   */
+  private openMergeMenu(source: GitRef, x: number, y: number): void {
+    const repo = this.gitRepo;
+    if (repo === null || repo.error !== null) {
+      return;
+    }
+    const busy = this.gitBusy;
+    showContextMenu(
+      x,
+      y,
+      mergeOptionsFor(repo, source).map((option) => ({
+        label: option.label,
+        hint: option.hint,
+        disabled: option.disabled || busy || option.mode === null,
+        run: () => {
+          if (option.mode !== null) {
+            void this.mergeGit(source, option.mode);
+          }
+        },
+      })),
+    );
+  }
+
+  /**
+   * Selects the working tree, a commit or a stash, and reads what the panel needs to describe it.
+   *
+   * Selecting also scrolls the graph to the row, but only as far as needed: a click on a ref in the
+   * panel on the left lands on its commit, while a click on a row already on screen moves nothing.
+   * An open diff is closed, since the reader has just asked about something else.
+   */
+  private selectGit(selection: GitSelection): void {
+    this.gitSelection = selection;
+    this.gitTarget = null;
+    this.gitDiff = null;
+    this.gitDetail = null;
+    if (selection.kind === 'commit' && this.gitRepo !== null) {
+      const sha = selection.sha;
+      const index = graphEntries(this.gitRepo).findIndex(
+        (entry) => entry.kind === 'commit' && entry.commit.sha === sha,
+      );
+      if (index !== -1) {
+        const viewport =
+          requireElement('git-center').querySelector('.git__graph')?.clientHeight ?? 0;
+        if (viewport > 0) {
+          this.gitScrollTop = scrollToReveal(this.gitScrollTop, viewport, GRAPH_ROW_HEIGHT, index);
+        }
+      }
+    }
+    this.renderGit();
+    void this.loadGitDetail();
+  }
+
+  /** Back to the graph from a diff, where it was scrolled. */
+  private closeGitDiff(): void {
+    if (this.gitTarget === null) {
+      return;
+    }
+    this.gitTarget = null;
+    this.gitDiff = null;
+    this.renderGit();
   }
 
   /**
@@ -2278,7 +2436,7 @@ class App {
   }
 
   private async readGitTab(): Promise<void> {
-    if (this.gitEditing) {
+    if (this.gitEditing || this.gitDragging) {
       return;
     }
     this.gitProject ??= this.projects[0]?.id ?? null;
@@ -2288,41 +2446,156 @@ class App {
       return;
     }
 
-    this.gitRepo = await window.api.gitState(projectId);
-    // The selected file may have been committed or reverted since the last pass, and a diff column
-    // still showing it would describe something that no longer exists.
-    if (this.gitTarget?.kind === 'file') {
-      const path = this.gitTarget.path;
-      if (!(this.gitRepo?.changes.some((change) => change.path === path) ?? false)) {
-        this.gitTarget = null;
-        this.gitDiff = null;
-      }
+    const repo = await window.api.gitState(projectId);
+    // The repository changed while this read was in flight: its answer is about the one left behind.
+    if (this.gitProject !== projectId) {
+      return;
     }
-    // Same rule for a stash, and it is not hypothetical here: `pop` and `drop` both remove the entry
-    // the diff column is showing, so this is the normal outcome of using the view rather than an edge.
-    if (this.gitTarget?.kind === 'stash') {
-      const sha = this.gitTarget.sha;
-      if (!(this.gitRepo?.stashes.some((stash) => stash.sha === sha) ?? false)) {
-        this.gitTarget = null;
-        this.gitDiff = null;
-      }
-    }
-    /*
-     * Opens on the first changed file when nothing is selected.
-     *
-     * The diff is the reason the tab has a third column, and arriving on an empty one asks the user to
-     * click before the tab tells them anything. Only when there is no selection at all, so it can
-     * never pull the view away from a file being read, and only on the changes view: preselecting a
-     * commit would fire a `git show` for a list nobody has looked at yet.
-     */
-    const first = this.gitRepo?.changes[0];
-    if (this.gitTarget === null && this.gitView === 'changes' && first !== undefined) {
-      this.gitTarget = defaultTargetFor(first);
+    this.gitRepo = repo;
+
+    // A diff about a file that has since been committed or reverted, or a stash that has been popped,
+    // would describe something that no longer exists: back to the graph.
+    const target = this.gitTarget;
+    if (
+      (target?.kind === 'file' &&
+        !(repo?.changes.some((change) => change.path === target.path) ?? false)) ||
+      (target?.kind === 'stash' && !(repo?.stashes.some((stash) => stash.sha === target.sha) ?? false))
+    ) {
+      this.gitTarget = null;
       this.gitDiff = null;
+    }
+
+    const previous = this.gitSelection;
+    this.gitSelection = this.keptGitSelection(repo);
+    const changed = JSON.stringify(previous) !== JSON.stringify(this.gitSelection);
+    if (changed) {
+      this.gitDetail = null;
     }
     this.renderGit();
     if (this.gitTarget !== null && this.gitDiff === null) {
       await this.loadGitDiff();
+    }
+    if (this.gitSelection.kind !== 'wip' && this.gitDetail === null) {
+      await this.loadGitDetail();
+    }
+  }
+
+  /**
+   * The selection to keep after a read, or the default one.
+   *
+   * Kept while it still exists: a commit still in the graph, a stash still in the list. The working
+   * tree is kept even once clean, as long as HEAD has not moved, because a commit made from the form
+   * should land the reader on what they just committed, not on an empty panel: when HEAD moved and the
+   * tree is clean, the selection follows HEAD. Otherwise the default: the working tree if there is
+   * anything in it, HEAD if not.
+   */
+  private keptGitSelection(repo: GitRepoState | null): GitSelection {
+    const current = this.gitSelection;
+    if (repo === null || repo.error !== null) {
+      return current ?? { kind: 'wip' };
+    }
+    if (current?.kind === 'stash' && repo.stashes.some((stash) => stash.sha === current.sha)) {
+      return current;
+    }
+    // A commit selected from a ref beyond the graph is kept too: its detail is read by sha.
+    if (current?.kind === 'commit' && current.sha.length > 0) {
+      const known =
+        repo.commits.some((commit) => commit.sha === current.sha) ||
+        repo.refs.some((ref) => ref.sha === current.sha);
+      if (known) {
+        return current;
+      }
+    }
+    if (current?.kind === 'wip' && (repo.changes.length > 0 || repo.headSha === null)) {
+      return current;
+    }
+    return repo.changes.length > 0 || repo.headSha === null
+      ? { kind: 'wip' }
+      : { kind: 'commit', sha: repo.headSha };
+  }
+
+  /** Reads the message and files of the selected commit or stash, unless the selection moved on. */
+  private async loadGitDetail(): Promise<void> {
+    const projectId = this.gitProject;
+    const selection = this.gitSelection;
+    if (projectId === null || selection === null || selection.kind === 'wip') {
+      return;
+    }
+    const detail = await window.api.gitCommitDetail(projectId, selection.sha);
+    if (this.gitSelection === selection) {
+      this.gitDetail = detail;
+      this.renderGit();
+    }
+  }
+
+  /**
+   * Checks out a branch from a double-click or its menu.
+   *
+   * A local branch by its name; a remote one as the local branch following it, created with
+   * `--track` when it does not exist yet. Nothing is stashed and nothing is forced, like the button it
+   * replaced: local changes in the way make git refuse, and git names the files.
+   */
+  private async checkoutGitRef(ref: GitRef): Promise<void> {
+    const projectId = this.requireGitProject();
+    if (ref.kind === 'tag' || ref.current) {
+      return;
+    }
+    await this.runGitWrite(() =>
+      ref.kind === 'remote'
+        ? window.api.gitCheckoutRemote(projectId, ref.ref)
+        : window.api.gitCheckout(projectId, ref.name),
+    );
+  }
+
+  /**
+   * Undoes the last commit, then puts its message back in the form.
+   *
+   * The message is taken from the state read **before** the undo, the only moment it is still HEAD's;
+   * it fills the form only when the form is empty, a draft being worth more than a pre-fill. With the
+   * changes staged and the message back, committing again is a single click: that is what makes an
+   * undo with no confirmation safe.
+   */
+  private async undoGit(): Promise<void> {
+    const message = this.gitRepo?.headMessage ?? '';
+    await this.runGitWrite(async () => {
+      const result = await window.api.gitUndo(this.requireGitProject());
+      if (result.ok) {
+        this.gitAmend = false;
+        if (this.gitMessage.trim().length === 0) {
+          this.gitMessage = message;
+        }
+        this.gitSelection = { kind: 'wip' };
+        this.gitDetail = null;
+      }
+      return result;
+    });
+  }
+
+  /**
+   * Merges a dropped branch, in a terminal tab brought forward.
+   *
+   * Brought forward for the reason the commit's tab is: a merge that stops on a conflict says so
+   * there, and a tab left behind would turn that into silence. The repository is read again after,
+   * which is what puts the `merge in progress` badge and its way out on screen when it stopped.
+   */
+  private async mergeGit(source: GitRef, mode: GitMergeMode): Promise<void> {
+    const projectId = this.gitProject;
+    if (projectId === null || this.gitBusy) {
+      return;
+    }
+    this.gitBusy = true;
+    this.renderGit();
+    try {
+      const { terminalId, result } = await window.api.gitMerge(projectId, source.ref, mode);
+      this.stampMessage(result.message);
+      if (terminalId === null) {
+        this.showGitNotice({ projectId, ...result });
+      } else {
+        await this.focusTerminal(terminalId);
+      }
+    } finally {
+      this.gitBusy = false;
+      await this.loadGit();
     }
   }
 
@@ -3043,7 +3316,7 @@ class App {
           hideCurrentReveal();
         }
         if (tab === 'git') {
-          this.gitSplitter?.setWidth(this.settings?.gitListWidth ?? DEFAULT_GIT_LIST_WIDTH);
+          this.gitSplitter?.setWidth(this.settings?.gitDetailWidth ?? DEFAULT_GIT_DETAIL_WIDTH);
           void this.loadGit();
         }
         // Same reasoning for Triage: sprints move once a fortnight, so they are read when the tab is
@@ -3072,16 +3345,35 @@ class App {
     this.gitSplitter = attachGitSplitter({
       handle: requireElement('git-resizer'),
       panel: requireElement('strip-panel-git'),
-      list: requireElement('git-main'),
-      initialWidth: settings.gitListWidth,
-      onResize: () => {},
+      center: requireElement('git-center'),
+      detail: requireElement('git-detail'),
+      initialWidth: settings.gitDetailWidth,
       onCommit: (width) => {
         const rounded = Math.round(width);
         if (this.settings !== null) {
-          this.settings = { ...this.settings, gitListWidth: rounded };
+          this.settings = { ...this.settings, gitDetailWidth: rounded };
         }
-        void window.api.updateSettings({ gitListWidth: rounded });
+        void window.api.updateSettings({ gitDetailWidth: rounded });
       },
+    });
+
+    /*
+     * Escape closes a diff and brings the graph back, the way `← Graph` does.
+     *
+     * On the document, because a click on a file row leaves the focus on the body, where a listener on
+     * the panel never hears the key. Guarded three ways so it takes Escape from nobody else: only while
+     * the Git tab is showing a diff, and never from a field, which covers the commit message and the
+     * terminal (xterm reads its keys through a textarea).
+     */
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || this.strip?.active !== 'git' || this.gitTarget === null) {
+        return;
+      }
+      if (event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLInputElement) {
+        return;
+      }
+      event.preventDefault();
+      this.closeGitDiff();
     });
 
     requireElement<HTMLButtonElement>('strip-collapse').addEventListener('click', () => {
@@ -3227,12 +3519,12 @@ const THEME_ICONS: Record<ThemeMode, { path: string; paint: 'fill' | 'stroke' }>
 };
 
 /**
- * Fallback width of the Git tab's working column.
+ * Fallback width of the Git tab's detail panel.
  *
  * Only reached if the settings have not loaded, which is a state the panel can technically be in; it
  * matches the CSS fallback in `.git` so the two cannot disagree about the first paint.
  */
-const DEFAULT_GIT_LIST_WIDTH = 460;
+const DEFAULT_GIT_DETAIL_WIDTH = 320;
 
 /**
  * How long a successful fetch / pull / push stays beside the branch.
