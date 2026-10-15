@@ -41,6 +41,18 @@ centre, and on the right whatever is selected in the graph.
   continue it.
 - The **+** of LOCAL creates a branch from HEAD and switches to it. Names are checked by git itself.
 
+## Tags
+
+- **Right-click** a commit and choose **Tag this commit…**, or use the **+** of TAGS to tag HEAD.
+  Tags are annotated; the message is optional. **Create and push**, in the chevron beside Create,
+  creates the tag and then asks to push it.
+- **Right-click** a tag to push it. A confirmation names the commit, the remote and any workflow the
+  tag would start (a release, for instance): pushing a tag is hard to take back.
+- A tag marked **local** is not on the remote. Whether the remote has a tag is checked on Fetch, Pull
+  and after a tag push.
+- **Delete the local tag** removes a tag the remote does not have. A pushed tag is deleted from a
+  terminal.
+
 ## Toolbar
 
 - **Undo** takes the last commit back: its changes are staged again and its message returns to the
@@ -54,5 +66,6 @@ centre, and on the right whatever is selected in the graph.
 
 ## What it does not do
 
-Conflict resolution, rebase, force push and staging of individual hunks: use a terminal for those.
+Conflict resolution, rebase, force push, moving a tag or deleting one on the remote, and staging of
+individual hunks: use a terminal for those.
 Files in conflict show as errors in the working tree's list.

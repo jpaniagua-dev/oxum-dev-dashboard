@@ -29,6 +29,7 @@ import {
   type GitDiff,
   type GitDiffTarget,
   type GitMergeMode,
+  type GitRemoteTags,
   type GitRepoState,
   type GitNotice,
   type GitResult,
@@ -191,6 +192,24 @@ const api: RendererApi = {
 
   gitCheckoutRemote: (projectId: ProjectId, remoteRef: string): Promise<GitResult> =>
     ipcRenderer.invoke(IpcChannel.GitCheckoutRemote, projectId, remoteRef),
+
+  gitCreateTag: (
+    projectId: ProjectId,
+    name: string,
+    sha: string,
+    message: string,
+    push: boolean,
+  ): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitTagCreate, projectId, name, sha, message, push),
+
+  gitPushTag: (projectId: ProjectId, name: string): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitTagPush, projectId, name),
+
+  gitDeleteTag: (projectId: ProjectId, name: string): Promise<GitResult> =>
+    ipcRenderer.invoke(IpcChannel.GitTagDelete, projectId, name),
+
+  gitRemoteTags: (projectId: ProjectId): Promise<GitRemoteTags> =>
+    ipcRenderer.invoke(IpcChannel.GitRemoteTags, projectId),
 
   gitMerge: (
     projectId: ProjectId,

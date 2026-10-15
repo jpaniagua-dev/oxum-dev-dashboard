@@ -5044,6 +5044,40 @@ body {
   gap: 6px;
 }
 
+.git__inline-actions--end {
+  justify-content: flex-end;
+}
+
+/* The commit a tag form is about to tag, said before anything is typed. */
+.git__inline-note {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A tag message is prose: the identifier face stays on the name. */
+.git__input--prose {
+  font-family: inherit;
+}
+
+/* The chevron of the tag form's secondary split button: the hairline of the primary one would
+   be white on white here. */
+.git__tag-more {
+  border-left: 1px solid var(--border-strong);
+}
+
+/* A tag the remote is known not to have. Neutral, not a warning: a local tag is a normal state. */
+.git__badge-local {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+}
+
 /* ------------------------------------------------------------- git graph */
 
 .git__center {

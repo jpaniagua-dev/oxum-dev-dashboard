@@ -15,6 +15,7 @@ import {
   type AppSettings,
   type BootstrapState,
   type GitCommitDetail,
+  type GitRemoteTags,
   type GitDiff,
   type GitDiffTarget,
   type GitRepoState,
@@ -68,6 +69,14 @@ import {
   sync,
   undoLastCommit,
 } from './git/git-commands.js';
+import {
+  createTag,
+  deleteLocalTag,
+  pushTag,
+  pushTagPlan,
+  readRemoteTags,
+} from './git/git-tags.js';
+import { readTagWorkflows, workflowsForTag } from './git/tag-workflows.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
 import type { AgentContext } from '@shared/agent-context.js';
 import { readAgentContext } from './agent/agent-context-reader.js';
@@ -967,6 +976,64 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
             ? { ok: false, message: 'Could not open the merge tab' }
             : { ok: true, message: `Merging ${plan.source} into ${plan.target} in a tab` },
       };
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitTagCreate,
+    async (
+      event,
+      projectId: unknown,
+      name: unknown,
+      sha: unknown,
+      message: unknown,
+      push: unknown,
+    ): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined || typeof name !== 'string' || typeof sha !== 'string') {
+        return { ok: false, message: 'Project or commit not found' };
+      }
+      const text = typeof message === 'string' ? message : '';
+      const created = await createTag(project.path, name, sha, text);
+      if (!created.ok || push !== true) {
+        return created;
+      }
+      const pushed = await confirmAndPushTag(event, project, name.trim());
+      return pushed.ok
+        ? pushed
+        : { ok: false, message: `Tag ${name.trim()} created, not pushed: ${pushed.message}` };
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitTagPush,
+    async (event, projectId: unknown, name: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined || typeof name !== 'string') {
+        return { ok: false, message: 'Project or tag not found' };
+      }
+      return confirmAndPushTag(event, project, name);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitTagDelete,
+    async (_event, projectId: unknown, name: unknown): Promise<GitResult> => {
+      const project = resolveProject(deps.projects(), projectId);
+      if (project === undefined || typeof name !== 'string') {
+        return { ok: false, message: 'Project or tag not found' };
+      }
+      return deleteLocalTag(project.path, name);
+    },
+  );
+
+  ipcMain.handle(
+    IpcChannel.GitRemoteTags,
+    async (_event, projectId: unknown): Promise<GitRemoteTags> => {
+      const project = resolveProject(deps.projects(), projectId);
+      return project === undefined
+        ? { remote: null, tags: [], error: 'Project not found' }
+        : readRemoteTags(project.path);
     },
   );
 
@@ -2395,6 +2462,55 @@ function resolveProject(projects: readonly Project[], id: unknown): Project | un
  * Anchored on the window the call came from rather than on the main window: this is invoked from the
  * dashboard, but a modal parented to another window would appear behind the one being used.
  */
+/**
+ * Pushes one tag, once a dialog on the window has been answered Push.
+ *
+ * Confirmed **every** time, where a branch push never is, and the difference is the point: a branch
+ * is pushed twenty times a day and a dialog in front of each is a dialog nobody reads by the third,
+ * whereas a tag is pushed rarely and is close to irreversible. Others fetch it at once, and a `v*` tag
+ * can start a release (it does on this repository): deleting it afterwards undoes neither.
+ *
+ * The dialog names the commit (a tag made on the wrong one is caught here or never), the remote, and
+ * the workflows `.github/workflows` says the tag would start. That reading is narrow on purpose (see
+ * `tag-workflows.ts`), which is why the question is asked whether it finds one or not. Cancel is the
+ * default, so a stray Enter pushes nothing.
+ */
+async function confirmAndPushTag(
+  event: Electron.IpcMainInvokeEvent,
+  project: Project,
+  name: string,
+): Promise<GitResult> {
+  const plan = await pushTagPlan(project.path, name);
+  if (!plan.ok) {
+    return { ok: false, message: plan.message };
+  }
+  const started = workflowsForTag(readTagWorkflows(project.path), name);
+  const workflows =
+    started.length === 0
+      ? 'No workflow of this repository reacts to this tag, as far as .github/workflows can be read.'
+      : `This will start:\n${started.map((workflow) => `  - ${workflow.name} (${workflow.file})`).join('\n')}`;
+  const options: Electron.MessageBoxOptions = {
+    type: started.length === 0 ? 'question' : 'warning',
+    buttons: ['Push', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Push a tag',
+    message: `Push the tag ${name} to ${plan.remote}?`,
+    detail:
+      `${plan.sha.slice(0, 7)} ${plan.subject}\n\n${workflows}\n\n` +
+      'Once pushed, others can fetch it, and deleting it afterwards undoes nothing it has started.',
+  };
+  const window = BrowserWindow.fromWebContents(event.sender);
+  const { response } =
+    window === null
+      ? await dialog.showMessageBox(options)
+      : await dialog.showMessageBox(window, options);
+  if (response !== 0) {
+    return { ok: false, message: 'Push cancelled' };
+  }
+  return pushTag(project.path, plan.remote, name);
+}
+
 async function confirmDiscard(
   event: Electron.IpcMainInvokeEvent,
   label: string,

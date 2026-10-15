@@ -1,5 +1,6 @@
 import type { GitRef, GitRepoState, GitStash } from '@shared/contracts.js';
-import { clearChildren, createElement, createIconButton } from './dom.js';
+import { showContextMenu } from './context-menu.js';
+import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
 import {
   describeDay,
   makeMergeDropZone,
@@ -8,7 +9,8 @@ import {
   type GitPanelState,
   type GitSectionKey,
 } from './git-panel-model.js';
-import { presentTrack, refSections } from './presenters.js';
+import { CHEVRON_DOWN_ICON } from './icons.js';
+import { presentTrack, refSections, tagOnRemote } from './presenters.js';
 
 /** A plus, for the `create` button at the right of a section heading. */
 const PLUS_ICON = 'M8 3.5L8 12.5M3.5 8L12.5 8';
@@ -87,12 +89,121 @@ export function renderRefs(
     }
   }
 
-  host.append(buildSection('tags', 'Tags', sections.tags.length, state, actions, null));
+  const head = repo.headSha;
+  host.append(
+    buildSection(
+      'tags',
+      'Tags',
+      sections.tags.length,
+      state,
+      actions,
+      head === null
+        ? null
+        : {
+            label: 'New tag',
+            title: 'Tag HEAD. To tag another commit, right-click it in the graph.',
+            run: () =>
+              state.creating === 'tag' ? actions.onCreating(null) : actions.onTagCommit(head),
+          },
+    ),
+  );
   if (!state.collapsed.has('tags')) {
+    if (state.creating === 'tag' && state.tagTarget !== null) {
+      host.append(buildTagForm(repo, state.tagTarget, state, actions));
+    }
     for (const ref of sections.tags) {
       host.append(buildRefRow(ref, repo, state, actions));
     }
   }
+}
+
+/**
+ * The tag form: which commit, a name, an optional message, and `Create` or `Create and push`.
+ *
+ * The commit is spelled out at the top, sha and subject, because a tag on the wrong commit is the one
+ * mistake this form can make, and the push confirmation names it a second time. `Create and push` is
+ * in the chevron of `Create`, the arrangement `Commit and push` already has: the primary gesture
+ * touches the local repository only.
+ */
+function buildTagForm(
+  repo: GitRepoState,
+  sha: string,
+  state: GitPanelState,
+  actions: GitPanelActions,
+): HTMLElement {
+  const form = createElement('div', { className: 'git__inline-form git__inline-form--stack' });
+  const commit = repo.commits.find((entry) => entry.sha === sha);
+  form.append(
+    createElement('span', {
+      className: 'git__inline-note',
+      text: `On ${sha.slice(0, 7)}${commit === undefined ? '' : ` ${commit.subject}`}`,
+      title: sha,
+    }),
+  );
+
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.className = 'git__input';
+  name.placeholder = 'v1.2.0';
+  name.value = state.tagDraft;
+  name.setAttribute('aria-label', 'Tag name');
+  const message = document.createElement('input');
+  message.type = 'text';
+  message.className = 'git__input git__input--prose';
+  message.placeholder = 'Message (optional)';
+  message.value = state.tagMessage;
+  message.setAttribute('aria-label', 'Tag message');
+  for (const field of [name, message]) {
+    field.addEventListener('focus', () => actions.onEditing(true));
+    field.addEventListener('blur', () => actions.onEditing(false));
+    field.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        actions.onCreating(null);
+      } else if (event.key === 'Enter' && name.value.trim().length > 0) {
+        actions.onCreateTag(false);
+      }
+    });
+  }
+  name.addEventListener('input', () => actions.onTagDraft(name.value));
+  message.addEventListener('input', () => actions.onTagMessage(message.value));
+
+  const disabled = state.busy || state.tagDraft.trim().length === 0;
+  const create = createElement('button', {
+    className: 'button',
+    text: 'Create',
+    title: 'git tag -a: an annotated tag, kept local. The name is validated by git itself.',
+  });
+  create.type = 'button';
+  create.disabled = disabled;
+  create.addEventListener('click', () => actions.onCreateTag(false));
+
+  const more = createElement('button', { className: 'button git__commit-more git__tag-more' });
+  more.type = 'button';
+  more.append(createIcon(CHEVRON_DOWN_ICON, { paint: 'stroke' }));
+  more.disabled = disabled;
+  more.title = 'Create and push';
+  more.setAttribute('aria-label', 'More tag actions');
+  more.setAttribute('aria-haspopup', 'menu');
+  const split = createElement('div', { className: 'git__commit-split' });
+  more.addEventListener('click', (event) => {
+    // A menu opened on a left click stops the click here, or the document listener closes it.
+    event.stopPropagation();
+    const box = split.getBoundingClientRect();
+    showContextMenu(box.left, box.bottom + 4, [
+      {
+        label: 'Create and push',
+        hint: 'Creates the tag, then asks before pushing it: the confirmation names the remote and any workflow the tag would start.',
+        disabled,
+        run: () => actions.onCreateTag(true),
+      },
+    ]);
+  });
+  split.append(create, more);
+
+  const footer = createElement('div', { className: 'git__inline-actions git__inline-actions--end' });
+  footer.append(split);
+  form.append(name, message, footer);
+  return form;
 }
 
 /**
@@ -193,6 +304,16 @@ function buildRefRow(
       row.append(createElement('span', { className: 'git__track', text: track }));
     }
   }
+  // A tag the remote is known not to have. Only against an answer: unknown draws nothing.
+  if (ref.kind === 'tag' && tagOnRemote(ref.name, state.remoteTags) === false) {
+    row.append(
+      createElement('span', {
+        className: 'git__badge-local',
+        text: 'local',
+        title: `Not on ${state.remoteTags?.remote ?? 'the remote'}: right-click to push it`,
+      }),
+    );
+  }
 
   row.title = describeRef(ref, repo);
   row.addEventListener('click', () => actions.onSelect({ kind: 'commit', sha: ref.sha }));
@@ -235,7 +356,7 @@ function describeRef(ref: GitRef, repo: GitRepoState): string {
   if (ref.current) {
     lines.push(`Checked out. Drop another branch here to merge it into ${repo.branch}.`);
   } else if (ref.kind === 'tag') {
-    lines.push('Click: show the commit');
+    lines.push('Click: show the commit. Right click: push, delete.');
   } else {
     lines.push(
       ref.kind === 'remote'

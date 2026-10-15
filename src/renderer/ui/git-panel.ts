@@ -25,7 +25,7 @@ import {
 import { renderRefs } from './git-refs.js';
 import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
-import { remoteBranchName, undoStateFor } from './presenters.js';
+import { remoteBranchName, tagOnRemote, undoStateFor } from './presenters.js';
 import { buildTagDots, type TagPalette } from './tags.js';
 
 export {
@@ -472,6 +472,12 @@ export function buildCommitMenuItems(
       disabled: false,
       run: () => actions.onOpenDiff({ kind: 'commit', sha: commit.sha }),
     },
+    {
+      label: 'Tag this commit…',
+      hint: `Opens the tag form on ${short}, in the Tags section.`,
+      disabled: state.busy,
+      run: () => actions.onTagCommit(commit.sha),
+    },
   ];
   if (commit.sha === repo.headSha) {
     const undo = undoStateFor(repo);
@@ -529,6 +535,35 @@ export function buildRefMenuItems(
       disabled: state.busy,
       run: () => actions.onCheckout(ref),
     });
+  }
+  if (ref.kind === 'tag') {
+    /*
+     * Push one tag, and delete a local one. Both read whether the remote has the tag, which is only
+     * known after a Fetch or a push: unknown leaves both entries enabled, the main process asking the
+     * remote itself (the push through its confirmation, the delete before touching anything).
+     */
+    const onRemote = tagOnRemote(ref.name, state.remoteTags);
+    const remote = state.remoteTags?.remote ?? 'the remote';
+    items.push(
+      {
+        label: onRemote === true ? `On ${remote}` : `Push to ${remote}…`,
+        hint:
+          onRemote === true
+            ? `${remote} already has ${ref.name}.`
+            : `git push ${remote} refs/tags/${ref.name}, after a confirmation that names the commit and any workflow the tag starts.`,
+        disabled: onRemote === true || state.busy,
+        run: () => actions.onPushTag(ref.name),
+      },
+      {
+        label: 'Delete the local tag',
+        hint:
+          onRemote === true
+            ? `${remote} has it: it would come back on the next fetch. Delete it from a terminal.`
+            : 'git tag -d. Refused if the remote turns out to have it.',
+        disabled: onRemote === true || state.busy,
+        run: () => actions.onDeleteTag(ref.name),
+      },
+    );
   }
   const current = currentBranch(repo);
   if (ref.kind !== 'tag' && !ref.current && current !== undefined) {

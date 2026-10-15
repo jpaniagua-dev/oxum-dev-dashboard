@@ -506,6 +506,19 @@ export interface GitNotice extends GitResult {
  */
 export type GitMergeMode = 'ff-only' | 'merge' | 'no-ff';
 
+/**
+ * The tags a remote has, by name, as `git ls-remote --tags` answered.
+ *
+ * git keeps no remote-tracking ref for tags, so this is a network read, made on Fetch and after a
+ * tag push and never on the poll. `remote` is null when the repository has none; `error` is set when
+ * the remote could not be asked, which is not the same as "it has no tags".
+ */
+export interface GitRemoteTags {
+  readonly remote: string | null;
+  readonly tags: readonly string[];
+  readonly error: string | null;
+}
+
 /** A network operation of the Git tab, all three sharing one channel and one budget. */
 export type GitSyncOp = 'fetch' | 'pull' | 'push';
 
@@ -2438,6 +2451,19 @@ export const IpcChannel = {
    * have to be readable, and a conflict leaves the repository mid-merge, which the sequencer reads.
    */
   GitMerge: 'git:merge',
+  /**
+   * invoke: (projectId, name, sha, message, push: boolean) => GitResult
+   *
+   * Creates an annotated tag; with `push`, then asks to push it, through the same confirmation as
+   * `GitTagPush`. A cancelled push leaves the tag created, and says so.
+   */
+  GitTagCreate: 'git:tag-create',
+  /** invoke: (projectId, name) => GitResult, one tag, after a confirmation naming what it starts */
+  GitTagPush: 'git:tag-push',
+  /** invoke: (projectId, name) => GitResult, a local tag the remote does not have */
+  GitTagDelete: 'git:tag-delete',
+  /** invoke: (projectId) => GitRemoteTags, a network read */
+  GitRemoteTags: 'git:remote-tags',
   /** invoke: (projectId, op: GitSequencerOp) => GitResult, finishes or abandons a half-done operation */
   GitSequencer: 'git:sequencer',
   /** invoke: (projectId, message, includeUntracked: boolean) => GitResult, creates a stash */
@@ -2905,6 +2931,23 @@ export interface RendererApi {
   gitUndo(projectId: ProjectId): Promise<GitResult>;
   /** Checks out the local branch following a remote one, creating it with `--track` if needed. */
   gitCheckoutRemote(projectId: ProjectId, remoteRef: string): Promise<GitResult>;
+  /** Creates an annotated tag on a commit, and with `push` asks to push it right after. */
+  gitCreateTag(
+    projectId: ProjectId,
+    name: string,
+    sha: string,
+    message: string,
+    push: boolean,
+  ): Promise<GitResult>;
+  /**
+   * Pushes one tag, after a confirmation the main process raises: it names the commit, the remote and
+   * the workflows the tag would start. A cancel comes back as `ok: false`.
+   */
+  gitPushTag(projectId: ProjectId, name: string): Promise<GitResult>;
+  /** Deletes a local tag, refused when the remote has it (it would come back on the next fetch). */
+  gitDeleteTag(projectId: ProjectId, name: string): Promise<GitResult>;
+  /** The tags the remote has. A network read: on Fetch and after a tag push only. */
+  gitRemoteTags(projectId: ProjectId): Promise<GitRemoteTags>;
   /**
    * Merges a branch, named by its full ref, into the current one, in a terminal tab.
    *

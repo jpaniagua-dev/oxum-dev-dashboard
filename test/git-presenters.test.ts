@@ -6,6 +6,7 @@ import {
   presentTrack,
   refChipsBySha,
   refSections,
+  tagOnRemote,
   undoStateFor,
 } from '../src/renderer/ui/presenters.js';
 import { scrollToReveal, visibleWindow } from '../src/renderer/ui/virtual-window.js';
@@ -180,6 +181,19 @@ describe('undoStateFor', () => {
     expect(undoStateFor(repo({ commits: [commit(C, [])] })).enabled).toBe(false);
     expect(undoStateFor(repo({ headSha: null })).enabled).toBe(false);
     expect(undoStateFor(repo({ sequencer: 'cherry-pick' })).reason).toContain('cherry-pick');
+  });
+});
+
+describe('tagOnRemote', () => {
+  it('answers only against a successful read of a remote', () => {
+    const read = { remote: 'origin', tags: ['v1'], error: null };
+
+    expect(tagOnRemote('v1', read)).toBe(true);
+    expect(tagOnRemote('v2', read)).toBe(false);
+    // Unknown is not "absent": no read yet, a failed read, or no remote at all.
+    expect(tagOnRemote('v2', null)).toBeNull();
+    expect(tagOnRemote('v2', { ...read, error: 'offline' })).toBeNull();
+    expect(tagOnRemote('v2', { remote: null, tags: [], error: 'No remote' })).toBeNull();
   });
 });
 

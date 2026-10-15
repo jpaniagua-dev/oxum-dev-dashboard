@@ -7,6 +7,7 @@ import type {
   GitDiffTarget,
   GitMergeMode,
   GitRef,
+  GitRemoteTags,
   GitRepoState,
   GitNotice,
   GitSyncOp,
@@ -287,6 +288,17 @@ class App {
   private readonly gitCollapsed = new Set<GitSectionKey>(['tags']);
   /** The inline creation form open in the refs panel. */
   private gitCreating: GitCreating = null;
+  /** The commit the tag form tags, and its drafts. */
+  private gitTagTarget: string | null = null;
+  private gitTagDraft = '';
+  private gitTagMessage = '';
+  /**
+   * What each repository's remote answered about its tags, by project.
+   *
+   * Kept per project and for the session: it is a network read, made on Fetch, Pull and after a tag
+   * push, so switching back to a repository must not forget the answer and fall back to "unknown".
+   */
+  private readonly gitRemoteTags = new Map<ProjectId, GitRemoteTags>();
   /**
    * Raised while a ref is being dragged towards the current branch.
    *
@@ -1830,6 +1842,11 @@ class App {
       branchDraft: this.gitBranchDraft,
       stashDraft: this.gitStashDraft,
       stashUntracked: this.gitStashUntracked,
+      tagTarget: this.gitTagTarget,
+      tagDraft: this.gitTagDraft,
+      tagMessage: this.gitTagMessage,
+      remoteTags:
+        this.gitProject === null ? null : (this.gitRemoteTags.get(this.gitProject) ?? null),
       busy: this.gitBusy,
       generating: this.gitGenerating,
       // Straight off the poll's rows, which already read every repository for the Projects tab.
@@ -1864,6 +1881,9 @@ class App {
         this.gitAmend = false;
         this.gitBranchDraft = '';
         this.gitStashDraft = '';
+        this.gitTagTarget = null;
+        this.gitTagDraft = '';
+        this.gitTagMessage = '';
         this.renderGit();
         void this.loadGit();
       },
@@ -1897,21 +1917,21 @@ class App {
         this.explorer?.edit(this.gitProject, path, target);
       },
       onCheckout: (ref) => void this.checkoutGitRef(ref),
-      onCreating: (creating) => {
-        this.gitCreating = creating;
-        // The form lives in its section, so a folded section is unfolded to show it.
-        if (creating === 'branch') {
-          this.gitCollapsed.delete('local');
-        } else if (creating === 'stash') {
-          this.gitCollapsed.delete('stashes');
-        }
-        this.renderGit();
-        // Opened on purpose, so the field takes the focus here, once: focusing it from the render
-        // would steal the focus back on every poll.
-        if (creating !== null) {
-          requireElement('git-refs').querySelector<HTMLInputElement>('.git__input')?.focus();
-        }
+      onCreating: (creating) => this.openGitForm(creating),
+      onTagCommit: (sha) => {
+        this.gitTagTarget = sha;
+        this.openGitForm('tag');
       },
+      onTagDraft: (value) => {
+        this.gitTagDraft = value;
+      },
+      onTagMessage: (value) => {
+        this.gitTagMessage = value;
+      },
+      onCreateTag: (push) => void this.createGitTag(push),
+      onPushTag: (name) => void this.pushGitTag(name),
+      onDeleteTag: (name) =>
+        void this.runGitWrite(() => window.api.gitDeleteTag(this.requireGitProject(), name)),
       onCreateBranch: (name) => {
         void this.runGitWrite(async () => {
           const result = await window.api.gitCreateBranch(this.requireGitProject(), name, true);
@@ -2129,6 +2149,77 @@ class App {
     }
     this.renderGit();
     void this.loadGitDetail();
+  }
+
+  /**
+   * Opens one of the refs panel's creation forms, or closes it with `null`.
+   *
+   * The form lives in its section, so a folded section is unfolded to show it. Its first field takes
+   * the focus here, once: focusing it from the render would steal the focus back on every poll.
+   */
+  private openGitForm(creating: GitCreating): void {
+    this.gitCreating = creating;
+    if (creating === 'branch') {
+      this.gitCollapsed.delete('local');
+    } else if (creating === 'stash') {
+      this.gitCollapsed.delete('stashes');
+    } else if (creating === 'tag') {
+      this.gitCollapsed.delete('tags');
+    } else {
+      this.gitTagTarget = null;
+    }
+    this.renderGit();
+    if (creating !== null) {
+      requireElement('git-refs').querySelector<HTMLInputElement>('.git__input')?.focus();
+    }
+  }
+
+  /**
+   * Creates the tag of the form, and with `push` lets the main process ask to push it.
+   *
+   * The form closes once the tag exists, whether or not the push that followed was confirmed: a
+   * cancelled push leaves a local tag, which the `local` badge and the tag's own menu take from there.
+   */
+  private async createGitTag(push: boolean): Promise<void> {
+    const projectId = this.requireGitProject();
+    const sha = this.gitTagTarget;
+    if (sha === null) {
+      return;
+    }
+    const name = this.gitTagDraft.trim();
+    await this.runGitWrite(async () => {
+      const result = await window.api.gitCreateTag(projectId, name, sha, this.gitTagMessage, push);
+      if (push) {
+        this.showGitNotice({ projectId, ...result });
+      }
+      return result;
+    });
+    // Read off the repository just re-read rather than off the message: the tag exists or it does not.
+    if (this.gitRepo?.refs.some((ref) => ref.kind === 'tag' && ref.name === name) === true) {
+      this.gitTagDraft = '';
+      this.gitTagMessage = '';
+      this.openGitForm(null);
+    }
+    if (push) {
+      await this.loadRemoteTags(projectId);
+    }
+  }
+
+  /** Pushes one tag (the main process confirms first), then asks the remote what it has now. */
+  private async pushGitTag(name: string): Promise<void> {
+    const projectId = this.requireGitProject();
+    await this.runGitWrite(async () => {
+      const result = await window.api.gitPushTag(projectId, name);
+      this.showGitNotice({ projectId, ...result });
+      return result;
+    });
+    await this.loadRemoteTags(projectId);
+  }
+
+  /** Asks a repository's remote which tags it has, and repaints the badges with the answer. */
+  private async loadRemoteTags(projectId: ProjectId): Promise<void> {
+    this.gitRemoteTags.set(projectId, await window.api.gitRemoteTags(projectId));
+    this.renderGit();
   }
 
   /** Back to the graph from a diff, where it was scrolled. */
@@ -2653,11 +2744,18 @@ class App {
    */
   private async syncGit(op: GitSyncOp): Promise<void> {
     const projectId = this.requireGitProject();
+    let fetched = false;
     await this.runGitWrite(async () => {
       const result = await window.api.gitSync(projectId, op);
       this.showGitNotice({ projectId, ...result });
+      fetched = result.ok && op !== 'push';
       return result;
     });
+    // Fetch and pull talk to the remote already: the moment to ask which tags it has, which git does
+    // not track and the poll must not ask (a network call every ten seconds).
+    if (fetched) {
+      await this.loadRemoteTags(projectId);
+    }
   }
 
   /**

@@ -6,6 +6,7 @@ import type {
   GitDiffTarget,
   GitNotice,
   GitRef,
+  GitRemoteTags,
   GitRepoState,
   GitSequencer,
   GitSequencerOp,
@@ -40,7 +41,7 @@ export type GitSelection =
   | { readonly kind: 'stash'; readonly sha: string; readonly ref: string };
 
 /** The inline creation form open in the refs panel, if any. */
-export type GitCreating = 'branch' | 'stash' | null;
+export type GitCreating = 'branch' | 'stash' | 'tag' | null;
 
 /** A section of the refs panel, or a remote's group inside the REMOTE section. */
 export type GitSectionKey = 'local' | 'remote' | 'stashes' | 'tags' | `remote:${string}`;
@@ -107,6 +108,17 @@ export interface GitPanelState {
   readonly stashDraft: string;
   /** Whether a new stash should sweep up untracked files. Off by default: see `git-refs.ts`. */
   readonly stashUntracked: boolean;
+  /** The commit the tag form will tag, or null while the form is closed. */
+  readonly tagTarget: string | null;
+  /** Draft tag name and message, held for the same reason as the other drafts. */
+  readonly tagDraft: string;
+  readonly tagMessage: string;
+  /**
+   * The tags the remote has, as last read, or null when nothing has asked it yet.
+   *
+   * Null is "not known", which is not "none": a tag is badged `local` only against an answer.
+   */
+  readonly remoteTags: GitRemoteTags | null;
   /** True while a write is in flight, so a double click cannot launch two checkouts. */
   readonly busy: boolean;
   /**
@@ -142,6 +154,16 @@ export interface GitPanelActions {
   onCheckout: (ref: GitRef) => void;
   onCreating: (creating: GitCreating) => void;
   onCreateBranch: (name: string) => void;
+  /** Opens the tag form on a commit. */
+  onTagCommit: (sha: string) => void;
+  onTagDraft: (value: string) => void;
+  onTagMessage: (value: string) => void;
+  /** Creates the tag of the form; with `push`, the main process then asks to push it. */
+  onCreateTag: (push: boolean) => void;
+  /** Pushes one tag, after the main process's confirmation. */
+  onPushTag: (name: string) => void;
+  /** Deletes a local tag the remote does not have. */
+  onDeleteTag: (name: string) => void;
   /** Commits in a terminal tab. With `push`, a `git push` follows a commit that exited cleanly. */
   onCommit: (push: boolean) => void;
   onMessage: (value: string) => void;

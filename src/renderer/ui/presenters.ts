@@ -3,6 +3,7 @@ import type {
   GitCommit,
   GitMergeMode,
   GitRef,
+  GitRemoteTags,
   GitRepoState,
   GitState,
   PrReview,
@@ -744,6 +745,20 @@ export function mergeOptionsFor(repo: GitRepoState, source: GitRef): MergeOption
       mode: 'merge',
     },
   ];
+}
+
+/**
+ * Whether the remote has a tag: `true`, `false`, or `null` when that is not known.
+ *
+ * Unknown until a Fetch or a tag push has asked the remote, and unknown again when asking failed.
+ * Kept apart from `false` on purpose, the rule the repository badges follow: a `local` badge drawn on
+ * a tag nobody checked would send it to be pushed a second time.
+ */
+export function tagOnRemote(name: string, remote: GitRemoteTags | null): boolean | null {
+  if (remote === null || remote.remote === null || remote.error !== null) {
+    return null;
+  }
+  return remote.tags.includes(name);
 }
 
 /** Whether the Undo button can run, and what its tooltip says either way. */

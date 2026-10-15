@@ -1715,6 +1715,35 @@ The bullets that follow are the reasons and the traps, the new ones first.
   what the commit form leaves; a `+` / `-` on hover stages one file, `Stage all` / `Unstage all` the
   list. A file staged then edited (`MM`) is in **both** lists, which is the rule below about never
   merging the two columns, made visible.
+- **Tags are created, pushed one at a time, and deleted only locally** (added on 2026-10-15, on
+  request: "a tag that stays local is not worth much").
+  - **Created annotated** (`tag -a`, the message defaulting to the name), from a commit's right-click
+    or the `+` of TAGS (HEAD). A tag that may become a release keeps who made it and when. The name is
+    validated by `check-ref-format refs/tags/<name>`, and an existing name is **refused**, never
+    passed `-f`: moving a tag others may have fetched is the tag version of a force push.
+  - **Pushed ONE at a time**, `git push <remote> refs/tags/<name>`: never `--tags`, which publishes
+    every local tag at once, test ones included, and the full ref so a branch of the same name is not
+    pushed instead (tested). The remote is the current branch's, `origin` otherwise, re-read at click.
+  - **Confirmed every time**, by the main process, Cancel by default, where a branch push never is.
+    The difference is the point: a branch is pushed twenty times a day and a dialog nobody reads by
+    the third is worse than none, whereas a tag is pushed rarely and is close to irreversible (others
+    fetch it, and a `v*` tag starts `release.yml` on this very repository). The dialog names the
+    commit (sha and subject, the one place a tag on the wrong commit gets caught), the remote, and
+    the workflows the tag would start.
+  - **The workflows are read narrowly, on purpose** (`tag-workflows.ts`): no YAML parser for this,
+    only `on: push` and its `tags` / `tags-ignore` / `branches` filters, with GitHub's rule that a push
+    filtered on branches only does not run for tags, and its pattern syntax (`*` stops at `/`, `**`
+    does not, a later `!` excludes). Every doubtful case answers "may start". That narrowness is the
+    reason the question is asked even when no workflow is found.
+  - **Whether the remote has a tag** is a network read (`ls-remote --tags`): git keeps no
+    remote-tracking ref for tags, there is no `origin/v1`. Read on Fetch, Pull and after a tag push,
+    gestures that talk to the remote already, never on the poll; cached per project for the session.
+    A tag is badged `local` only against an answer: unknown draws nothing, the rule the repository
+    badges follow.
+  - **Deleting is local only, and refused for a tag the remote has**: it would come back on the next
+    fetch, a delete that looks like it worked. The remote is asked again before deleting, and a remote
+    that cannot be reached refuses rather than guesses. Deleting on the remote is for a terminal, a
+    release having possibly been built from the tag.
 - **The stash form lives in the refs panel**, behind the `+` of STASHES (name, `--include-untracked`
   unticked by default); the toolbar's `Stash` is the quick one, tracked changes under git's own message,
   and `Pop` pops the newest entry, by sha like every stash write.
@@ -1976,7 +2005,7 @@ The bullets that follow are the reasons and the traps, the new ones first.
   reports it as one record carrying the new name, and restoring only that leaves the old file deleted,
   which is the worse half of the change the reader asked to be rid of.
 - **What this tab still does not do, and why**: no conflict resolution, no rebase of any kind, no force
-  push, no hunk-level staging. The reason has not changed: they leave the repository in an intermediate state this
+  push, no moved or remotely deleted tag, no hunk-level staging. The reason has not changed: they leave the repository in an intermediate state this
   strip could neither show nor finish, and conflicts stay displayed as `error` in the list rather than
   drowned among the modifications, precisely to send you to the terminal. **Stash**, on the other hand,
   has left that list, and the argument deserves its epitaph: it was aimed at the *gesture* nobody wanted
