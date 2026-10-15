@@ -1,31 +1,58 @@
 # Git
 
-Pick a repository on the left (each carries its count of uncommitted files), then **Changes**,
-**Branches** or **History**, and read the diff on the right.
+Pick a repository among the tabs at the top (each carries its count of uncommitted files). Below the
+toolbar, three columns: the branches, stashes and tags on the left, the **commit graph** in the
+centre, and on the right whatever is selected in the graph.
 
-## Changes
+## The graph
 
-- Tick a file to stage it; click it to see its diff. `MM` is a file staged and edited again.
-- **Right-click** a file to edit it, in the Explorer tab or in a window of its own (the Git tab then
-  stays on screen), to stage it, or to discard its changes. A file deleted on disk has nothing to
-  edit.
+- Every local branch, remote branch and tag, the last 400 commits, one colour per line of history.
+  Branch and tag labels sit left of the graph; `main ⇅` means the local branch and its remote are on
+  the same commit.
+- **// WIP** at the top is your working tree, when it has changes. Click it to stage and commit.
+- Click a commit to see its message and files on the right; click a file there to see its diff in
+  place of the graph. **← Graph** or **Escape** brings the graph back.
+- **Right-click** a commit to cherry-pick it, copy its sha, see its whole diff, or undo it if it is the
+  last one.
+
+## Staging and committing
+
+- Select **// WIP**. The right panel lists the **unstaged** files, then the **staged** ones. A file
+  staged then edited again is in both lists.
+- Click a file to see its diff. Use the **+** / **-** on its row, or **Stage all** / **Unstage all**.
+- **Right-click** a file to edit it, in the Explorer tab or in a window of its own, to stage it, or to
+  discard its changes (confirmed first; an untracked file is deleted).
 - **Commit** runs in a terminal tab, so hooks (`husky`, `lint-staged`) show what they print. The
   message is kept if the commit is refused.
 - **Commit and push**, in the chevron beside Commit, pushes only if the commit succeeded.
-- **Amend** (the checkbox above the message, at its right) rewrites the last commit; its tooltip
-  names the commit and warns when it is already pushed.
+- **Amend** (above the message, at its right) rewrites the last commit; its tooltip names the commit
+  and warns when it is already pushed.
 - **Generate** writes a message from the staged diff with the agent, following the repository's own
   convention. It fills the field and never commits.
 
-## Branches and sync
+## Branches
 
-- **Checkout** is a button per branch. Nothing is stashed: a checkout blocked by local changes fails
-  and git names the files.
-- New branch names are checked by git itself.
-- **Fetch**, **Pull** (fast-forward only) and **Push** are the icons at the end of the tab row; what
-  they did shows beside the branch.
+- **Click** a branch or a tag to show its commit in the graph.
+- **Double-click** a branch to check it out. A remote branch is checked out as a local branch that
+  follows it. Nothing is stashed: a checkout blocked by local changes fails and git names the files.
+- **Drag** a branch onto the current one (its row on the left, its label in the graph, or the WIP row)
+  to merge it. A menu asks how: fast-forward when possible, a merge commit otherwise. The merge runs in
+  a terminal tab; if it stops on a conflict, the toolbar says so and the **⋯** menu can abort or
+  continue it.
+- The **+** of LOCAL creates a branch from HEAD and switches to it. Names are checked by git itself.
+
+## Toolbar
+
+- **Undo** takes the last commit back: its changes are staged again and its message returns to the
+  form. Not offered on a commit already pushed, on a merge, or on the first commit.
+- **Fetch**, **Pull** (fast-forward only) and **Push**; what they did shows beside the branch.
+- **New branch**, **Stash** (the tracked changes, under git's own message) and **Pop** (the newest
+  stash). The **+** of STASHES names a stash and can include untracked files; right-click a stash to
+  apply, pop or delete it.
+- **⋯**, or a right-click on the toolbar: the same actions, and the way out of a half-done cherry-pick
+  or merge.
 
 ## What it does not do
 
-Stash, conflict resolution, rebase and staging of individual hunks: use a terminal for those.
-Conflicts show as errors in the list.
+Conflict resolution, rebase, force push and staging of individual hunks: use a terminal for those.
+Files in conflict show as errors in the working tree's list.

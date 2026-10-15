@@ -828,9 +828,11 @@ row. None of it can say what a session was opened FOR.
   changing view. The column's count follows the active sub-view, otherwise the badge contradicts the
   list next to it. `pullScope` is persisted (so it is in `asPatch` **and** `LOCAL_ONLY_KEYS`, see the
   note on `settings-patch.ts`).
-- **`.subtab` is shared by the Git tab and the PR tab.** It was `.git__view`, renamed: a class named
-  after one panel is a class the next panel copies instead of reusing. Same reason as
-  `.icon-button--row`.
+- **`.subtab` was shared by the Git tab and the PR tab**, and keeps its generic name now that only the
+  PR tab uses it (the Git tab's views became a graph in 11.0.0). It was `.git__view`, renamed: a class
+  named after one panel is a class the next panel copies instead of reusing. Same reason as
+  `.icon-button--row`. It lost its `font-weight: 600` on the active tab at the same time, which the
+  visual grammar forbids (a label moves when it is clicked).
 - **The author is shown as soon as it is not the user**, not only under `All`: a PR waiting for
   your review says "review requested" without saying whose it is, which is the first thing you want to know.
   Hidden when it is yours, for the reason that makes the assignee column disappear under `My
@@ -1585,6 +1587,138 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
 
 ## Git tab
 
+Redesigned on 2026-10-15, on request, after a graph client: the repositories as tabs, a toolbar, then
+three columns, the refs on the left, the **commit graph** in the centre and the **detail of the
+selection** on the right (the staging area and the commit form for the working tree, the message and
+files of a commit or a stash otherwise). Decided with it, and not to be reopened by accident:
+
+- **It stays in the 460 px strip.** No full-window mode. Everything below is sized for that: about
+  seventeen graph rows, the diff taking the graph's place rather than a column of its own.
+- **The diff replaces the graph** in the centre, with `← Graph` and Escape to come back. A permanent
+  fourth column left both the graph and the diff too narrow to read. Escape is bound on the document
+  (a click on a file row leaves the focus on the body), but only while the Git tab shows a diff and
+  never from a field, which also leaves the terminal's own Escape alone.
+- **Three gestures were added, two were refused.** Added: **Undo the last commit**, **double-click to
+  check out**, **drag a branch onto the current one to merge**. Refused: **rebase** by drag and **force
+  push**. `pull` stays `--ff-only`: a merge is now an explicit gesture, never something a pull does.
+
+The bullets that follow are the reasons and the traps, the new ones first.
+
+- **The graph reads every branch, not HEAD.** `git log --topo-order -n400 --branches --remotes --tags
+  HEAD --format=%H %P ...`: `--topo-order` keeps a child above its parents and a branch's commits
+  together, which is what lets a lane run straight down; `HEAD` is named because a detached HEAD
+  belongs to none of the namespaces; `%H` and `%P` are full shas because the layout matches parents
+  against shas it has seen, and an abbreviation is only unique as of the moment git printed it. A
+  repository with no commit makes `git log` fail, read as an empty graph and not as an error.
+- **`readCommits[0]` is no longer HEAD.** It is the newest commit of any branch. HEAD is
+  `GitRepoState.headSha`, taken from the current branch's ref, or from the `%D` decoration on a
+  detached HEAD. A test asking "where does the branch stand" asks git (`head()` in the tests).
+- **One `for-each-ref` for the three namespaces** (`readRefs`, which replaced `readBranches`): the
+  graph needs every ref to hang its labels, and `readRepoState` stays at **five** processes, inside
+  `VIEW_CONCURRENCY = 6`; a sixth read would cost a second wave, measured at 1068 ms against 173 ms.
+  The display name is the full name minus its namespace, not `%(refname:short)`, which turns into
+  `heads/x` as soon as a tag of the same name exists. `<remote>/HEAD` is dropped (a pointer, not a
+  branch: a second `origin/main` label on the same commit). An annotated tag is **peeled**
+  (`%(*objectname)`), the tag object's own sha being on no row of the graph.
+- **`GIT_GRAPH_LIMIT = 400`, and the cut is announced** at the bottom of the graph, for the reason the
+  diff's 4000-line cap is: a graph that stops in silence reads like a repository that starts there.
+- **`layoutGraph` (`shared/git-graph.ts`) is the whole graph, and it is pure.** The algorithm
+  `git log --graph` uses: each open lane waits for a sha; a commit takes the leftmost lane waiting for
+  it, and other lanes waiting for it converge and close; the **first parent always continues in the
+  commit's own lane**, even when another lane already waits for it, so a branch stays straight down to
+  its fork instead of jumping columns at its last commit; other parents join a lane already waiting or
+  open one; a parent beyond the limit keeps its lane open to the bottom. **No compaction**: a lane keeps
+  its column while it is open, so no line moves sideways for a reason unrelated to it. Every graph bug
+  (a line that never closes, a merge landing in the wrong column) is a bug of this function, which is
+  why it is tested on its own: linear, merge, octopus, criss-cross, lane reuse, parent out of range.
+- **The working tree is a row of the graph** when it has changes: a pseudo-commit `WIP` whose parent
+  is HEAD, laid out by the same function, drawn hollow and dashed. Clicking it is how the staging area
+  and the commit form are reached.
+- **The graph is windowed.** Four hundred rows with an SVG each, rebuilt on every poll, is the freeze
+  the diff cap exists to avoid: only the visible rows plus a margin are built (`visibleWindow`, pure),
+  absolutely placed in a canvas as tall as the list so the scrollbar is honest. A scroll repaints the
+  graph's rows only, through `requestAnimationFrame`, and hands `scrollTop` to the app, because the
+  panel is rebuilt whole and the next poll must land where the reader left it.
+- **The lane colours are NOT brand values**, and `tokens.css` says so: eight hues are needed, the ramp
+  has six and its red is `--primary`, the selection accent no lane may be mistaken for. Each clears
+  3:1 (WCAG, graphical objects) on the raised surface and on the inset one of a selected row, in both
+  themes. Colours reach the SVG through classes (`git__lane-stroke--N`), never inline.
+- **Labels have a column of their own, left of the lanes**, as in any graph client. A local branch and
+  its remote twin **on the same commit** are one chip with a `⇅` mark (the twin is in the tooltip);
+  once they diverge they sit on different commits and get a chip each. One chip in full, then `+n`,
+  the list in the tooltip: the subject is what the row is for, the rule the old refs badge learned when
+  `HEAD -> main, origin/main, origin/HEAD` left a merge's subject one character wide.
+- **A single click on a ref is a read**: it selects its commit and scrolls the graph to it, only as far
+  as needed (`scrollToReveal`), so a row already on screen does not jump under the pointer.
+- **Checkout is a double-click** (decided 2026-10-15, replacing the `Checkout` button), on a branch in
+  the refs panel and on its chip in the graph, and also on the right-click menu so it can be found. A
+  double-click is not made by accident while reading a list, which was the whole argument for the
+  button. Still **no stash and no force**. `checkoutBranch` now passes a trailing `--` and refuses a
+  name starting with `-`: without the `--`, a branch named like a file of the working tree makes git
+  hesitate between switching branch and restoring that file. A **remote** branch is checked out as the
+  local branch following it, `checkout -b <name> --track <ref>`, the ref re-read at click time; when
+  that local branch already exists it is checked out **as it is**, bringing it up to date being Pull's
+  job and not a second write hidden behind one gesture. A double-click on a commit row checks nothing
+  out: a detached HEAD is not something to land in by accident.
+- **Undo the last commit is `reset --soft HEAD~1`, and it has no dialog.** The branch moves back, the
+  index and the files do not, so everything is staged again and nothing is lost; the panel puts the
+  undone message back in the form (when the form is empty), so committing again is one click. That is
+  what makes a dialog unnecessary, where discard has one. Refused, re-read at click time:
+  - in the middle of an operation (git's markers would point at a history that just moved);
+  - on the first commit (no `HEAD~1`);
+  - on a merge (its first parent is half of what it joined, and the "undone" changes would be the whole
+    other branch);
+  - on a commit **any** remote-tracking branch contains (`for-each-ref --contains HEAD refs/remotes`),
+    not only the upstream: a commit someone can fetch, under whatever branch, is one rewriting would
+    pull from under them.
+  The toolbar disables the button with the reason (`undoStateFor`, from the graph alone, no process);
+  the main process asks git again, the graph being only as fresh as its last read.
+- **Merging is a drag of a branch onto the current one, and the drop opens a menu.** It writes nothing
+  by itself: a merge changes the branch, so the drop is a question and the menu the answer, Escape the
+  way out. That is the difference with the Jira board, whose drop writes at once (a status field, not
+  history).
+  - **Only the current branch is a drop zone** (its row, its chip, the WIP row): `git merge` merges into
+    HEAD, and any other target would mean a hidden checkout first. Tags are not drag sources.
+  - **The menu is computed from the graph** (`mergeOptionsFor`): already merged (one disabled entry, so
+    the drop does not look like a gesture that failed), fast-forward possible (`--ff-only` first, then
+    `--no-ff` for a branch whose history should stay visible), or diverged (`merge`). `isAncestor`
+    answering `false` can mean "beyond what was read": it is only used to offer, never to refuse.
+  - **It runs in a terminal tab** (`git:merge`, a reserved action id like the commit's), for the reasons
+    the commit does: hooks, and a conflict that has to be read. `--no-edit`, or git opens `core.editor`
+    inside the pty. A conflict leaves `MERGE_HEAD`, which `sequencer` already reads: the badge, then
+    `--abort` / `--continue` from the menu, and the `UU` files in the working tree's list, `Edit` on
+    their right-click.
+  - **The source is passed by its SHORT name**, verified on a real repository: git writes the merge
+    message from what it is given, and the full `refs/heads/feat` produced `Merge branch
+    'refs/heads/feat'`. A short name is safe on two checked conditions: it does not start with `-`, and
+    no other ref has it, since git resolves a tag before a branch of the same name and would merge the
+    tag. An ambiguous name is refused with "merge it from a terminal".
+  - The drag carries the ref's full name in its own MIME type (`application/x-oxum-git-ref`) and the
+    panel is **not rebuilt while it lasts** (`gitDragging`): replacing the element under the pointer
+    cancels the drag, the trap the Jira board and the project table already record.
+- **A commit's files are read with `git show --diff-merges=first-parent`, not `diff-tree`.** Verified
+  on a real repository: `diff-tree -m --first-parent` **ignores** `--first-parent`, a revision-walk
+  option, and lists the merge's files against both parents. Against the first parent is what a merge
+  brought into its branch. `git show` also lists the root commit against the empty tree, where
+  `diff-tree` needs `--root`. The file of a commit opens as a `commit-file` diff target, same option.
+  Requires git 2.31 (2021). A stash, being a merge commit too, shows its tracked changes that way; its
+  untracked files live in a third parent this view does not read, and its whole diff stays
+  `stash show -p` from its menu.
+- **The message and files of a commit are read when it is selected** (`git:commit-detail`), never with
+  the graph: four hundred rows would be four hundred reads for the one somebody clicks. A detail that
+  lands after the selection moved on is dropped.
+- **The selection survives a poll while it still exists**: a commit still in the graph or still named
+  by a ref, a stash still in the list. The working tree stays selected while it has changes; once
+  clean (a commit was just made), the selection follows HEAD, so the reader lands on what they
+  committed and not on an empty panel. The default is the working tree if it has changes, HEAD if not.
+- **The working tree's two lists replace the checkbox.** Unstaged above, staged below, each half of
+  what the commit form leaves; a `+` / `-` on hover stages one file, `Stage all` / `Unstage all` the
+  list. A file staged then edited (`MM`) is in **both** lists, which is the rule below about never
+  merging the two columns, made visible.
+- **The stash form lives in the refs panel**, behind the `+` of STASHES (name, `--include-untracked`
+  unticked by default); the toolbar's `Stash` is the quick one, tracked changes under git's own message,
+  and `Pop` pops the newest entry, by sha like every stash write.
+
 - **Reading is pulled, not pushed.** There is no monitor behind this tab: a single row is displayed at a
   time, and probing branches, history and status for every project would cost several times the strip's
   git poll for something nobody is looking at. The renderer asks when it shows the tab, when the
@@ -1615,7 +1749,8 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
 - **The commit tab carries a reserved `actionId`, `git:`.** It is tied to a project but is **not** one of
   its configured actions: looked up in the action list it finds nothing, so without the exemption case in
   `isUnreachable` every settings save would kill a commit in the middle of a hook. The case is tested,
-  like the four others in that function.
+  like the four others in that function. The merge tab is `git:merge`, its own id so a merge never
+  reuses a commit's tab; the exemption is on the prefix and covers it.
 - **`run-git.ts` is the only place that calls git.** `execFile` with an argument array and **never a
   shell**: a branch name or a path therefore cannot be read as shell syntax. `git-service.ts` was folded
   onto it rather than keeping its own launcher, otherwise there would be two answers to "how do we call
@@ -1627,9 +1762,9 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   to lose: a rename occupies **two** fields, and failing to consume the second one adds a phantom file
   and shifts everything after it.
 - **The index and working-tree columns are never merged.** `MM` (staged then modified again) is the case
-  a single state would flatten, and it is the one where the checkbox would lie about what the commit
-  contains. `isStaged` lives in `shared/git-changes.ts` because the renderer ticks the box and the main
-  process holds the commit: two definitions of "staged" would end up diverging, exactly like `verdictFor`
+  a single state would flatten, and it is the one where a single list would lie about what the commit
+  contains: it appears in both lists. `isStaged` lives in `shared/git-changes.ts` because the renderer
+  sorts the lists and the main process holds the commit: two definitions of "staged" would end up diverging, exactly like `verdictFor`
   on the checks side. And `?` is **not** a staged state, which a plain `!== ' '` misses.
 - **In a diff, headers are tested before markers.** `---` and `+++` start with the deletion and addition
   characters: read as content they consume two line numbers and shift everything that follows. They are
@@ -1638,9 +1773,11 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
 - **`git diff --no-index` exits 1 as soon as it finds a difference.** That is documented and is not a
   failure: it is the only way to see the content of an untracked file, and treating that exit code as an
   error would show an error message for every new file.
-- **`pull` is `--ff-only`, deliberately.** A merge or a rebase can stop on a conflict, and this tab has
-  nothing to offer someone standing in the middle of a rebase: refusing to start one is the only outcome
-  it can honestly explain. A diverged branch is a job for the terminal.
+- **`pull` is `--ff-only`, deliberately.** A pull that merges is a merge nobody chose; the merge is the
+  drag (above), a gesture of its own with its own menu. A **rebase** stays out entirely: this tab has
+  nothing to offer someone standing in the middle of one, and refusing to start it is the only outcome
+  it can honestly explain. A diverged branch is merged by dropping its remote branch onto it, or
+  rebased in a terminal.
 - **`push` becomes `-u origin <branch>` when there is no upstream**, re-read at click time and not from
   what the renderer had seen: this is the first push of every new branch, and a stale answer would turn
   it into an incomprehensible refusal.
@@ -1648,8 +1785,8 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   writes: every other one repaints a list that is already on screen, whereas a push that succeeded and
   a push that was refused look exactly alike from the tab. The answer used to be the window header's
   four-second stamp, at the other end of the window from the button, which in use reads as a button
-  that does nothing. `GitPanelState.notice` is that line, an `ok`/`error` pill at the end of the header
-  row. A success clears itself after 8 s; a **failure stays** until it is clicked, being the one that
+  that does nothing. `GitPanelState.notice` is that line, an `ok`/`error` pill in the toolbar, before the
+  icons. A success clears itself after 8 s; a **failure stays** until it is clicked, being the one that
   must not be missed and the one whose text you want on screen while deciding what to do about it. The
   clearing timer is held on the app so a second push cannot have its line wiped by the first one's
   countdown. Deliberately **not** a confirmation dialog: that was offered and refused, a push being run
@@ -1677,14 +1814,14 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
     condition is the one the amend tooltip already computes (`hasUpstream && ahead === 0`), and forcing
     is not something a one-click button in this tab offers.
   - No dialog in front of it, on request. The guard is the hook, not a question.
-- **Every repository row is badged with its uncommitted file count**, not only the selected one. The
-  column badged the open repository alone, on the argument that reading the others would cost a git
+- **Every repository tab is badged with its uncommitted file count**, not only the selected one. The
+  column (tabs since 11.0.0) badged the open repository alone, on the argument that reading the others would cost a git
   call per row per paint — a read nobody makes: the project poll already runs
   `git status --porcelain=v2` on every project for the Projects tab, so the number was on the other
   side of the app the whole time, and answering "where do I have work waiting" meant clicking each
   repository in turn or leaving the tab.
-  - **The selected row answers from the on-demand read, the others from the poll.** The badge beside
-    the open repository has to agree with the list of files right next to it, and the poll can be a
+  - **The selected tab answers from the on-demand read, the others from the poll.** The badge of
+    the open repository has to agree with the lists of files in the detail panel, and the poll can be a
     whole interval out of date.
   - **`GitState.changed` is counted, never `modified + staged + untracked`.** Those three are counted
     per state and a file staged with further edits on top is deliberately counted twice among them, by
@@ -1693,21 +1830,20 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   - **A project the poll has not answered for gets no badge**, not a dash. A dash means "nothing to
     commit" in this column, and drawing one over an unread repository reports a clean tree for one that
     may be full of work.
-- **Checkout stashes nothing and forces nothing**, and it is a **button**, not a click on the row:
-  changing what is on disk must not be one stray click inside a list. A checkout blocked by local
-  changes fails, and git itself says which files are in the way. An automatic stash would move work
-  somewhere nobody asked for or looked at.
+- **Checkout stashes nothing and forces nothing.** A checkout blocked by local changes fails, and git
+  itself says which files are in the way. An automatic stash would move work somewhere nobody asked
+  for or looked at. It was a **button** until 11.0.0 so that changing the disk was never one stray
+  click inside a list; it is a double-click now (above), which keeps that property.
 - **A branch name is validated by `git check-ref-format`**, not by a regular expression of our own:
   git's rules are subtler than they look (no `..`, no trailing `.lock`, no `@{`) and an approximation
   either refuses a legal name or lets through an illegal one that git will reject later while talking
   about something else.
-- **The panel is rebuilt whole on every poll**, so the message draft, the branch name being typed and
-  the selection live in `App`, not in the DOM. And refreshing is **suspended while a field has focus**
-  (`gitEditing`), same guard and same reason as the table's inline rename.
-- **A commit's subject wins over its refs.** `flex: none` on the refs badge was wrong and it showed on
-  the first real merge: `HEAD -> main, origin/main, origin/HEAD` did not shrink and left the subject
-  **one character**. Refs are context, they shrink first and are capped; the full list stays in the
-  tooltip.
+- **The panel is rebuilt whole on every poll**, so the message draft, the branch name being typed, the
+  selection, the folded sections and the graph's scroll position live in `App`, not in the DOM. And
+  refreshing is **suspended while a field has focus** (`gitEditing`), same guard and same reason as the
+  table's inline rename, and while a ref is dragged (`gitDragging`). A field opened by a `+` takes the
+  focus once, from the action that opened it: focusing it from the render would steal the focus back
+  on every poll.
 - **A path is truncated on the left, a subject on the right.** The end of
   `src/app/feature/x.component.ts` is what tells two files apart; the beginning of `PROJ-412-…` or of
   `feat: …` is what tells two branches or two commits apart. Hence two classes and not one.
@@ -1716,11 +1852,10 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
 - **The diff is capped at 4000 lines, and it says so.** A generated lockfile runs to tens of thousands of
   lines, and one element per line is what freezes the strip. A diff cut in silence reads like a complete
   diff, so the truncation is announced in the view.
-- **The diff column opens on the first modified file.** That is the third column's reason to exist, and
-  landing on an empty column asks you to click before the tab says anything at all. Only when nothing is
-  selected, so it can never tear the view away from a file being read, and only on the Changes view:
-  preselecting a commit would run a `git show` for a list nobody opened.
-- **`defaultTargetFor` decides which side is shown**, shared by the click and by the preselection: the
+- **No diff opens by itself** (since 11.0.0). The diff column used to open on the first modified file,
+  that column being the reason the layout existed; the centre is the graph now, and a diff taking its
+  place unasked would hide the very thing the tab is for.
+- **`defaultTargetFor` decides which side is shown** from the right-click `See the diff`: the
   working tree when there is something there, the index otherwise. It is also the only choice that is
   never empty, `git diff` returning nothing for a file that is entirely staged. The index/disk button
   only appears for a file that is both at once, the only case where the question has two answers.
@@ -1729,18 +1864,17 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   right click emits no `click`. The `⋯` button is the first menu opened on left click, and without
   `event.stopPropagation()` the opening click travelled on to the dismissal listener and closed the menu
   in the same tick: a button perfectly dead in use, and invisible in tests.
-- **Fetch, pull and push are ALSO icons at the end of the tab row.** They are there and not in the
-  header because that is the row of controls: the header is a status line (branch, upstream gap) and
-  mixing verbs into it is what made it unreadable. `align-self: center` and a height below the tabs, on
-  purpose: an icon as tall as a tab reads like a fourth tab, whereas those three *do* something while a
-  tab only changes view.
+- **The verbs are icons on the right of the toolbar, the status is text on its left.** Undo, fetch,
+  pull, push, new branch, stash, pop, `⋯`, at the pane-strip size of the visual grammar (22 px, 13 px
+  glyph), each named in `aria-label` and explained in its tooltip. The branch and its badges stay on
+  the left: a status read at a glance, which four labelled buttons beside the branch once made
+  unreadable.
 - **An arrow head is sized against the RENDERED icon, not against the viewBox.** The first version of
   the fetch icon drew its head at 1.3 units in a 16-unit box, about one pixel per barb once rendered at
   14 px: it came out as a whisker and the icon read like a "C". Seen for real, under magnification,
   corrected to 2.2 units.
-- **The repository actions are a menu, not buttons.** Fetch, pull, push and "open a terminal here" took
-  four buttons on the header line; a status strip is read at a glance, and four controls competing with
-  the branch name is no longer a glance. Right click on the header line, plus a `⋯` button kept for the
+- **The repository actions are also a menu.** The sequencer's way out, fetch, pull, push, undo and
+  "open a terminal here". Right click anywhere on the toolbar, plus a `⋯` button kept for the
   reason that kept the chevron next to the fold double-click: the expert gesture does not have to be the
   discoverable one, but there has to be one. The menu is **rebuilt on every open**, like the Jira
   transitions: its labels depend on the state (`Push` becomes "Push and publish the branch" with no
@@ -1748,33 +1882,34 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
 - **`gitPanelState()` and `gitPanelActions()` are extracted for that.** The menu needs exactly the same
   snapshot as the panel; two places assembling it would end up disagreeing, and the failure would be a
   menu offering a `Push` the panel has already disabled.
-- **The list/diff boundary is draggable, and it is the LIST's width that is stored.** The unstored
-  column absorbs every window resize: spare width is worth something to a diff (long lines of code) and
-  nothing to a column of paths. The splitter writes a **custom property** on the grid and not a width on
+- **The graph/detail boundary is draggable, and it is the DETAIL panel's width that is stored**
+  (`gitDetailWidth`, replacing `gitListWidth` in 11.0.0, the old value sizing the other side of a layout
+  that is gone). The unstored column absorbs every window resize: spare width is worth something to a
+  graph and its diffs and nothing to a column of paths and a form. The splitter writes a **custom property** on the grid and not a width on
   the column: a grid track cannot be sized from a drag, but the property that sizes it can. And unlike
   the app's two other splitters, this one **does not refit the terminal**: it moves a boundary *inside*
   the strip, the terminal's box does not move.
 - **`git-split.ts` is a third splitter module, not a generalisation.** Same reasoning as for
-  `side-resizer.ts`: three different axes (height anchored at the top, width anchored on the right,
-  width anchored on the left inside a container), and a resizer's direction is precisely what gets
-  written backwards, which has already happened here. All three are therefore pure, tested functions.
-- **`gitHeight` defaults to 460**, the largest of them all. Three columns ending in a diff make this the
-  tab where you stop glancing and start working; 250 px would show four lines of diff.
-- **A repository row's terminal icon is the row's SIBLING, not its child**, and that is the entire reason
-  for the `git__repo-line` container. The row is a real `<button>` (so reachable with Tab and responding
+  `side-resizer.ts`: different axes (height anchored at the top, widths anchored on the right), and a
+  resizer's direction is precisely what gets written backwards, which has already happened here. This
+  one changed side in 11.0.0 (it sized the list on the left), so its tests were rewritten, not edited.
+  All of them are pure, tested functions.
+- **`gitHeight` defaults to 460**, the largest of them all, and the redesign was made to fit it:
+  this is the tab where you stop glancing and start working, and 250 px would show four graph rows.
+- **A repository tab's terminal icon is the tab's SIBLING, not its child**, and that is the entire reason
+  for the `git__repo-line` container. The tab is a real `<button>` (so reachable with Tab and responding
   to Enter) and nesting a button inside a button is invalid HTML that browsers silently rearrange, the
   very reason a PR row is a `div`. Here the row keeps its semantics and the icon is a control in its own
   right. An intended consequence: opening a terminal does **not select** the repository, so it triggers
   no git read of a repository nobody opened. It is not disabled by `state.busy`, like the same entry in
   the repository menu: it runs no git command.
-- **Cherry-pick is on RIGHT CLICK on a commit, never a row button.** This is the same judgement the
-  `Checkout` button records in the other direction: a checkout changes the disk, so it must not be
-  reachable by a stray click in a list; a cherry-pick changes **history**, so it must not be reachable at
-  all without having been asked for. The history column is scrolled and clicked all day long to read
-  diffs. The menu is rebuilt on every open, like the repository one: the target branch is in the labels.
+- **Cherry-pick is on RIGHT CLICK on a commit, never a row button.** A cherry-pick changes **history**,
+  so it must not be reachable at all without having been asked for. The graph is scrolled and clicked
+  all day long to read commits. It is disabled on HEAD itself, which it would only replay onto itself. The menu is rebuilt on every open, like the repository one: the target branch is in the labels.
 - **A sha is validated, for lack of a `--` to hide behind.** `cherry-pick` takes revisions and not paths,
   so there is no separator to neutralise a value starting with `-`: the guard is the hexadecimal pattern
-  itself. It costs nothing, those shas coming from our own `git log`.
+  itself (`SHA_PATTERN`, shared by every command taking a revision, the commit detail included). It costs
+  nothing, those shas coming from our own `git log`.
 - **`GitRepoState.sequencer` is the mandatory other half of cherry-pick.** A conflicting cherry-pick
   stops with `CHERRY_PICK_HEAD` on disk, and from that state *every* other button in the tab fails for a
   reason that has nothing to do with what was clicked. The state is therefore read, shown as an `error`
@@ -1840,8 +1975,8 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   promise. A **rename** contributes both of its paths (`change.from` alongside `change.path`): git
   reports it as one record carrying the new name, and restoring only that leaves the old file deleted,
   which is the worse half of the change the reader asked to be rid of.
-- **What this tab still does not do, and why**: no conflict resolution, no interactive rebase, no
-  hunk-level staging. The reason has not changed: they leave the repository in an intermediate state this
+- **What this tab still does not do, and why**: no conflict resolution, no rebase of any kind, no force
+  push, no hunk-level staging. The reason has not changed: they leave the repository in an intermediate state this
   strip could neither show nor finish, and conflicts stay displayed as `error` in the list rather than
   drowned among the modifications, precisely to send you to the terminal. **Stash**, on the other hand,
   has left that list, and the argument deserves its epitaph: it was aimed at the *gesture* nobody wanted

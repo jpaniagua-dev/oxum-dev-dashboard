@@ -13,7 +13,7 @@ page of the tab you are using.
   - [Worktrees](tabs/worktrees.md): every worktree of every project, created and removed in place.
   - [Tickets](tabs/tickets.md): Jira issues and local tickets, as a list or a board.
   - [Triage](tabs/triage.md): a sprint classified by an agent, and tickets handed over to it.
-  - [Git](tabs/git.md): stage, commit, branches and history of one repository.
+  - [Git](tabs/git.md): the commit graph of one repository, staging, commit, checkout, merge and undo.
   - [Rules](tabs/rules.md): automations that act on their own.
   - [Vault](tabs/vault.md): secrets kept out of `.env` files and chats.
   - [Agents](tabs/agents.md): the coding agents running, and what each one reads.
