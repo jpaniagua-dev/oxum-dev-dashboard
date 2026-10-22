@@ -2293,216 +2293,6 @@ body {
  * the detail column is new: a row of recorded facts, then one section per kind of context.
  * ------------------------------------------------------------------ */
 
-/*
- * The Agents list is wider than the repository lists it borrows its layout from.
- *
- * 190px fits a repository name and a count, which is what the pull request and Jira tabs put there.
- * A row here carries two lines: a name with a dot and an age, then the ticket, the repository and
- * the model. At 190 the second line was an ellipsis with nothing before it.
- */
-#strip-panel-agents {
-  grid-template-columns: 380px minmax(0, 1fr);
-}
-
-.agents__row {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.agents__row:hover {
-  background: var(--surface-hover);
-}
-
-.agents__row--active {
-  background: var(--surface-inset);
-  border-color: transparent;
-  box-shadow: inset 2px 0 0 var(--primary);
-  color: var(--text);
-}
-
-.agents__row-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* The same 7px circle the tags, the pills and the board cards use. One shape for one question. */
-.agents__row-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-
-.agents__row--working .agents__row-dot {
-  background: var(--success);
-}
-
-.agents__row--exited .agents__row-dot {
-  background: var(--text-faint);
-}
-
-.agents__row-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--font-md);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agents__row-age {
-  flex: none;
-  color: var(--text-faint);
-  font-size: var(--font-3xs);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Indented under the name, past the dot, so the two lines read as one entry and not as two. */
-.agents__row-facts {
-  padding-left: 13px;
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--font-3xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/*
- * The facts about the selected agent, as a two-column key/value block.
- *
- * A grid and not a row of chips: the values are of wildly different lengths (a model name, a word,
- * a full path), and a flex row made every one of them a different width on every session. Labels
- * in a fixed narrow column is what lets the eye go down the values.
- */
-.agents__head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 3px 10px;
-  padding: 2px 0 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.agents__fact-label {
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.agents__fact-value {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: var(--font-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* A path gets the whole width: wrapped into a narrow cell it is a path nobody can read. */
-.agents__fact-label--wide {
-  grid-column: 1;
-}
-
-.agents__fact-value--wide {
-  grid-column: 2 / -1;
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-.agents__section {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0 10px;
-}
-
-.agents__section-title {
-  padding-bottom: 3px;
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-/*
- * A path is a value something else reads back exactly, so it is monospace. This app spends that face
- * on paths, commands, ports and ids, and on nothing a person chose the wording of.
- */
-.agents__path {
-  overflow: hidden;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/*
- * One memory card per line: its name, then what it is about.
- *
- * Columns of bare names were tried and dropped. They fit more on screen and answered a narrower
- * question: the summary is what says whether the agent knows a thing, while a filename only says
- * that a file exists.
- */
-.agents__card {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-  padding: 2px 0;
-}
-
-/*
- * A fixed column for the name, so the summaries line up.
- *
- * Ragged left edges on the second column is what makes a list of seventy unreadable: the eye has to
- * find the start of every summary instead of running down one line.
- */
-.agents__card-name {
-  flex: none;
-  width: 210px;
-  overflow: hidden;
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agents__card-desc {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The one line this tab exists to make impossible to miss: a session that starts with nothing. */
-.agents__note {
-  margin: 0;
-  padding: 2px 0;
-  color: var(--warning);
-  font-size: var(--font-sm);
-}
-
 .pull__age {
   color: var(--text-faint);
   font-size: var(--font-xs);
@@ -7268,6 +7058,28 @@ textarea.tickets__input {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- the top line: the day, then the numbers, side by side */
+
+.today__top {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 10px;
+}
+
+/* The day takes what the tiles leave, and drops under them only when that is too narrow to read. */
+.today__top > .today__chart {
+  flex: 1 1 520px;
+}
+
+.today__top > .today__stats {
+  flex: 0 1 auto;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 190px);
+  grid-template-columns: none;
+}
+
 /* ---- headline numbers: each one leads to its source */
 
 .today__stats {
@@ -7349,6 +7161,11 @@ textarea.tickets__input {
 
 .today__stat--hero .today__stat-value {
   color: var(--primary);
+}
+
+/* Clocked in: the healthy colour the pills use, and only then. "Out" stays neutral. */
+.today__stat--ok .today__stat-value {
+  color: var(--success);
 }
 
 .today__stat-detail {

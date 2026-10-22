@@ -69,9 +69,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // Between the status table and the Git tab: one line per worktree, and this workspace holds eight
   // of them across two repositories, which is more than a 250px strip can show without scrolling.
   worktreesHeight: 360,
-  // Master-detail with a list of instruction files and a list of memory cards on the right, so it
-  // wants the room the Git tab wants rather than the room a status table wants.
-  agentsHeight: 460,
   automationsHeight: 460,
   vaultHeight: 460,
   extensionsHeight: 460,
@@ -263,7 +260,6 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       90,
       1200,
     ),
-    agentsHeight: clamp(asNumber(input.agentsHeight, DEFAULT_SETTINGS.agentsHeight), 90, 1200),
     automationsHeight: clamp(
       asNumber(input.automationsHeight, DEFAULT_SETTINGS.automationsHeight),
       90,

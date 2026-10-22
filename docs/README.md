@@ -18,7 +18,6 @@ page of the tab you are using.
   - [Git](tabs/git.md): the commit graph of one repository, staging, commit, checkout, merge and undo.
   - [Rules](tabs/rules.md): automations that act on their own.
   - [Vault](tabs/vault.md): secrets kept out of `.env` files and chats.
-  - [Agents](tabs/agents.md): the coding agents running, and what each one reads.
   - [Extensions](tabs/extensions.md): hooks, skills, plugins, MCP servers and routines of Claude
     Code and Codex.
   - [Explorer](tabs/explorer.md): the files of each project, searched and edited in place or in a

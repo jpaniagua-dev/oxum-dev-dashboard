@@ -194,11 +194,6 @@ export function shownChannels(channels: TodayChannels): TodayChannel[] {
   return TODAY_CHANNELS.filter((channel) => channels[channel]);
 }
 
-/** Where a tile leads when the source has no better link of its own. */
-const OUTLOOK_MAIL_URL = 'https://outlook.office.com/mail/';
-const OUTLOOK_CALENDAR_URL = 'https://outlook.office.com/calendar/';
-const TEAMS_URL = 'https://teams.microsoft.com/';
-
 /**
  * One screen, no page scroll: the day, the numbers, then panels that share the height left.
  *
@@ -229,22 +224,29 @@ export function renderTodayPanel(
     return;
   }
 
+  // The day and the numbers share one line: the day takes what the tiles leave.
+  const top = createElement('div', { className: 'today__top' });
   const digest = inputs.digest.digest;
   if (inputs.channels.calendar && digest !== null && digest.errors.calendar === undefined) {
     const card = chartCard('Your day');
     renderDay(card.body, layoutDay(digest.events), new Date(inputs.now));
-    host.append(card.element);
+    top.append(card.element);
   }
-
-  host.append(
-    buildStatRow(
-      statTiles(inputs).map((tile) => {
-        const target =
-          tile.channel === undefined ? null : tileTarget(tile.channel, inputs, actions);
-        return target === null ? tile : { ...tile, open: target };
-      }),
-    ),
-  );
+  const tiles = statTiles(inputs);
+  if (tiles.length > 0) {
+    top.append(
+      buildStatRow(
+        tiles.map((tile) => {
+          const target =
+            tile.channel === undefined ? null : tileTarget(tile.channel, inputs, actions);
+          return target === null ? tile : { ...tile, open: target };
+        }),
+      ),
+    );
+  }
+  if (top.childElementCount > 0) {
+    host.append(top);
+  }
 
   const panels = createElement('div', { className: 'today__panels' });
   if (inputs.channels.pulls) {
@@ -276,17 +278,11 @@ function tileTarget(
       return { title: 'Open the Pull requests tab', run: actions.onOpenPulls };
     case 'tickets':
       return { title: 'Open the Tickets tab', run: actions.onOpenTickets };
-    case 'calendar': {
-      const next = (inputs.digest.digest?.events ?? []).find(
-        (event) => !event.isCancelled && eventMoment(event, inputs.now) !== 'past',
-      );
-      const url = next?.url !== undefined && next.url.length > 0 ? next.url : OUTLOOK_CALENDAR_URL;
-      return { title: 'Open the calendar in Outlook', run: () => actions.onOpenUrl(url) };
-    }
+    // No tile for these three: their panel below already says how many, and which.
+    case 'calendar':
     case 'mail':
-      return { title: 'Open Outlook', run: () => actions.onOpenUrl(OUTLOOK_MAIL_URL) };
     case 'teams':
-      return { title: 'Open Teams', run: () => actions.onOpenUrl(TEAMS_URL) };
+      return null;
     case 'tipee':
       return inputs.tipeeUrl.length === 0
         ? null
@@ -295,21 +291,15 @@ function tileTarget(
 }
 
 /**
- * The headline numbers, one per card switched on, the first one leading.
+ * The headline numbers: pull requests, tickets and time tracking, the first one leading.
  *
- * A digest value that is being read says so, and one that could not be read says `?` rather than
- * 0: a zero would claim an empty inbox nobody checked.
+ * Calendar, mail and Teams have none, on request: their panels already say how many and which,
+ * and three tiles fewer is what lets the rest share the line of the day. A value that is being read
+ * says so, and one that could not be read says `?` rather than 0.
  */
 export function statTiles(inputs: TodayInputs): StatTile[] {
   const tiles: StatTile[] = [];
   const { channels, now } = inputs;
-  const digest = inputs.digest.digest;
-  const unknown = (section: DigestSection): string | null => {
-    if (digest === null) {
-      return inputs.digest.running ? '…' : '?';
-    }
-    return digest.errors[section] === undefined ? null : '?';
-  };
   if (channels.pulls) {
     const items = todayPulls(inputs.pulls);
     const owed = items.filter((item) => item.need === 'review' || item.need === 'changes').length;
@@ -333,46 +323,12 @@ export function statTiles(inputs: TodayInputs): StatTile[] {
       detail: `${items.filter((issue) => issue.stage !== 'in-progress').length} to do`,
     });
   }
-  if (channels.calendar) {
-    const events = (digest?.events ?? []).filter((event) => !event.isCancelled && !event.isAllDay);
-    const left = events.filter((event) => eventMoment(event, now) !== 'past');
-    const next = left.find((event) => eventMoment(event, now) === 'later');
-    tiles.push({
-      channel: 'calendar',
-      label: 'Meetings left',
-      value: unknown('calendar') ?? String(left.length),
-      detail:
-        next === undefined
-          ? left.length > 0
-            ? 'one under way'
-            : 'nothing more today'
-          : `next ${next.start.slice(11, 16)} ${next.subject}`,
-    });
-  }
-  if (channels.mail) {
-    const mail = digest?.mail ?? [];
-    tiles.push({
-      channel: 'mail',
-      label: 'Unread mail',
-      value: unknown('mail') ?? String(unreadMail(inputs).length),
-      detail: digest === null ? '' : `among the ${mail.length} newest`,
-    });
-  }
-  if (channels.teams) {
-    const chats = digest?.chats ?? [];
-    const messages = chats.reduce((sum, chat) => sum + chat.count, 0);
-    tiles.push({
-      channel: 'teams',
-      label: 'Teams to answer',
-      value: unknown('teams') ?? String(chats.length),
-      detail: digest === null ? '' : `${messages} message${messages === 1 ? '' : 's'} waiting`,
-    });
-  }
   if (channels.tipee) {
     const status = inputs.tipee.status;
     tiles.push({
       channel: 'tipee',
       label: 'Clocked since',
+      ok: status?.clockedIn === true,
       value:
         status === null
           ? inputs.tipee.configured && inputs.tipee.error === null

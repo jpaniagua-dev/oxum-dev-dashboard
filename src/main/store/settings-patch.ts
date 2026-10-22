@@ -19,7 +19,6 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'gitHeight',
   'triageHeight',
   'worktreesHeight',
-  'agentsHeight',
   'automationsHeight',
   'vaultHeight',
   'extensionsHeight',
@@ -65,7 +64,6 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.gitHeight === 'number') patch.gitHeight = input.gitHeight;
   if (typeof input.triageHeight === 'number') patch.triageHeight = input.triageHeight;
   if (typeof input.worktreesHeight === 'number') patch.worktreesHeight = input.worktreesHeight;
-  if (typeof input.agentsHeight === 'number') patch.agentsHeight = input.agentsHeight;
   if (typeof input.automationsHeight === 'number')
     patch.automationsHeight = input.automationsHeight;
   if (typeof input.vaultHeight === 'number') patch.vaultHeight = input.vaultHeight;

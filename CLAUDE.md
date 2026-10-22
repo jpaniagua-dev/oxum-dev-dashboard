@@ -436,31 +436,16 @@ row. None of it can say what a session was opened FOR.
   **only when a shape is explicitly picked**, never at boot and never on a poll, because it undoes a
   grouping built by dragging tabs together; the way back is the pane menu's "Merge into a single
   pane".
-- **The Agents tab is agnostic in its left half and Claude-specific in its right.** What the app
-  RECORDED at the spawn (`SessionAgent`: profile label, model, instruction file, start time) is as
-  true of Codex as of Claude Code, because the app itself decided it. What is read off disk
-  afterwards is a bonus: the instruction chain works for any agent, being a filename looked up the
-  directory tree, and the memory cards are Claude Code's own storage and are **absent by design**
-  for anything else, said out loud rather than shown as an empty list.
+- **The Agents tab was removed on request (2026-10-22), unused.** It listed the agent sessions and
+  read, off disk, the instruction files and Claude Code memory each one starts with
+  (`agent-context.ts`, `claudeProjectKey`). What it relied on stays: `SessionAgent`, recorded at the
+  spawn, still feeds the board and the sessions restored at launch.
 - **`SessionAgent` is captured at the spawn and never re-read.** Both the model and the profile can
   be changed in the settings while a session runs, so a panel re-reading them would describe the
   NEXT handoff as though it were this one.
 - **An agent session is declared by its caller, never sniffed from the command line.** An action can
   run anything, and matching on the word `claude` would classify `git log --grep claude` as a coding
   agent. Two callers set it today: the ticket handoff and the feedback pass.
-- **`claudeProjectKey` is inferred from disk, not from a contract.** A Windows path becomes its own
-  name with every separator and the drive's colon turned into a dash; it matches every entry of a
-  real `~/.claude/projects` but nothing promises it survives a Claude Code release. A missing folder
-  is therefore "nothing to show", never an error, and the app must never write into that path. The
-  encoding is **lossy** and is never inverted: a folder whose name holds a dash encodes like a
-  nested one, which is pinned by a test.
-- **Memory is indexed by working directory, and the tab exists to make that visible.** Measured on
-  this machine: the workspace root held 70 cards, every repository folder held none. A session
-  started inside a repository therefore begins with no memory at all, which the panel says in the
-  warning colour because it is invisible everywhere else.
-- **Paths in that tab are read-only.** Opening one would need an IPC handing an arbitrary path to the
-  shell, which this app does not do and does not need to say what an agent reads. The Explorer opens
-  files, but only inside a configured project and through its own two gates: see that section.
 - **The activity panel groups sessions by how loudly they ask for you**, and `attention` is the
   HONEST version of Dorothy's "Needs Attention", not a copy. That panel lists agents waiting for an
   answer, which its host learns from Claude Code's hooks; here a session waiting for you and one
@@ -1184,7 +1169,7 @@ dev server belongs to its project row, while an agent carries a conversation tha
 - **A conversation never spoken to is not reopened.** Measured on 2026-10-13: an interactive
   session left idle writes no transcript, and `--resume` on it would open a tab on an error.
   `claudeConversationExists` looks for `<id>.jsonl` by FILE NAME across `~/.claude/projects`,
-  never through `claudeProjectKey`, whose encoding is inferred, and reads its first 256 KiB for a
+  never through a key derived from the folder path, whose encoding is only inferred, and reads its first 256 KiB for a
   message (`holdsConversation`): a file holding only the bookkeeping line counts as none. Another agent answers `null` and is
   reopened, left to say for itself whether it remembers. A missing folder or a profile without
   `resumeArgs` drops the record too, with a log line.
@@ -3687,7 +3672,7 @@ grammar; a new surface follows it rather than inventing a seventh way.
 - **Nothing changes weight on becoming active**: tabs, suggestion buttons and filter chips keep their
   weight, and an active tab keeps its look under the cursor.
 - **Two row heights**: 3px vertical padding for the dense lists (Git files, Explorer), 5px for every
-  other list. Rails are 190px (the Agents rail, a facts column, is the one exception).
+  other list. Rails are 190px.
 - **One column heading recipe**, the table's: `--font-2xs`, 600, 0.06em, uppercase, `--text-faint`.
   The settings window is the exception on purpose: its labels are sentences.
 - **One empty-state look** (`--text-faint`, `--font-sm`, line height 1.5) and one loading spelling,

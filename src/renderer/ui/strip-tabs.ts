@@ -47,7 +47,6 @@ export function loadRestoredStrip(tab: StripTab, loaders: RestoredStripLoaders):
     case 'projects':
     case 'pulls':
     case 'jira':
-    case 'agents':
       break;
   }
 }
@@ -68,7 +67,6 @@ export class StripTabs {
     git: requireElement<HTMLButtonElement>('strip-tab-git'),
     triage: requireElement<HTMLButtonElement>('strip-tab-triage'),
     worktrees: requireElement<HTMLButtonElement>('strip-tab-worktrees'),
-    agents: requireElement<HTMLButtonElement>('strip-tab-agents'),
     automations: requireElement<HTMLButtonElement>('strip-tab-automations'),
     vault: requireElement<HTMLButtonElement>('strip-tab-vault'),
     extensions: requireElement<HTMLButtonElement>('strip-tab-extensions'),
@@ -83,7 +81,6 @@ export class StripTabs {
     git: requireElement('strip-panel-git'),
     triage: requireElement('strip-panel-triage'),
     worktrees: requireElement('strip-panel-worktrees'),
-    agents: requireElement('strip-panel-agents'),
     automations: requireElement('strip-panel-automations'),
     vault: requireElement('strip-panel-vault'),
     extensions: requireElement('strip-panel-extensions'),

@@ -37,7 +37,6 @@ import type {
   ThemeState,
   WorktreeCommand,
 } from '@shared/contracts.js';
-import type { AgentContext } from '@shared/agent-context.js';
 import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
@@ -65,7 +64,6 @@ import {
 import { showContextMenu } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
-import { agentSessions, renderAgentsPanel } from './ui/agents-panel.js';
 import { ExtensionsPanel } from './ui/extensions-panel.js';
 import { ExplorerPanel } from './ui/explorer-panel.js';
 import { clearChildren, hitsInteractive, requireElement } from './ui/dom.js';
@@ -150,19 +148,6 @@ class App {
   private readonly rerunning = new Set<TerminalId>();
   /** The separator keeps its session-local width when cards are switched or the preview is hidden. */
   private boardPreviewResizer: { refresh: () => void } | null = null;
-  /** Which agent session the Agents tab is looking at. Null means "the newest one". */
-  private selectedAgent: TerminalId | null = null;
-  /**
-   * The context of the selected agent, or null while it is being read.
-   *
-   * Cached rather than re-read on every repaint: the panel is rebuilt whenever the session list
-   * changes, which is every poll, and this touches the disk. It is invalidated by a change of
-   * selection and nothing else, a file edited under a running session being rare enough that
-   * `Refresh` is the honest answer to it.
-   */
-  private agentContext: AgentContext | null = null;
-  /** Which session `agentContext` describes, so a stale answer can be dropped. */
-  private agentContextFor: TerminalId | null = null;
   /** Ticks while the board is up, so a card goes quiet on its own rather than at the next poll. */
   private boardTimer: number | null = null;
   private profiles: readonly ShellProfile[] = [];
@@ -504,7 +489,6 @@ class App {
     this.renderTable();
     this.renderPulls();
     this.renderJira();
-    this.renderAgents();
     // Painted so the tab is never blank, but only **read** when it is the one on screen: the reads
     // are per-repository and there is no monitor pushing them.
     this.renderGit();
@@ -674,7 +658,6 @@ class App {
       }
       this.terminal?.setSessions(sessions);
       this.renderBoard();
-      this.renderAgents();
       // Closing the very last tab must not leave a dead surface: with no session there is no
       // strip, and the "+" that could open a new one lives in the strip. Same rule as the
       // bootstrap below — the terminal is this app's centre, so it is never left empty.
@@ -1035,37 +1018,6 @@ class App {
         onOpenUrl: (url) => void window.api.openExternal(url),
         onOpenSettings: () => void window.api.openSettings(),
       },
-    );
-  }
-
-  private renderAgents(): void {
-    const agents = agentSessions(this.sessions);
-    const active = agents.find((entry) => entry.id === this.selectedAgent) ?? agents[0];
-    if (active !== undefined && active.id !== this.agentContextFor) {
-      this.agentContextFor = active.id;
-      this.agentContext = null;
-      void window.api.readAgentContext(active.id).then((context) => {
-        // Checked on the way back: a click on another session while this was in flight would
-        // otherwise paint the wrong context under the right name.
-        if (this.agentContextFor === active.id) {
-          this.agentContext = context;
-          this.renderAgents();
-        }
-      });
-    }
-
-    renderAgentsPanel(
-      { list: requireElement('agents-list'), detail: requireElement('agents-detail') },
-      this.sessions,
-      this.agentContext,
-      { selected: this.selectedAgent },
-      {
-        onOpen: (terminalId) => {
-          this.selectedAgent = terminalId;
-          this.renderAgents();
-        },
-      },
-      { rows: this.rows, lastOutputAt: this.lastOutputAt },
     );
   }
 
@@ -3046,9 +2998,6 @@ class App {
     }
     if (terminalId !== null) {
       await this.focusTerminal(terminalId);
-      // The tab is what the Agents tab lists, so the list has to learn about it now rather than at
-      // the next session broadcast.
-      this.renderAgents();
     }
   }
 
@@ -3478,14 +3427,9 @@ class App {
         // Nothing is read for the Git tab while it is hidden, so showing it is the moment to read.
         // The stored column width goes back on here too: the splitter cannot measure a `display: none`
         // panel, so this is the first instant its value can actually be honoured.
-        // The context of an agent is read from the disk, so it is read when the tab is shown rather
-        // than kept warm behind it. Same reasoning as Git and Triage below.
         // The local tickets are files anybody may have edited since: shown is when to read them.
         if (tab === 'jira') {
           void this.loadLocalTickets();
-        }
-        if (tab === 'agents') {
-          this.renderAgents();
         }
         if (tab === 'today') {
           this.showToday();
@@ -3786,8 +3730,6 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.triageHeight;
     case 'worktrees':
       return settings.worktreesHeight;
-    case 'agents':
-      return settings.agentsHeight;
     case 'automations':
       return settings.automationsHeight;
     case 'vault':
@@ -3813,7 +3755,6 @@ function heightKeyOf(
   | 'gitHeight'
   | 'triageHeight'
   | 'worktreesHeight'
-  | 'agentsHeight'
   | 'automationsHeight'
   | 'vaultHeight'
   | 'extensionsHeight'
@@ -3830,8 +3771,6 @@ function heightKeyOf(
       return 'triageHeight';
     case 'worktrees':
       return 'worktreesHeight';
-    case 'agents':
-      return 'agentsHeight';
     case 'automations':
       return 'automationsHeight';
     case 'vault':

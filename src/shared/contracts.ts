@@ -32,7 +32,6 @@ import type { TipeeState } from './tipee.js';
  * the set cannot be known at compile time. Ids are generated from the folder name and never change
  * when a project is renamed, which is what keeps a rename from orphaning its running terminal.
  */
-import type { AgentContext } from './agent-context.js';
 
 export type ProjectId = string;
 
@@ -1434,7 +1433,6 @@ export type StripTab =
   | 'git'
   | 'triage'
   | 'worktrees'
-  | 'agents'
   | 'automations'
   | 'vault'
   | 'extensions'
@@ -1471,7 +1469,6 @@ export const STRIP_TABS: readonly StripTab[] = [
   'git',
   'automations',
   'vault',
-  'agents',
   'extensions',
   'explorer',
 ];
@@ -1999,7 +1996,6 @@ export interface AppSettings {
   /** Profile the bare "new tab" click uses. */
   defaultShellProfileId: string;
   /** Height of the Agents strip, in pixels. */
-  agentsHeight: number;
   automationsHeight: number;
   vaultHeight: number;
   extensionsHeight: number;
@@ -2527,8 +2523,6 @@ export const IpcChannel = {
    * Keys only, like every other Jira channel. The estimate is looked up in `triage.json` by the main
    * process rather than travelling, so it is always the current one.
    */
-  /** invoke: (terminalId) => AgentContext | null, what the agent of that session reads */
-  AgentContextRead: 'agent:context',
   /** invoke: () => AgentOpenResult, opens the configured coding agent in a tab of its own */
   AgentOpen: 'agent:open',
   TriageStartInJira: 'triage:start-in-jira',
@@ -2847,14 +2841,6 @@ export interface RendererApi {
   deleteLocalTicket(key: string): Promise<LocalTicketResult>;
   /** Opens the ticket's file in the editor, or shows it in its folder. Answers why not, or ''. */
   openLocalTicket(key: string, reveal: boolean): Promise<string>;
-  /**
-   * The instruction files and memory the agent of one session reads.
-   *
-   * Read on demand rather than pushed with the session list: it touches the disk, it only matters
-   * while the Agents tab is open on that one session, and it cannot change without somebody editing
-   * a file. `null` when the terminal is unknown or runs no agent.
-   */
-  readAgentContext(terminalId: TerminalId): Promise<AgentContext | null>;
   /**
    * Opens the configured coding agent in a tab, in the workspace root.
    *

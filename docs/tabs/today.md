@@ -5,12 +5,11 @@ Today**, for this machine only: a home computer and a work computer can show dif
 
 The tab fits the strip without scrolling. From top to bottom:
 
-- **Your day**: today's meetings on an hour axis, with a red line at the current time. Hover a
-  meeting for its time and subject.
-- **Headline numbers**: pull requests that need you, tickets in progress, meetings left, unread
-  mail, Teams conversations to answer, and since when you are clocked in. Click a number to open
-  its source: the Pull requests or Tickets tab, Outlook, Teams or Tipee. A `…` is being read; a `?`
-  could not be read. Hover the time tracking tile for the time due and the balance.
+- **Your day** and three numbers, on one line: today's meetings on an hour axis, with a red line
+  at the current time (hover a meeting for its time and subject), then pull requests that need
+  you, tickets in progress, and since when you are clocked in (green while you are). Click a number
+  to open its source: the Pull requests or Tickets tab, or Tipee. A `…` is being read; a `?` could
+  not be read. Hover the time tracking number for the time due and the balance.
 - **Panels**, sharing the rest of the height, each scrolling on its own:
   - **Pull requests**: **To review** (waiting for your review) and **Mine, waiting** (yours waiting
     for a review from somebody else; not drafts, not those approved or with changes requested).

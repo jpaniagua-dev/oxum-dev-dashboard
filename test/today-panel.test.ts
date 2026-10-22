@@ -193,10 +193,21 @@ describe('statTiles', () => {
     expect(tiles[1]).toMatchObject({ label: 'In progress', value: '…' });
   });
 
-  it('says ? for a digest never read, and … while it is being read, never 0', () => {
-    const channels = { ...DEFAULT_TODAY_CHANNELS, pulls: false, tickets: false, mail: true };
-    expect(statTiles({ ...base, channels })[0]?.value).toBe('?');
-    const running = { ...base.digest, running: true };
-    expect(statTiles({ ...base, channels, digest: running })[0]?.value).toBe('…');
+  it('gives calendar, mail and Teams no tile: their panels already count them', () => {
+    const channels = { ...DEFAULT_TODAY_CHANNELS, calendar: true, mail: true, teams: true };
+    expect(statTiles({ ...base, channels }).map((tile) => tile.channel)).toEqual([
+      'pulls',
+      'tickets',
+    ]);
+  });
+
+  it('says ? for time tracking that is not configured, never a time', () => {
+    const channels = { ...DEFAULT_TODAY_CHANNELS, pulls: false, tickets: false, tipee: true };
+    expect(statTiles({ ...base, channels })[0]).toMatchObject({
+      label: 'Clocked since',
+      value: '?',
+      detail: 'not configured',
+      ok: false,
+    });
   });
 });

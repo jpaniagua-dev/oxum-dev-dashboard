@@ -20,6 +20,8 @@ export interface StatTile {
   readonly detail: string;
   /** The tile the row leads with, drawn larger. */
   readonly hero?: boolean;
+  /** A value that is good news, in the healthy colour: being clocked in. */
+  readonly ok?: boolean;
   /** Why the value is what it is, when it is not a number. */
   readonly title?: string;
   /** Where a click on the tile leads: the tab or the site the number comes from. */
@@ -141,6 +143,7 @@ export function buildStatRow(tiles: readonly StatTile[]): HTMLElement {
         ? createElement('div', { className: 'today__stat' })
         : createElement('button', { className: 'today__stat today__stat--link' });
     element.classList.toggle('today__stat--hero', tile.hero === true);
+    element.classList.toggle('today__stat--ok', tile.ok === true);
     if (tile.open !== undefined && element instanceof HTMLButtonElement) {
       element.type = 'button';
       element.addEventListener('click', tile.open.run);

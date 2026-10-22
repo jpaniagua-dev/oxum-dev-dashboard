@@ -78,8 +78,6 @@ import {
 } from './git/git-tags.js';
 import { readTagWorkflows, workflowsForTag } from './git/tag-workflows.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
-import type { AgentContext } from '@shared/agent-context.js';
-import { readAgentContext } from './agent/agent-context-reader.js';
 import { generateCommitMessage } from './git/generate-commit.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { readGitState, readRemoteSlug } from './git/git-service.js';
@@ -1476,22 +1474,6 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         message = result.message;
       }
       return { config: deps.jiraConfig(), message };
-    },
-  );
-
-  ipcMain.handle(
-    IpcChannel.AgentContextRead,
-    async (_event, terminalId: unknown): Promise<AgentContext | null> => {
-      if (typeof terminalId !== 'string') {
-        return null;
-      }
-      const session = deps.terminals.sessions().find((entry) => entry.id === terminalId);
-      // No agent means nothing to describe. A shell reads no instruction file of its own, and
-      // answering with the chain anyway would put a context panel on a bash prompt.
-      if (session?.agent == null) {
-        return null;
-      }
-      return readAgentContext(session.cwd, session.agent.instructionFile, homedir());
     },
   );
 

@@ -1,4 +1,3 @@
-import type { AgentContext } from '@shared/agent-context.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AgentProfile } from '@shared/agent-profile.js';
 import type { AutomationRule } from '@shared/automation.js';
@@ -316,9 +315,6 @@ const api: RendererApi = {
     ipcRenderer.on(IpcChannel.TriageChanged, handler);
     return () => ipcRenderer.off(IpcChannel.TriageChanged, handler);
   },
-
-  readAgentContext: (terminalId: TerminalId): Promise<AgentContext | null> =>
-    ipcRenderer.invoke(IpcChannel.AgentContextRead, terminalId),
 
   openAgentSession: (): Promise<AgentOpenResult> => ipcRenderer.invoke(IpcChannel.AgentOpen),
 
