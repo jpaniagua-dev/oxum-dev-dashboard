@@ -6,7 +6,6 @@ import type {
   GitStash,
   GitSyncOp,
   Project,
-  ProjectId,
 } from '@shared/contracts.js';
 import { isDeletedOnDisk, isStaged } from '@shared/git-changes.js';
 import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
@@ -26,7 +25,6 @@ import { renderRefs } from './git-refs.js';
 import { TERMINAL_ICON } from './icons.js';
 import { buildPill } from './project-table.js';
 import { remoteBranchName, tagOnRemote, undoStateFor } from './presenters.js';
-import { buildTagDots, type TagPalette } from './tags.js';
 
 export {
   defaultTargetFor,
@@ -42,11 +40,10 @@ export {
 /*
  * The Git tab, laid out like a graph client inside a 460 px strip (redesigned on 2026-10-15):
  *
- *   [ repository tabs, each with its uncommitted count ]
- *   [ branch, distance, notices ............ undo · fetch pull push · branch stash pop · ⋯ ]
+ *   [ repository ▾, branch, distance, notices ...... undo · fetch pull push · branch stash pop · >_ ⋯ ]
  *   [ refs ][ graph, or the diff in its place      ][ detail: staging + commit, or a commit ]
  *
- * This module draws the two rows on top and hands the three columns to their own modules. Every
+ * This module draws the toolbar on top and hands the three columns to their own modules. Every
  * write keeps the gesture the earlier tab gave it, for the reasons recorded there and in CLAUDE.md:
  * checkout is deliberate (now a double-click), history-changing writes are behind a right-click,
  * discarding is confirmed by the main process. What the redesign added is listed in CLAUDE.md under
@@ -77,13 +74,12 @@ const SYNC_HINTS: Record<GitSyncOp, string> = {
   push: 'Push: git push',
 };
 
-/** Paints the whole tab: repositories, toolbar, refs, graph, detail. */
+/** Paints the whole tab: toolbar, refs, graph, detail. */
 export function renderGitPanel(
   hosts: GitPanelHosts,
   state: GitPanelState,
   actions: GitPanelActions,
 ): void {
-  renderRepoTabs(hosts.repos, state, actions);
   clearChildren(hosts.toolbar);
   clearChildren(hosts.refs);
   clearChildren(hosts.center);
@@ -95,12 +91,13 @@ export function renderGitPanel(
     );
     return;
   }
+  // Drawn before the repository is read: the picker is how one gets away from a slow read.
+  hosts.toolbar.append(buildToolbar(state.repo, state, actions));
   const repo = state.repo;
   if (repo === null) {
     hosts.center.append(createElement('p', { className: 'pulls__empty', text: 'Reading…' }));
     return;
   }
-  hosts.toolbar.append(buildToolbar(repo, state, actions));
   if (repo.error !== null) {
     hosts.center.append(createElement('p', { className: 'pulls__error', text: repo.error }));
     return;
@@ -111,68 +108,38 @@ export function renderGitPanel(
   renderDetail(hosts.detail, repo, state, actions);
 }
 
-/* ------------------------------------------------------------ repo tabs */
+/* ------------------------------------------------------- repo picker */
 
 /**
- * One tab per repository, each badged with its uncommitted file count.
+ * The repository picker, a `<select>` at the head of the toolbar.
  *
- * Every tab carries its count, not only the selected one: the selected repository's comes from the
- * on-demand read (so it agrees with the files listed on the right), the others' from the project poll
- * that already reads every repository for the Projects tab. A repository the poll has not answered for
- * gets no badge rather than a dash, which here means "nothing to commit" and would report a clean tree
- * for one that may be full of work.
+ * A native select for the reason the Jira tab's assignee filter is one: the list is as long as the
+ * configuration, and a row of tabs wider than the strip scrolled sideways and hid the repositories
+ * past its edge.
  *
- * The terminal icon is the tab's **sibling**, not its child: the tab is a real button, and a button
- * inside a button is invalid HTML that browsers rearrange. Opening a terminal therefore does not
- * select the repository, and so sets off no git read of a repository nobody opened.
+ * The panel is rebuilt on every git poll, and a select replaced while its list is open closes under
+ * the pointer: hence the `gitEditing` guard the text fields use, raised while it has the focus.
  */
-function renderRepoTabs(host: HTMLElement, state: GitPanelState, actions: GitPanelActions): void {
-  clearChildren(host);
-  const palette: TagPalette = { projects: state.projects, colors: state.tagColors };
-
+function buildRepoPicker(state: GitPanelState, actions: GitPanelActions): HTMLSelectElement {
+  const select = createElement('select', { className: 'git__repo-select' });
+  select.setAttribute('aria-label', 'Repository');
   for (const project of state.projects) {
-    const active = project.id === state.selectedProject;
-    const line = createElement('div', {
-      className: `git__repo-line${active ? ' git__repo-line--active' : ''}`,
-    });
-    const tab = createElement('button', { className: 'git__repo-tab' });
-    tab.type = 'button';
-    tab.setAttribute('role', 'tab');
-    tab.setAttribute('aria-selected', String(active));
-    const dots = buildTagDots(palette, project.id);
-    if (dots !== null) {
-      tab.append(dots);
-    }
-    tab.append(createElement('span', { className: 'git__repo-name', text: project.label }));
-
-    const count = repoFileCount(project.id, active, state);
-    if (count !== null) {
-      tab.append(
-        createElement('span', {
-          className: `pulls__repo-count${count > 0 ? ' pulls__repo-count--dirty' : ''}`,
-          text: count === 0 ? '—' : String(count),
-        }),
-      );
-    }
-    tab.title =
-      active && state.repo !== null && state.repo.error === null
-        ? `${state.repo.branch}\n${count ?? 0} uncommitted file(s)`
-        : count === null
-          ? project.path
-          : `${project.path}\n${count} uncommitted file(s)`;
-    tab.addEventListener('click', () => actions.onSelectProject(project.id));
-
-    line.append(tab, buildRepoTerminal(project, actions));
-    host.append(line);
+    const option = createElement('option', { text: project.label });
+    option.value = project.id;
+    option.selected = project.id === state.selectedProject;
+    select.append(option);
   }
-}
+  select.title =
+    state.projects.find((project) => project.id === state.selectedProject)?.path ?? 'Repository';
 
-/** The number on one repository tab, or `null` when nothing has read it yet. */
-function repoFileCount(projectId: ProjectId, active: boolean, state: GitPanelState): number | null {
-  if (active && state.repo !== null && state.repo.error === null) {
-    return state.repo.changes.length;
-  }
-  return state.changedByProject[projectId] ?? null;
+  select.addEventListener('focus', () => actions.onEditing(true));
+  select.addEventListener('blur', () => actions.onEditing(false));
+  select.addEventListener('change', () => {
+    // Lowered before the switch, or the guard would skip the very read the switch asks for.
+    actions.onEditing(false);
+    actions.onSelectProject(select.value);
+  });
+  return select;
 }
 
 /** Not disabled by `busy`, like the same entry of the repository menu: it runs no git command. */
@@ -180,7 +147,7 @@ function buildRepoTerminal(project: Project, actions: GitPanelActions): HTMLButt
   const button = createIconButton(TERMINAL_ICON, {
     label: `Open a terminal in ${project.label}`,
     title: `Open a new terminal tab in ${project.path}`,
-    className: 'icon-button--row',
+    className: 'git__tool',
   });
   button.addEventListener('click', () => actions.onNewTerminal(project.id));
   return button;
@@ -191,18 +158,24 @@ function buildRepoTerminal(project: Project, actions: GitPanelActions): HTMLButt
 /**
  * The status of the repository on the left, its verbs on the right.
  *
- * The left half is read at a glance: the branch, how far it stands from its upstream, a half-done
- * operation said out loud, and the line where fetch, pull and push report what they did (they are the
- * only writes that move nothing on screen). The right half is the toolbar a graph client has, as
- * icons: undo, the three network operations, a new branch, stash and pop, and the `⋯` menu, which a
- * right-click anywhere on the row opens too.
+ * The left half is read at a glance: which repository, its branch, how far it stands from its
+ * upstream, a half-done operation said out loud, and the line where fetch, pull and push report what
+ * they did (they are the only writes that move nothing on screen). The right half is the toolbar a
+ * graph client has, as icons: undo, the three network operations, a new branch, stash and pop, a
+ * terminal, and the `⋯` menu, which a right-click anywhere on the row opens too.
+ *
+ * `repo` is null while the selected repository is being read: the picker alone, then.
  */
 function buildToolbar(
-  repo: GitRepoState,
+  repo: GitRepoState | null,
   state: GitPanelState,
   actions: GitPanelActions,
 ): HTMLElement {
   const bar = createElement('div', { className: 'git__toolbar-row' });
+  bar.append(buildRepoPicker(state, actions));
+  if (repo === null) {
+    return bar;
+  }
   bar.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     actions.onMenu(event.clientX, event.clientY);
@@ -322,6 +295,14 @@ function buildToolbar(
           }
         },
       ),
+    );
+  }
+
+  const project = state.projects.find((entry) => entry.id === repo.projectId);
+  if (project !== undefined) {
+    bar.append(
+      createElement('span', { className: 'git__toolbar-gap' }),
+      buildRepoTerminal(project, actions),
     );
   }
 

@@ -15,7 +15,6 @@ import type {
   GitSyncOp,
   Project,
   ProjectId,
-  TagColors,
 } from '@shared/contracts.js';
 import type { ExplorerTarget } from '@shared/explorer.js';
 import { hasWorktreeChange, isStaged } from '@shared/git-changes.js';
@@ -55,7 +54,6 @@ export interface GitMenuItem {
 }
 
 export interface GitPanelHosts {
-  readonly repos: HTMLElement;
   readonly toolbar: HTMLElement;
   readonly refs: HTMLElement;
   readonly center: HTMLElement;
@@ -65,15 +63,6 @@ export interface GitPanelHosts {
 export interface GitPanelState {
   /** Every watched project: the Git tab follows all of them, not just the ones with pull requests. */
   readonly projects: readonly Project[];
-  /** `tagKey -> colour`, for the dots beside the names on the repository tabs. */
-  readonly tagColors: TagColors;
-  /**
-   * Files not committed, per project, from the poll that already reads every repository.
-   *
-   * `undefined` for a project the poll has not answered for yet, which is not the same as zero and
-   * must not be drawn as a clean repository.
-   */
-  readonly changedByProject: Readonly<Record<ProjectId, number | undefined>>;
   readonly selectedProject: ProjectId | null;
   /** Null while the first read of the selected repository is still in flight. */
   readonly repo: GitRepoState | null;

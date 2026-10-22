@@ -1908,7 +1908,6 @@ class App {
     }
     renderGitPanel(
       {
-        repos: requireElement('git-repos'),
         toolbar: requireElement('git-toolbar'),
         refs: requireElement('git-refs'),
         center: requireElement('git-center'),
@@ -1929,7 +1928,6 @@ class App {
   private gitPanelState(): GitPanelState {
     return {
       projects: this.projects,
-      tagColors: this.settings?.tagColors ?? {},
       selectedProject: this.gitProject,
       repo: this.gitRepo,
       selection: this.gitSelection ?? { kind: 'wip' },
@@ -1951,13 +1949,6 @@ class App {
         this.gitProject === null ? null : (this.gitRemoteTags.get(this.gitProject) ?? null),
       busy: this.gitBusy,
       generating: this.gitGenerating,
-      // Straight off the poll's rows, which already read every repository for the Projects tab.
-      changedByProject: Object.fromEntries(
-        this.rows.map((row) => [
-          row.project.id,
-          row.git?.error === null ? row.git.changed : undefined,
-        ]),
-      ),
       notice: this.gitNotice,
     };
   }

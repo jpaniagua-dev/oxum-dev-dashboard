@@ -1,6 +1,6 @@
 # Git
 
-Pick a repository among the tabs at the top (each carries its count of uncommitted files). Below the
+Pick a repository in the list at the start of the toolbar, left of the current branch. Below the
 toolbar, three columns: the branches, stashes and tags on the left, the **commit graph** in the
 centre, and on the right whatever is selected in the graph.
 
@@ -61,6 +61,7 @@ centre, and on the right whatever is selected in the graph.
 - **New branch**, **Stash** (the tracked changes, under git's own message) and **Pop** (the newest
   stash). The **+** of STASHES names a stash and can include untracked files; right-click a stash to
   apply, pop or delete it.
+- **Terminal** opens a terminal tab in the repository.
 - **⋯**, or a right-click on the toolbar: the same actions, and the way out of a half-done cherry-pick
   or merge.
 

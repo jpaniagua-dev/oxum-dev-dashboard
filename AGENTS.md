@@ -1587,10 +1587,11 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
 
 ## Git tab
 
-Redesigned on 2026-10-15, on request, after a graph client: the repositories as tabs, a toolbar, then
-three columns, the refs on the left, the **commit graph** in the centre and the **detail of the
-selection** on the right (the staging area and the commit form for the working tree, the message and
-files of a commit or a stash otherwise). Decided with it, and not to be reopened by accident:
+Redesigned on 2026-10-15, on request, after a graph client: a toolbar that opens on the repository
+picker, then three columns, the refs on the left, the **commit graph** in the centre and the **detail
+of the selection** on the right (the staging area and the commit form for the working tree, the
+message and files of a commit or a stash otherwise). Decided with it, and not to be reopened by
+accident:
 
 - **It stays in the 460 px strip.** No full-window mode. Everything below is sized for that: about
   seventeen graph rows, the diff taking the graph's place rather than a column of its own.
@@ -1603,6 +1604,27 @@ files of a commit or a stash otherwise). Decided with it, and not to be reopened
   push**. `pull` stays `--ff-only`: a merge is now an explicit gesture, never something a pull does.
 
 The bullets that follow are the reasons and the traps, the new ones first.
+
+- **The repository is picked from a `<select>`, at the head of the toolbar** (2026-10-22, on request,
+  replacing the row of repository tabs). The tabs scrolled sideways once there were more
+  repositories than width, so the ones past the edge were out of sight, and the row cost a line of
+  the 460 px the graph is sized for. A native select for the reason the Jira assignee filter is one:
+  keyboard, screen readers and the dark theme (`color-scheme`) come with it, and the list is only as
+  long as the configuration. What the tabs carried, and where it went:
+  - **The entries are the names alone**, on request, for clarity: a first version followed each name
+    with its uncommitted count (`· 3 uncommitted`, `· clean`). "Where do I have work waiting" is the
+    Projects tab's question now; the selected repository's own changes are the WIP row and the
+    detail panel.
+  - **The tag dots are gone from this tab.** An `<option>` holds text only, and the dots answered
+    "which stack is this line" while scanning a column of repositories, a question a single picked
+    name does not ask.
+  - **The terminal icon is a toolbar verb** for the selected repository, before `⋯`.
+  - **The picker raises `gitEditing` while it has the focus**, like the text fields. The panel is
+    rebuilt on every git poll, and a select replaced while its list is open closes under the pointer.
+    Its `change` lowers the guard **before** `onSelectProject`, whose read the guard would otherwise
+    skip, leaving the new repository on `Reading…` until the next poll after a blur.
+  - **The toolbar is drawn while the repository is read** (the picker alone): it is the way out of a
+    slow read, and a toolbar that vanished on every switch would make the picker flicker away.
 
 - **The graph reads every branch, not HEAD.** `git log --topo-order -n400 --branches --remotes --tags
   HEAD --format=%H %P ...`: `--topo-order` keeps a child above its parents and a branch's commits
@@ -1843,22 +1865,12 @@ The bullets that follow are the reasons and the traps, the new ones first.
     condition is the one the amend tooltip already computes (`hasUpstream && ahead === 0`), and forcing
     is not something a one-click button in this tab offers.
   - No dialog in front of it, on request. The guard is the hook, not a question.
-- **Every repository tab is badged with its uncommitted file count**, not only the selected one. The
-  column (tabs since 11.0.0) badged the open repository alone, on the argument that reading the others would cost a git
-  call per row per paint — a read nobody makes: the project poll already runs
-  `git status --porcelain=v2` on every project for the Projects tab, so the number was on the other
-  side of the app the whole time, and answering "where do I have work waiting" meant clicking each
-  repository in turn or leaving the tab.
-  - **The selected tab answers from the on-demand read, the others from the poll.** The badge of
-    the open repository has to agree with the lists of files in the detail panel, and the poll can be a
-    whole interval out of date.
-  - **`GitState.changed` is counted, never `modified + staged + untracked`.** Those three are counted
-    per state and a file staged with further edits on top is deliberately counted twice among them, by
-    the very rule that keeps the two columns apart. The sum would badge one file as two, and the number
-    beside the open repository would disagree with the list under it. Tested on the `MM` case.
-  - **A project the poll has not answered for gets no badge**, not a dash. A dash means "nothing to
-    commit" in this column, and drawing one over an unread repository reports a clean tree for one that
-    may be full of work.
+- **No per-repository uncommitted count in this tab any more** (2026-10-22). The repository tabs
+  carried one, read off the project poll, which already runs `git status --porcelain=v2` on every
+  project; the picker shows names only (above). Should a count come back, three rules it learned:
+  the selected repository counts from the on-demand read, so it agrees with the detail panel's lists;
+  the others count `GitState.changed`, never `modified + staged + untracked`, which counts an `MM`
+  file twice (tested); and a repository the poll has not answered for gets no count, never "clean".
 - **Checkout stashes nothing and forces nothing.** A checkout blocked by local changes fails, and git
   itself says which files are in the way. An automatic stash would move work somewhere nobody asked
   for or looked at. It was a **button** until 11.0.0 so that changing the disk was never one stray
@@ -1925,13 +1937,12 @@ The bullets that follow are the reasons and the traps, the new ones first.
   All of them are pure, tested functions.
 - **`gitHeight` defaults to 460**, the largest of them all, and the redesign was made to fit it:
   this is the tab where you stop glancing and start working, and 250 px would show four graph rows.
-- **A repository tab's terminal icon is the tab's SIBLING, not its child**, and that is the entire reason
-  for the `git__repo-line` container. The tab is a real `<button>` (so reachable with Tab and responding
-  to Enter) and nesting a button inside a button is invalid HTML that browsers silently rearrange, the
-  very reason a PR row is a `div`. Here the row keeps its semantics and the icon is a control in its own
-  right. An intended consequence: opening a terminal does **not select** the repository, so it triggers
-  no git read of a repository nobody opened. It is not disabled by `state.busy`, like the same entry in
-  the repository menu: it runs no git command.
+- **The terminal icon opens a tab in the selected repository**, among the verbs, just before `⋯`. It
+  is not disabled by `state.busy`, like the same entry in the repository menu: it runs no git command.
+  When it hung beside each repository tab, it could open a terminal in a repository without selecting
+  it; that went with the tabs, the repository menu and the Projects tab covering the case.
+  `git__repo-line`, the container that kept that icon a sibling of its tab (a button inside a button
+  being invalid HTML), stays for the Pull requests column, which uses it for the same reason.
 - **Cherry-pick is on RIGHT CLICK on a commit, never a row button.** A cherry-pick changes **history**,
   so it must not be reachable at all without having been asked for. The graph is scrolled and clicked
   all day long to read commits. It is disabled on HEAD itself, which it would only replay onto itself. The menu is rebuilt on every open, like the repository one: the target branch is in the labels.
@@ -3344,17 +3355,18 @@ Added on 2026-09-04, the tab having had five columns and no way to know what any
 
 ### The tags on the OTHER tabs: dots, not chips
 
-Added on 2026-09-03. Three surfaces name a project outside the projects table, and all three now show
-its tags: the pull request tab's repository column, the Git tab's, and the project cell of every
-worktree row. Jira lists issues, so there is nothing to tag there. Triage is no longer in that list, and what it
+Added on 2026-09-03. Two surfaces name a project outside the projects table, and both show its tags:
+the pull request tab's repository column and the project cell of every worktree row. The Git tab
+showed them on its repository tabs until those became a `<select>` (2026-10-22), whose options hold
+text only. Jira lists issues, so there is nothing to tag there. Triage is no longer in that list, and what it
 shows is not this vocabulary: a ticket's domain and its `100% agent` flag are chips a run produced,
 closed and fixed, reaching the same palette **tokens** through their own modifiers. They borrow the
 drawing and share none of the plumbing, deliberately, `AppSettings.tagColors` being the user's, keyed
 by word, and the word `backend` existing in both.
 
-- **The chip does not travel; the dot does.** All three surfaces are fixed-width and read down their
-  length: 190px for the pull request and Git repositories, a 104px grid track for a
-  worktree's project. A labelled chip in any of them has to be paid for by widening the column the
+- **The chip does not travel; the dot does.** Both surfaces are fixed-width and read down their
+  length: 190px for the pull request repositories, a 104px grid track for a
+  worktree's project. A labelled chip in either of them has to be paid for by widening the column the
   strip is actually read in, and the question these rows ask is "which stack is this line", not "what
   is this tag called". So the word stays in the projects table, which is the permanent legend, and what
   travels is the half of a chip the eye was scanning anyway. `shared/project-tags.ts` already said the
@@ -3366,16 +3378,13 @@ by word, and the word `backend` existing in both.
   two variants (an editable chip with a remove button, a preview chip beside a colour select) because
   they are different drawings, not the same one at another size.
 - **Read-only there, and that is not laziness.** A tag is configuration in the projects table and
-  *context* on these rows, so both gestures stay where the tag is edited. It also settles a collision:
-  a right click on a Git repository line already opens that repository's menu (fetch, pull, push), and
-  a chip answering the same gesture on the same target would open one menu over the other.
+  *context* on these rows, so both gestures stay where the tag is edited.
 - **`RepoPulls` and `RepoWorktrees` are NOT widened with a `tags` field**, and the reason is freshness
   rather than tidiness. Those two payloads arrive from **polls**; a tag change arrives as a settings
   broadcast. A tag carried on them would appear in the projects table at once and in the pull request
   column at the next GitHub poll, which is up to a minute of two tabs disagreeing about one word.
   `TagPalette` is assembled in the renderer from `this.projects`, the list the main process built those
-  payloads from, so the lookup always hits and can never be stale. The Git tab needs only `tagColors`
-  in its state, `GitPanelState.projects` already carrying the words.
+  payloads from, so the lookup always hits and can never be stale.
 - **The dots come BEFORE the name**, so the coloured marks of a whole column start on one edge, which
   is what makes a column of them scannable at all. The cost is accepted and it is real: an untagged row
   starts at the left edge while a tagged one is indented, so the *names* no longer align perfectly. No

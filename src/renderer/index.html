@@ -298,16 +298,15 @@
             </div>
 
             <!--
-          Laid out like a graph client, inside the strip: the repositories as tabs, a toolbar, then
-          three columns. The refs on the left, the graph in the centre (a diff takes its place when a
-          file is opened), and the detail of the selection on the right: the staging area and the
-          commit form for the working tree, the message and files of a commit otherwise.
+          Laid out like a graph client, inside the strip: a toolbar that opens on the repository
+          picker, then three columns. The refs on the left, the graph in the centre (a diff takes its
+          place when a file is opened), and the detail of the selection on the right: the staging
+          area and the commit form for the working tree, the message and files of a commit otherwise.
 
           Every child is filled by the `git-*.ts` modules with `textContent`: branch names, commit
           subjects and diff bodies are all text from outside the app.
         -->
             <div class="git" id="strip-panel-git" role="tabpanel" hidden>
-              <div class="git__repos" id="git-repos" role="tablist" aria-label="Repositories"></div>
               <div class="git__toolbar" id="git-toolbar"></div>
               <div class="git__refs" id="git-refs" aria-label="Branches, stashes and tags"></div>
               <div class="git__center" id="git-center"></div>

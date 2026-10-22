@@ -4742,8 +4742,9 @@ body {
 /* ------------------------------------------------------------------- git */
 
 /*
- * Laid out like a graph client inside the strip (2026-10-15): two full-width rows (the repository
- * tabs, the toolbar) over three columns (refs, the graph or a diff, the detail of the selection).
+ * Laid out like a graph client inside the strip (2026-10-15): one full-width row (the toolbar, which
+ * opens on the repository picker) over three columns (refs, the graph or a diff, the detail of the
+ * selection).
  *
  * The detail panel's width is a custom property so the separator can drive it: a grid *track* cannot
  * be given a width from a drag, but the property that sizes it can. The centre is `1fr` and absorbs
@@ -4755,7 +4756,7 @@ body {
 .git {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr) 5px var(--git-detail-width, 320px);
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   column-gap: 10px;
   row-gap: 6px;
   flex: 1;
@@ -4768,7 +4769,6 @@ body {
   display: none;
 }
 
-.git__repos,
 .git__toolbar {
   grid-column: 1 / -1;
   min-width: 0;
@@ -4787,51 +4787,13 @@ body {
 }
 
 /*
- * The repository tabs.
- *
- * A row of sub-tabs in the strip's own grammar (no weight change when active, a primary underline),
- * scrolling sideways when there are more repositories than room rather than wrapping onto a second
- * line the graph would pay for.
+ * A repository row of the Pull requests column and the buttons beside it: siblings, because the row
+ * is a button itself.
  */
-.git__repos {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  border-bottom: 1px solid var(--border);
-  scrollbar-width: thin;
-}
-
-/* One tab and its terminal icon, siblings because the tab is a button (see `buildRepoTerminal`). */
 .git__repo-line {
   display: flex;
   flex: none;
   align-items: center;
-}
-
-.git__repo-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px 4px 9px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-md);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.git__repo-tab:hover {
-  color: var(--text);
-}
-
-.git__repo-line--active .git__repo-tab {
-  color: var(--text);
-  border-bottom-color: var(--primary);
 }
 
 /* The toolbar: status on the left, the verbs as icons on the right. */
@@ -4840,6 +4802,24 @@ body {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+/*
+ * The repository picker, the Jira assignee filter's recipe at the toolbar's height. Capped so a long
+ * name cannot push the branch and the verbs off the row; the list itself opens as wide as it needs.
+ */
+.git__repo-select {
+  flex: none;
+  max-width: 240px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 /* Pushes what follows to the right edge without a margin rule per button. */
