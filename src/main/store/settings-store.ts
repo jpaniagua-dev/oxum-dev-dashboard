@@ -3,6 +3,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { normalizeModel } from '@shared/agent-model.js';
 import { isStripTab } from '@shared/contracts.js';
+import { sanitizeTipeeUrl } from '@shared/tipee.js';
+import { DEFAULT_TODAY_CHANNELS, sanitizeTodayChannels } from '@shared/today.js';
 import { sanitizeExclusions } from '@shared/explorer.js';
 import {
   sanitizeTagColors,
@@ -74,6 +76,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   vaultHeight: 460,
   extensionsHeight: 460,
   explorerHeight: 460,
+  // Tiles, charts and lists: the one tab of the strip that is a page to scroll more than a glance.
+  todayHeight: 560,
+  todayChannels: DEFAULT_TODAY_CHANNELS,
+  tipeeUrl: '',
+  tipeeUser: '',
+  // A clock status changes four times a day; five minutes is fresh enough to read at a glance.
+  tipeePollSeconds: 300,
   automationsEnabled: false,
   automationShellEnabled: false,
   // Wide enough for a real path (`src/renderer/ui/git-panel.ts`) without truncation, which the first
@@ -267,6 +276,15 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       1200,
     ),
     explorerHeight: clamp(asNumber(input.explorerHeight, DEFAULT_SETTINGS.explorerHeight), 90, 1200),
+    todayHeight: clamp(asNumber(input.todayHeight, DEFAULT_SETTINGS.todayHeight), 90, 1200),
+    todayChannels: sanitizeTodayChannels(input.todayChannels),
+    tipeeUrl: sanitizeTipeeUrl(input.tipeeUrl),
+    tipeeUser: typeof input.tipeeUser === 'string' ? input.tipeeUser.trim() : '',
+    tipeePollSeconds: clamp(
+      asNumber(input.tipeePollSeconds, DEFAULT_SETTINGS.tipeePollSeconds),
+      60,
+      3600,
+    ),
     // `=== true` and never a truthy read: a hand-edited file must not be able to switch on a
     // feature that starts agents by itself with the string "false".
     automationsEnabled: input.automationsEnabled === true,

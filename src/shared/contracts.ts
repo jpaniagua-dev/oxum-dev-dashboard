@@ -11,6 +11,8 @@ import type {
 } from './explorer.js';
 import type { LocalTicketDraft, LocalTicketResult, LocalTicketsState } from './local-tickets.js';
 import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
+import type { TodayChannels, TodayDigestState } from './today.js';
+import type { TipeeState } from './tipee.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
  *
@@ -1436,7 +1438,8 @@ export type StripTab =
   | 'automations'
   | 'vault'
   | 'extensions'
-  | 'explorer';
+  | 'explorer'
+  | 'today';
 
 /**
  * Every tab, in display order, as a value.
@@ -1456,8 +1459,10 @@ export type StripTab =
  * tabs were added in until 2026-10-02, when it was rearranged on request to follow the work:
  * projects, pull requests, worktrees, tickets, triage, git, then the tools. A new tab still goes at
  * the END, because inserting one moves the others under a cursor that has learnt where they are.
+ * Today is the one exception, first on request: it is the summary the day starts from.
  */
 export const STRIP_TABS: readonly StripTab[] = [
+  'today',
   'projects',
   'pulls',
   'worktrees',
@@ -1999,6 +2004,14 @@ export interface AppSettings {
   vaultHeight: number;
   extensionsHeight: number;
   explorerHeight: number;
+  todayHeight: number;
+  /** Which cards the Today tab shows on this machine. Never part of a team configuration. */
+  todayChannels: TodayChannels;
+  /** Time tracking instance, `https://host`, or empty. The password is in its own encrypted file. */
+  tipeeUrl: string;
+  tipeeUser: string;
+  /** Seconds between time tracking reads. */
+  tipeePollSeconds: number;
   /**
    * Whether rules may act at all. **False by default.**
    *
@@ -2254,6 +2267,9 @@ export interface BootstrapState {
   readonly jiraConfig: JiraConfig;
   /** Pty backend the terminals run on, so xterm can be configured for it. `null` off Windows. */
   readonly terminalCompat: TerminalCompat | null;
+  /** The last Microsoft 365 digest, so the Today tab paints yesterday's answer before any run. */
+  readonly todayDigest: TodayDigestState;
+  readonly tipee: TipeeState;
 }
 
 /* ------------------------------------------------------------------ *
@@ -2711,6 +2727,22 @@ export const IpcChannel = {
   SettingsDirty: 'settings:dirty',
   /** invoke: () => void, closes the window the call came from */
   WindowClose: 'window:close',
+  /** on: (state: TodayDigestState) => void, pushed when a digest run starts and ends */
+  TodayDigestChanged: 'today:digest-changed',
+  /** invoke: (force: boolean) => TodayDigestState, reads again; without force, only once a day */
+  TodayDigestRefresh: 'today:digest-refresh',
+  /** invoke: () => { ok, message }, one connector call to say whether it answers and as whom */
+  TodayDigestTest: 'today:digest-test',
+  /** on: (state: TipeeState) => void, pushed after each time tracking read */
+  TipeeChanged: 'tipee:changed',
+  /** invoke: () => TipeeState, reads again now */
+  TipeeRefresh: 'tipee:refresh',
+  /** invoke: (draft) => { ok, message }, signs in with what is typed on screen; empty password = the stored one */
+  TipeeTest: 'tipee:test',
+  /** invoke: (password: string) => { ok, message }, writes the password to its encrypted file */
+  TipeeSavePassword: 'tipee:save-password',
+  /** invoke: () => boolean, whether a password is stored. Never the password itself */
+  TipeeHasPassword: 'tipee:has-password',
 } as const;
 
 /**
@@ -2750,6 +2782,15 @@ export interface RendererApi {
   ): Promise<{ ok: boolean; message: string }>;
   /** Runs the agent once on a tiny prompt and reports what came back, command line included. */
   testAgent(profile: AgentProfile): Promise<{ ok: boolean; message: string }>;
+  refreshTodayDigest(force: boolean): Promise<TodayDigestState>;
+  onTodayDigestChanged(listener: (state: TodayDigestState) => void): () => void;
+  testTodayDigest(): Promise<{ ok: boolean; message: string }>;
+  refreshTipee(): Promise<TipeeState>;
+  onTipeeChanged(listener: (state: TipeeState) => void): () => void;
+  testTipee(draft: { url: string; user: string; password: string }): Promise<{ ok: boolean; message: string }>;
+  /** The password only travels towards the main process; an empty one clears it. */
+  saveTipeePassword(password: string): Promise<{ ok: boolean; message: string }>;
+  hasTipeePassword(): Promise<boolean>;
   /** The body a review would post, or posted. Empty when there is no review. */
   pullReviewBody(slug: string, number: number): Promise<string>;
   /** Moves a pull request between draft and ready for review. */

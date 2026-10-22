@@ -156,6 +156,10 @@ import {
 } from '@shared/explorer.js';
 import type { EditorStart, TerminalSize } from '@shared/contracts.js';
 import type { LocalTicketStore } from './tickets/local-ticket-store.js';
+import type { DigestService } from './today/digest-service.js';
+import type { TipeeMonitor } from './today/tipee-monitor.js';
+import { wantsDigest, type TodayDigestState } from '@shared/today.js';
+import { sanitizeTipeeUrl, type TipeeState } from '@shared/tipee.js';
 import { existingFolder, runFolder } from './projects/run-folder.js';
 import { existsSync } from 'node:fs';
 import { readFile as readTextFile, writeFile as writeTextFile } from 'node:fs/promises';
@@ -186,6 +190,11 @@ export interface IpcDependencies {
   readonly monitor: () => ProjectMonitor;
   readonly pulls: () => PullMonitor;
   readonly jira: () => JiraMonitor;
+  readonly todayDigest: () => DigestService;
+  readonly tipee: () => TipeeMonitor;
+  /** Writes the time tracking password to its encrypted file. Never reads it back towards the renderer. */
+  readonly saveTipeePassword: (password: string) => Promise<{ ok: boolean; message: string }>;
+  readonly hasTipeePassword: () => Promise<boolean>;
   readonly triage: () => TriageService;
   readonly automations: () => AutomationState;
   readonly saveAutomationRules: (rules: readonly AutomationRule[]) => Promise<AutomationState>;
@@ -282,6 +291,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     jira: deps.jira().state(),
     jiraConfig: deps.jiraConfig(),
     terminalCompat: terminalCompat(process.platform, release()),
+    todayDigest: deps.todayDigest().state(),
+    tipee: deps.tipee().state(),
   }));
 
   ipcMain.handle(IpcChannel.RefreshNow, async (): Promise<ProjectRow[]> => deps.monitor().refreshAll());
@@ -549,6 +560,41 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   );
 
   ipcMain.handle(IpcChannel.JiraRefresh, async (): Promise<JiraState> => deps.jira().refreshNow());
+
+  /* ---------------------------------------------------------------- today */
+
+  // Refused while no Microsoft 365 card is on: a run reaches an account, so it needs the switch.
+  ipcMain.handle(IpcChannel.TodayDigestRefresh, async (_event, force: unknown): Promise<TodayDigestState> => {
+    const digest = deps.todayDigest();
+    if (!wantsDigest(deps.settings.get().todayChannels)) {
+      return digest.state();
+    }
+    return force === true ? digest.refresh() : digest.refreshIfStale();
+  });
+
+  ipcMain.handle(IpcChannel.TodayDigestTest, async (): Promise<{ ok: boolean; message: string }> =>
+    deps.todayDigest().test(),
+  );
+
+  ipcMain.handle(IpcChannel.TipeeRefresh, async (): Promise<TipeeState> => deps.tipee().refreshNow());
+
+  ipcMain.handle(IpcChannel.TipeeTest, async (_event, raw: unknown): Promise<{ ok: boolean; message: string }> => {
+    const record = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    const text = (key: string): string => (typeof record[key] === 'string' ? (record[key] as string) : '');
+    const url = sanitizeTipeeUrl(text('url'));
+    if (url.length === 0) {
+      return { ok: false, message: 'The address must be an https:// address' };
+    }
+    return deps.tipee().test({ url, user: text('user').trim(), password: text('password') });
+  });
+
+  ipcMain.handle(
+    IpcChannel.TipeeSavePassword,
+    async (_event, password: unknown): Promise<{ ok: boolean; message: string }> =>
+      deps.saveTipeePassword(typeof password === 'string' ? password : ''),
+  );
+
+  ipcMain.handle(IpcChannel.TipeeHasPassword, async (): Promise<boolean> => deps.hasTipeePassword());
 
   /* --------------------------------------------------------------- triage */
 
@@ -2332,6 +2378,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
        */
       if (Object.keys(parsed).some((key) => !LOCAL_ONLY_KEYS.has(key))) {
         deps.broadcastSettings(saved);
+      }
+      // Read at once rather than at the next poll: the card was just switched on or pointed elsewhere.
+      if ('todayChannels' in parsed || 'tipeeUrl' in parsed || 'tipeeUser' in parsed) {
+        void deps.tipee().refreshNow();
       }
       return saved;
     },

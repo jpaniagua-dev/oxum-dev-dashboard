@@ -2948,27 +2948,89 @@ app has to run whichever agent its user has.
   terminal pane had reimplemented on its own. A dropdown anchored to a control is
   `showContextMenu(box.left, box.bottom + 4, items)`, not a new list.
 
-## Mail and Teams: why they are not here
+## Today tab: what is waiting, one card per source
 
-Asked for in V3, dropped after measurement rather than for lack of time:
+Added after 11.0.0, on request: one tab answering "what is waiting for me" across pull requests,
+tickets, calendar, mail, Teams and time tracking, each card switched on per machine
+(`todayChannels`, never part of a team configuration), because a home computer and a work one do
+not reach the same accounts. WhatsApp was asked for and left out: there is no API for a personal
+account, and the unofficial libraries break its terms and risk a ban of the number.
 
-- **Classic Outlook over COM can be unavailable** while Outlook is installed. When the new client is
-  active (`Outlook\Preferences\UseNewOutlook = 1` on the user side), launching `OUTLOOK.EXE` hands over
-  to the new Outlook and then exits **without registering its COM class**: activation fails after about
-  thirty seconds with `CO_E_SERVER_EXEC_FAILURE`. Reproduced twice.
-- **Microsoft Graph requires an app registration**, and therefore a tenant that allows one. Many
-  companies refuse it (`defaultUserRolePermissions.allowedToCreateApps = false`, no user consent
-  policy), and the trap is the Azure CLI token: its `scp` claim (`Application.ReadWrite.All`, and so on)
-  belongs to **the CLI application**, not to the user's own rights, which wrongly suggests one can be
-  created from the command line. Check this before writing code.
-- **The Teams activity bell has no read API**, even through Graph. The most that can be read is
-  `GET /me/chats` plus `viewpoint.lastMessageReadDateTime`, which already excludes channel mentions.
-
-If the app registration ever arrives: public client, `http://localhost` redirect, delegated `Mail.Read`
-plus `offline_access` (plus `Chat.Read`), `@azure/msal-node` in device code flow, token encrypted by the
-`SecretStore` that already exists, and a monitor modelled on `JiraMonitor`. The space in
-`.projects__header-actions` (formerly `.topbar__actions`, gone with the title bar) and the strip's
-pattern are left ready.
+- **Pull requests and tickets cost no request.** The cards read `this.pulls` and the merged Jira
+  state the other tabs already hold. A review request wins over authorship in `needOf`: GitHub drops
+  a reviewer from the requested list once they have reviewed, so `isReviewer` on somebody else's
+  pull request means the review is still owed.
+- **Mail, calendar and Teams go through Claude Code, not Microsoft Graph.** Graph needs an app
+  registration, which many tenants refuse (`allowedToCreateApps = false`, no user consent), and
+  classic Outlook over COM is gone when the new Outlook is active (`CO_E_SERVER_EXEC_FAILURE` after
+  thirty seconds). The claude.ai Microsoft 365 connector carries its own consented app, and it is
+  only reachable from inside Claude Code, so `DigestService` runs one headless `claude -p` that
+  makes five read calls, the routines reader's pattern. The cost is a dependency on a claude.ai
+  account with that connector, which the card states rather than hides.
+- ⚠️ **Every flag of `digestArgs` was measured against the real CLI, and the obvious ones are
+  wrong.** `--strict-mcp-config`, `--restricted` and `--tools` (even `--tools ToolSearch`) all
+  remove the claude.ai connectors: the tools are not found, and the run still exits 0.
+  `--allowedTools` alone restricts nothing for a user whose own settings say `defaultMode: auto`:
+  a tool outside the list was called. `--permission-mode dontAsk` is what makes the list binding,
+  and `--setting-sources project`, from an empty folder, keeps the user's hooks and mode out. The
+  writing tools of the connector and the shell are refused by name on top, as a second lock.
+- ⚠️ **The data is read from the `tool_result` events, never from the reply.** Given no tool, Haiku
+  was measured writing a call and a plausible result as plain text, a made-up user id included.
+  `readToolCalls` pairs each result with its `tool_use` by id; a run with no Microsoft 365 call at
+  all is reported as such, with the command line.
+- **Run on demand, not on a poll.** At the first look of the day (`refreshIfStale`, which also
+  remembers a failed attempt, or every tab switch would start a run) and on Refresh. A run is about
+  ten seconds and a cent; a poll would multiply that by the hours the app is open with nobody
+  looking. The answer is cached in `today-digest.json` and re-read through the same parser, so a
+  hand-edited file is held to the rules of a fresh answer.
+- **Teams says "waiting for your reply", never "unread".** The connector exposes no read state,
+  checked on the search and on a full message read (no `isRead`, no `viewpoint`), and the activity
+  bell has no read API at all. What it does give is who wrote last, so the card lists the
+  conversations where somebody else wrote after my last message, chosen on 2026-10-22 over "not
+  seen in this app", which would keep showing what was read in Teams itself. A reply of mine older
+  than the search window does not count, so within it the whole conversation is waiting. Mail does
+  carry `isRead`, but the search cannot filter on it: the unread are those among the newest, and
+  the card says when the search matched more.
+- **Calendar times are wall clock.** `start` and `end` come as a wall-clock string plus the
+  mailbox's zone; they are kept as written and compared as local time, never reinterpreted as UTC.
+  The search returns everything overlapping the day, so a whole-day event that ended at midnight
+  comes back too and is filtered out in `onDay`.
+- **A status dashboard, laid out on request after a reference design**: the day timeline first
+  (moved above the numbers on request), then headline numbers, the two pull request queues, a stacked sprint bar, unread mail and the Teams
+  conversations waiting for a reply, then the lists. Meters and conversation bars were tried and
+  removed on request: the reader wanted the messages, not their counts. The charts are
+  divs placed in percent, not a scaled SVG, which would stretch its labels. The categorical slots
+  are their own tokens, `--chart-1..3`, validated as a set in both themes (lightness band, chroma,
+  colour-blind separation, 3:1 on the raised surface); the git lanes were tried and their dark steps
+  are too light for a fill. Every value drawn is also written, on the chart or in the lists. A tile
+  says `?` for what could not be read and never 0, which would claim an inbox nobody checked. The
+  day timeline sits outside the chart grid: a card spanning every track keeps the empty `auto-fit`
+  tracks from collapsing, and the other charts then stop stretching. `--font-display` is the one
+  step above the ladder, for those figures only.
+- **One screen, no page scroll, and each fact once** (UX review on request, 2026-10-22). The strip
+  is a few hundred pixels tall, so a page that scrolled hid most of itself: the day and the tiles
+  take their height, and the panels share what is left (`grid-auto-rows: minmax(0, 1fr)`), each
+  scrolling on its own. The Details section was removed because it repeated the tiles and the
+  panels; the time tracking facts moved to the tile's tooltip. A tile is a whole button leading to
+  its source (a tab, Outlook, Teams, Tipee): a 20px corner glyph was the only target before.
+- **The cards stand on a recessed ground** (`--surface-inset` behind, `--surface-raised` cards,
+  `--border-strong` edges, `--card-shadow`). On the strip's own surface a raised card was #1b1b1b
+  on #131313 in the dark theme and #fafafa on white in the light one, with a 1.3:1 border: no edge
+  could be seen, and the text of neighbouring cards read as one stacked column. `--card-shadow` is
+  one token per theme because a shadow alone vanishes on a dark ground; there it adds a top
+  hairline of light.
+- ⚠️ **The digest file carries a `version`** (`DIGEST_VERSION`), raised whenever a field the cards
+  read is added. A file of an older shape is refused, so the first look of the day reads again;
+  without it, a digest cached before the change shows its cards with the new field empty all day,
+  which is what happened to the message text.
+- **Teams messages lose the sender the search puts in front of some summaries** (`lineText`), and a
+  message with no text says `(attachment or card)` rather than drawing an empty line.
+- **Tipee is read, never written.** Its API is the private one its web app uses (form login with a
+  CSRF token, session cookies, `resources.show-status` and `workdays.show` filtered on the person's
+  own id, since an unfiltered list was seen returning colleagues). Clocking stays with the web app
+  and with any dedicated tool. The password is in its own `SecretStore` file like the Jira token,
+  the address is reduced to an https origin, and nothing is polled until the card is on and all
+  three are set.
 
 ## Notifications: saying it to somebody who is not looking
 

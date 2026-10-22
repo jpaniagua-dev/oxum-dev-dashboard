@@ -62,6 +62,10 @@ export const AppPaths = {
   agentSessions: (): string => join(app.getPath('userData'), 'agent-sessions.json'),
   /** The last routine list read from claude.ai: a whitelist of fields, never a routine's prompt. */
   routines: (): string => join(app.getPath('userData'), 'routines.json'),
+  /** The last Microsoft 365 digest of the Today tab: a whitelist of fields, never a message body. */
+  todayDigest: (): string => join(app.getPath('userData'), 'today-digest.json'),
+  /** Encrypted time tracking password, kept out of `settings.json` like the Jira token. */
+  tipeePassword: (): string => join(app.getPath('userData'), 'tipee-password.bin'),
   /** The default folder of the local tickets, one Markdown file each. */
   tickets: (): string => join(app.getPath('userData'), 'tickets'),
   /**

@@ -8,6 +8,8 @@ page of the tab you are using.
 - [Settings](settings.md): every page of the settings window, and what sits under Advanced.
 - [The terminal](terminal.md): tabs, panes, shells.
 - Tabs, in the order of the strip:
+  - [Today](tabs/today.md): what is waiting for you, one card per source: pull requests, tickets,
+    calendar, mail, Teams and time tracking.
   - [Projects](tabs/projects.md): the watched repositories, their server, files, branch and checks.
   - [Pull requests](tabs/pull-requests.md): the pull requests that involve you, and their review.
   - [Worktrees](tabs/worktrees.md): every worktree of every project, created and removed in place.

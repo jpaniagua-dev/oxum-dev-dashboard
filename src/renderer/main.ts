@@ -108,6 +108,9 @@ import { TerminalPane } from './ui/terminal-pane.js';
 import { applyUiFontSize } from './ui/ui-font.js';
 import { appShortcut } from './ui/app-shortcuts.js';
 import { attachBoardPreviewResizer } from './ui/board-preview-resizer.js';
+import { renderTodayPanel } from './ui/today-panel.js';
+import { wantsDigest, type TodayDigestState } from '@shared/today.js';
+import type { TipeeState } from '@shared/tipee.js';
 
 /**
  * Application shell.
@@ -238,6 +241,10 @@ class App {
   /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
   private autoRuns: AutoRunRecord[] = [];
   private triagePanel: TriagePanel | null = null;
+  private todayDigest: TodayDigestState = { digest: null, running: false, startedAt: null, error: null };
+  private tipee: TipeeState = { configured: false, status: null, checkedAt: null, error: null };
+  /** Repaints the Today tab every second while a digest run is under way, for its clock. */
+  private todayClock: ReturnType<typeof setInterval> | null = null;
   private selectedJiraView: JiraViewId = 'mine';
   /*
    * Jira filter and sort.
@@ -486,6 +493,8 @@ class App {
     this.pulls = bootstrap.pulls;
     this.pullScope = bootstrap.settings.pullScope;
     this.jira = bootstrap.jira;
+    this.todayDigest = bootstrap.todayDigest;
+    this.tipee = bootstrap.tipee;
     this.ticketsLayout = bootstrap.settings.ticketsLayout;
     // Read at startup whatever tab is shown: a folder of a few files, and the Tickets tab must not
     // open on a board missing half its cards until it is left and shown again.
@@ -527,6 +536,7 @@ class App {
       git: () => void this.loadGit(),
       extensions: () => void this.extensions?.load(),
       explorer: () => void this.explorer?.load(),
+      today: () => this.showToday(),
     });
 
     window.api.onRowsChanged((rows) => {
@@ -556,6 +566,7 @@ class App {
     window.api.onPullsChanged((repos) => {
       this.pulls = repos;
       this.renderPulls();
+      this.renderToday();
       // The table's `Checks` column is a join against this payload, so the pulls poll is now one of
       // the two things that can change what that column says. Before the column stopped being its own
       // `gh pr view` per project, this push only concerned the Pull requests tab.
@@ -574,6 +585,15 @@ class App {
     window.api.onJiraChanged((state) => {
       this.jira = state;
       this.renderJira();
+      this.renderToday();
+    });
+    window.api.onTodayDigestChanged((state) => {
+      this.todayDigest = state;
+      this.renderToday();
+    });
+    window.api.onTipeeChanged((state) => {
+      this.tipee = state;
+      this.renderToday();
     });
     // Pushed around a run: the button has to say "Analysing" the moment it starts, and the verdicts
     // have to land when it ends, which can be minutes later.
@@ -934,6 +954,88 @@ class App {
       return;
     }
     renderVaultPanel(host, view, actions);
+  }
+
+  /** Paints the Today tab and reads the Microsoft 365 digest if nothing was read today. */
+  private showToday(): void {
+    this.renderToday();
+    if (this.settings !== null && wantsDigest(this.settings.todayChannels)) {
+      void window.api.refreshTodayDigest(false).then((state) => {
+        this.todayDigest = state;
+        this.renderToday();
+      });
+    }
+  }
+
+  /** Everything the Today tab reads, at once: the digest is forced, the other sources re-polled. */
+  private async refreshToday(): Promise<void> {
+    const channels = this.settings?.todayChannels;
+    if (channels === undefined) {
+      return;
+    }
+    await Promise.all([
+      channels.pulls ? window.api.refreshPulls().then((repos) => (this.pulls = repos)) : null,
+      channels.tickets ? window.api.refreshJira().then((state) => (this.jira = state)) : null,
+      wantsDigest(channels)
+        ? window.api.refreshTodayDigest(true).then((state) => (this.todayDigest = state))
+        : null,
+      channels.tipee ? window.api.refreshTipee().then((state) => (this.tipee = state)) : null,
+    ]);
+    this.renderPulls();
+    this.renderJira();
+    this.renderToday();
+  }
+
+  private renderToday(): void {
+    if (this.settings === null) {
+      return;
+    }
+    // Only the clock needs a timer, and only while a run is under way and the tab is looked at.
+    const ticking = this.todayDigest.running && this.strip?.active === 'today';
+    if (ticking && this.todayClock === null) {
+      this.todayClock = setInterval(() => this.renderToday(), 1000);
+    } else if (!ticking && this.todayClock !== null) {
+      clearInterval(this.todayClock);
+      this.todayClock = null;
+    }
+    const tickets =
+      this.jira === null
+        ? null
+        : withLocalTickets(this.jira, (this.localTickets?.tickets ?? []).map(localAsIssue)).state;
+    renderTodayPanel(
+      requireElement('strip-panel-today'),
+      {
+        channels: this.settings.todayChannels,
+        pulls: this.pulls,
+        tickets,
+        digest: this.todayDigest,
+        tipee: this.tipee,
+        tipeeUrl: this.settings.tipeeUrl,
+        now: Date.now(),
+      },
+      {
+        onOpenPull: (projectId) => {
+          this.selectedRepo = projectId;
+          this.strip?.select('pulls');
+          this.renderPulls();
+        },
+        onOpenPulls: () => this.strip?.select('pulls'),
+        onOpenTickets: () => this.strip?.select('jira'),
+        onOpenIssue: (issue) => {
+          if (issue.source === 'local') {
+            void window.api.openLocalTicket(issue.key, false).then((problem) => {
+              if (problem.length > 0) {
+                this.stampMessage(problem);
+              }
+            });
+          } else {
+            void window.api.openExternal(issue.url);
+          }
+        },
+        onOpenUrl: (url) => void window.api.openExternal(url),
+        onOpenSettings: () => void window.api.openSettings(),
+      },
+    );
   }
 
   private renderAgents(): void {
@@ -3174,6 +3276,10 @@ class App {
         });
         return;
       }
+      if (this.strip?.active === 'today') {
+        void this.refreshToday().then(() => this.stampRefresh());
+        return;
+      }
       if (this.strip?.active === 'jira') {
         void window.api.refreshJira().then((state) => {
           this.jira = state;
@@ -3290,6 +3396,7 @@ class App {
       const folderMoved = settings.localTicketsDir !== this.settings?.localTicketsDir;
       this.settings = settings;
       void this.reloadAfterSettings();
+      this.renderToday();
       // A folder changed in the settings window is a different set of tickets.
       if (folderMoved) {
         void this.loadLocalTickets();
@@ -3388,6 +3495,9 @@ class App {
         }
         if (tab === 'agents') {
           this.renderAgents();
+        }
+        if (tab === 'today') {
+          this.showToday();
         }
         // Two files on disk that change when an agent runs, so the tab being shown is exactly
         // when the answer can have changed and somebody is there to read it. No monitor, the
@@ -3695,6 +3805,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.extensionsHeight;
     case 'explorer':
       return settings.explorerHeight;
+    case 'today':
+      return settings.todayHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -3714,7 +3826,8 @@ function heightKeyOf(
   | 'automationsHeight'
   | 'vaultHeight'
   | 'extensionsHeight'
-  | 'explorerHeight' {
+  | 'explorerHeight'
+  | 'todayHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -3736,6 +3849,8 @@ function heightKeyOf(
       return 'extensionsHeight';
     case 'explorer':
       return 'explorerHeight';
+    case 'today':
+      return 'todayHeight';
     case 'projects':
       return 'projectsHeight';
   }

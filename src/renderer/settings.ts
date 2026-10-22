@@ -27,6 +27,7 @@ async function start(): Promise<void> {
       review: requireElement('settings-review'),
       automations: requireElement('settings-automations'),
       jira: requireElement('settings-jira'),
+      today: requireElement('settings-today'),
       footer: requireElement('settings-footer'),
     },
     {

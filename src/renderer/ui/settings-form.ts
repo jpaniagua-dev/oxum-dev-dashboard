@@ -31,6 +31,14 @@ import {
   withAssignedTagColors,
   withTagColor,
 } from '@shared/project-tags.js';
+import {
+  DEFAULT_TODAY_CHANNELS,
+  DIGEST_CHANNELS,
+  TODAY_CHANNEL_LABELS,
+  TODAY_CHANNELS,
+  type TodayChannel,
+  type TodayChannels,
+} from '@shared/today.js';
 import { clearChildren, createElement } from './dom.js';
 
 /**
@@ -131,6 +139,7 @@ export interface SettingsFormHosts {
   readonly review: HTMLElement;
   readonly automations: HTMLElement;
   readonly jira: HTMLElement;
+  readonly today: HTMLElement;
   readonly footer: HTMLElement;
 }
 
@@ -260,6 +269,13 @@ export class SettingsForm {
   /** Typed token, held only until the save. Never read back from the main process. */
   private jiraToken = '';
   private jiraStatus = '';
+  private todayChannels: TodayChannels = DEFAULT_TODAY_CHANNELS;
+  private tipee = { url: '', user: '' };
+  /** Typed password, held only until the save. Never read back from the main process. */
+  private tipeePassword = '';
+  private tipeeHasPassword = false;
+  private tipeeStatus = '';
+  private digestStatus = '';
   private validations: ProjectValidation[] = [];
   private candidates: ProjectCandidate[] = [];
   private showCandidates = false;
@@ -337,6 +353,12 @@ export class SettingsForm {
     this.jira = { ...jira, projectKeys: [...jira.projectKeys] };
     this.jiraToken = '';
     this.jiraStatus = '';
+    this.todayChannels = { ...settings.todayChannels };
+    this.tipee = { url: settings.tipeeUrl, user: settings.tipeeUser };
+    this.tipeePassword = '';
+    this.tipeeStatus = '';
+    this.digestStatus = '';
+    this.tipeeHasPassword = await window.api.hasTipeePassword();
     // Deep copies down to the actions: the form must not mutate the state the dashboard renders from.
     this.projects = settings.projects.map((project) => ({
       ...project,
@@ -383,6 +405,7 @@ export class SettingsForm {
     this.renderReview();
     this.renderAutomations();
     this.renderJira();
+    this.renderToday();
     this.renderFooter();
     this.renderRail();
   }
@@ -526,6 +549,12 @@ export class SettingsForm {
             ? 'posts to GitHub as you'
             : 'reads only',
         tone: this.feedbackPass || this.reviewWrites ? 'warn' : 'neutral',
+      },
+      {
+        id: 'section-today',
+        name: 'Today',
+        state: `${TODAY_CHANNELS.filter((channel) => this.todayChannels[channel]).length} of ${TODAY_CHANNELS.length} cards`,
+        tone: 'neutral',
       },
       {
         id: 'section-automations',
@@ -1239,6 +1268,134 @@ export class SettingsForm {
       shellBox.disabled = true;
     }
     this.hosts.automations.append(shell);
+  }
+
+  /**
+   * Which cards the Today tab shows on this machine, and the two connections behind them.
+   *
+   * Per machine by construction: these keys live in this account's settings and are never part of
+   * a team configuration, so a home PC and a work PC each say what they can reach.
+   */
+  private renderToday(): void {
+    clearChildren(this.hosts.today);
+
+    const boxes = TODAY_CHANNELS.map((channel) => {
+      const box = this.checkbox(
+        TODAY_CHANNEL_LABELS[channel],
+        this.todayChannels[channel],
+        (checked) => {
+          this.todayChannels = { ...this.todayChannels, [channel]: checked };
+          this.touch();
+          this.renderRail();
+        },
+      );
+      box.title = channelHint(channel);
+      return box;
+    });
+    this.hosts.today.append(this.group('Cards', '', boxes));
+
+    const digestNote = this.statusNote(this.digestStatus);
+    const test = createElement('button', { className: 'button', text: 'Test Microsoft 365' });
+    test.type = 'button';
+    test.title = 'One read call through Claude Code, to say whether the connector answers and as whom';
+    test.addEventListener('click', () => {
+      test.disabled = true;
+      digestNote.textContent = 'Asking Claude Code…';
+      digestNote.hidden = false;
+      void window.api
+        .testTodayDigest()
+        .then((result) => {
+          this.digestStatus = result.message;
+        })
+        .catch((error: unknown) => {
+          this.digestStatus = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => this.renderToday());
+    });
+    const digest = createElement('div', { className: 'settings-inline' });
+    digest.append(test);
+    this.hosts.today.append(
+      this.group(
+        'Microsoft 365',
+        'Calendar, Mail and Teams are read through Claude Code and its claude.ai Microsoft 365 ' +
+          'connector, read only, at the first look of the day and on Refresh.',
+        [digest, digestNote],
+      ),
+    );
+
+    // Mono like the Jira fields: an address and a username are values something else must match.
+    const grid = createElement('div', { className: 'settings-entry__grid settings-entry__grid--jira' });
+    grid.append(
+      this.field(
+        'Address',
+        this.tipee.url,
+        (value) => {
+          this.tipee = { ...this.tipee, url: value };
+          this.touch();
+        },
+        '',
+        true,
+      ),
+    );
+    grid.append(
+      this.field(
+        'Username',
+        this.tipee.user,
+        (value) => {
+          this.tipee = { ...this.tipee, user: value };
+          this.touch();
+        },
+        '',
+        true,
+      ),
+    );
+    const password = this.field(
+      'Password',
+      '',
+      (value) => {
+        this.tipeePassword = value;
+        this.touch();
+      },
+      this.tipeeHasPassword ? 'a password is saved, type a new one to replace it' : '',
+      true,
+    );
+    const input = password.querySelector('input');
+    if (input !== null) {
+      input.type = 'password';
+      input.autocomplete = 'off';
+    }
+    const tipeeTest = createElement('button', { className: 'button', text: 'Test' });
+    tipeeTest.type = 'button';
+    tipeeTest.title = 'Signs in and reads the clock status, with what is typed here';
+    tipeeTest.addEventListener('click', () => {
+      tipeeTest.disabled = true;
+      void window.api
+        .testTipee({ url: this.tipee.url, user: this.tipee.user, password: this.tipeePassword })
+        .then((result) => {
+          this.tipeeStatus = result.message;
+        })
+        .catch((error: unknown) => {
+          this.tipeeStatus = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => this.renderToday());
+    });
+    const secret = createElement('div', { className: 'settings-inline' });
+    secret.append(password, tipeeTest);
+    this.hosts.today.append(
+      this.group(
+        'Time tracking',
+        "A Tipee instance, read only: the clock status and the day's totals. The password is " +
+          'encrypted for your Windows account and never shown again.',
+        [grid, secret, this.statusNote(this.tipeeStatus)],
+      ),
+    );
+  }
+
+  /** The answer of a Test button, hidden while there is none. */
+  private statusNote(text: string): HTMLElement {
+    const note = createElement('p', { className: 'settings-entry__hint', text });
+    note.hidden = text.length === 0;
+    return note;
   }
 
   private renderJira(): void {
@@ -2298,6 +2455,9 @@ export class SettingsForm {
       updateCheck: this.updateCheck,
       restoreAgentSessions: this.restoreAgents,
       tagColors: this.tagColors,
+      todayChannels: this.todayChannels,
+      tipeeUrl: this.tipee.url,
+      tipeeUser: this.tipee.user,
     });
     this.fontSize = saved.terminalFontSize;
     this.uiFontSize = saved.uiFontSize;
@@ -2331,6 +2491,15 @@ export class SettingsForm {
     // **completes** this map, giving a colour to any tag added in this very session, so the draft would
     // otherwise stay short of what was stored and the signature would never match the echo.
     this.tagColors = { ...saved.tagColors };
+    // Read back: the store keeps only an https address, reduced to its origin.
+    this.todayChannels = { ...saved.todayChannels };
+    this.tipee = { url: saved.tipeeUrl, user: saved.tipeeUser };
+    if (this.tipeePassword.length > 0) {
+      const result = await window.api.saveTipeePassword(this.tipeePassword);
+      this.tipeeStatus = result.ok ? 'Password saved' : result.message;
+      this.tipeeHasPassword = result.ok || this.tipeeHasPassword;
+      this.tipeePassword = '';
+    }
 
     // The token travels only when one was actually typed: an empty field means "keep the stored one".
     const jira = await window.api.saveJira(
@@ -2559,4 +2728,15 @@ export class SettingsForm {
     wrapper.append(select);
     return wrapper;
   }
+}
+
+/** What switching a card on costs, said where the switch is. */
+function channelHint(channel: TodayChannel): string {
+  if (DIGEST_CHANNELS.includes(channel)) {
+    return 'Read through Claude Code: needs the claude.ai Microsoft 365 connector on this account';
+  }
+  if (channel === 'tipee') {
+    return 'Needs the address, username and password below';
+  }
+  return 'Read from what the other tabs already hold: no request of its own';
 }

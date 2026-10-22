@@ -14,6 +14,7 @@ function loaders(): Record<keyof RestoredStripLoaders, ReturnType<typeof vi.fn>>
     git: vi.fn(),
     extensions: vi.fn(),
     explorer: vi.fn(),
+    today: vi.fn(),
   };
 }
 
@@ -26,6 +27,7 @@ describe('loadRestoredStrip', () => {
     git: 'git',
     extensions: 'extensions',
     explorer: 'explorer',
+    today: 'today',
   };
 
   for (const tab of STRIP_TABS) {

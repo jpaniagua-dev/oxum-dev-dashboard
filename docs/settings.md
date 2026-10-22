@@ -109,6 +109,15 @@ Advanced, in three groups:
 
 Advanced: **Automated reviewer login**, the bot whose remarks the review weighs.
 
+## Today
+
+- **Cards**: which cards the [Today tab](tabs/today.md) shows, on this machine only. Pull requests
+  and Tickets are on by default.
+- **Test Microsoft 365**: one read call through Claude Code, to check the connector the Calendar,
+  Mail and Teams cards need and say as whom it answers.
+- **Time tracking**: the Tipee address, username and password, and **Test**, which signs in and
+  reads the clock status. The password field is always empty: type a new one to replace it.
+
 ## Rules
 
 - **Let rules act on their own**: off by default. See [Rules](tabs/rules.md).
@@ -117,4 +126,4 @@ Advanced: **Automated reviewer login**, the bot whose remarks the review weighs.
 ## Where settings live
 
 `%APPDATA%\oxum-dev-dashboard\settings.json`. Secrets are in separate encrypted files beside it
-(`jira-token.bin`, `vault.bin`) and cannot be copied to another Windows account.
+(`jira-token.bin`, `tipee-password.bin`, `vault.bin`) and cannot be copied to another Windows account.

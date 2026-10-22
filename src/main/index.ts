@@ -44,6 +44,8 @@ import { PullReviewService } from './review/review-service.js';
 import { runAgent } from './agent/run-agent.js';
 import { registerIpcHandlers } from './ipc.js';
 import { JiraMonitor } from './jira/jira-monitor.js';
+import { DigestService } from './today/digest-service.js';
+import { TipeeMonitor } from './today/tipee-monitor.js';
 import { TriageService } from './triage/triage-service.js';
 import { buildJql, searchIssues } from './jira/jira-service.js';
 import { SecretStore } from './store/secret-store.js';
@@ -313,6 +315,18 @@ async function bootstrap(): Promise<void> {
       dashboardWindow.send(IpcChannel.JiraChanged, state);
       void runAutomations();
     },
+  );
+
+  const todayDigest = new DigestService({
+    command: () => settingsStore.get().claudeCommand,
+    onChange: (state) => dashboardWindow.send(IpcChannel.TodayDigestChanged, state),
+  });
+  await todayDigest.load();
+  const tipeeSecrets = new SecretStore(AppPaths.tipeePassword());
+  const tipeeMonitor = new TipeeMonitor(
+    () => settingsStore.get(),
+    tipeeSecrets,
+    (state) => dashboardWindow.send(IpcChannel.TipeeChanged, state),
   );
 
   /*
@@ -812,6 +826,16 @@ async function bootstrap(): Promise<void> {
     monitor: () => projectMonitor,
     pulls: () => pullMonitor,
     jira: () => jiraMonitor,
+    todayDigest: () => todayDigest,
+    tipee: () => tipeeMonitor,
+    saveTipeePassword: async (password) => {
+      const result = await tipeeSecrets.write(password);
+      if (result.ok) {
+        void tipeeMonitor.refreshNow();
+      }
+      return result;
+    },
+    hasTipeePassword: async () => (await tipeeSecrets.read()).length > 0,
     triage: () => triageService,
     vault: () => vaultStore,
     vaultFiles: () => vaultFiles,
@@ -1063,6 +1087,7 @@ async function bootstrap(): Promise<void> {
   pullMonitor.start();
   hasJiraToken = (await secrets.read()).length > 0;
   jiraMonitor.start();
+  tipeeMonitor.start();
 
   window.on('close', (event) => {
     // Dev servers and editors matter here. A shell tab dying with the app is expected; a build being
@@ -1105,6 +1130,7 @@ async function bootstrap(): Promise<void> {
     projectMonitor.stop();
     pullMonitor.stop();
     jiraMonitor.stop();
+    tipeeMonitor.stop();
     terminalManager.stopAll();
     editorWindows.closeAll();
     panelEditor.stop();

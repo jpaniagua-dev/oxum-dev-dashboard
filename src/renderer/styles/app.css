@@ -7239,3 +7239,536 @@ textarea.tickets__input {
 .editor-page__status[hidden] {
   display: none;
 }
+
+/* -------------------------------------------------------------- today tab */
+
+/*
+ * One screen, no page scroll: the day, the numbers, then panels sharing the height that is left.
+ *
+ * The strip is a few hundred pixels above the terminal, so a page that scrolls hides most of
+ * itself. Each panel scrolls on its own instead, and the panel itself only scrolls as a last
+ * resort, on a strip too short for the panels' minimum height.
+ */
+.today {
+  display: flex;
+  flex-direction: column;
+  /* A recessed ground, so the cards stand on it: on the strip's own surface they had no edge. */
+  background: var(--surface-inset);
+  /* The space between the three bands is what says where one ends: 8px read as one block. */
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 10px 12px;
+}
+
+.today[hidden] {
+  display: none;
+}
+
+.today__none {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.today__card-title {
+  color: var(--text-dim);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.today__card-count {
+  flex: 1;
+  color: var(--text-dim);
+  font-size: var(--font-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- headline numbers: each one leads to its source */
+
+.today__stats {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.today__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 7px 12px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--card-shadow);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.today__stat--link {
+  cursor: pointer;
+}
+
+.today__stat--link:hover {
+  background: var(--surface-hover);
+}
+
+.today__stat--link:active {
+  background: var(--surface-inset);
+}
+
+/* The number the tab leads with: same face, on the accent edge the app uses for "this one". */
+.today__stat--hero {
+  box-shadow: inset 3px 0 0 var(--primary), var(--card-shadow);
+}
+
+.today__stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.today__stat-label {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Says "this goes somewhere" without competing with the number: faint until the tile is hovered. */
+.today__stat-glyph {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-faint);
+  opacity: 0.6;
+}
+
+.today__stat--link:hover .today__stat-glyph {
+  opacity: 1;
+}
+
+.today__stat-value {
+  color: var(--text);
+  font-size: var(--font-display);
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+.today__stat--hero .today__stat-value {
+  color: var(--primary);
+}
+
+.today__stat-detail {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- the day: meetings on an hour axis, now as a line */
+
+.today__chart {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 12px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--card-shadow);
+}
+
+.today__chart-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.today__allday {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.today__allday-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+}
+
+.today__day {
+  --lane-height: 18px;
+  position: relative;
+  height: calc(var(--lanes) * (var(--lane-height) + 3px) + 6px);
+  /* Room for the hour labels, which hang below the axis: without it they spill out of the card. */
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.today__day-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.today__day-hour {
+  position: absolute;
+  bottom: -16px;
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+}
+
+/* The two ends align inward, or half of each label falls outside the card. */
+.today__day-hour--first {
+  transform: none;
+}
+
+.today__day-hour--last {
+  transform: translateX(-100%);
+}
+
+.today__day-event {
+  position: absolute;
+  top: calc(var(--lane) * (var(--lane-height) + 3px) + 3px);
+  height: var(--lane-height);
+  min-width: 3px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--chart-1);
+}
+
+/* Over: the same mark, faded to the inset ground, so the eye goes to what is left. */
+.today__day-event--past {
+  background: var(--border-strong);
+}
+
+.today__day-event--now {
+  box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 3px var(--chart-1);
+}
+
+.today__day-label {
+  display: block;
+  padding: 2px 6px;
+  overflow: hidden;
+  color: var(--white);
+  font-size: var(--font-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today__day-event--past .today__day-label {
+  color: var(--text);
+}
+
+.today__day-now {
+  position: absolute;
+  top: -2px;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--primary);
+}
+
+/* ---- panels: the rest of the height, each scrolling on its own */
+
+.today__panels {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 12px 10px;
+  min-height: 160px;
+}
+
+.today__panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--card-shadow);
+}
+
+.today__panel-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  /* The head one step off the body, so where a panel starts reads before its text does. */
+  background: var(--surface);
+}
+
+.today__panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.today__panel-body > .pulls__empty,
+.today__panel-body > .pulls__error {
+  margin: 2px 6px;
+}
+
+/* The sprint sits on top of the tickets it is made of, divided from the list by one hairline. */
+.today__panel-chart {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.today__group-title {
+  padding: 4px 8px 2px;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  font-weight: 600;
+}
+
+/* ---- rows */
+
+.today__row {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.today__row:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.today__row:disabled {
+  cursor: default;
+}
+
+.today__row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.today__row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today__row-facts {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today__row-when {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* What is under way: a ticket being worked on. An edge, never a weight. */
+.today__row--active {
+  box-shadow: inset 2px 0 0 var(--success);
+}
+
+.today__flag {
+  flex: none;
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* ---- the sprint: part to whole, one stacked bar per row */
+
+.today__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+}
+
+.today__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.today__swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.today__stack-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.today__stack-label {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today__stack {
+  display: flex;
+  gap: 2px;
+  height: 16px;
+}
+
+.today__stack-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3px;
+  border-radius: 4px;
+}
+
+.today__stack-count {
+  color: var(--white);
+  font-size: var(--font-3xs);
+  font-weight: 600;
+}
+
+.today__stack-total {
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- messages: unread mail, conversations waiting for a reply */
+
+.today__message {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 8px 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.today__message:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.today__message:disabled {
+  cursor: default;
+}
+
+.today__message + .today__message {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.today__message-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.today__message-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font-md);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two lines of the body at most: enough to know what it is about, the link opens the rest. */
+.today__message-preview,
+.today__message-line {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.today__message-from {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.today__message-more {
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+}
+
+/* A second group opens on its own space: "Mine, waiting" read as the last row of "To review". */
+.today__group-title ~ .today__group-title {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* The first line stays close to its title; the wider gap is what separates one message from the next. */
+.today__message-head + .today__row-facts,
+.today__message-head + .today__message-line {
+  margin-top: -2px;
+}

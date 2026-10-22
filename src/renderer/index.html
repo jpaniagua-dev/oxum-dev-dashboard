@@ -50,6 +50,9 @@
               the date each tab was added. The ids are unchanged, `jira` included under its Tickets
               label: they are what the settings store as the tab to reopen on.
             -->
+                <button type="button" id="strip-tab-today" class="strip__tab" role="tab">
+                  Today
+                </button>
                 <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
                   Projects
                 </button>
@@ -263,6 +266,9 @@
           Filled by `explorer-panel.ts`, which builds the three columns itself.
         -->
             <div class="pulls pulls--detail explorer" id="strip-panel-explorer" role="tabpanel" hidden></div>
+
+            <!-- Filled by `today-panel.ts`: one card per source switched on in the settings. -->
+            <div class="today" id="strip-panel-today" role="tabpanel" hidden></div>
 
             <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
               <div class="pulls__repos" id="triage-sprints"></div>
