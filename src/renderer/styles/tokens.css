@@ -98,6 +98,8 @@
   --chart-1: #2f6bd8;
   --chart-2: #c8681a;
   --chart-3: #7c4fd6;
+  /* A green-leaning teal: a plain teal sat too close to slot 1's blue, even in full colour vision. */
+  --chart-4: #0f8f72;
 
   --selection: var(--brand-primary-extra-light);
   --active-line: #00000005;
@@ -240,6 +242,7 @@
   --chart-1: #5585e6;
   --chart-2: #c97a30;
   --chart-3: #9070e6;
+  --chart-4: #2aa184;
 
   --selection: #3a1f26;
   --active-line: #ffffff06;

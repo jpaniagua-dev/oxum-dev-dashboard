@@ -3,25 +3,20 @@
 What is waiting for you, as a status dashboard. Each source is switched on or off in **Settings,
 Today**, for this machine only: a home computer and a work computer can show different cards.
 
-The tab fits the strip without scrolling. From top to bottom:
+Three lines, each a chart followed by three numbers. Click a number to open its source; a `…` is
+being read, a `?` could not be read.
 
-- **Your day** and three numbers, on one line: today's meetings on an hour axis, with a red line
-  at the current time (hover a meeting for its time and subject), then pull requests that need
-  you, tickets in progress, and since when you are clocked in (green while you are). Click a number
-  to open its source: the Pull requests or Tickets tab, or Tipee. A `…` is being read; a `?` could
-  not be read. Hover the time tracking number for the time due and the balance.
-- **Panels**, sharing the rest of the height, each scrolling on its own:
-  - **Pull requests**: **To review** (waiting for your review) and **Mine, waiting** (yours waiting
-    for a review from somebody else; not drafts, not those approved or with changes requested).
-  - **Tickets**: the sprint by stage, then your open tickets, the ones in progress first.
-  - **Unread mail**: the unread mails among the newest since yesterday morning, with the start of
-    each one.
-  - **Teams, waiting for your reply**: the conversations where somebody else wrote after your last
-    message, with what they wrote. Teams gives no read state, so this is "waiting for your reply",
-    not "unread".
-
-A click on a row opens it: a pull request or a ticket in its tab, a mail in Outlook, a conversation
-in Teams.
+- **Your day**: today's meetings on an hour axis, with a red line at the current time (hover a
+  meeting for its time and subject). Then the unread mails among the newest since yesterday
+  morning, the Teams conversations waiting for your reply (somebody else wrote after your last
+  message; Teams gives no read state, so this is not "unread"), and since when you are clocked in,
+  in green while you are, with the time worked today. Hover it for the time due and the balance.
+- **Sprint**: your tickets and the whole sprint's, by stage. Then your tickets of the current sprint
+  in progress, to do and done.
+- **Pull requests by age**: yours and the ones waiting for your review, each a bar from the day it
+  was opened to now, coloured by what it waits for, so the one waiting longest stands out. Click a
+  bar to open it in the Pull requests tab. Then the pull requests that need you (your review, or
+  changes asked of yours), yours waiting for approval, and yours approved.
 
 Pull requests and tickets cost nothing: they show what the Pull requests and Tickets tabs already
 read.

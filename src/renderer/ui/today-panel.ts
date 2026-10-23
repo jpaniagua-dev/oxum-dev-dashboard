@@ -1,9 +1,8 @@
-import type { JiraIssue, JiraState, ProjectId, PullRequest, RepoPulls } from '@shared/contracts.js';
+import type { JiraState, ProjectId, PullRequest, RepoPulls } from '@shared/contracts.js';
 import { describeMinutes, type TipeeState } from '@shared/tipee.js';
 import {
   localDay,
   TODAY_CHANNELS,
-  type DigestEvent,
   type DigestMail,
   type DigestSection,
   type TodayChannel,
@@ -11,24 +10,26 @@ import {
   type TodayDigestState,
 } from '@shared/today.js';
 import { clearChildren, createElement } from './dom.js';
-import type { Pill } from './presenters.js';
-import { buildPill } from './project-table.js';
 import {
   buildStatRow,
   chartCard,
+  layoutAges,
   layoutDay,
+  renderAges,
   renderDay,
   renderSprint,
   sprintBreakdown,
+  type AgeRow,
   type StatTile,
 } from './today-charts.js';
 
 /**
- * The Today tab: one card per source, each answering "what is waiting for me there".
+ * The Today tab: three lines, each a chart and the three numbers that go with it.
  *
- * Pull requests and tickets are read from what the other tabs already hold, so the tab costs no
- * request of its own for them. Calendar, mail and Teams come from one Microsoft 365 digest, and the
- * time tracking card from its own poll; both are pushed by the main process.
+ * The day with mail, Teams and the clock; the sprint with my tickets by stage; the pull requests
+ * by age with what waits on whom. Pull requests and tickets are read from what the other tabs
+ * already hold; calendar, mail and Teams come from one Microsoft 365 digest, and the clock from
+ * its own poll, both pushed by the main process.
  */
 
 export interface TodayInputs {
@@ -46,12 +47,11 @@ export interface TodayActions {
   readonly onOpenPull: (projectId: ProjectId, number: number) => void;
   readonly onOpenPulls: () => void;
   readonly onOpenTickets: () => void;
-  readonly onOpenIssue: (issue: JiraIssue) => void;
   readonly onOpenUrl: (url: string) => void;
   readonly onOpenSettings: () => void;
 }
 
-/** What a pull request is waiting for, in the order the card lists them: what needs me first. */
+/** What a pull request is waiting for, in the order the chart lists them: what needs me first. */
 export type PullNeed = 'review' | 'changes' | 'approved' | 'waiting' | 'draft';
 
 const NEED_ORDER: readonly PullNeed[] = ['review', 'changes', 'approved', 'waiting', 'draft'];
@@ -64,7 +64,8 @@ export interface TodayPull {
 }
 
 /**
- * My pull requests and the ones waiting for my review, the ones that need me first.
+ * My pull requests and the ones waiting for my review, the ones that need me first, the oldest
+ * first within each.
  *
  * A review request wins over authorship: GitHub drops me from the requested reviewers once I have
  * reviewed, so `isReviewer` on somebody else's pull request means my review is still owed.
@@ -82,7 +83,7 @@ export function todayPulls(repos: readonly RepoPulls[]): TodayPull[] {
   return out.sort(
     (left, right) =>
       NEED_ORDER.indexOf(left.need) - NEED_ORDER.indexOf(right.need) ||
-      right.pull.updatedAt.localeCompare(left.pull.updatedAt),
+      left.pull.createdAt.localeCompare(right.pull.createdAt),
   );
 }
 
@@ -102,62 +103,6 @@ export function needOf(pull: PullRequest): PullNeed {
     case 'none':
       return 'waiting';
   }
-}
-
-export function presentNeed(need: PullNeed): Pill {
-  switch (need) {
-    case 'review':
-      return { label: 'your review', tone: 'busy', title: 'Your review is requested' };
-    case 'changes':
-      return { label: 'changes requested', tone: 'error', title: 'A reviewer requested changes' };
-    case 'approved':
-      return { label: 'approved', tone: 'ok', title: 'Approved: ready to merge once green' };
-    case 'waiting':
-      return { label: 'waiting', tone: 'neutral', title: 'Waiting for a review' };
-    case 'draft':
-      return { label: 'draft', tone: 'neutral', title: 'Still a draft' };
-  }
-}
-
-/** My open tickets, once each, what is moving before what is waiting. */
-export function todayTickets(state: JiraState | null): JiraIssue[] {
-  if (state === null) {
-    return [];
-  }
-  const byKey = new Map<string, JiraIssue>();
-  for (const view of state.views) {
-    for (const issue of view.issues) {
-      if (issue.isMine && issue.stage !== 'done' && !byKey.has(issue.key)) {
-        byKey.set(issue.key, issue);
-      }
-    }
-  }
-  const order = ['in-progress', 'todo', 'unknown'];
-  return [...byKey.values()].sort(
-    (left, right) =>
-      order.indexOf(left.stage) - order.indexOf(right.stage) ||
-      right.updatedAt.localeCompare(left.updatedAt),
-  );
-}
-
-/** Where a meeting stands against the clock: over, under way, or still to come. */
-export type EventMoment = 'past' | 'now' | 'later';
-
-export function eventMoment(event: DigestEvent, now: number): EventMoment {
-  if (event.isAllDay) {
-    return 'now';
-  }
-  // A wall-clock string without a zone parses as local time, which is the zone the search used.
-  const start = Date.parse(event.start);
-  const end = Date.parse(event.end);
-  if (Number.isNaN(start) || Number.isNaN(end)) {
-    return 'later';
-  }
-  return now >= end ? 'past' : now >= start ? 'now' : 'later';
-}
-
-export function describeEventTime(event: DigestEvent): string {
-  return event.isAllDay ? 'All day' : `${event.start.slice(11, 16)}-${event.end.slice(11, 16)}`;
 }
 
 /** `14:05` today, `Yesterday 14:05`, or `Mon 14:05` further back. */
@@ -194,138 +139,59 @@ export function shownChannels(channels: TodayChannels): TodayChannel[] {
   return TODAY_CHANNELS.filter((channel) => channels[channel]);
 }
 
-/**
- * One screen, no page scroll: the day, the numbers, then panels that share the height left.
- *
- * Laid out for a strip a few hundred pixels tall above the terminal. Each fact appears once:
- * the tiles say how many and lead to the source, the panels say which. A panel that is longer
- * than its share scrolls on its own, so the others stay in view.
- */
-export function renderTodayPanel(
-  host: HTMLElement,
-  inputs: TodayInputs,
-  actions: TodayActions,
-): void {
-  clearChildren(host);
-  const channels = shownChannels(inputs.channels);
-  if (channels.length === 0) {
-    const empty = createElement('div', { className: 'today__none' });
-    empty.append(
-      createElement('p', {
-        className: 'pulls__empty',
-        text: 'No card is switched on. Choose what this machine shows in Settings, Today.',
-      }),
-    );
-    const open = createElement('button', { className: 'button', text: 'Open settings' });
-    open.type = 'button';
-    open.addEventListener('click', () => actions.onOpenSettings());
-    empty.append(open);
-    host.append(empty);
-    return;
-  }
-
-  // The day and the numbers share one line: the day takes what the tiles leave.
-  const top = createElement('div', { className: 'today__top' });
-  const digest = inputs.digest.digest;
-  if (inputs.channels.calendar && digest !== null && digest.errors.calendar === undefined) {
-    const card = chartCard('Your day');
-    renderDay(card.body, layoutDay(digest.events), new Date(inputs.now));
-    top.append(card.element);
-  }
-  const tiles = statTiles(inputs);
-  if (tiles.length > 0) {
-    top.append(
-      buildStatRow(
-        tiles.map((tile) => {
-          const target =
-            tile.channel === undefined ? null : tileTarget(tile.channel, inputs, actions);
-          return target === null ? tile : { ...tile, open: target };
-        }),
-      ),
-    );
-  }
-  if (top.childElementCount > 0) {
-    host.append(top);
-  }
-
-  const panels = createElement('div', { className: 'today__panels' });
-  if (inputs.channels.pulls) {
-    panels.append(pullsPanel(inputs, actions));
-  }
-  if (inputs.channels.tickets) {
-    panels.append(ticketsPanel(inputs, actions));
-  }
-  if (inputs.channels.mail) {
-    panels.append(mailPanel(inputs, actions));
-  }
-  if (inputs.channels.teams) {
-    panels.append(teamsPanel(inputs, actions));
-  }
-  if (panels.childElementCount > 0) {
-    panels.style.setProperty('--panels', String(panels.childElementCount));
-    host.append(panels);
-  }
+/** The unread mail of the digest, newest first. The search cannot filter on it, so this does. */
+export function unreadMail(inputs: TodayInputs): DigestMail[] {
+  return [...(inputs.digest.digest?.mail ?? [])]
+    .filter((entry) => !entry.isRead)
+    .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt));
 }
 
-/** What a click on a tile opens: the tab or the site the number comes from. */
-function tileTarget(
-  channel: TodayChannel,
-  inputs: TodayInputs,
-  actions: TodayActions,
-): { title: string; run: () => void } | null {
-  switch (channel) {
-    case 'pulls':
-      return { title: 'Open the Pull requests tab', run: actions.onOpenPulls };
-    case 'tickets':
-      return { title: 'Open the Tickets tab', run: actions.onOpenTickets };
-    // No tile for these three: their panel below already says how many, and which.
-    case 'calendar':
-    case 'mail':
-    case 'teams':
-      return null;
-    case 'tipee':
-      return inputs.tipeeUrl.length === 0
-        ? null
-        : { title: 'Open Tipee', run: () => actions.onOpenUrl(inputs.tipeeUrl) };
-  }
+/** The numbers of each line. Pure, so what each one counts is pinned by a test. */
+export interface TodayTiles {
+  readonly day: StatTile[];
+  readonly tickets: StatTile[];
+  readonly pulls: StatTile[];
 }
 
 /**
- * The headline numbers: pull requests, tickets and time tracking, the first one leading.
+ * The three numbers of each line.
  *
- * Calendar, mail and Teams have none, on request: their panels already say how many and which,
- * and three tiles fewer is what lets the rest share the line of the day. A value that is being read
- * says so, and one that could not be read says `?` rather than 0.
+ * A digest value that is being read says so, and one that could not be read says `?` rather than
+ * 0: a zero would claim an empty inbox nobody checked. The tickets are mine in the current sprint,
+ * read off the sprint view, so a ticket outside the sprint does not inflate them.
  */
-export function statTiles(inputs: TodayInputs): StatTile[] {
-  const tiles: StatTile[] = [];
+export function todayTiles(inputs: TodayInputs): TodayTiles {
   const { channels, now } = inputs;
-  if (channels.pulls) {
-    const items = todayPulls(inputs.pulls);
-    const owed = items.filter((item) => item.need === 'review' || item.need === 'changes').length;
-    const approved = items.filter((item) => item.need === 'approved').length;
-    tiles.push({
-      channel: 'pulls',
-      label: 'PRs need you',
-      value: String(owed),
-      detail: `${approved} approved · ${items.length} open`,
+  const digest = inputs.digest.digest;
+  const unknown = (section: DigestSection): string | null => {
+    if (digest === null) {
+      return inputs.digest.running ? '…' : '?';
+    }
+    return digest.errors[section] === undefined ? null : '?';
+  };
+
+  const day: StatTile[] = [];
+  if (channels.mail) {
+    day.push({
+      channel: 'mail',
+      label: 'Unread mail',
+      value: unknown('mail') ?? String(unreadMail(inputs).length),
+      detail: digest === null ? '' : `among the ${digest.mail.length} newest`,
     });
   }
-  if (channels.tickets) {
-    const items = todayTickets(inputs.tickets);
-    tiles.push({
-      channel: 'tickets',
-      label: 'In progress',
-      value:
-        inputs.tickets === null
-          ? '…'
-          : String(items.filter((issue) => issue.stage === 'in-progress').length),
-      detail: `${items.filter((issue) => issue.stage !== 'in-progress').length} to do`,
+  if (channels.teams) {
+    const chats = digest?.chats ?? [];
+    const messages = chats.reduce((sum, chat) => sum + chat.count, 0);
+    day.push({
+      channel: 'teams',
+      label: 'Teams to answer',
+      value: unknown('teams') ?? String(chats.length),
+      detail: digest === null ? '' : `${messages} message${messages === 1 ? '' : 's'} waiting`,
     });
   }
   if (channels.tipee) {
     const status = inputs.tipee.status;
-    tiles.push({
+    day.push({
       channel: 'tipee',
       label: 'Clocked since',
       ok: status?.clockedIn === true,
@@ -352,212 +218,246 @@ export function statTiles(inputs: TodayInputs): StatTile[] {
             }),
     });
   }
-  const first = tiles[0];
-  if (first !== undefined) {
-    tiles[0] = { ...first, hero: true };
+
+  const tickets: StatTile[] = [];
+  if (channels.tickets) {
+    const mine = sprintBreakdown(inputs.tickets)?.mine ?? null;
+    const value = (count: number | undefined): string =>
+      inputs.tickets === null ? '…' : String(count ?? 0);
+    const detail =
+      mine === null && inputs.tickets !== null ? 'no sprint found' : 'yours, this sprint';
+    tickets.push(
+      // Each number in the colour of its stage on the sprint chart beside it.
+      {
+        channel: 'tickets',
+        label: 'In progress',
+        value: value(mine?.inProgress),
+        detail,
+        accent: 'var(--chart-2)',
+      },
+      {
+        channel: 'tickets',
+        label: 'To do',
+        value: value(mine?.todo),
+        detail,
+        accent: 'var(--chart-3)',
+      },
+      {
+        channel: 'tickets',
+        label: 'Done',
+        value: value(mine?.done),
+        detail,
+        accent: 'var(--chart-1)',
+      },
+    );
   }
-  return tiles;
+
+  const pulls: StatTile[] = [];
+  if (channels.pulls) {
+    const items = todayPulls(inputs.pulls);
+    const count = (need: PullNeed): number => items.filter((item) => item.need === need).length;
+    pulls.push(
+      {
+        channel: 'pulls',
+        label: 'PRs need you',
+        value: String(count('review') + count('changes')),
+        detail: `${count('review')} to review, ${count('changes')} to change`,
+      },
+      {
+        channel: 'pulls',
+        label: 'Mine, waiting',
+        accent: 'var(--chart-4)',
+        value: String(count('waiting')),
+        detail: 'open, waiting for approval',
+      },
+      {
+        channel: 'pulls',
+        label: 'Mine, approved',
+        accent: 'var(--chart-3)',
+        value: String(count('approved')),
+        detail: 'open, ready to merge',
+      },
+    );
+  }
+  return { day, tickets, pulls };
 }
 
-/** The unread mail of the digest, newest first. The search cannot filter on it, so this does. */
-export function unreadMail(inputs: TodayInputs): DigestMail[] {
-  return [...(inputs.digest.digest?.mail ?? [])]
-    .filter((entry) => !entry.isRead)
-    .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt));
+/** Where a click on a tile leads: the tab or the site the number comes from. */
+const OUTLOOK_MAIL_URL = 'https://outlook.office.com/mail/';
+const TEAMS_URL = 'https://teams.microsoft.com/';
+
+/** How many pull requests the age chart draws before saying how many more there are. */
+const AGE_ROWS = 6;
+
+export function renderTodayPanel(
+  host: HTMLElement,
+  inputs: TodayInputs,
+  actions: TodayActions,
+): void {
+  clearChildren(host);
+  if (shownChannels(inputs.channels).length === 0) {
+    const empty = createElement('div', { className: 'today__none' });
+    empty.append(
+      createElement('p', {
+        className: 'pulls__empty',
+        text: 'No card is switched on. Choose what this machine shows in Settings, Today.',
+      }),
+    );
+    const open = createElement('button', { className: 'button', text: 'Open settings' });
+    open.type = 'button';
+    open.addEventListener('click', () => actions.onOpenSettings());
+    empty.append(open);
+    host.append(empty);
+    return;
+  }
+
+  const tiles = todayTiles(inputs);
+  appendLine(host, inputs.channels.calendar ? dayCard(inputs) : null, tiles.day, inputs, actions);
+  appendLine(
+    host,
+    inputs.channels.tickets ? sprintCard(inputs) : null,
+    tiles.tickets,
+    inputs,
+    actions,
+  );
+  appendLine(
+    host,
+    inputs.channels.pulls ? pullsCard(inputs, actions) : null,
+    tiles.pulls,
+    inputs,
+    actions,
+  );
 }
 
-/** A panel: a title with its count, and a body that scrolls on its own. */
-function panelShell(title: string, count: string): { element: HTMLElement; body: HTMLElement } {
-  const element = createElement('section', { className: 'today__panel' });
-  const head = createElement('div', { className: 'today__panel-head' });
-  head.append(createElement('span', { className: 'today__card-title', text: title }));
-  if (count.length > 0) {
-    head.append(createElement('span', { className: 'today__card-count', text: count }));
+/** One line: the chart takes what the tiles leave, and drops under them only when too narrow. */
+function appendLine(
+  host: HTMLElement,
+  chart: HTMLElement | null,
+  tiles: readonly StatTile[],
+  inputs: TodayInputs,
+  actions: TodayActions,
+): void {
+  if (chart === null && tiles.length === 0) {
+    return;
   }
-  const body = createElement('div', { className: 'today__panel-body' });
-  element.append(head, body);
-  return { element, body };
+  const line = createElement('div', { className: 'today__line' });
+  if (chart !== null) {
+    line.append(chart);
+  }
+  if (tiles.length > 0) {
+    line.append(
+      buildStatRow(
+        tiles.map((tile) => {
+          const target =
+            tile.channel === undefined ? null : tileTarget(tile.channel, inputs, actions);
+          return target === null ? tile : { ...tile, open: target };
+        }),
+      ),
+    );
+  }
+  host.append(line);
+}
+
+function tileTarget(
+  channel: TodayChannel,
+  inputs: TodayInputs,
+  actions: TodayActions,
+): { title: string; run: () => void } | null {
+  switch (channel) {
+    case 'pulls':
+      return { title: 'Open the Pull requests tab', run: actions.onOpenPulls };
+    case 'tickets':
+      return { title: 'Open the Tickets tab', run: actions.onOpenTickets };
+    case 'mail':
+      return { title: 'Open Outlook', run: () => actions.onOpenUrl(OUTLOOK_MAIL_URL) };
+    case 'teams':
+      return { title: 'Open Teams', run: () => actions.onOpenUrl(TEAMS_URL) };
+    case 'tipee':
+      return inputs.tipeeUrl.length === 0
+        ? null
+        : { title: 'Open Tipee', run: () => actions.onOpenUrl(inputs.tipeeUrl) };
+    case 'calendar':
+      return null;
+  }
 }
 
 /**
- * The two queues of pull requests: the ones waiting for my review, and mine waiting for others.
- *
- * Mine counts only while it waits on somebody else: a draft is not asking anyone yet, and one
- * with changes requested or approved is back in my hands.
+ * The day's meetings, or what stands in their place: a run under way, a run that failed, or an
+ * answer from another day, which is said and not drawn on today's axis.
  */
-function pullsPanel(inputs: TodayInputs, actions: TodayActions): HTMLElement {
-  const items = todayPulls(inputs.pulls);
-  const panel = panelShell('Pull requests', '');
-  if (inputs.pulls.length > 0 && inputs.pulls.every((repo) => repo.checkedAt === null)) {
-    panel.body.append(note('Reading…'));
+function dayCard(inputs: TodayInputs): HTMLElement {
+  const card = chartCard('Your day');
+  const digest = inputs.digest.digest;
+  if (digestPreamble(card.body, inputs, 'calendar') || digest === null) {
+    return card.element;
   }
-  for (const [title, need, empty] of [
-    ['To review', 'review', 'Nothing waiting for your review.'],
-    ['Mine, waiting', 'waiting', 'None of yours is waiting for a review.'],
-  ] as const) {
-    const queue = items.filter((item) => item.need === need);
-    panel.body.append(
-      createElement('span', { className: 'today__group-title', text: `${title} ${queue.length}` }),
-    );
-    if (queue.length === 0) {
-      panel.body.append(note(empty));
-    }
-    for (const item of queue) {
-      const row = rowButton(item.pull.title, `${item.repo} · #${item.pull.number}`, []);
-      row.title = `${item.pull.title}\n${item.pull.branch}`;
-      row.addEventListener('click', () => actions.onOpenPull(item.projectId, item.pull.number));
-      panel.body.append(row);
+  if (digest.day === localDay(new Date(inputs.now))) {
+    renderDay(card.body, layoutDay(digest.events), new Date(inputs.now));
+  }
+  return card.element;
+}
+
+function sprintCard(inputs: TodayInputs): HTMLElement {
+  const card = chartCard('Sprint');
+  if (inputs.tickets === null) {
+    card.body.append(note('Reading…'));
+    return card.element;
+  }
+  const sprint = sprintBreakdown(inputs.tickets);
+  if (sprint === null) {
+    card.body.append(note('No sprint found in the Tickets tab.'));
+  } else {
+    renderSprint(card.body, sprint);
+  }
+  const error = inputs.tickets.views.map((view) => view.error).find((entry) => entry !== null);
+  if (error !== undefined && error !== null) {
+    card.body.append(problem(error));
+  }
+  return card.element;
+}
+
+function pullsCard(inputs: TodayInputs, actions: TodayActions): HTMLElement {
+  const card = chartCard('Pull requests by age');
+  if (inputs.pulls.length > 0 && inputs.pulls.every((repo) => repo.checkedAt === null)) {
+    card.body.append(note('Reading…'));
+    return card.element;
+  }
+  const items = todayPulls(inputs.pulls);
+  if (items.length === 0) {
+    card.body.append(note('No open pull request of yours, and none waiting for your review.'));
+  } else {
+    const rows: AgeRow[] = items.map((item) => ({
+      key: `${item.projectId}#${item.pull.number}`,
+      label: `#${item.pull.number} ${item.pull.title}`,
+      detail: `${item.repo} · ${item.pull.branch}`,
+      slot: item.need,
+      createdAt: item.pull.createdAt,
+    }));
+    const layout = layoutAges(rows, inputs.now, AGE_ROWS);
+    renderAges(card.body, layout, (key) => {
+      const item = items.find((entry) => `${entry.projectId}#${entry.pull.number}` === key);
+      if (item !== undefined) {
+        actions.onOpenPull(item.projectId, item.pull.number);
+      }
+    });
+    if (layout.hidden > 0) {
+      card.body.append(note(`${layout.hidden} more in the Pull requests tab.`));
     }
   }
   const failed = inputs.pulls.filter((repo) => repo.error !== null).length;
   if (failed > 0) {
-    panel.body.append(
+    card.body.append(
       problem(`${failed} ${failed === 1 ? 'repository' : 'repositories'} could not be read`),
     );
   }
-  return panel.element;
-}
-
-/** My open tickets, under the sprint they belong to. */
-function ticketsPanel(inputs: TodayInputs, actions: TodayActions): HTMLElement {
-  const items = todayTickets(inputs.tickets);
-  const panel = panelShell('Tickets', inputs.tickets === null ? '' : String(items.length));
-  if (inputs.tickets === null) {
-    panel.body.append(note('Reading…'));
-    return panel.element;
-  }
-  const sprint = sprintBreakdown(inputs.tickets);
-  if (sprint !== null) {
-    const chart = createElement('div', { className: 'today__panel-chart' });
-    renderSprint(chart, sprint);
-    panel.body.append(chart);
-  }
-  if (items.length === 0) {
-    panel.body.append(note('No open ticket assigned to you.'));
-  }
-  for (const issue of items) {
-    const row = rowButton(
-      `${issue.key}  ${issue.summary}`,
-      [issue.status, issue.type].filter(Boolean).join(' · '),
-      [],
-    );
-    row.classList.toggle('today__row--active', issue.stage === 'in-progress');
-    row.addEventListener('click', () => actions.onOpenIssue(issue));
-    panel.body.append(row);
-  }
-  const errors = inputs.tickets.views
-    .map((view) => view.error)
-    .filter((error): error is string => error !== null);
-  if (errors[0] !== undefined) {
-    panel.body.append(problem(errors[0]));
-  }
-  return panel.element;
-}
-
-function mailPanel(inputs: TodayInputs, actions: TodayActions): HTMLElement {
-  const digest = inputs.digest.digest;
-  const unread = unreadMail(inputs);
-  const panel = panelShell('Unread mail', digest === null ? '' : String(unread.length));
-  if (digestPreamble(panel.body, inputs, 'mail')) {
-    return panel.element;
-  }
-  if (unread.length === 0) {
-    panel.body.append(note('No unread mail among the newest.'));
-  }
-  for (const entry of unread) {
-    const message = messageButton(
-      entry.subject,
-      `${entry.sender} · ${describeWhen(entry.receivedAt, inputs.now)}`,
-      entry.preview,
-    );
-    if (entry.important) {
-      message
-        .querySelector('.today__message-head')
-        ?.prepend(
-          createElement('span', { className: 'today__flag', text: '!', title: 'High importance' }),
-        );
-    }
-    linkRow(message, entry.url, actions);
-    panel.body.append(message);
-  }
-  // Read among the newest only: the search returns the newest, with no filter on the read state.
-  if (digest !== null && digest.mailTotal !== null && digest.mailTotal > digest.mail.length) {
-    panel.body.append(
-      note(`Among the ${digest.mail.length} newest of ${digest.mailTotal} since yesterday.`),
-    );
-  }
-  return panel.element;
+  return card.element;
 }
 
 /**
- * The conversations where somebody else wrote last, with what they wrote.
- *
- * Titled "waiting for your reply" and never "unread": Teams gives the connector no read state.
- */
-function teamsPanel(inputs: TodayInputs, actions: TodayActions): HTMLElement {
-  const digest = inputs.digest.digest;
-  const chats = digest?.chats ?? [];
-  const panel = panelShell(
-    'Teams, waiting for your reply',
-    digest === null ? '' : String(chats.length),
-  );
-  if (digestPreamble(panel.body, inputs, 'teams')) {
-    return panel.element;
-  }
-  if (chats.length === 0) {
-    panel.body.append(note('Every conversation since yesterday ends with your message.'));
-  }
-  for (const chat of chats) {
-    const thread = createElement('button', { className: 'today__message' });
-    thread.type = 'button';
-    const head = createElement('span', { className: 'today__message-head' });
-    head.append(createElement('span', { className: 'today__message-title', text: chat.title }));
-    head.append(
-      createElement('span', {
-        className: 'today__row-when',
-        text: describeWhen(chat.lastAt, inputs.now),
-      }),
-    );
-    thread.append(head);
-    for (const line of chat.lines) {
-      const text = createElement('span', { className: 'today__message-line' });
-      text.append(createElement('span', { className: 'today__message-from', text: line.from }));
-      text.append(document.createTextNode(` ${line.text}`));
-      thread.append(text);
-    }
-    if (chat.count > chat.lines.length) {
-      thread.append(
-        createElement('span', {
-          className: 'today__message-more',
-          text: `${chat.count - chat.lines.length} earlier`,
-        }),
-      );
-    }
-    linkRow(thread, chat.url, actions);
-    panel.body.append(thread);
-  }
-  return panel.element;
-}
-
-/** A message row: who and when, the subject, and the start of the text under it. */
-function messageButton(title: string, facts: string, preview: string): HTMLButtonElement {
-  const button = createElement('button', { className: 'today__message' });
-  button.type = 'button';
-  const head = createElement('span', { className: 'today__message-head' });
-  head.append(createElement('span', { className: 'today__message-title', text: title }));
-  button.append(head);
-  button.append(createElement('span', { className: 'today__row-facts', text: facts }));
-  if (preview.length > 0) {
-    button.append(createElement('span', { className: 'today__message-preview', text: preview }));
-  }
-  return button;
-}
-
-/**
- * What the two digest panels say before their own content, and whether that is all they say.
+ * What a digest card says before its own content, and whether that is all it says.
  *
  * A run under way shows its clock; a digest from another day says which day; a failed run says
- * why, naming the command, and keeps the older answer underneath when there is one.
+ * why, naming the command.
  */
 function digestPreamble(body: HTMLElement, inputs: TodayInputs, section: DigestSection): boolean {
   const { digest, running, startedAt, error } = inputs.digest;
@@ -582,31 +482,6 @@ function digestPreamble(body: HTMLElement, inputs: TodayInputs, section: DigestS
     return true;
   }
   return false;
-}
-
-function rowButton(title: string, facts: string, pills: readonly Pill[]): HTMLButtonElement {
-  const row = createElement('button', { className: 'today__row' });
-  row.type = 'button';
-  const line = createElement('span', { className: 'today__row-head' });
-  line.append(createElement('span', { className: 'today__row-title', text: title }));
-  for (const pill of pills) {
-    line.append(buildPill(pill));
-  }
-  row.append(line);
-  if (facts.length > 0) {
-    row.append(createElement('span', { className: 'today__row-facts', text: facts }));
-  }
-  return row;
-}
-
-/** A row that opens its link, or stays inert and says why when the source gave none. */
-function linkRow(row: HTMLButtonElement, url: string, actions: TodayActions): void {
-  if (url.length === 0) {
-    row.disabled = true;
-    row.title = 'No link to open';
-    return;
-  }
-  row.addEventListener('click', () => actions.onOpenUrl(url));
 }
 
 function note(text: string): HTMLElement {

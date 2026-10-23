@@ -1,16 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { JiraIssue, JiraState, PullRequest, RepoPulls } from '../src/shared/contracts.js';
-import type { DigestEvent } from '../src/shared/today.js';
 import { DEFAULT_TODAY_CHANNELS } from '../src/shared/today.js';
 import {
   describeElapsed,
-  describeEventTime,
   describeWhen,
-  eventMoment,
   shownChannels,
-  statTiles,
   todayPulls,
-  todayTickets,
+  todayTiles,
 } from '../src/renderer/ui/today-panel.js';
 
 function pull(patch: Partial<PullRequest>): PullRequest {
@@ -28,6 +24,7 @@ function pull(patch: Partial<PullRequest>): PullRequest {
     pending: 0,
     isAuthor: true,
     isReviewer: false,
+    createdAt: '2026-03-09T08:00:00Z',
     updatedAt: '2026-03-10T08:00:00Z',
     headSha: '',
     changedFiles: 2,
@@ -82,63 +79,15 @@ describe('todayPulls', () => {
       [2, 'draft'],
     ]);
   });
-});
 
-describe('todayTickets', () => {
-  it('lists my open tickets once, the ones in progress first', () => {
-    const state: JiraState = {
-      configured: true,
-      views: [
-        {
-          id: 'sprint',
-          label: 'Sprint',
-          checkedAt: null,
-          error: null,
-          truncated: false,
-          issues: [
-            issue({ key: 'PROJ-1' }),
-            issue({ key: 'PROJ-2', stage: 'in-progress' }),
-            issue({ key: 'PROJ-3', stage: 'done' }),
-            issue({ key: 'PROJ-4', isMine: false }),
-          ],
-        },
-        {
-          id: 'mine',
-          label: 'Mine',
-          checkedAt: null,
-          error: null,
-          truncated: false,
-          issues: [issue({ key: 'PROJ-1' })],
-        },
-      ],
-    };
-    expect(todayTickets(state).map((entry) => entry.key)).toEqual(['PROJ-2', 'PROJ-1']);
-    expect(todayTickets(null)).toEqual([]);
-  });
-});
-
-describe('the calendar card', () => {
-  const meeting: DigestEvent = {
-    subject: 'Sprint review',
-    start: '2026-03-10T09:30',
-    end: '2026-03-10T10:00',
-    timeZone: 'W. Europe Standard Time',
-    isAllDay: false,
-    isCancelled: false,
-    showAs: 'busy',
-    location: '',
-    url: '',
-  };
-
-  it('tells a meeting over from one under way and one to come, in local time', () => {
-    expect(eventMoment(meeting, new Date(2026, 2, 10, 9, 0).getTime())).toBe('later');
-    expect(eventMoment(meeting, new Date(2026, 2, 10, 9, 45).getTime())).toBe('now');
-    expect(eventMoment(meeting, new Date(2026, 2, 10, 10, 0).getTime())).toBe('past');
-  });
-
-  it('writes the wall-clock range, or All day', () => {
-    expect(describeEventTime(meeting)).toBe('09:30-10:00');
-    expect(describeEventTime({ ...meeting, isAllDay: true })).toBe('All day');
+  it('puts the oldest first within one need, since the chart is read for what has waited longest', () => {
+    const items = todayPulls([
+      repo([
+        pull({ number: 7, createdAt: '2026-03-08T08:00:00Z' }),
+        pull({ number: 8, createdAt: '2026-03-01T08:00:00Z' }),
+      ]),
+    ]);
+    expect(items.map((item) => item.pull.number)).toEqual([8, 7]);
   });
 });
 
@@ -171,39 +120,72 @@ describe('shownChannels', () => {
   });
 });
 
-describe('statTiles', () => {
+describe('todayTiles', () => {
+  const sprint: JiraState = {
+    configured: true,
+    views: [
+      {
+        id: 'sprint',
+        label: 'Sprint',
+        checkedAt: null,
+        error: null,
+        truncated: false,
+        issues: [
+          issue({ key: 'PROJ-1', stage: 'in-progress' }),
+          issue({ key: 'PROJ-2', stage: 'todo' }),
+          issue({ key: 'PROJ-3', stage: 'todo' }),
+          issue({ key: 'PROJ-4', stage: 'done' }),
+          issue({ key: 'PROJ-5', stage: 'done', isMine: false }),
+        ],
+      },
+    ],
+  };
   const base = {
+    channels: { ...DEFAULT_TODAY_CHANNELS, mail: true, teams: true, tipee: true },
     pulls: [
       repo([
         pull({ number: 1, isAuthor: false, isReviewer: true }),
-        pull({ number: 2, review: 'approved' }),
+        pull({ number: 2, review: 'changes-requested' }),
+        pull({ number: 3 }),
+        pull({ number: 4, review: 'approved' }),
+        pull({ number: 5, isDraft: true }),
       ]),
     ],
-    tickets: null,
+    tickets: sprint,
     digest: { digest: null, running: false, startedAt: null, error: null },
     tipee: { configured: false, status: null, checkedAt: null, error: null },
     tipeeUrl: '',
     now: new Date(2026, 2, 10, 9, 0).getTime(),
   };
 
-  it('leads with the first card switched on, and counts what needs me', () => {
-    const tiles = statTiles({ ...base, channels: DEFAULT_TODAY_CHANNELS });
-    expect(tiles[0]).toMatchObject({ label: 'PRs need you', value: '1', hero: true });
-    expect(tiles[0]?.detail).toBe('1 approved · 2 open');
-    expect(tiles[1]).toMatchObject({ label: 'In progress', value: '…' });
-  });
-
-  it('gives calendar, mail and Teams no tile: their panels already count them', () => {
-    const channels = { ...DEFAULT_TODAY_CHANNELS, calendar: true, mail: true, teams: true };
-    expect(statTiles({ ...base, channels }).map((tile) => tile.channel)).toEqual([
-      'pulls',
-      'tickets',
+  it('counts what needs me, mine waiting and mine approved, drafts in none of them', () => {
+    expect(todayTiles(base).pulls.map((tile) => [tile.label, tile.value])).toEqual([
+      ['PRs need you', '2'],
+      ['Mine, waiting', '1'],
+      ['Mine, approved', '1'],
     ]);
   });
 
+  it('counts my tickets of the sprint by stage, and only mine', () => {
+    expect(todayTiles(base).tickets.map((tile) => [tile.label, tile.value])).toEqual([
+      ['In progress', '1'],
+      ['To do', '2'],
+      ['Done', '1'],
+    ]);
+  });
+
+  it('says ? for mail and Teams never read, and … while they are being read, never 0', () => {
+    expect(todayTiles(base).day.map((tile) => tile.value)).toEqual(['?', '?', '?']);
+    const running = { ...base, digest: { ...base.digest, running: true } };
+    expect(
+      todayTiles(running)
+        .day.slice(0, 2)
+        .map((tile) => tile.value),
+    ).toEqual(['…', '…']);
+  });
+
   it('says ? for time tracking that is not configured, never a time', () => {
-    const channels = { ...DEFAULT_TODAY_CHANNELS, pulls: false, tickets: false, tipee: true };
-    expect(statTiles({ ...base, channels })[0]).toMatchObject({
+    expect(todayTiles(base).day[2]).toMatchObject({
       label: 'Clocked since',
       value: '?',
       detail: 'not configured',

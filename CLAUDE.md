@@ -3003,12 +3003,14 @@ account, and the unofficial libraries break its terms and risk a ban of the numb
   day timeline sits outside the chart grid: a card spanning every track keeps the empty `auto-fit`
   tracks from collapsing, and the other charts then stop stretching. `--font-display` is the one
   step above the ladder, for those figures only.
-- **One screen, no page scroll, and each fact once** (UX review on request, 2026-10-22). The strip
-  is a few hundred pixels tall, so a page that scrolled hid most of itself: the day and the tiles
-  take their height, and the panels share what is left (`grid-auto-rows: minmax(0, 1fr)`), each
-  scrolling on its own. The Details section was removed because it repeated the tiles and the
-  panels; the time tracking facts moved to the tile's tooltip. A tile is a whole button leading to
-  its source (a tab, Outlook, Teams, Tipee): a 20px corner glyph was the only target before.
+- **Three lines, each a chart and its three numbers** (on request, 2026-10-22, replacing a layout
+  of four scrolling panels): the day with unread mail, Teams to answer and the clock; the sprint
+  with my tickets by stage; the pull requests by age with what needs me, mine waiting and mine
+  approved. A tile is a whole button leading to its source. The pull request chart is a bar per
+  pull request from `createdAt` to now, read for "what has waited longest", which the lists sorted
+  by update time hid; `createdAt` rides the `gh pr list` call the tab already makes. The ticket
+  numbers come from the sprint view and `isMine`, never from "my issues", so a ticket outside the
+  sprint does not count.
 - **The cards stand on a recessed ground** (`--surface-inset` behind, `--surface-raised` cards,
   `--border-strong` edges, `--card-shadow`). On the strip's own surface a raised card was #1b1b1b
   on #131313 in the dark theme and #fafafa on white in the light one, with a 1.3:1 border: no edge

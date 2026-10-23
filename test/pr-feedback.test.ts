@@ -96,6 +96,7 @@ const pull = (over: Partial<PullRequest> = {}): PullRequest =>
     isReviewer: false,
     headSha: 'abc1234',
     changedFiles: 3,
+    createdAt: '2026-09-20T09:30:00Z',
     updatedAt: '2026-09-21T09:30:00Z',
     ...over,
   }) as PullRequest;

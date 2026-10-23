@@ -1004,17 +1004,6 @@ class App {
         },
         onOpenPulls: () => this.strip?.select('pulls'),
         onOpenTickets: () => this.strip?.select('jira'),
-        onOpenIssue: (issue) => {
-          if (issue.source === 'local') {
-            void window.api.openLocalTicket(issue.key, false).then((problem) => {
-              if (problem.length > 0) {
-                this.stampMessage(problem);
-              }
-            });
-          } else {
-            void window.api.openExternal(issue.url);
-          }
-        },
         onOpenUrl: (url) => void window.api.openExternal(url),
         onOpenSettings: () => void window.api.openSettings(),
       },

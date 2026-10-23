@@ -753,6 +753,8 @@ export interface PullRequest {
    */
   readonly isAuthor: boolean;
   readonly isReviewer: boolean;
+  /** When it was opened, ISO. Empty when the payload did not carry it. */
+  readonly createdAt: string;
   readonly updatedAt: string;
   /**
    * Sha of the head commit, as the poll last saw it.

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { JiraIssue, JiraState } from '../src/shared/contracts.js';
 import type { DigestEvent } from '../src/shared/today.js';
-import { layoutDay, nowOffset, sprintBreakdown } from '../src/renderer/ui/today-charts.js';
+import {
+  describeAge,
+  layoutAges,
+  layoutDay,
+  nowOffset,
+  sprintBreakdown,
+  type AgeRow,
+} from '../src/renderer/ui/today-charts.js';
 
 function meeting(start: string, end: string, patch: Partial<DigestEvent> = {}): DigestEvent {
   return {
@@ -98,5 +105,42 @@ describe('sprintBreakdown', () => {
       team: { todo: 2, inProgress: 1, done: 1 },
     });
     expect(sprintBreakdown(null)).toBeNull();
+  });
+});
+
+describe('layoutAges', () => {
+  const now = new Date(2026, 2, 10, 12, 0).getTime();
+  const row = (key: string, createdAt: string): AgeRow => ({
+    key,
+    label: `#${key}`,
+    detail: 'web-app',
+    slot: 'waiting',
+    createdAt,
+  });
+
+  it('spans at least a week, from local midnight, and ends every bar at now', () => {
+    const layout = layoutAges([row('1', new Date(2026, 2, 9, 12, 0).toISOString())], now, 6);
+    const bar = layout.bars[0];
+    expect(bar?.days).toBe(1);
+    expect((bar?.left ?? 0) + (bar?.width ?? 0)).toBeCloseTo(100);
+    expect(layout.ticks[0]).toMatchObject({ left: 0 });
+    expect(layout.ticks.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it('caps the axis at a month and lets an older bar start at its edge', () => {
+    const layout = layoutAges([row('1', new Date(2025, 11, 1).toISOString())], now, 6);
+    expect(layout.bars[0]?.left).toBe(0);
+    expect(layout.bars[0]?.days).toBeGreaterThan(90);
+  });
+
+  it('draws the first rows and counts the rest, and an unknown date gets no age', () => {
+    const rows = ['1', '2', '3'].map((key) => row(key, 'not a date'));
+    const layout = layoutAges(rows, now, 2);
+    expect(layout.bars.map((bar) => bar.key)).toEqual(['1', '2']);
+    expect(layout.hidden).toBe(1);
+    expect(layout.bars[0]?.days).toBeNull();
+    expect(describeAge(null)).toBe('');
+    expect(describeAge(0)).toBe('today');
+    expect(describeAge(4)).toBe('4 d');
   });
 });

@@ -44,6 +44,7 @@ const pull = (over: Partial<PullRequest> = {}): PullRequest => ({
   pending: 0,
   isAuthor: false,
   isReviewer: true,
+  createdAt: '2026-09-17T08:00:00Z',
   updatedAt: '2026-09-18T08:00:00Z',
   headSha: 'a'.repeat(40),
   changedFiles: 7,
