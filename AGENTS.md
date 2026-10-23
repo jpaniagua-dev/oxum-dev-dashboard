@@ -1200,82 +1200,109 @@ dev server belongs to its project row, while an agent carries a conversation tha
 ## Vault tab: secrets, and what it does not protect
 
 Added on 2026-09-26. Somewhere to keep an API key so it does not end up in a `.env` that gets
-committed or pasted into a chat.
+committed or pasted into a chat. Reshaped on 2026-10-22, on request: **one card per file**, and the
+agent broker removed.
 
-- ⚠️ **What it protects: the value at rest and from accidental chat disclosure. What it does NOT
-  protect: a generated file from processes in that project.** The file is plaintext by design, but
-  its path must be ignored by Git before the app writes it. The panel explains that boundary in the
-  compact `How it works` disclosure instead of repeating it as a permanent banner.
-- **The file is the unit of the Vault interface.** Each project/path is one box: its variables are
-  read and edited in place, and `+ Variable`, `Generate file` and `Remove file` live together in the
-  box footer. A global add opens a new prospective file box instead of a detached form at the top.
-- **Agents request operations, never values.** Project terminals receive a random, process-lifetime
-  token and the address of a loopback-only broker in `OXUM_VAULT_TOKEN` and `OXUM_VAULT_URL`;
-  `OXUM_VAULT_HELP` gives the discovery request. The token identifies the project;
-  `GET /v1/capabilities` exposes metadata only, and
-  `POST /v1/execute` performs one constrained HTTP request after a native approval dialog. There is
-  no get-secret route, CLI output or plaintext handoff file.
-- **An HTTP capability fixes the origin, methods, path prefixes and project.** The agent supplies a
-  relative path, scalar query parameters and an optional JSON body. It cannot supply an absolute
-  URL or request headers, redirects are refused, remote plain HTTP is refused, and only loopback
-  origins may use HTTP. Those are boundaries, not form hints: the shared parser and broker both
-  enforce them.
-- **Every operation asks once.** There is deliberately no remember/always-allow choice in the first
-  version. The native dialog names the project, card, method and complete target URL; Cancel is both
-  the default and escape action. Only after approval does main read the value and inject it as a
-  bearer token or configured header.
-- **Results are bounded and scrubbed.** The broker returns status, content type and at most 256 KiB
-  of body, never response headers. An exact occurrence of the credential in the response is
-  replaced before the agent sees it. Redirects are errors so a custom authentication header cannot
-  travel to a second origin.
-- **The audit is metadata and process-local.** The last thirty attempts shown in the panel contain
-  card name, project, method, path, outcome and status, never query values, request bodies, response
-  bodies or credentials. Restarting clears it; it is operational feedback, not a durable log.
+- ⚠️ **What it protects: the values at rest, and out of the renderer and the agent prompt. What it
+  does NOT protect: a generated file from processes in that project.** The file is plaintext by
+  design, agents can read it, and its path must be ignored by Git before the app writes it. The
+  panel explains that boundary in the compact `How it works` disclosure instead of repeating it as a
+  permanent banner.
+- **A card is a file.** In the form, in this order: the project, the path (`.env.local` by default),
+  the lifetime of the generated file (30 minutes by default), the secrets as `Name` / `Secret` rows,
+  then a **free text**. The text is for the lines that are not secret (a user name, an e-mail): the
+  vault ended up being a text file to edit, and a card per variable made every one of those a secret
+  to reveal. One card per project and path, refused otherwise: two cards writing one file would
+  each overwrite the other.
+- **The text is shown in clear, and stored with the secrets.** It sits in the same encrypted blob,
+  but it crosses to the renderer on `VaultState` like any metadata, because it is displayed and
+  edited as typed. The form says so beside it. It is written into the file verbatim, above the
+  secrets; `sanitizeVaultText` refuses control characters rather than dropping them, so the file
+  never differs from what was typed in silence.
+- **A name is set once per file.** `secretConflict` refuses a secret named twice (case ignored) or a
+  secret the text also assigns (`NAME=`, `export NAME=`): the file would hold two values for one
+  variable, and which one wins depends on the loader.
+- **The expiry removes the generated file, not the card.** The plaintext on disk is the exposure;
+  the encrypted blob is not. `Generate file` writes the file and starts its lifetime
+  (`generatedAt`, `expiresAt`); when it runs out the file goes, the values stay, and the next
+  generation is one click. Decided on 2026-10-22 against the earlier rule, where the card itself
+  destroyed its secret: at a 30-minute default, that rule would have meant retyping a whole file
+  every half hour.
+- **`Remove file` removes the card AND its generated file, in one gesture** (decided on 2026-10-22,
+  on request). The card is the file, so its owner reads "remove the file" as both. A first version
+  had it delete the file on disk only, keeping the card, beside a faint `×` that deleted the card:
+  in use the card stayed put, the result went to the header stamp at the other end of the window,
+  and the button read as one that does nothing. The `×` and the file-only channel went with it. The
+  price, accepted: no gesture erases the plaintext before its lifetime while keeping the values.
+- ⚠️ **The sweep runs at start-up, on a one-minute timer, AND before `VaultRead` answers**
+  (`removeExpiredFiles`). The start-up pass is the one that matters: a timer cannot fire while the
+  app is closed, and a laptop asleep for six hours runs no interval, so a file whose time passed
+  overnight would still be there in the morning. A file that is already missing, or no longer
+  carries the marker, counts as removed (there is nothing more to do about it); a deletion that
+  fails is retried by the next pass.
+- **A quiet sweep writes nothing**, the rule `advanceRun` and `setNote` already follow: otherwise the
+  vault is re-encrypted, rewritten and broadcast 1440 times a day.
+- **Values are editable now.** An existing secret's field starts empty with `Unchanged` in it: the
+  form is never told a value, so an empty field keeps the stored one, a typed one replaces it, and
+  a row renamed without retyping keeps its value through `from`, the name it was stored under. The
+  earlier rule (value and expiry frozen, rotation is delete and add) existed because the expiry was
+  the card's: a new secret under an old card would have inherited a lifetime chosen for another.
+  The lifetime is the file's now, so the reason is gone.
+- **The store owns the dates.** `save` ignores `generatedAt` and `expiresAt` from the payload: they
+  say what is on disk, and only generating or removing may change them. A card moved to another path
+  has nothing there yet, so it comes back as not generated, and the file it left is cleaned by a
+  `sync` of its old binding. A new lifetime on a generated card is counted from `generatedAt`.
+- **`sync` never creates a file.** After a save or a delete it rewrites or removes a file that is
+  already on disk, and leaves a missing one missing: saving a card never materializes a secret
+  without a click.
+- **The earlier format is migrated on load, once** (`parseVault`, then one `flush`): the variables
+  of one file become one card, a note becomes a `# NAME: note` line of the text (where the file
+  already printed it), and every migrated file counts as generated at the migration, so a file the
+  earlier version left on disk is removed after the default lifetime. Dropped, by decision: a
+  variable bound to no file, and one whose own expiry had passed. The `capability` field of the
+  broker is ignored.
 - **One encrypted blob, `vault.bin`, not a file per card.** `safeStorage` encrypts a string; N files
   would be N atomic writes to keep consistent, with a half-written vault as the failure mode, and
   the metadata would have to live either in a plaintext index (a name like `prod-db-root` is most of
   the secret's value) or inside each ciphertext, which makes listing mean decrypting everything.
+  The blob is `{ version: 2, files: [...] }`; an array is the earlier format.
 - **The pure half is `shared/vault.ts` and holds no secret**; `main/vault/vault-store.ts` is the
-  authority that may release one inside main. The main-process broker necessarily holds the value
-  while constructing its outbound request, but it never crosses to the renderer or agent.
+  authority that may release one inside main, to a copy, a reveal or a generated file.
 - ⚠️ **`VaultState` carries no value, and a test asserts it on the object rather than on the type.**
   A type stops a mistake at compile time and says nothing about an object built with a spread. The
-  leak would be invisible: the renderer simply would not draw the extra field.
+  leak would be invisible: the renderer simply would not draw the extra field. `test/vault-store.test.ts`
+  replaces `safeStorage` with a reversible encoding to test what surrounds the encryption.
 - **`VaultReveal` is the one channel that hands a secret to the renderer**, against the rule the
   Jira token sets, and the difference is whose credential it is. The Jira token is one the APP uses
-  on its owner's behalf, so the renderer never needs it; a vault card is one the OWNER uses, and a
+  on its owner's behalf, so the renderer never needs it; a vault secret is one the OWNER uses, and a
   vault whose values can never be read back is a write-only hole. It crosses once, on an `invoke`,
-  in answer to a click, and never in a list, a broadcast or the bootstrap.
-- **Copy and reveal are controls inside the Secret field.** Copying happens entirely in the main
+  in answer to a click, for one secret named by card and name, and never in a list, a broadcast or
+  the bootstrap.
+- **Copy and reveal are controls inside each secret's field.** Copying happens entirely in the main
   process, so the value never enters the window; the eye icon reveals it on a screen that gets
   shared and screenshotted. The reveal re-masks after 20 s and on `window.blur`, which also covers
-  the quit dialog. There is no `Send` action: agents use generated files or approved operations.
+  the quit dialog. The UI never types a credential into a terminal, where prompts and scrollback
+  could expose it.
 - **The mask is a constant twelve dots.** One sized from the value would say whether it is a
   six-digit PIN or a sixty-four character key, which is a third of the answer given away by a
   decoration. No last-four preview either.
-- **Direct terminal sending is not exposed by the Vault.** Agents instead use a generated dotenv file
-  or an approved broker operation; the UI never types a credential into a terminal, where prompts
-  and scrollback could expose it.
-- **Deleting is confirmed by a dialog in the main process.** It is intentionally harder than
-  editing because it removes the encrypted value and cannot be undone from the app.
-- ⚠️ **A card's value and expiry cannot be edited; its name, note and capability can.** A lifetime
-  runs from creation, so a new secret under an old card would either inherit the remaining life of
-  the one it replaced or silently restart the clock. Rotating a key is delete and add, said on
-  screen rather than discovered.
-- ⚠️ **The sweep runs at start-up, on a one-minute timer, AND inside `valueOf`.** None is redundant:
-  a timer cannot fire while the app is closed, so the start-up pass is what honours a card that died
-  overnight; and a laptop asleep for six hours runs no interval and does not catch up, so the lazy
-  check in `valueOf` is what stops a click handing out a secret whose time was up. The timer keeps
-  the display honest, the lazy check keeps the answer honest.
-- **A quiet sweep writes nothing**, the rule `advanceRun` and `setNote` already follow: otherwise the
-  vault is re-encrypted, rewritten and broadcast 1440 times a day.
-- ⚠️ **"Destroyed" means this app has no record and will never show or send it again.** It does not
+- **The panel keeps the caret across a repaint.** It is rebuilt whole, and it is rebuilt while a
+  form is open (a reveal re-masking on another card, a file expiring), so the focused field is
+  marked with `data-focus-key` and given its selection back. The form also stays open until the
+  main process answers a save, so a refusal leaves what was typed where it was.
+- **Removing is confirmed by a dialog in the main process.** It is intentionally harder than
+  editing because it removes the encrypted values and cannot be undone from the app. The generated
+  file goes through `sync`, which deletes only a file carrying the vault's marker.
+- **The agent broker was removed on 2026-10-22, unused.** It gave project terminals a token and a
+  loopback address so an agent could ask for one approved HTTP request with a secret injected. Its
+  owner never used it. The terminal manager's per-project environment hook (`environmentFor`) stays:
+  `terminalEnvironment` and two test files use it.
+- ⚠️ **"Destroyed" means this app has no record and will never show or write it again.** It does not
   mean the bytes are gone from the disk: `atomicWriteFile` renames a new file over the old, so the
   previous ciphertext can survive in unreferenced blocks, and an in-place overwrite would not fix
   that on an SSD either.
-- ⚠️ **Expiry is hygiene, not a boundary.** This app is its sole enforcer, and DPAPI will decrypt the
-  file for anything run by the same Windows account. "After an hour this key is unrecoverable" is
-  not what it provides.
+- ⚠️ **The lifetime is hygiene, not a boundary.** This app is its sole enforcer: a file copied
+  elsewhere stays, and DPAPI will decrypt the vault for anything run by the same Windows account.
 - **A blob that will not decrypt is KEPT, never replaced**, and every write is refused while it is
   there: it may be readable again on the account that wrote it. `Start a new vault` is the one way
   out, behind a confirmation, because a refusal with no exit is a dead feature.

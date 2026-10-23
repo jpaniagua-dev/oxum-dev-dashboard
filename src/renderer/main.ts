@@ -42,7 +42,7 @@ import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
 import { isReviewCurrent } from '@shared/pull-review.js';
 import type { AutomationState } from '@shared/contracts.js';
-import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
+import type { VaultFileCard, VaultSecretInput, VaultState } from '@shared/vault.js';
 import { renderAutomationPanel, skillNames } from './ui/automation-panel.js';
 import {
   bindVaultHost,
@@ -896,33 +896,28 @@ class App {
       projects: this.projects.map((project) => ({ id: project.id, label: project.label })),
     };
     const actions = {
-      onSave: (card: VaultCard, value: string) => {
-        void window.api.saveVaultCard(card, value).then((result) => {
+      onSave: (card: VaultFileCard, secrets: readonly VaultSecretInput[]) =>
+        window.api.saveVaultCard(card, secrets).then((result) => {
           this.stampMessage(result.message);
           void this.loadVault();
-        });
-      },
+          return result;
+        }),
       onDelete: (id: string) => {
         void window.api.deleteVaultCard(id).then((result) => {
           this.stampMessage(result.message);
           void this.loadVault();
         });
       },
-      onReveal: (id: string) => window.api.revealVaultCard(id),
-      onCopy: (id: string) => {
-        void window.api.copyVaultCard(id).then((result) => {
+      onReveal: (id: string, name: string) => window.api.revealVaultSecret(id, name),
+      onCopy: (id: string, name: string) => {
+        void window.api.copyVaultSecret(id, name).then((result) => {
           this.stampMessage(result.message);
         });
       },
-      onGenerateFile: (binding: VaultFileBinding) => {
-        void window.api.generateVaultFile(binding).then((result) => {
+      onGenerateFile: (id: string) => {
+        void window.api.generateVaultFile(id).then((result) => {
           this.stampMessage(result.message);
           void this.loadVault();
-        });
-      },
-      onRemoveFile: (binding: VaultFileBinding) => {
-        void window.api.removeVaultFile(binding).then((result) => {
-          this.stampMessage(result.message);
         });
       },
       onReset: () => {

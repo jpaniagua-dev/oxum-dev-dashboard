@@ -138,7 +138,7 @@ export class TerminalManager {
      * reporting the wrong shape at boot is a grid that visibly snaps into place a moment later.
      */
     initialColumns: number = PANE_COLUMNS_AUTO,
-    /** Ephemeral capabilities added according to the project that owns a new process. */
+    /** Extra environment for the processes of one project, merged over the inherited one. */
     private readonly environmentFor: (projectId: ProjectId | null) => NodeJS.ProcessEnv = () => ({}),
   ) {
     this.columns = sanitizeColumns(initialColumns);

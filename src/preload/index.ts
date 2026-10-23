@@ -14,7 +14,7 @@ import type {
   LocalTicketResult,
   LocalTicketsState,
 } from '@shared/local-tickets.js';
-import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
+import type { VaultFileCard, VaultSecretInput, VaultState } from '@shared/vault.js';
 import type { TodayDigestState } from '@shared/today.js';
 import type { TipeeState } from '@shared/tipee.js';
 import {
@@ -389,23 +389,23 @@ const api: RendererApi = {
 
   readVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultRead),
 
-  saveVaultCard: (card: VaultCard, value: string): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultSave, card, value),
+  saveVaultCard: (
+    card: VaultFileCard,
+    secrets: readonly VaultSecretInput[],
+  ): Promise<VaultResult> => ipcRenderer.invoke(IpcChannel.VaultSave, card, secrets),
 
   deleteVaultCard: (id: string): Promise<VaultResult> =>
     ipcRenderer.invoke(IpcChannel.VaultDelete, id),
 
-  revealVaultCard: (id: string): Promise<string> =>
-    ipcRenderer.invoke(IpcChannel.VaultReveal, id),
+  revealVaultSecret: (id: string, name: string): Promise<string> =>
+    ipcRenderer.invoke(IpcChannel.VaultReveal, id, name),
 
-  copyVaultCard: (id: string): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultCopy, id),
+  copyVaultSecret: (id: string, name: string): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultCopy, id, name),
 
-  generateVaultFile: (binding: VaultFileBinding): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultGenerateFile, binding),
+  generateVaultFile: (id: string): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultGenerateFile, id),
 
-  removeVaultFile: (binding: VaultFileBinding): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultRemoveFile, binding),
 
   resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
 

@@ -10,7 +10,7 @@ import type {
   PanelEditorState,
 } from './explorer.js';
 import type { LocalTicketDraft, LocalTicketResult, LocalTicketsState } from './local-tickets.js';
-import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
+import type { VaultFileCard, VaultSecretInput, VaultState } from './vault.js';
 import type { TodayChannels, TodayDigestState } from './today.js';
 import type { TipeeState } from './tipee.js';
 /**
@@ -2619,7 +2619,6 @@ export const IpcChannel = {
   VaultReveal: 'vault:reveal',
   VaultCopy: 'vault:copy',
   VaultGenerateFile: 'vault:generate-file',
-  VaultRemoveFile: 'vault:remove-file',
   VaultChanged: 'vault:changed',
   VaultReset: 'vault:reset',
   /** invoke: () => ExtensionsView, both agents read off disk */
@@ -3044,24 +3043,25 @@ export interface RendererApi {
 
   /** The cards, never their values. */
   readVault(): Promise<VaultState>;
-  /** Adds or replaces a card. An empty value on an existing card keeps the stored one. */
-  saveVaultCard(card: VaultCard, value: string): Promise<VaultResult>;
-  /** Destroys a card. The main process asks for confirmation before anything is touched. */
+  /** Adds or replaces a file card. An empty value on an existing secret keeps the stored one. */
+  saveVaultCard(card: VaultFileCard, secrets: readonly VaultSecretInput[]): Promise<VaultResult>;
+  /**
+   * Destroys a file card and the file it generated. The main process asks for confirmation before
+   * anything is touched.
+   */
   deleteVaultCard(id: string): Promise<VaultResult>;
   /**
-   * The value of one card, for the reader's own eyes.
+   * The value of one secret, for the reader's own eyes.
    *
    * ⚠️ The one place a secret travels towards the renderer, against the rule the Jira token sets.
    * A deliberate exception: the owner asked to be able to see what is stored, on an explicit
    * gesture, on their own screen.
    */
-  revealVaultCard(id: string): Promise<string>;
+  revealVaultSecret(id: string, name: string): Promise<string>;
   /** Puts the value on the clipboard without it passing through the renderer. */
-  copyVaultCard(id: string): Promise<VaultResult>;
-  /** Materializes all live variables bound to one project dotenv file. */
-  generateVaultFile(binding: VaultFileBinding): Promise<VaultResult>;
-  /** Removes a generated file, but only when it carries the Oxum Vault marker. */
-  removeVaultFile(binding: VaultFileBinding): Promise<VaultResult>;
+  copyVaultSecret(id: string, name: string): Promise<VaultResult>;
+  /** Writes one card's file into its project, which starts the file's lifetime. */
+  generateVaultFile(id: string): Promise<VaultResult>;
   /** Throws away a vault this account cannot read, after a confirmation in the main process. */
   resetVault(): Promise<VaultState>;
   onVaultChanged(listener: (state: VaultState) => void): () => void;
