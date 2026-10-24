@@ -1190,6 +1190,13 @@ export interface SessionAgent {
    * belongs to something else (the feedback pass, a routine), which therefore never come back.
    */
   readonly conversation?: AgentConversation;
+  /**
+   * Set when this session was meant to come back after a restart and its agent profile could not
+   * name its conversation (no session or resume arguments, the case of a Codex profile). Recorded
+   * so the next launch can say the tab did not come back, and why. Absent on the runs excluded on
+   * purpose (the feedback pass, a routine), which nobody expects back.
+   */
+  readonly unresumable?: true;
 }
 
 /** A resumable conversation: its id, and whether it was opened in plan mode. */
@@ -1213,6 +1220,13 @@ export interface AgentOpenResult {
   readonly terminalId: TerminalId | null;
   /** Empty when it worked. The reason otherwise, ready to show. */
   readonly message: string;
+}
+
+/** An agent tab of the previous run that was not reopened at this launch, and why. */
+export interface AgentNotReopened {
+  readonly title: string;
+  /** Ready to show after the title. */
+  readonly reason: string;
 }
 
 /**
@@ -2268,6 +2282,13 @@ export interface BootstrapState {
   /** The last Microsoft 365 digest, so the Today tab paints yesterday's answer before any run. */
   readonly todayDigest: TodayDigestState;
   readonly tipee: TipeeState;
+  /**
+   * The agent tabs of the previous run that this launch did not reopen, each with its reason.
+   *
+   * Carried to the screen because the reasons used to reach the main process's console only, which
+   * an installed build never shows: a tab simply failed to come back. Empty when all of them did.
+   */
+  readonly agentsNotReopened: readonly AgentNotReopened[];
 }
 
 /* ------------------------------------------------------------------ *

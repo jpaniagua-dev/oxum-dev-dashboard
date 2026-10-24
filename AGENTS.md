@@ -1187,7 +1187,26 @@ dev server belongs to its project row, while an agent carries a conversation tha
   never through `claudeProjectKey`, whose encoding is inferred, and reads its first 256 KiB for a
   message (`holdsConversation`): a file holding only the bookkeeping line counts as none. Another agent answers `null` and is
   reopened, left to say for itself whether it remembers. A missing folder or a profile without
-  `resumeArgs` drops the record too, with a log line.
+  `resumeArgs` drops the record too.
+- **A tab that does not come back says so, in the top bar** (2026-10-23, after an audit asked for on
+  "some agent tabs do not come back, Codex ones above all"). Every reason `restorable` and
+  `restoreAgentSessions` find (an agent that cannot resume, a folder gone, a conversation never
+  started, a shell profile or a plan mode gone) rides the bootstrap (`agentsNotReopened`) to a pill
+  beside the update button: the count as its label, one `title: reason` line per tab in its tooltip,
+  gone when clicked. They used to reach `console.warn` in the main process only, which an installed
+  build never shows: a tab simply did not return, and nothing said why.
+- **An agent its profile cannot name is recorded anyway, marked `unresumable`.** The three spawns
+  meant to come back (`Ctrl+N`, `Work on this`, a rule) set it when `newConversation` answers null;
+  the feedback pass and `/schedule` never do, being excluded on purpose. Without the marker such a
+  tab left no trace in `agent-sessions.json`, so the notice above could not have named it, and that
+  was exactly the case of a Codex profile.
+- ⚠️ **A Codex profile is not resumable, and that is a limit of Codex, not a missing setting.**
+  Codex reopens a conversation by id (`codex resume <SESSION_ID>`) but has no flag to impose the id
+  of a new session, which is what `sessionArgs` relies on (official CLI reference, read on
+  2026-10-23). Its rollout files (`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`) open on a
+  `session_meta` line carrying `id`, `cwd` and `timestamp`, and no process id (observed on 0.84).
+  Finding a tab's id afterwards would mean matching by folder and time, the matching refused above
+  for Claude because every agent starts in the same workspace. Left open.
 - ⚠️ **The app strips a parent Claude Code session's markers from every pty**
   (`terminalEnvironment`). Started from inside a session (`npm run dev` in an agent tab), the app
   passed `CLAUDE_CODE_CHILD_SESSION` and its siblings to every terminal, and an agent started there

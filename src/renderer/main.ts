@@ -1,4 +1,5 @@
 import type {
+  AgentNotReopened,
   TicketsLayout,
   UpdateNotice,
   AppSettings,
@@ -66,7 +67,7 @@ import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
 import { ExtensionsPanel } from './ui/extensions-panel.js';
 import { ExplorerPanel } from './ui/explorer-panel.js';
-import { clearChildren, hitsInteractive, requireElement } from './ui/dom.js';
+import { clearChildren, createElement, hitsInteractive, requireElement } from './ui/dom.js';
 import { canRerunSession } from '@shared/session-actions.js';
 import {
   buildChangeMenuItems,
@@ -342,6 +343,7 @@ class App {
     applyVersion(bootstrap.appVersion);
     void window.api.readUpdate().then(applyUpdate);
     window.api.onUpdateChanged(applyUpdate);
+    applyAgentsNotReopened(bootstrap.agentsNotReopened);
     // Before anything is measured: the strip resizer and the terminal's fit both read pixel sizes that
     // the text size decides, so applying it afterwards would fit them to a layout already gone.
     applyUiFontSize(bootstrap.settings.uiFontSize);
@@ -3693,6 +3695,30 @@ function applyUpdate(notice: UpdateNotice | null): void {
   button.textContent = `Version ${notice.version} is available`;
   button.title = `Downloads the installer of ${notice.version}. Run it to update in place.`;
   button.onclick = () => void window.api.openExternal(notice.download);
+}
+
+/**
+ * The agent tabs of the previous run that did not come back, said in the top bar until clicked.
+ *
+ * The reasons used to reach the main process's console only, which an installed build never shows:
+ * a tab simply failed to return, and nothing on screen said why. A pill like the Git tab's notice,
+ * the label for the count and the tooltip for the reasons, one per line after the tab's title.
+ */
+function applyAgentsNotReopened(entries: readonly AgentNotReopened[]): void {
+  const notice = requireElement<HTMLButtonElement>('agents-notice');
+  notice.hidden = entries.length === 0;
+  if (entries.length === 0) {
+    return;
+  }
+  const count = entries.length;
+  notice.replaceChildren(
+    createElement('span', { className: 'pill__dot' }),
+    document.createTextNode(`${String(count)} agent tab${count === 1 ? '' : 's'} not reopened`),
+  );
+  notice.title = `${entries.map((entry) => `${entry.title}: ${entry.reason}`).join('\n')}\n\nClick to dismiss`;
+  notice.onclick = () => {
+    notice.hidden = true;
+  };
 }
 
 function applyVersion(version: string): void {

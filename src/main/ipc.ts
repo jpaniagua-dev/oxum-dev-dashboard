@@ -2,6 +2,7 @@ import { homedir, release } from 'node:os';
 import { basename } from 'node:path';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import {
+  type AgentNotReopened,
   type AgentOpenResult,
   GIT_COMMIT_ACTION_ID,
   GIT_MERGE_ACTION_ID,
@@ -194,6 +195,8 @@ export interface IpcDependencies {
   readonly pulls: () => PullMonitor;
   readonly jira: () => JiraMonitor;
   readonly todayDigest: () => DigestService;
+  /** The agent tabs of the previous run that this launch did not reopen, with why. */
+  readonly agentsNotReopened: () => readonly AgentNotReopened[];
   readonly tipee: () => TipeeMonitor;
   /** Writes the time tracking password to its encrypted file. Never reads it back towards the renderer. */
   readonly saveTipeePassword: (password: string) => Promise<{ ok: boolean; message: string }>;
@@ -296,6 +299,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     terminalCompat: terminalCompat(process.platform, release()),
     todayDigest: deps.todayDigest().state(),
     tipee: deps.tipee().state(),
+    agentsNotReopened: deps.agentsNotReopened(),
   }));
 
   ipcMain.handle(IpcChannel.RefreshNow, async (): Promise<ProjectRow[]> => deps.monitor().refreshAll());
@@ -1289,7 +1293,9 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           model: settings.agentWorkModel,
           instructionFile: settings.agentProfile.instructionFile,
           startedAt: new Date().toISOString(),
-          ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: conversation.plan } }),
+          ...(conversation === null
+            ? { unresumable: true }
+            : { conversation: { id: conversation.id, plan: conversation.plan } }),
         },
         /*
          * The session is born saying what it was sent to do, and this is what makes notes worth
@@ -1516,7 +1522,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         model: settings.agentWorkModel,
         instructionFile: settings.agentProfile.instructionFile,
         startedAt: new Date().toISOString(),
-        ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: false } }),
+        ...(conversation === null ? { unresumable: true } : { conversation: { id: conversation.id, plan: false } }),
       },
     });
     return {

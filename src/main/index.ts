@@ -69,7 +69,7 @@ import { AgentSessionStore } from './terminal/agent-session-store.js';
 import { restoreAgentSessions } from './terminal/agent-restore.js';
 import { ConversationTracker } from './terminal/conversation-tracker.js';
 import { agentRecordsFrom } from '@shared/agent-sessions.js';
-import type { TerminalGroup } from '@shared/contracts.js';
+import type { AgentNotReopened, TerminalGroup } from '@shared/contracts.js';
 import type { VaultState } from '@shared/vault.js';
 import { VaultFiles, removeExpiredFiles } from './vault/vault-files.js';
 import { VaultStore } from './vault/vault-store.js';
@@ -669,7 +669,7 @@ async function bootstrap(): Promise<void> {
         model: settings.agentWorkModel,
         instructionFile: settings.agentProfile.instructionFile,
         startedAt: new Date().toISOString(),
-        ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: false } }),
+        ...(conversation === null ? { unresumable: true } : { conversation: { id: conversation.id, plan: false } }),
       },
       note: prompt,
     });
@@ -779,8 +779,12 @@ async function bootstrap(): Promise<void> {
   const profiles = (): ShellProfile[] =>
     mergeProfiles(detectProfiles(), settingsStore.get().shellProfiles);
 
+  /** Filled by the restore below, before the window asks for its bootstrap. */
+  let agentsNotReopened: readonly AgentNotReopened[] = [];
+
   registerIpcHandlers({
     projects: () => projects,
+    agentsNotReopened: () => agentsNotReopened,
     // The dashboard only, like `GitPolled`: the settings window has no Git tab to put a notice in.
     notifyGit: (notice) => dashboardWindow.send(IpcChannel.GitNotice, notice),
     monitor: () => projectMonitor,
@@ -1011,7 +1015,7 @@ async function bootstrap(): Promise<void> {
   if (settingsStore.get().restoreAgentSessions && previousAgents.length > 0) {
     const settings = settingsStore.get();
     const shells = mergeProfiles(detectProfiles(), settings.shellProfiles);
-    const reopened = restoreAgentSessions({
+    const { reopened, notReopened } = restoreAgentSessions({
       records: previousAgents,
       terminals: terminalManager,
       profile: settings.agentProfile,
@@ -1020,6 +1024,7 @@ async function bootstrap(): Promise<void> {
       projects: resolveProjects(settings.projects),
       size: terminalSize,
     });
+    agentsNotReopened = notReopened;
     console.log(`Reopened ${String(reopened)} of ${String(previousAgents.length)} agent session(s)`);
   }
   // Once, so a record dropped above (a folder gone, a conversation never started) leaves the file

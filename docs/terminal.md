@@ -54,6 +54,11 @@ the next launch on their conversation, with their title and note. Nothing runs b
 waits for your next message. Shells and dev servers do not come back, and neither does an agent you
 never wrote to. Turn it off in Settings, Terminal, **Reopen my agents at launch**.
 
+When an agent tab does not come back, the top bar says how many with a pill such as **2 agent tabs
+not reopened**; hover it for each tab's reason, click it to dismiss it. An agent whose profile
+cannot resume a conversation, Codex for instance, never comes back: Codex cannot be given a
+conversation id when it starts.
+
 ## Cards
 
 Watch and Server sessions have a rerun button on both their card and terminal tab. It stops the

@@ -604,6 +604,17 @@ body {
   white-space: nowrap;
 }
 
+/* A pill that is also a button: it states the problem and is clicked away, like the Git notice. */
+.agents-notice {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Same trap as `.pulls` and `.git`: a class setting `display` beats `[hidden]`. */
+.agents-notice[hidden] {
+  display: none;
+}
+
 .pill__dot {
   width: 7px;
   height: 7px;
