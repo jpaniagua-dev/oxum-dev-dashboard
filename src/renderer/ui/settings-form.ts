@@ -316,6 +316,8 @@ export class SettingsForm {
     }
     this.renderProjects();
     this.renderRail();
+    // The scope decides which errors block Save, and the footer was drawn by the load, before it.
+    this.renderFooter();
   }
 
   /** Loads a fresh draft from the stored settings. */
@@ -2333,17 +2335,31 @@ export class SettingsForm {
   private renderFooter(): void {
     clearChildren(this.hosts.footer);
 
+    // Saving a configuration with a broken path would produce a row that can never run, and a model
+    // that is not one would be saved as the default with nothing said.
+    const blocker = saveBlocker(
+      this.validations,
+      this.projects,
+      this.projectScope,
+      Object.values(this.agentModels),
+    );
+    // The reason is written where the eye already is, next to the button: a tooltip on a disabled
+    // button was the only place it was said, and a greyed Save with no word read as a broken one.
     const status = createElement('span', {
       className:
-        this.saveError.length > 0 || this.dirty ? 'settings__status' : 'settings__status settings__status--ok',
+        this.saveError.length > 0 || blocker !== null || this.dirty
+          ? 'settings__status'
+          : 'settings__status settings__status--ok',
       text:
         this.saveError.length > 0
           ? this.saveError
-          : this.dirty
-            ? 'unsaved changes'
-            : this.saved
-              ? 'changes saved'
-              : '',
+          : blocker !== null
+            ? blocker
+            : this.dirty
+              ? 'unsaved changes'
+              : this.saved
+                ? 'changes saved'
+                : '',
     });
     this.hosts.footer.append(status);
 
@@ -2354,17 +2370,9 @@ export class SettingsForm {
 
     const save = createElement('button', { className: 'button button--primary', text: 'Save' });
     save.type = 'button';
-    // Saving a configuration with a broken path would produce a row that can never run, and a model
-    // that is not one would be saved as the default with nothing said.
-    const brokenProject = this.validations.some((entry) =>
-      entry.issues.some((issue) => issue.level === 'error'),
-    );
-    const badModel = Object.values(this.agentModels).some((model) => !isValidModel(model));
-    save.disabled = brokenProject || badModel;
-    if (brokenProject) {
-      save.title = 'Fix the reported project errors before saving';
-    } else if (badModel) {
-      save.title = 'A model on the Agent page is not a model name';
+    save.disabled = blocker !== null;
+    if (blocker !== null) {
+      save.title = blocker;
     }
     save.addEventListener('click', () => {
       // Each of the writes broadcasts and can fail on its own; a failure is said, never swallowed.
@@ -2739,4 +2747,36 @@ function channelHint(channel: TodayChannel): string {
     return 'Needs the address, username and password below';
   }
   return 'Read from what the other tabs already hold: no request of its own';
+}
+
+/**
+ * Why Save cannot run right now, as the sentence shown beside it, or null when it can.
+ *
+ * In the window scoped to one project, only that project's errors count. Every project is saved
+ * from there, but the others exactly as they are already stored, so one of them being broken (a
+ * folder on an unplugged drive) is nothing this window can make worse, and nothing it shows: the
+ * button stayed disabled over an error nobody could see.
+ */
+export function saveBlocker(
+  validations: readonly ProjectValidation[],
+  projects: readonly { readonly id: ProjectId; readonly label: string }[],
+  scope: ProjectId | null,
+  models: readonly string[],
+): string | null {
+  const broken = validations
+    .filter((entry) => scope === null || entry.id === scope)
+    .filter((entry) => entry.issues.some((issue) => issue.level === 'error'));
+  if (broken.length > 0) {
+    if (scope !== null) {
+      return 'Fix the error shown on this project to save';
+    }
+    const names = broken.map(
+      (entry) => projects.find((project) => project.id === entry.id)?.label || entry.id,
+    );
+    return `Fix the errors on ${names.join(', ')} to save`;
+  }
+  if (models.some((model) => !isValidModel(model))) {
+    return 'A model on the Agent page is not a model name';
+  }
+  return null;
 }

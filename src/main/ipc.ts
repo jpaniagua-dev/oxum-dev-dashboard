@@ -2465,8 +2465,11 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
   );
 
   ipcMain.handle(IpcChannel.SettingsOpen, async (_event, projectId: unknown): Promise<void> => {
+    // The stored configuration, not the live list: that one drops a disabled project and one whose
+    // folder is gone, which the window edits all the same.
+    const configured = deps.settings.get().projects;
     const scope =
-      typeof projectId === 'string' && deps.projects().some((project) => project.id === projectId)
+      typeof projectId === 'string' && configured.some((project) => project.id === projectId)
         ? (projectId as ProjectId)
         : null;
     await deps.openSettings(scope);

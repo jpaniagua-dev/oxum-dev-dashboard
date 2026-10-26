@@ -3156,6 +3156,13 @@ account, and the unofficial libraries break its terms and risk a ban of the numb
   validation `error`; a missing `package.json`, or a missing script an action points at, is a `warning`.
   Those cases break one button, while git status, the terminal and `commit` all work. As an `error`, a
   single row of that kind blocked the "Save" button for the whole settings dialog.
+- **What blocks Save is `saveBlocker`, and it says so beside the button.** The window scoped to one
+  project ("Edit only this project") counts that project's errors only: the others are saved exactly
+  as already stored, so a missing folder elsewhere must not lock a window that does not show it. The
+  reason used to be a tooltip on a greyed button, which nobody hovers. The footer is drawn again once
+  the scope is applied, since the load drew it before. The scope is checked against the stored
+  configuration, not the live project list, which drops a disabled project and one whose folder is
+  gone: the window edits both.
 - **The renderer does not build a project configuration.** `buildProjectConfig` (IPC) builds it in the
   main process, so a project added from the table and a project added from the settings are identical:
   same id derivation, same label, same default actions. It used to be duplicated in both places, and
