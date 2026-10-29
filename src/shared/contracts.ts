@@ -1182,8 +1182,8 @@ export interface SessionAgent {
   /**
    * The conversation this session can be reopened on after a restart, when it has one.
    *
-   * Given by the app at the spawn through the profile's `sessionArgs`, never read back from the
-   * agent's files. Absent for an agent the profile cannot resume and for the runs whose life cycle
+   * Given through `sessionArgs`, or returned by Codex's local app-server before the tab opens.
+   * Absent for an agent the profile cannot resume and for the runs whose life cycle
    * belongs to something else (the feedback pass, a routine), which therefore never come back.
    */
   readonly conversation?: AgentConversation;
@@ -1192,6 +1192,8 @@ export interface SessionAgent {
 /** A resumable conversation: its id, and whether it was opened in plan mode. */
 export interface AgentConversation {
   readonly id: string;
+  /** Codex ids must not be handed to another CLI after the agent setting changes. */
+  readonly provider?: 'codex';
   /**
    * Plan mode, so a resumed session comes back through `planArgs`: resumed through the ordinary
    * command it would skip every permission prompt the plan was opened to keep.

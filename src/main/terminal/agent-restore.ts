@@ -5,6 +5,8 @@ import {
   CLAUDE_CODE_PROFILE,
   conversationArgs,
   splitCommand,
+  isCodexProfile,
+  resumeArguments,
   type AgentProfile,
 } from '@shared/agent-profile.js';
 import { restorable, type AgentSessionRecord } from '@shared/agent-sessions.js';
@@ -65,17 +67,24 @@ function readHead(file: string): string {
  */
 export function restoreAgentSessions(options: {
   records: readonly AgentSessionRecord[];
-  terminals: TerminalManager;
+  terminals: Pick<TerminalManager, 'restoreAgent'>;
   profile: AgentProfile;
   shells: readonly ShellProfile[];
   defaultShell: ShellProfile | undefined;
   projects: readonly Project[];
   size: TerminalSize;
 }): number {
-  const { keep, dropped } = restorable(options.records, {
+  const codex = isCodexProfile(options.profile);
+  const records = options.records.filter((record) => {
+    const compatible = (record.agent.conversation.provider === 'codex') === codex;
+    if (!compatible)
+      console.warn(`Not reopening "${record.title}": the configured agent has changed`);
+    return compatible;
+  });
+  const { keep, dropped } = restorable(records, {
     folderExists: (path) => existsSync(path),
     conversationExists: (id) => claudeConversationExists(id, options.profile),
-    canResume: options.profile.resumeArgs.trim().length > 0,
+    canResume: resumeArguments(options.profile).length > 0,
   });
   for (const { record, reason } of dropped) {
     console.warn(`Not reopening "${record.title}": ${reason}`);
@@ -83,13 +92,14 @@ export function restoreAgentSessions(options: {
 
   let reopened = 0;
   for (const record of keep) {
-    const shell = options.shells.find((entry) => entry.id === record.profileId) ?? options.defaultShell;
+    const shell =
+      options.shells.find((entry) => entry.id === record.profileId) ?? options.defaultShell;
     if (shell === undefined) {
       console.warn(`Not reopening "${record.title}": no shell profile to run it in`);
       continue;
     }
     const { id, plan } = record.agent.conversation;
-    const resume = conversationArgs(options.profile.resumeArgs, id);
+    const resume = conversationArgs(resumeArguments(options.profile), id);
     const command = plan
       ? buildPlanCommand(options.profile, record.agent.model, resume)
       : buildInteractiveCommand(options.profile, record.agent.model, resume);

@@ -25,7 +25,9 @@ export interface AgentSessionRecord {
   readonly actionId: string | null;
   readonly profileId: string | null;
   /** The agent as captured at the first spawn, conversation included. */
-  readonly agent: SessionAgent & { readonly conversation: NonNullable<SessionAgent['conversation']> };
+  readonly agent: SessionAgent & {
+    readonly conversation: NonNullable<SessionAgent['conversation']>;
+  };
   readonly note: string | null;
 }
 
@@ -41,12 +43,22 @@ export function agentRecordsFrom(
   groups: readonly TerminalGroup[],
 ): AgentSessionRecord[] {
   const byId = new Map(sessions.map((session) => [session.id, session]));
-  const order = [...new Set([...groups.flatMap((group) => group.tabs), ...sessions.map((session) => session.id)])];
+  const order = [
+    ...new Set([
+      ...groups.flatMap((group) => group.tabs),
+      ...sessions.map((session) => session.id),
+    ]),
+  ];
   const records: AgentSessionRecord[] = [];
   for (const id of order) {
     const session = byId.get(id);
     const conversation = session?.agent?.conversation;
-    if (session === undefined || !session.running || session.agent === null || conversation === undefined) {
+    if (
+      session === undefined ||
+      !session.running ||
+      session.agent === null ||
+      conversation === undefined
+    ) {
       continue;
     }
     records.push({
@@ -103,7 +115,13 @@ export function readAgentRecord(value: unknown): AgentSessionRecord | null {
       startedAt: text(raw['startedAt']),
       // `=== true`: plan mode keeps the permission prompts, so a value that merely failed to be
       // `false` must not drop them on the way back.
-      conversation: { id, plan: (conversation as Record<string, unknown>)['plan'] === true },
+      conversation: {
+        id,
+        plan: (conversation as Record<string, unknown>)['plan'] === true,
+        ...((conversation as Record<string, unknown>)['provider'] === 'codex'
+          ? { provider: 'codex' as const }
+          : {}),
+      },
     },
     note: optionalText(row['note']),
   };

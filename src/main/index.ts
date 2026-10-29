@@ -62,10 +62,11 @@ import { DashboardWindow, loadRendererPage, preloadPath } from './window.js';
 import { quotePrompt } from '@shared/automation.js';
 import { AutomationRunner, forgetRule, forgetTarget } from './automation/automation-runner.js';
 import { AutomationStore } from './automation/automation-store.js';
-import { buildInteractiveCommand, newConversation } from './triage/work-command.js';
+import { buildInteractiveCommand } from './triage/work-command.js';
 import { AgentSessionStore } from './terminal/agent-session-store.js';
 import { restoreAgentSessions } from './terminal/agent-restore.js';
 import { ConversationTracker } from './terminal/conversation-tracker.js';
+import { prepareConversation, stopCodexPreparations, type PreparedConversation } from './terminal/codex-conversation.js';
 import { agentRecordsFrom } from '@shared/agent-sessions.js';
 import type { TerminalGroup } from '@shared/contracts.js';
 import type { VaultState } from '@shared/vault.js';
@@ -223,7 +224,7 @@ async function bootstrap(): Promise<void> {
    * fired in the first second would have nowhere to put a tab, and reporting "could not" is what
    * makes that visible instead of silent.
    */
-  let startAutomationAgent: (prompt: string, projectId: string | null, title: string) => boolean =
+  let startAutomationAgent: (prompt: string, projectId: string | null, title: string) => boolean | Promise<boolean> =
     () => false;
   let startAutomationShell: (command: string, projectId: string | null, title: string) => boolean =
     () => false;
@@ -657,7 +658,7 @@ async function bootstrap(): Promise<void> {
     return all.find((project) => project.id === projectId) ?? all[0];
   };
 
-  startAutomationAgent = (prompt, projectId, title) => {
+  startAutomationAgent = async (prompt, projectId, title) => {
     const project = automationProject(projectId);
     const settings = settingsStore.get();
     const profile = resolveDefaultProfile(
@@ -667,7 +668,14 @@ async function bootstrap(): Promise<void> {
     if (project === undefined || profile === undefined) {
       return false;
     }
-    const conversation = newConversation(settings.agentProfile, false);
+    const cwd = resolveWorkspaceRoot(settings.workspaceRoot, project.path);
+    let conversation: PreparedConversation | null;
+    try {
+      conversation = await prepareConversation(settings.agentProfile, false, cwd, settings.agentWorkModel, title);
+    } catch (error) {
+      console.warn(`Could not prepare the agent session: ${String(error)}`);
+      return false;
+    }
     const resolved = resolveShellCommand(
       profile,
       `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, conversation?.args)} "${quotePrompt(prompt)}"`,
@@ -689,13 +697,13 @@ async function bootstrap(): Promise<void> {
       args: resolved.args,
       size: terminalSize,
       profileId: profile.id,
-      cwd: resolveWorkspaceRoot(settings.workspaceRoot, project.path),
+      cwd,
       agent: {
         label: settings.agentProfile.label,
         model: settings.agentWorkModel,
         instructionFile: settings.agentProfile.instructionFile,
         startedAt: new Date().toISOString(),
-        ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: false } }),
+        ...(conversation === null ? {} : { conversation: conversation.conversation }),
       },
       note: prompt,
     });
@@ -1094,13 +1102,18 @@ async function bootstrap(): Promise<void> {
   /*
    * Quit: stop the monitors and every terminal.
    *
-   * This used to defer the quit once to flush unsaved notes, which is why it takes the event at all.
-   * Nothing asynchronous is left to save, so it now runs straight through.
+   * A pending Codex preparation must first close its temporary local server. Otherwise quitting
+   * during startup could leave that child running after the dashboard has gone away.
    */
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
     // First: the kills below push session lists in which no agent is live any more, and recording
     // those would empty the very list the next launch reopens.
     agentSessions.freeze();
+    const preparing = stopCodexPreparations();
+    if (preparing !== null) {
+      event.preventDefault();
+      void preparing.then(() => app.quit());
+    }
     conversationTracker.stop();
     projectMonitor.stop();
     pullMonitor.stop();

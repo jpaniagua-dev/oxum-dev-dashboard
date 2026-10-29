@@ -1,7 +1,11 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { followConversations, readLiveSession, type LiveClaudeSession } from '@shared/claude-sessions.js';
+import {
+  followConversations,
+  readLiveSession,
+  type LiveClaudeSession,
+} from '@shared/claude-sessions.js';
 import type { TerminalSession } from '@shared/contracts.js';
 
 /** How often the registry is read. A `/resume` typed in a tab is followed within this long. */
@@ -54,8 +58,16 @@ export class ConversationTracker {
     try {
       const agents = this.ports
         .sessions()
-        .filter((session) => session.running && session.agent?.conversation !== undefined)
-        .map((session) => ({ terminalId: session.id, conversationId: session.agent?.conversation?.id ?? '' }));
+        .filter(
+          (session) =>
+            session.running &&
+            session.agent?.conversation !== undefined &&
+            session.agent.conversation.provider !== 'codex',
+        )
+        .map((session) => ({
+          terminalId: session.id,
+          conversationId: session.agent?.conversation?.id ?? '',
+        }));
       // Tabs that are gone or ended drop their binding, so a reused pid can never be followed.
       const live = new Set(agents.map((agent) => agent.terminalId));
       for (const terminalId of [...this.bound.keys()]) {
@@ -93,7 +105,9 @@ export class ConversationTracker {
     const sessions: LiveClaudeSession[] = [];
     for (const name of names.filter((entry) => entry.endsWith('.json'))) {
       try {
-        const session = readLiveSession(JSON.parse(await readFile(join(this.folder, name), 'utf8')));
+        const session = readLiveSession(
+          JSON.parse(await readFile(join(this.folder, name), 'utf8')),
+        );
         if (session !== null) {
           sessions.push(session);
         }

@@ -121,7 +121,8 @@ import { findFreePort, withPort } from './projects/free-port.js';
 import type { PullReviewService } from './review/review-service.js';
 import type { AutoRunRecords } from './autorun/auto-run-store.js';
 import type { TriageService } from './triage/triage-service.js';
-import { buildInteractiveCommand, buildWorkCommand, newConversation, resolveWorkspaceRoot } from './triage/work-command.js';
+import { buildInteractiveCommand, buildWorkCommand, resolveWorkspaceRoot } from './triage/work-command.js';
+import { prepareConversation, type PreparedConversation } from './terminal/codex-conversation.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -1206,7 +1207,13 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         };
       }
       // A conversation the app names, so this session can be reopened on it after a restart.
-      const conversation = newConversation(settings.agentProfile, mode === 'plan');
+      let conversation: PreparedConversation | null;
+      try {
+        conversation = await prepareConversation(settings.agentProfile, mode === 'plan', cwd,
+          settings.agentWorkModel, `${project.label} · ${keys.join(', ')}`);
+      } catch (error) {
+        return { terminalId: null, result: { ok: false, message: `Could not prepare the agent session: ${String(error)}` } };
+      }
       const command = buildWorkCommand(
         keys,
         basename(project.path),
@@ -1240,7 +1247,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           model: settings.agentWorkModel,
           instructionFile: settings.agentProfile.instructionFile,
           startedAt: new Date().toISOString(),
-          ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: conversation.plan } }),
+          ...(conversation === null ? {} : { conversation: conversation.conversation }),
         },
         /*
          * The session is born saying what it was sent to do, and this is what makes notes worth
@@ -1466,7 +1473,14 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
      * directly and lose the environment a login shell sets up, which is where `claude` lives on a
      * normal install.
      */
-    const conversation = newConversation(settings.agentProfile, false);
+    const cwd = resolveWorkspaceRoot(settings.workspaceRoot, runFolder(settings.projectsRoot));
+    let conversation: PreparedConversation | null;
+    try {
+      conversation = await prepareConversation(settings.agentProfile, false, cwd,
+        settings.agentWorkModel, settings.agentProfile.label);
+    } catch (error) {
+      return { terminalId: null, message: `Could not prepare the agent session: ${String(error)}` };
+    }
     const command = buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, conversation?.args);
     const resolved = resolveShellCommand(shell, command);
     const terminalId = deps.terminals.openAgent({
@@ -1475,7 +1489,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       args: resolved.args,
       // The workspace root, never a repository: memory and instructions are indexed by working
       // directory, so a session started in a repository begins with neither.
-      cwd: resolveWorkspaceRoot(settings.workspaceRoot, runFolder(settings.projectsRoot)),
+      cwd,
       size: deps.terminalSize(),
       profileId: shell.id,
       agent: {
@@ -1483,7 +1497,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         model: settings.agentWorkModel,
         instructionFile: settings.agentProfile.instructionFile,
         startedAt: new Date().toISOString(),
-        ...(conversation === null ? {} : { conversation: { id: conversation.id, plan: false } }),
+        ...(conversation === null ? {} : { conversation: conversation.conversation }),
       },
     });
     return {

@@ -17,7 +17,7 @@ import type { AutomationData, AutomationStore } from './automation-store.js';
 export interface AutomationPorts {
   readonly notify: (title: string, body: string) => void;
   /** Opens a coding agent in a tab with this prompt. Answers false when it could not. */
-  readonly runAgent: (prompt: string, projectId: string | null, title: string) => boolean;
+  readonly runAgent: (prompt: string, projectId: string | null, title: string) => boolean | Promise<boolean>;
   /** Opens a shell tab running this command. Answers false when it could not. */
   readonly runShell: (command: string, projectId: string | null, title: string) => boolean;
   readonly now: () => Date;
@@ -105,7 +105,7 @@ export class AutomationRunner {
       const ran: string[] = [];
       const refusals: string[] = [];
       for (const firing of decision.firings) {
-        const outcome = this.perform(firing, gate);
+        const outcome = await this.perform(firing, gate);
         if (outcome.ok) {
           ran.push(outcome.message);
         } else {
@@ -159,7 +159,7 @@ export class AutomationRunner {
       for (const rule of due) {
         // No target, so no fields: a scheduled rule's text is written out in full, and a `{{name}}`
         // in it stays as written, which `fillTemplate` already guarantees.
-        const outcome = this.perform(
+        const outcome = await this.perform(
           {
             ruleId: rule.id,
             ruleName: rule.name,
@@ -180,14 +180,14 @@ export class AutomationRunner {
   }
 
   /** Runs one firing through the ports, and says in one sentence what happened. */
-  private perform(firing: AutomationFiring, gate: AutomationGate): { ok: boolean; message: string } {
+  private async perform(firing: AutomationFiring, gate: AutomationGate): Promise<{ ok: boolean; message: string }> {
     const where = firing.action.projectId ?? firing.target.projectId;
     switch (firing.action.kind) {
       case 'notify':
         this.ports.notify(firing.target.label, firing.text);
         return { ok: true, message: `Notified: ${firing.target.label}` };
       case 'agent':
-        return this.ports.runAgent(firing.text, where, firing.ruleName)
+        return (await this.ports.runAgent(firing.text, where, firing.ruleName))
           ? { ok: true, message: `Started an agent on ${firing.target.label}` }
           : { ok: false, message: `Could not start an agent on ${firing.target.label}` };
       case 'shell':
@@ -212,7 +212,7 @@ export class AutomationRunner {
         if (firing.action.skill.length === 0) {
           return { ok: false, message: 'This rule runs a skill but names none' };
         }
-        return this.ports.runAgent(skillPrompt(firing.action.skill, firing.text), where, firing.ruleName)
+        return (await this.ports.runAgent(skillPrompt(firing.action.skill, firing.text), where, firing.ruleName))
           ? { ok: true, message: `Started /${firing.action.skill} on ${firing.target.label}` }
           : { ok: false, message: `Could not start /${firing.action.skill} on ${firing.target.label}` };
     }

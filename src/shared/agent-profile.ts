@@ -104,7 +104,7 @@ export interface AgentProfile {
   /**
    * Arguments that reopen a conversation by its id, after the interactive command, with
    * `{session}` where the id goes. Empty when the agent cannot resume one, and then no agent of
-   * this profile comes back after a restart.
+   * this profile comes back after a restart. Codex has a built-in `resume {session}` fallback.
    */
   readonly resumeArgs: string;
 }
@@ -259,7 +259,10 @@ export function describeCommand(file: string, args: readonly string[]): string {
 }
 
 /** Reads a profile off disk or off an IPC payload, filling anything missing from the default. */
-export function readProfile(value: unknown, fallback: AgentProfile = CLAUDE_CODE_PROFILE): AgentProfile {
+export function readProfile(
+  value: unknown,
+  fallback: AgentProfile = CLAUDE_CODE_PROFILE,
+): AgentProfile {
   if (typeof value !== 'object' || value === null) {
     return fallback;
   }
@@ -280,7 +283,8 @@ export function readProfile(value: unknown, fallback: AgentProfile = CLAUDE_CODE
     // report every run as empty.
     answerFormat: raw['answerFormat'] === 'stream-json' ? 'stream-json' : 'stdout',
     // Empty is a real value here, unlike the two above: it means "this agent has no such flag".
-    extraDirFlag: typeof raw['extraDirFlag'] === 'string' ? raw['extraDirFlag'].trim() : fallback.extraDirFlag,
+    extraDirFlag:
+      typeof raw['extraDirFlag'] === 'string' ? raw['extraDirFlag'].trim() : fallback.extraDirFlag,
     modelFlag: typeof raw['modelFlag'] === 'string' ? raw['modelFlag'].trim() : fallback.modelFlag,
     // Not empty-able, unlike the two flags above: every agent reads its instructions from somewhere,
     // and an empty name would make the Agents tab walk the tree looking for a file called nothing.
@@ -315,7 +319,19 @@ function readSameProgramArgs(
 }
 
 /** What a conversation id may look like: the UUID the app generates, and nothing a shell reads. */
-export const CONVERSATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const CONVERSATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Recognize the executable, not its editable label or another program's arguments. */
+export function isCodexProfile(profile: AgentProfile): boolean {
+  const program = (splitCommand(profile.interactive)[0] ?? '').split(/[\\/]/).pop() ?? '';
+  return /^codex(?:\.exe|\.cmd|\.bat)?$/i.test(program);
+}
+
+/** Codex resumes by its own id; it does not accept a caller-supplied id at startup. */
+export function resumeArguments(profile: AgentProfile): string {
+  return profile.resumeArgs.trim() || (isCodexProfile(profile) ? 'resume {session}' : '');
+}
 
 /**
  * A `sessionArgs` or `resumeArgs` template with its id filled in, or `''`.

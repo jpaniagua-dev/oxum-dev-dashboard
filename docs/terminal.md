@@ -51,8 +51,21 @@ watches find their group again after a restart; a shell is grouped until it clos
 
 The coding agents open when you quit (opened with `Ctrl+N`, **Work on this**, or a rule) reopen at
 the next launch on their conversation, with their title and note. Nothing runs by itself: each one
-waits for your next message. Shells and dev servers do not come back, and neither does an agent you
-never wrote to. Turn it off in Settings, Terminal, **Reopen my agents at launch**.
+waits for your next message. Shells and dev servers do not come back. Claude Code sessions without
+a saved message are skipped. Turn it off in Settings, Terminal, **Reopen my agents at launch**.
+
+**Codex** sessions opened by the Dashboard are also restored. Set the agent's interactive command
+to `codex {model}` (or the path to `codex.exe` / `codex.cmd`); no session-id or name flag is needed.
+The Dashboard creates a saved conversation through Codex's local app-server, then opens it with
+`codex resume <id>`. Renaming a card keeps that identity, and its title and note return with it.
+This uses the installed Codex CLI, with no Rust build or changes to global hook configuration.
+The local API was verified with Codex CLI 0.166.0; an unavailable API reports a launch error.
+
+Use the Dashboard's new-agent action for new restorable Codex conversations. Switching to another
+conversation with `/new`, `/fork` or `/resume` inside Codex is not currently tracked, and a remote
+`--remote` command or a `--profile` option is not supported by automatic restoration (use `-c`
+overrides instead of `--profile`). Previously opened Codex tabs whose
+ids the Dashboard never recorded cannot be recovered automatically by this upgrade.
 
 ## Cards
 

@@ -1142,11 +1142,25 @@ Added on 2026-10-13, on request: quitting killed every terminal and every agent 
 again by hand, its conversation lost. **Agents only**, by decision: a shell is cheap to reopen and a
 dev server belongs to its project row, while an agent carries a conversation that is the work.
 
-- **The app names the conversation at the spawn.** Every interactive agent the app starts
+- **For a CLI accepting caller-supplied ids, the app names the conversation at the spawn.** Every interactive agent the app starts
   (`Ctrl+N`, `Work on this` in its three modes, a rule's `agent` and `skill`) gets a UUID through the
   profile's `sessionArgs` (`--session-id {session}`), kept on `SessionAgent.conversation` with the
   spawn's other facts. The next launch reopens it through `resumeArgs` (`--resume {session}`). A
   resumed conversation keeps its id, so one id carries a session across any number of restarts.
+- **Codex returns its own id through the local app-server** (added 2026-10-29). All three launch
+  paths await `prepareConversation`: a short worker-owned stdio exchange initializes the server,
+  calls `thread/start` with `ephemeral: false`, sets the initial name, and closes it. No `turn/start`
+  or model work is submitted. The PTY opens with `resume <id>`; an empty `resumeArgs` has that
+  built-in fallback for a Codex executable. Configuration overrides and the configured model are
+  retained. Ids are matched by request/response, never by directory, title or creation time.
+  `conversation.provider` keeps Codex ids out of another CLI and the Claude process tracker.
+  Hook trust and user config files are untouched. A failed preparation is a visible launch error;
+  pending preparations are cancelled and reaped before quit. Bootstraps are serialized to keep one
+  extra process at a time, including on a fresh Codex home. Remote CLI commands and `--profile`
+  are refused; Codex itself rejects profiles on app-server. Use `-c` overrides instead.
+  Internal `/new`, `/fork` and `/resume` switches are not tracked for Codex: use the Dashboard's
+  new-agent action for a new restorable conversation. Pre-upgrade tabs without a saved id cannot
+  be recovered by guessing.
 - ⚠️ **...and then follows the process, because that id stops being true.** Found on 2026-10-14 from a
   restore that failed with "No conversation found with session ID": once the person types `/resume`
   (or `/clear`) in the tab, the process writes ANOTHER conversation, and the file named after the
@@ -1159,7 +1173,7 @@ dev server belongs to its project row, while an agent carries a conversation tha
   unreadable or missing registry is no information, and the handed-in id stands. The known gap: a tab
   whose person switched conversation before the first pass (10 s) is never bound, and keeps its
   first id.
-- **Two profile fields, empty meaning "not resumable"**, migrated like `planArgs`: a stored profile
+- **Two profile fields, empty meaning "not resumable" outside the built-in Codex path**, migrated like `planArgs`: a stored profile
   gets Claude Code's only if it runs the same program, since Claude's flags on Codex would be an
   unknown option on every session. The id is whitelisted (`CONVERSATION_ID_PATTERN`) because it
   lands in a shell line.
