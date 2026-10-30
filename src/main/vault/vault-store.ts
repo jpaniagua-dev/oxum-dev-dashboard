@@ -1,7 +1,20 @@
 import { readFile } from 'node:fs/promises';
 import { safeStorage } from 'electron';
-import type { VaultCard, VaultEntry, VaultState } from '@shared/vault.js';
-import { cardsOf, parseVault, sameVaultFile, sweepExpired, type VaultFileBinding } from '@shared/vault.js';
+import type {
+  VaultEntry,
+  VaultFileBinding,
+  VaultFileCard,
+  VaultSecretInput,
+  VaultState,
+} from '@shared/vault.js';
+import {
+  cardsOf,
+  expiredFiles,
+  expiryFrom,
+  parseVault,
+  sameVaultFile,
+  secretConflict,
+} from '@shared/vault.js';
 import { atomicWriteFile, fileExists } from '../store/atomic-write.js';
 
 /**
@@ -11,10 +24,10 @@ import { atomicWriteFile, fileExists } from '../store/atomic-write.js';
  * a single scalar, this holds a set. **One encrypted blob rather than a file per card**, because
  * `safeStorage` encrypts a string and a set of files would be a set of atomic writes to keep
  * consistent, with a half-written vault as the failure. The whole blob is rewritten on every
- * change, which for a handful of cards costs nothing.
+ * change, which for a handful of files costs nothing.
  *
- * Values returned by `valueOf` may be used by the main-process operation broker or by an explicit
- * manual gesture. They never ride on `VaultState` or an activity record.
+ * Values leave through `valueOf` (a manual copy or reveal) and `entryForFile` (writing the file).
+ * They never ride on `VaultState`.
  */
 export class VaultStore {
   private entries: VaultEntry[] = [];
@@ -34,7 +47,7 @@ export class VaultStore {
     return safeStorage.isEncryptionAvailable();
   }
 
-  async load(): Promise<void> {
+  async load(now: Date): Promise<void> {
     this.entries = [];
     this.unreadable = false;
     if (!fileExists(this.filePath) || !this.available()) {
@@ -44,8 +57,7 @@ export class VaultStore {
     try {
       const base64 = (await readFile(this.filePath, 'utf8')).trim();
       // An empty file is an empty vault and not a failure: that is what a vault emptied of its last
-      // card leaves behind, and `decryptString` on zero bytes throws. The noise `SecretStore` makes
-      // on every poll after a cleared token is exactly this case, unhandled.
+      // card leaves behind, and `decryptString` on zero bytes throws.
       if (base64.length === 0) {
         return;
       }
@@ -55,12 +67,21 @@ export class VaultStore {
       this.unreadable = true;
       return;
     }
+    let migrated: boolean;
     try {
-      this.entries = parseVault(JSON.parse(plain));
+      const parsed = parseVault(JSON.parse(plain), now);
+      this.entries = parsed.entries;
+      migrated = parsed.migrated;
     } catch {
       // Decrypted but not JSON: the bytes are ours and unusable, which is still not a reason to
       // overwrite them.
       this.unreadable = true;
+      return;
+    }
+    // Written back at once, so the earlier format is read exactly once and its dropped entries
+    // stop sitting in the blob.
+    if (migrated) {
+      await this.flush();
     }
   }
 
@@ -68,45 +89,39 @@ export class VaultStore {
   state(): VaultState {
     return {
       cards: cardsOf(this.entries),
-      activity: [],
       available: this.available(),
       unreadable: this.unreadable,
     };
   }
 
-  /**
-   * One secret, for the two gestures that move it. Never crosses IPC by itself.
-   *
-   * ⚠️ **Sweeps first, and that is the case the timer cannot cover.** A laptop asleep for six hours
-   * runs no interval and `setInterval` does not catch up, so the list on screen would still hold a
-   * card that died during the nap and a click would hand out a secret its owner had asked to be
-   * destroyed. The timer keeps the display honest; this keeps the answer honest.
-   */
-  async valueOf(id: string, now: Date): Promise<string | null> {
-    await this.sweep(now);
-    return this.entries.find((entry) => entry.card.id === id)?.value ?? null;
+  /** One secret, for the two gestures that move it. Never crosses IPC by itself. */
+  valueOf(id: string, name: string): string | null {
+    const entry = this.entries.find((candidate) => candidate.card.id === id);
+    return entry?.card.secrets.includes(name) === true ? (entry.values[name] ?? null) : null;
   }
 
-  /** Values for one generated file. Main-process only; never exposed through IPC. */
-  async entriesForFile(binding: VaultFileBinding, now: Date): Promise<readonly VaultEntry[]> {
-    await this.sweep(now);
-    return this.entries.filter((entry) => sameVaultFile(entry.card.file, binding));
+  /** The values for one generated file. Main-process only; never exposed through IPC. */
+  entryForFile(binding: VaultFileBinding): VaultEntry | undefined {
+    return this.entries.find((entry) => sameVaultFile(entry.card.binding, binding));
+  }
+
+  /** The cards whose generated file has outlived its lifetime. Reads only. */
+  expired(now: Date): readonly VaultFileCard[] {
+    return expiredFiles(cardsOf(this.entries), now);
   }
 
   /**
-   * Adds a card, or edits its non-secret metadata and capability.
+   * Adds a file card, or replaces one.
    *
-   * ⚠️ **The value of an existing card is never replaced, and the expiry rule is what forbids it.**
-   * A lifetime is measured from creation, so a new secret under an old card would either inherit
-   * the remaining life of the one it replaced, which is an expiry describing the wrong secret, or
-   * silently restart the clock, which contradicts what the reader chose. Rotating a key is
-   * therefore remove and add, said on screen rather than left to be discovered.
-   *
-   * An empty value on an existing card consequently means "keep the stored one", which is also the
-   * Jira token's contract: the form is never told the value, so it cannot send it back, and an
-   * empty string would wipe a working secret on every rename.
+   * A secret sent with an empty value keeps the value stored under its `from` name, which is how a
+   * secret is renamed without being retyped: the form is never told a value, so it cannot send one
+   * back. A secret left out of `secrets` is gone. The dates are the store's, never the payload's:
+   * `generatedAt` says what is on disk, and only generating or removing the file may change it.
    */
-  async save(card: VaultCard, value: string): Promise<{ ok: boolean; message: string }> {
+  async save(
+    card: VaultFileCard,
+    secrets: readonly VaultSecretInput[],
+  ): Promise<{ ok: boolean; message: string }> {
     if (this.unreadable) {
       return { ok: false, message: 'The vault could not be read, so nothing was written' };
     }
@@ -114,44 +129,76 @@ export class VaultStore {
       return { ok: false, message: 'Encryption is unavailable on this machine: nothing was saved' };
     }
     const existing = this.entries.find((entry) => entry.card.id === card.id);
-    if (existing === undefined && value.length === 0) {
-      return { ok: false, message: 'A card needs a value' };
+    const values: Record<string, string> = {};
+    for (const secret of secrets) {
+      const value =
+        secret.value.length > 0
+          ? secret.value
+          : secret.from === null
+            ? undefined
+            : existing?.values[secret.from];
+      if (value === undefined || value.length === 0) {
+        return { ok: false, message: `${secret.name} needs a value` };
+      }
+      values[secret.name] = value;
+    }
+    const names = secrets.map((secret) => secret.name);
+    const conflict = secretConflict({ secrets: names, text: card.text });
+    if (conflict !== null) {
+      return { ok: false, message: conflict };
+    }
+    if (names.length === 0 && card.text.trim().length === 0) {
+      return { ok: false, message: 'Add a secret or some text' };
     }
     if (
-      card.file !== null &&
       this.entries.some(
-        (entry) =>
-          entry.card.id !== card.id &&
-          entry.card.name.toLowerCase() === card.name.toLowerCase() &&
-          sameVaultFile(entry.card.file, card.file),
+        (entry) => entry.card.id !== card.id && sameVaultFile(entry.card.binding, card.binding),
       )
     ) {
-      return { ok: false, message: `${card.name} already exists in that file` };
+      return { ok: false, message: `${card.binding.path} already has a card in that project` };
     }
-    /*
-     * An existing card keeps its stored value AND its expiry, whatever arrives.
-     *
-     * The expiry is carried over from the stored card rather than from the payload for the same
-     * reason the value is: both were decided at creation, and letting either be edited would make
-     * the card describe a secret it no longer holds.
-     */
+
+    // A card moved to another file has nothing on disk there yet; the old file is the caller's to
+    // clean up, through a sync of the binding it left.
+    const generatedAt =
+      existing !== undefined && sameVaultFile(existing.card.binding, card.binding)
+        ? existing.card.generatedAt
+        : null;
+    const next: VaultEntry = {
+      card: {
+        ...card,
+        createdAt: existing?.card.createdAt ?? card.createdAt,
+        generatedAt,
+        expiresAt: generatedAt === null ? null : expiryFrom(generatedAt, card.lifetimeMinutes),
+        secrets: names,
+      },
+      values,
+    };
     this.entries =
       existing === undefined
-        ? [...this.entries, { card, value }]
-        : this.entries.map((entry) =>
-            entry.card.id === card.id
-              ? {
-                  card: {
-                    ...card,
-                    createdAt: entry.card.createdAt,
-                    expiresAt: entry.card.expiresAt,
-                  },
-                  value: entry.value,
-                }
-              : entry,
-          );
+        ? [...this.entries, next]
+        : this.entries.map((entry) => (entry.card.id === card.id ? next : entry));
     await this.flush();
-    return { ok: true, message: existing === undefined ? 'Card added' : 'Card saved' };
+    return { ok: true, message: existing === undefined ? 'File card added' : 'File card saved' };
+  }
+
+  /** Records that the file was just written, which starts its lifetime. */
+  async markGenerated(id: string, now: Date): Promise<void> {
+    const generatedAt = now.toISOString();
+    await this.update(id, (card) => ({
+      ...card,
+      generatedAt,
+      expiresAt: expiryFrom(generatedAt, card.lifetimeMinutes),
+    }));
+  }
+
+  /** Records that nothing is on disk any more. A card already in that state writes nothing. */
+  async markRemoved(id: string): Promise<void> {
+    const entry = this.entries.find((candidate) => candidate.card.id === id);
+    if (entry === undefined || entry.card.generatedAt === null) {
+      return;
+    }
+    await this.update(id, (card) => ({ ...card, generatedAt: null, expiresAt: null }));
   }
 
   /** Removes a card. "Destroyed" means absent from the file, which is what `flush` writes. */
@@ -169,29 +216,6 @@ export class VaultStore {
   }
 
   /**
-   * Destroys whatever has expired, and says what it destroyed.
-   *
-   * ⚠️ **Run at start-up as well as on the timer, and the start-up pass is the one that matters.**
-   * A timer cannot fire while the app is closed, so a card whose hour passed overnight would
-   * otherwise be sitting there readable the next morning, which is the opposite of what its owner
-   * asked for. Sweeping before anything can read the vault is what makes the promise true rather
-   * than best effort.
-   */
-  async sweep(now: Date): Promise<readonly VaultCard[]> {
-    if (this.unreadable || this.entries.length === 0) {
-      return [];
-    }
-    const { dropped } = sweepExpired(cardsOf(this.entries), now);
-    if (dropped.length === 0) {
-      return [];
-    }
-    const gone = new Set(dropped.map((card) => card.id));
-    this.entries = this.entries.filter((entry) => !gone.has(entry.card.id));
-    await this.flush();
-    return dropped;
-  }
-
-  /**
    * Throws the unreadable blob away and starts over.
    *
    * The one way out of `unreadable`, and it exists because a refusal with no exit is a dead
@@ -205,10 +229,20 @@ export class VaultStore {
     await atomicWriteFile(this.filePath, '');
   }
 
+  private async update(id: string, change: (card: VaultFileCard) => VaultFileCard): Promise<void> {
+    if (this.unreadable || !this.entries.some((entry) => entry.card.id === id)) {
+      return;
+    }
+    this.entries = this.entries.map((entry) =>
+      entry.card.id === id ? { ...entry, card: change(entry.card) } : entry,
+    );
+    await this.flush();
+  }
+
   /**
    * Rewrites the whole blob.
    *
-   * ⚠️ **"Destroyed" means this app has no record and will never show or send it again.** It does
+   * ⚠️ **"Destroyed" means this app has no record and will never show or write it again.** It does
    * not mean the bytes are gone from the disk: `atomicWriteFile` writes a new file and renames over
    * the old one, so the previous ciphertext can survive in unreferenced blocks, and on an SSD with
    * wear levelling an in-place overwrite would not fix that either. Promising the second is a
@@ -223,9 +257,10 @@ export class VaultStore {
       await atomicWriteFile(this.filePath, '');
       return;
     }
-    const plain = JSON.stringify(
-      this.entries.map((entry) => ({ ...entry.card, value: entry.value })),
-    );
+    const plain = JSON.stringify({
+      version: 2,
+      files: this.entries.map((entry) => ({ ...entry.card, values: entry.values })),
+    });
     await atomicWriteFile(this.filePath, safeStorage.encryptString(plain).toString('base64'));
   }
 }

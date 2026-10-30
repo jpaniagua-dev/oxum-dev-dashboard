@@ -1,60 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type VaultCard,
+  type VaultFileCard,
+  assignedNames,
   cardsOf,
-  describeExpiry,
+  describeFileState,
+  expiredFiles,
   expiryFrom,
-  isExpired,
+  fileExpired,
   parseVault,
-  sanitizeHttpCapability,
-  sanitizeHint,
-  sanitizeName,
+  sanitizeLifetime,
   sanitizeVaultFileBinding,
+  sanitizeVaultText,
   sanitizeVaultVariableName,
-  sweepExpired,
+  secretConflict,
 } from '../src/shared/vault.js';
 
 /**
  * The vault's pure half.
  *
- * Three properties carry it, and each would fail in silence: a secret never rides on the shape the
- * renderer is handed, a card whose stamp is unreadable is NOT destroyed, and one bad entry in the
- * file does not take the others with it.
+ * Four properties carry it, and each would fail in silence: a secret never rides on the shape the
+ * renderer is handed, a file whose stamp is unreadable is NOT removed, one bad entry does not take
+ * the others with it, and a vault written in the earlier format is migrated rather than lost.
  */
 
 const NOW = new Date('2026-09-26T12:00:00.000Z');
+const BINDING = { kind: 'dotenv', projectId: 'web-app', path: '.env.local' } as const;
 
-function card(over: Partial<VaultCard> = {}): VaultCard {
+function card(over: Partial<VaultFileCard> = {}): VaultFileCard {
   return {
-    id: 'c1',
-    name: 'Stripe test key',
-    hint: 'sandbox only',
+    id: 'f1',
+    binding: BINDING,
     createdAt: '2026-09-26T11:00:00.000Z',
+    lifetimeMinutes: 30,
+    generatedAt: null,
     expiresAt: null,
-    file: null,
-    capability: null,
+    secrets: ['API_KEY'],
+    text: '',
     ...over,
   };
 }
 
-describe('sanitizeName and sanitizeHint', () => {
-  it('folds line breaks out, because both are drawn on one line', () => {
-    // A name holding a newline is a card whose height depends on what was pasted into it.
-    expect(sanitizeName('  two\nlines  ')).toBe('two lines');
-    expect(sanitizeHint('a\t\tb')).toBe('a b');
-  });
-
-  it('caps, then trims again after the cut', () => {
-    // Cutting mid-word can leave a trailing space, and a name ending in one differs from the same
-    // name typed without it for every comparison that follows.
-    expect(sanitizeName(`${'a'.repeat(39)}   tail`)).toBe('a'.repeat(39));
-  });
-
-  it('reads anything that is not a string as empty', () => {
-    expect(sanitizeName(42)).toBe('');
-    expect(sanitizeName(null)).toBe('');
-  });
-});
+function stored(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return { ...card(), values: { API_KEY: 'k-123' }, ...over };
+}
 
 describe('dotenv file metadata', () => {
   it('accepts variable names agents can reference without quoting', () => {
@@ -65,17 +53,58 @@ describe('dotenv file metadata', () => {
 
   it('keeps a relative project file and rejects traversal or .git internals', () => {
     expect(
-      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: '.env.local' }),
-    ).toEqual({ kind: 'dotenv', projectId: 'business', path: '.env.local' });
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'web-app', path: '.env.local' }),
+    ).toEqual({ kind: 'dotenv', projectId: 'web-app', path: '.env.local' });
     expect(
-      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: '../.env' }),
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'web-app', path: '../.env' }),
     ).toBeNull();
     expect(
-      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: '.git/config' }),
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'web-app', path: '.git/config' }),
     ).toBeNull();
     expect(
-      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'business', path: 'config/NUL.env' }),
+      sanitizeVaultFileBinding({ kind: 'dotenv', projectId: 'web-app', path: 'config/NUL.env' }),
     ).toBeNull();
+  });
+
+  it('only accepts a lifetime the form offers', () => {
+    expect(sanitizeLifetime(30)).toBe(30);
+    expect(sanitizeLifetime(null)).toBeNull();
+    expect(sanitizeLifetime(31)).toBeUndefined();
+    expect(sanitizeLifetime('30')).toBeUndefined();
+  });
+});
+
+describe('the free text', () => {
+  it('normalises line endings and refuses what a file cannot carry', () => {
+    expect(sanitizeVaultText('A=1\r\nB=2')).toBe('A=1\nB=2');
+    expect(sanitizeVaultText('tab\tkept')).toBe('tab\tkept');
+    expect(sanitizeVaultText('bell\u0007')).toBeNull();
+    expect(sanitizeVaultText(42)).toBeNull();
+    expect(sanitizeVaultText('x'.repeat(16 * 1024 + 1))).toBeNull();
+  });
+
+  it('lists the names it assigns, comments aside', () => {
+    expect(
+      assignedNames('# HIDDEN=1\nEMAIL=me@example.com\nexport USER = me\nnot an assignment'),
+    ).toEqual(['EMAIL', 'USER']);
+  });
+});
+
+describe('secretConflict', () => {
+  it('refuses a name given twice, case ignored', () => {
+    expect(secretConflict({ secrets: ['API_KEY', 'api_key'], text: '' })).toBe(
+      'api_key appears twice',
+    );
+  });
+
+  it('refuses a secret the text also sets, which would put two values in the file', () => {
+    expect(secretConflict({ secrets: ['API_KEY'], text: 'api_key=plain' })).toBe(
+      'api_key is a secret and is also set in the text',
+    );
+  });
+
+  it('accepts distinct names', () => {
+    expect(secretConflict({ secrets: ['API_KEY'], text: 'EMAIL=me@example.com' })).toBeNull();
   });
 });
 
@@ -84,204 +113,197 @@ describe('expiryFrom', () => {
     expect(expiryFrom('2026-09-26T12:00:00.000Z', 30)).toBe('2026-09-26T12:30:00.000Z');
   });
 
-  it('answers null for "no expiry" and for a nonsense duration', () => {
+  it('answers null for "never" and for a nonsense duration', () => {
     expect(expiryFrom('2026-09-26T12:00:00.000Z', null)).toBeNull();
-    expect(expiryFrom('2026-09-26T12:00:00.000Z', 0)).toBeNull();
     expect(expiryFrom('2026-09-26T12:00:00.000Z', -5)).toBeNull();
   });
 
-  it('answers null rather than an invalid date when the creation stamp is unreadable', () => {
+  it('answers null rather than an invalid date when the starting stamp is unreadable', () => {
     expect(expiryFrom('not a date', 30)).toBeNull();
   });
 });
 
-describe('isExpired', () => {
+describe('fileExpired', () => {
+  const generated = { generatedAt: '2026-09-26T11:30:00.000Z' };
+
   it('is true once the instant has passed, and on the instant itself', () => {
-    expect(isExpired(card({ expiresAt: '2026-09-26T11:59:00.000Z' }), NOW)).toBe(true);
-    expect(isExpired(card({ expiresAt: NOW.toISOString() }), NOW)).toBe(true);
+    expect(fileExpired(card({ ...generated, expiresAt: '2026-09-26T11:59:00.000Z' }), NOW)).toBe(
+      true,
+    );
+    expect(fileExpired(card({ ...generated, expiresAt: NOW.toISOString() }), NOW)).toBe(true);
   });
 
-  it('is false before, and false for a card with no expiry', () => {
-    expect(isExpired(card({ expiresAt: '2026-09-26T12:01:00.000Z' }), NOW)).toBe(false);
-    expect(isExpired(card(), NOW)).toBe(false);
+  it('is false before, for a file kept until removed, and for one never generated', () => {
+    expect(fileExpired(card({ ...generated, expiresAt: '2026-09-26T12:01:00.000Z' }), NOW)).toBe(
+      false,
+    );
+    expect(fileExpired(card({ ...generated, expiresAt: null }), NOW)).toBe(false);
+    expect(fileExpired(card({ expiresAt: '2026-09-26T11:00:00.000Z' }), NOW)).toBe(false);
   });
 
   it('reads an UNREADABLE stamp as not expired, which is the direction to be wrong in', () => {
-    // The other reading deletes a secret because a byte in a file was mangled, and nothing brings
-    // it back. Being wrong towards "keep it" costs a card that outstays its welcome.
-    expect(isExpired(card({ expiresAt: 'soon' }), NOW)).toBe(false);
+    // The other reading deletes a file because a byte in the vault was mangled.
+    expect(fileExpired(card({ ...generated, expiresAt: 'garbage' }), NOW)).toBe(false);
+  });
+
+  it('lists only the cards whose file is due', () => {
+    const due = card({ id: 'due', ...generated, expiresAt: '2026-09-26T11:59:00.000Z' });
+    expect(expiredFiles([due, card({ id: 'quiet' })], NOW).map((entry) => entry.id)).toEqual([
+      'due',
+    ]);
   });
 });
 
-describe('sweepExpired', () => {
-  it('returns BOTH halves, because both are used', () => {
-    // One is written back to the file, the other is what the panel reports. Returning only the
-    // survivors would make a card vanish with nothing saying why.
-    const alive = card({ id: 'alive', expiresAt: '2026-09-26T13:00:00.000Z' });
-    const dead = card({ id: 'dead', expiresAt: '2026-09-26T11:00:00.000Z' });
-    const sweep = sweepExpired([alive, dead], NOW);
-    expect(sweep.kept.map((entry) => entry.id)).toEqual(['alive']);
-    expect(sweep.dropped.map((entry) => entry.id)).toEqual(['dead']);
-  });
-
-  it('keeps a card that never expires, however old', () => {
-    const old = card({ createdAt: '2020-01-01T00:00:00.000Z', expiresAt: null });
-    expect(sweepExpired([old], NOW).kept).toHaveLength(1);
-  });
-
-  it('drops nothing on an empty vault', () => {
-    expect(sweepExpired([], NOW)).toEqual({ kept: [], dropped: [] });
-  });
-});
-
-describe('describeExpiry', () => {
-  it('counts in the coarsest unit that is still true', () => {
-    expect(describeExpiry(card({ expiresAt: '2026-09-26T12:20:00.000Z' }), NOW)).toBe(
-      'Expires in 20 min',
+describe('describeFileState', () => {
+  it('says whether the file is on disk, and for how long', () => {
+    expect(describeFileState(card(), NOW)).toBe('Not generated');
+    expect(
+      describeFileState(
+        card({ generatedAt: NOW.toISOString(), expiresAt: '2026-09-26T12:12:00.000Z' }),
+        NOW,
+      ),
+    ).toBe('Generated, removed in 12 min');
+    expect(
+      describeFileState(
+        card({ generatedAt: NOW.toISOString(), expiresAt: '2026-09-26T16:00:00.000Z' }),
+        NOW,
+      ),
+    ).toBe('Generated, removed in 4h');
+    expect(describeFileState(card({ generatedAt: NOW.toISOString() }), NOW)).toBe(
+      'Generated, kept until removed',
     );
-    expect(describeExpiry(card({ expiresAt: '2026-09-26T15:00:00.000Z' }), NOW)).toBe(
-      'Expires in 3h',
-    );
-    expect(describeExpiry(card({ expiresAt: '2026-09-28T12:00:00.000Z' }), NOW)).toBe(
-      'Expires in 2d',
-    );
-  });
-
-  it('says so plainly for a card that does not expire', () => {
-    expect(describeExpiry(card(), NOW)).toBe('No expiry');
-  });
-
-  it('says "no expiry" rather than a nonsense count for an unreadable stamp', () => {
-    // Matches `isExpired`, which will not destroy that card either: the two must agree or the panel
-    // counts down to a deletion that never comes.
-    expect(describeExpiry(card({ expiresAt: 'soon' }), NOW)).toBe('No expiry');
   });
 });
 
 describe('parseVault', () => {
-  const good = {
-    id: 'c1',
-    name: 'Key',
-    hint: 'h',
-    value: 'sk-secret',
-    createdAt: '2026-09-26T11:00:00.000Z',
-    expiresAt: null,
-  };
-
-  it('reads a well-formed entry', () => {
-    const entries = parseVault([good]);
+  it('reads a well-formed file card', () => {
+    const { entries, migrated } = parseVault(
+      { version: 2, files: [stored({ text: 'EMAIL=me@example.com' })] },
+      NOW,
+    );
+    expect(migrated).toBe(false);
     expect(entries).toHaveLength(1);
-    expect(entries[0]?.value).toBe('sk-secret');
-    expect(entries[0]?.card.name).toBe('Key');
-    expect(entries[0]?.card.file).toBeNull();
-    expect(entries[0]?.card.capability).toBeNull();
+    expect(entries[0]?.card.secrets).toEqual(['API_KEY']);
+    expect(entries[0]?.card.text).toBe('EMAIL=me@example.com');
+    expect(entries[0]?.values).toEqual({ API_KEY: 'k-123' });
   });
 
   it('drops ONE bad entry without taking the others with it', () => {
-    // The property that matters in a file holding several secrets: a mangled byte in one costs one
-    // card, never the vault.
-    expect(parseVault([good, null, 'nope', { id: 'x' }])).toHaveLength(1);
-  });
-
-  it('drops an entry with no value, so no card offers a Send that types nothing', () => {
-    expect(parseVault([{ ...good, value: '' }])).toEqual([]);
-  });
-
-  it('drops an entry with no name, since the name is how every gesture names it', () => {
-    expect(parseVault([{ ...good, name: '   ' }])).toEqual([]);
-  });
-
-  it('keeps the FIRST of two entries sharing an id', () => {
-    // Every gesture is "do this to the card with this id", so a duplicate would shadow the first
-    // and make its secret unreachable while still occupying the file.
-    const entries = parseVault([good, { ...good, value: 'other' }]);
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.value).toBe('sk-secret');
-  });
-
-  it('reads anything that is not an array as an empty vault', () => {
-    expect(parseVault(null)).toEqual([]);
-    expect(parseVault({})).toEqual([]);
-    expect(parseVault('')).toEqual([]);
-  });
-
-  it('replaces an unreadable creation stamp rather than dropping the entry', () => {
-    // The stamp only feeds a label, unlike the name and the value: losing a secret over it would be
-    // the cure being worse than the disease.
-    const entries = parseVault([{ ...good, createdAt: 'whenever' }]);
-    expect(entries).toHaveLength(1);
-    expect(Number.isNaN(new Date(entries[0]?.card.createdAt ?? '').getTime())).toBe(false);
-  });
-
-  it('loads a valid file binding but drops an unusable optional binding without losing the secret', () => {
-    const valid = parseVault([
+    const { entries } = parseVault(
       {
-        ...good,
-        name: 'API_KEY',
-        file: { kind: 'dotenv', projectId: 'dashboard', path: '.env.local' },
+        version: 2,
+        files: [
+          stored(),
+          { id: 'broken' },
+          stored({ id: 'f2', binding: { ...BINDING, path: '.env' } }),
+        ],
       },
-    ]);
-    expect(valid[0]?.card.file).toEqual({
-      kind: 'dotenv',
-      projectId: 'dashboard',
-      path: '.env.local',
-    });
+      NOW,
+    );
+    expect(entries.map((entry) => entry.card.id)).toEqual(['f1', 'f2']);
+  });
 
-    const recovered = parseVault([
+  it('keeps the FIRST of two cards sharing an id or a file', () => {
+    const { entries } = parseVault(
       {
-        ...good,
-        name: 'Readable legacy label',
-        file: { kind: 'dotenv', projectId: 'dashboard', path: '../.env' },
+        version: 2,
+        files: [stored(), stored({ values: { API_KEY: 'second' } }), stored({ id: 'f3' })],
       },
-    ]);
-    expect(recovered).toHaveLength(1);
-    expect(recovered[0]?.card.file).toBeNull();
+      NOW,
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.values['API_KEY']).toBe('k-123');
+  });
+
+  it('drops a secret with no value, but keeps the card', () => {
+    const { entries } = parseVault(
+      { version: 2, files: [stored({ secrets: ['API_KEY', 'TOKEN'] })] },
+      NOW,
+    );
+    expect(entries[0]?.card.secrets).toEqual(['API_KEY']);
+  });
+
+  it('falls back to the default lifetime rather than losing the secrets over a mangled one', () => {
+    const { entries } = parseVault(
+      { version: 2, files: [stored({ lifetimeMinutes: 'soon' })] },
+      NOW,
+    );
+    expect(entries[0]?.card.lifetimeMinutes).toBe(30);
+  });
+
+  it('reads anything it does not recognise as an empty vault', () => {
+    expect(parseVault('nope', NOW).entries).toEqual([]);
+    expect(parseVault({ version: 3, files: [stored()] }, NOW).entries).toEqual([]);
+    expect(parseVault(null, NOW).entries).toEqual([]);
   });
 });
 
-describe('sanitizeHttpCapability', () => {
-  const good = {
-    kind: 'http',
-    baseUrl: 'https://api.example.com',
-    auth: 'header',
-    headerName: 'X-API-Key',
-    methods: ['GET', 'POST'],
-    pathPrefixes: ['/v1/issues', '/v1/projects/'],
-    projectIds: ['dashboard'],
-  };
-
-  it('keeps a constrained HTTPS capability and normalizes its origin and paths', () => {
-    expect(sanitizeHttpCapability(good)).toEqual({
-      ...good,
-      baseUrl: 'https://api.example.com',
-      pathPrefixes: ['/v1/issues', '/v1/projects'],
-    });
+describe('parseVault migrating the earlier format, one entry per variable', () => {
+  const variable = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'v1',
+    name: 'API_KEY',
+    hint: '',
+    value: 'k-123',
+    createdAt: '2026-09-20T10:00:00.000Z',
+    expiresAt: null,
+    file: BINDING,
+    capability: null,
+    ...over,
   });
 
-  it('allows plain HTTP only for a loopback service', () => {
-    expect(sanitizeHttpCapability({ ...good, baseUrl: 'http://127.0.0.1:4312' })).not.toBeNull();
-    expect(sanitizeHttpCapability({ ...good, baseUrl: 'http://api.example.com' })).toBeNull();
+  it('groups the variables of one file into one card, in order', () => {
+    const { entries, migrated } = parseVault(
+      [
+        variable(),
+        variable({ id: 'v2', name: 'TOKEN', value: 't-1' }),
+        variable({ id: 'v3', name: 'OTHER', file: { ...BINDING, path: '.env' } }),
+      ],
+      NOW,
+    );
+    expect(migrated).toBe(true);
+    expect(entries.map((entry) => entry.card.secrets)).toEqual([['API_KEY', 'TOKEN'], ['OTHER']]);
+    expect(entries[0]?.values).toEqual({ API_KEY: 'k-123', TOKEN: 't-1' });
   });
 
-  it('rejects credentials in the origin and traversal in an allowed path', () => {
-    expect(
-      sanitizeHttpCapability({ ...good, baseUrl: 'https://user:secret@api.example.com' }),
-    ).toBeNull();
-    expect(sanitizeHttpCapability({ ...good, pathPrefixes: ['/v1/../admin'] })).toBeNull();
+  it('turns a note into a comment of the text, where the file already printed it', () => {
+    const { entries } = parseVault([variable({ hint: 'sandbox\nonly' })], NOW);
+    expect(entries[0]?.card.text).toBe('# API_KEY: sandbox only');
   });
 
-  it('rejects an unrestricted or malformed project scope', () => {
-    expect(sanitizeHttpCapability({ ...good, projectIds: [] })).toBeNull();
-    expect(sanitizeHttpCapability({ ...good, methods: [] })).toBeNull();
+  it('drops a variable bound to no file, and one whose own expiry has passed', () => {
+    const { entries } = parseVault(
+      [
+        variable({ id: 'loose', name: 'Loose key', file: null }),
+        variable({ id: 'dead', name: 'DEAD', expiresAt: '2026-09-26T11:00:00.000Z' }),
+        variable({ id: 'alive', name: 'ALIVE', expiresAt: '2026-09-26T13:00:00.000Z' }),
+      ],
+      NOW,
+    );
+    expect(entries.map((entry) => entry.card.secrets)).toEqual([['ALIVE']]);
+  });
+
+  it('keeps the first of two variables sharing a name, case ignored', () => {
+    const { entries } = parseVault(
+      [variable(), variable({ id: 'v2', name: 'api_key', value: 'second' })],
+      NOW,
+    );
+    expect(entries[0]?.values).toEqual({ API_KEY: 'k-123' });
+  });
+
+  it('counts every migrated file as generated now, so an old file on disk is removed in time', () => {
+    const { entries } = parseVault([variable()], NOW);
+    expect(entries[0]?.card.generatedAt).toBe(NOW.toISOString());
+    expect(entries[0]?.card.expiresAt).toBe('2026-09-26T12:30:00.000Z');
+    expect(entries[0]?.card.lifetimeMinutes).toBe(30);
   });
 });
 
 describe('cardsOf', () => {
   it('carries NO value, which is the whole contract with the renderer', () => {
-    // Asserted on the object itself rather than on the type: a type stops a mistake at compile
-    // time and says nothing about an object built with a spread.
-    const cards = cardsOf(parseVault([{ id: 'c1', name: 'Key', value: 'sk-secret' }]));
-    expect(JSON.stringify(cards)).not.toContain('sk-secret');
-    expect(Object.keys(cards[0] ?? {})).not.toContain('value');
+    // Asserted on the object and not on the type: a spread can carry a field no type mentions.
+    const { entries } = parseVault({ version: 2, files: [stored()] }, NOW);
+    const cards = cardsOf(entries);
+    expect(JSON.stringify(cards)).not.toContain('k-123');
+    expect(Object.keys(cards[0] ?? {})).not.toContain('values');
   });
 });

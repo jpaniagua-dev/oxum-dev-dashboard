@@ -604,6 +604,17 @@ body {
   white-space: nowrap;
 }
 
+/* A pill that is also a button: it states the problem and is clicked away, like the Git notice. */
+.agents-notice {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* Same trap as `.pulls` and `.git`: a class setting `display` beats `[hidden]`. */
+.agents-notice[hidden] {
+  display: none;
+}
+
 .pill__dot {
   width: 7px;
   height: 7px;
@@ -801,7 +812,7 @@ body {
 .git__repo-line:hover .icon-button--row,
 .git__section:hover .icon-button--row,
 .git__row:hover .icon-button--row,
-.vault__card:hover .icon-button--row,
+.vault__file:hover .icon-button--row,
 .automations__aside:hover .icon-button--row,
 .icon-button--row:hover,
 .icon-button--row:focus-visible {
@@ -1628,7 +1639,7 @@ body {
   gap: 8px;
 }
 
-.vault__new-variable {
+.vault__new-file {
   padding: 3px 9px;
   font-size: var(--font-xs);
 }
@@ -1752,11 +1763,6 @@ body {
   outline: 0;
 }
 
-.vault__field--wide {
-  flex-basis: 100%;
-  width: 100%;
-}
-
 .vault__field--mono {
   font-family: var(--font-mono);
 }
@@ -1767,61 +1773,62 @@ body {
   font-size: var(--font-xs);
 }
 
+/* Where the file goes and for how long: the order the form is read in, one line when it fits. */
 .vault__file-target {
   display: grid;
-  grid-template-columns: minmax(140px, 0.8fr) minmax(190px, 1.2fr);
+  grid-template-columns: minmax(120px, 0.8fr) minmax(150px, 1.2fr) auto;
+  align-items: center;
   gap: 8px;
 }
 
-.vault__advanced {
+.vault__inline-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--text-dim);
   font-size: var(--font-xs);
+  white-space: nowrap;
 }
 
-.vault__advanced > summary {
-  cursor: pointer;
-  user-select: none;
+.vault__inline-label .vault__select {
+  flex: none;
+  width: auto;
 }
 
-.vault__advanced[open] > summary {
-  margin-bottom: 6px;
-}
-
-.vault__capability-form {
+.vault__rows {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 7px;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--primary);
-  border-radius: var(--radius-sm);
-  background: var(--surface-inset);
 }
 
-.vault__capability-toggle,
-.vault__method {
-  display: inline-flex;
+/* One secret in the form: its name, its value, and the button that takes the line out. */
+.vault__row-edit {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(0, 1.3fr) auto;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
+}
+
+.vault__add-secret {
+  align-self: flex-start;
+  padding: 2px 7px;
+  font-size: var(--font-xs);
+}
+
+/* Written into the file verbatim, so it is shown in the face a file is read in. */
+.vault__text-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
   color: var(--text);
-  font-size: var(--font-xs);
-}
-
-.vault__capability-copy {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: var(--font-xs);
-}
-
-.vault__methods {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-}
-
-.vault__method {
-  color: var(--text-dim);
   font-family: var(--font-mono);
+  font-size: var(--font-sm);
+  line-height: 1.45;
+  resize: vertical;
 }
 
 .vault__hint {
@@ -1904,7 +1911,7 @@ body {
   flex-direction: column;
 }
 
-.vault__variables > .vault__card {
+.vault__variables > .vault__secret-row {
   border-bottom: 1px solid var(--border);
 }
 
@@ -1912,52 +1919,48 @@ body {
   border-bottom: 0;
 }
 
-.vault__variables .vault__card-name {
+/* One secret of a card: its name beside the masked value, read as a line of the file. */
+.vault__secret-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.6fr) minmax(0, 1.4fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+}
+
+.vault__secret-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.vault__card {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 10px 11px;
+.vault__file-state {
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
 }
 
-.vault__card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.vault__card-identity {
-  display: flex;
-  align-items: baseline;
-  min-width: 0;
-  gap: 8px;
+/* The free text, as the file will hold it. Selectable: the body is not, and these lines are not secret. */
+.vault__text {
+  margin: 0;
+  padding: 8px 11px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .vault__card-actions {
   display: flex;
   flex: none;
   gap: 2px;
-}
-
-.vault__card-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-md);
-  font-weight: 600;
-  color: var(--text);
-}
-
-.vault__card-expiry {
-  flex: none;
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
 }
 
 .vault__secret-control {
@@ -2027,77 +2030,6 @@ body {
 .vault__file-count {
   color: var(--text-faint);
   font-size: var(--font-2xs);
-}
-
-.vault__capability {
-  padding: 5px 7px;
-  border-left: 2px solid var(--primary);
-  border-radius: var(--radius-sm);
-  background: var(--surface-inset);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: var(--font-2xs);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.vault__activity {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.vault__activity-title {
-  margin: 2px 0 0;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-  font-weight: 600;
-}
-
-.vault__activity-list {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-}
-
-.vault__activity-row {
-  display: grid;
-  grid-template-columns: minmax(140px, 0.7fr) minmax(220px, 1.3fr);
-  gap: 8px;
-  padding: 5px 7px;
-  border-bottom: 1px solid var(--border);
-  font-size: var(--font-xs);
-}
-
-.vault__activity-row:last-child {
-  border-bottom: 0;
-}
-
-.vault__activity-row--succeeded {
-  border-left: 2px solid var(--success);
-}
-
-.vault__activity-row--denied,
-.vault__activity-row--failed {
-  border-left: 2px solid var(--warning);
-}
-
-.vault__activity-operation {
-  overflow: hidden;
-  color: var(--text);
-  font-family: var(--font-mono);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.vault__activity-meta {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-faint);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ------------------------------------------------------------------ *
@@ -2292,216 +2224,6 @@ body {
  * Master-detail on the same three boxes as the pull request and Jira tabs, so only what is inside
  * the detail column is new: a row of recorded facts, then one section per kind of context.
  * ------------------------------------------------------------------ */
-
-/*
- * The Agents list is wider than the repository lists it borrows its layout from.
- *
- * 190px fits a repository name and a count, which is what the pull request and Jira tabs put there.
- * A row here carries two lines: a name with a dot and an age, then the ticket, the repository and
- * the model. At 190 the second line was an ellipsis with nothing before it.
- */
-#strip-panel-agents {
-  grid-template-columns: 380px minmax(0, 1fr);
-}
-
-.agents__row {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.agents__row:hover {
-  background: var(--surface-hover);
-}
-
-.agents__row--active {
-  background: var(--surface-inset);
-  border-color: transparent;
-  box-shadow: inset 2px 0 0 var(--primary);
-  color: var(--text);
-}
-
-.agents__row-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* The same 7px circle the tags, the pills and the board cards use. One shape for one question. */
-.agents__row-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-
-.agents__row--working .agents__row-dot {
-  background: var(--success);
-}
-
-.agents__row--exited .agents__row-dot {
-  background: var(--text-faint);
-}
-
-.agents__row-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: var(--font-md);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agents__row-age {
-  flex: none;
-  color: var(--text-faint);
-  font-size: var(--font-3xs);
-  font-variant-numeric: tabular-nums;
-}
-
-/* Indented under the name, past the dot, so the two lines read as one entry and not as two. */
-.agents__row-facts {
-  padding-left: 13px;
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--font-3xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/*
- * The facts about the selected agent, as a two-column key/value block.
- *
- * A grid and not a row of chips: the values are of wildly different lengths (a model name, a word,
- * a full path), and a flex row made every one of them a different width on every session. Labels
- * in a fixed narrow column is what lets the eye go down the values.
- */
-.agents__head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 3px 10px;
-  padding: 2px 0 10px;
-  border-bottom: 1px solid var(--border);
-}
-
-.agents__fact-label {
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.agents__fact-value {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text);
-  font-size: var(--font-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* A path gets the whole width: wrapped into a narrow cell it is a path nobody can read. */
-.agents__fact-label--wide {
-  grid-column: 1;
-}
-
-.agents__fact-value--wide {
-  grid-column: 2 / -1;
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-}
-
-.agents__section {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 0 10px;
-}
-
-.agents__section-title {
-  padding-bottom: 3px;
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-/*
- * A path is a value something else reads back exactly, so it is monospace. This app spends that face
- * on paths, commands, ports and ids, and on nothing a person chose the wording of.
- */
-.agents__path {
-  overflow: hidden;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/*
- * One memory card per line: its name, then what it is about.
- *
- * Columns of bare names were tried and dropped. They fit more on screen and answered a narrower
- * question: the summary is what says whether the agent knows a thing, while a filename only says
- * that a file exists.
- */
-.agents__card {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-  padding: 2px 0;
-}
-
-/*
- * A fixed column for the name, so the summaries line up.
- *
- * Ragged left edges on the second column is what makes a list of seventy unreadable: the eye has to
- * find the start of every summary instead of running down one line.
- */
-.agents__card-name {
-  flex: none;
-  width: 210px;
-  overflow: hidden;
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: var(--font-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agents__card-desc {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-dim);
-  font-size: var(--font-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The one line this tab exists to make impossible to miss: a session that starts with nothing. */
-.agents__note {
-  margin: 0;
-  padding: 2px 0;
-  color: var(--warning);
-  font-size: var(--font-sm);
-}
 
 .pull__age {
   color: var(--text-faint);
@@ -4742,8 +4464,9 @@ body {
 /* ------------------------------------------------------------------- git */
 
 /*
- * Laid out like a graph client inside the strip (2026-10-15): two full-width rows (the repository
- * tabs, the toolbar) over three columns (refs, the graph or a diff, the detail of the selection).
+ * Laid out like a graph client inside the strip (2026-10-15): one full-width row (the toolbar, which
+ * opens on the repository picker) over three columns (refs, the graph or a diff, the detail of the
+ * selection).
  *
  * The detail panel's width is a custom property so the separator can drive it: a grid *track* cannot
  * be given a width from a drag, but the property that sizes it can. The centre is `1fr` and absorbs
@@ -4755,7 +4478,7 @@ body {
 .git {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr) 5px var(--git-detail-width, 320px);
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   column-gap: 10px;
   row-gap: 6px;
   flex: 1;
@@ -4768,7 +4491,6 @@ body {
   display: none;
 }
 
-.git__repos,
 .git__toolbar {
   grid-column: 1 / -1;
   min-width: 0;
@@ -4787,51 +4509,13 @@ body {
 }
 
 /*
- * The repository tabs.
- *
- * A row of sub-tabs in the strip's own grammar (no weight change when active, a primary underline),
- * scrolling sideways when there are more repositories than room rather than wrapping onto a second
- * line the graph would pay for.
+ * A repository row of the Pull requests column and the buttons beside it: siblings, because the row
+ * is a button itself.
  */
-.git__repos {
-  display: flex;
-  align-items: flex-end;
-  gap: 2px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  border-bottom: 1px solid var(--border);
-  scrollbar-width: thin;
-}
-
-/* One tab and its terminal icon, siblings because the tab is a button (see `buildRepoTerminal`). */
 .git__repo-line {
   display: flex;
   flex: none;
   align-items: center;
-}
-
-.git__repo-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px 4px 9px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
-  font-size: var(--font-md);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.git__repo-tab:hover {
-  color: var(--text);
-}
-
-.git__repo-line--active .git__repo-tab {
-  color: var(--text);
-  border-bottom-color: var(--primary);
 }
 
 /* The toolbar: status on the left, the verbs as icons on the right. */
@@ -4840,6 +4524,24 @@ body {
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+/*
+ * The repository picker, the Jira assignee filter's recipe at the toolbar's height. Capped so a long
+ * name cannot push the branch and the verbs off the row; the list itself opens as wide as it needs.
+ */
+.git__repo-select {
+  flex: none;
+  max-width: 240px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-md);
+  text-overflow: ellipsis;
+  cursor: pointer;
 }
 
 /* Pushes what follows to the right edge without a margin rule per button. */
@@ -7238,4 +6940,413 @@ textarea.tickets__input {
 
 .editor-page__status[hidden] {
   display: none;
+}
+
+/* -------------------------------------------------------------- today tab */
+
+/*
+ * One screen, no page scroll: the day, the numbers, then panels sharing the height that is left.
+ *
+ * The strip is a few hundred pixels above the terminal, so a page that scrolls hides most of
+ * itself. Each panel scrolls on its own instead, and the panel itself only scrolls as a last
+ * resort, on a strip too short for the panels' minimum height.
+ */
+.today {
+  display: flex;
+  flex-direction: column;
+  /* A recessed ground, so the cards stand on it: on the strip's own surface they had no edge. */
+  background: var(--surface-inset);
+  /* The space between the three bands is what says where one ends: 8px read as one block. */
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 10px 12px;
+}
+
+.today[hidden] {
+  display: none;
+}
+
+.today__none {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.today__card-title {
+  color: var(--text-dim);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+
+/* ---- a line: a chart, then its three numbers, side by side */
+
+.today__line {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  /* Tiles keep their own height: stretched beside a tall chart, they were mostly empty. */
+  align-items: flex-start;
+  gap: 10px;
+}
+
+/* The chart takes what the tiles leave, and drops under them only when that is too narrow to read. */
+.today__line > .today__chart {
+  flex: 1 1 520px;
+}
+
+.today__line > .today__stats {
+  flex: 0 1 auto;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 190px);
+  grid-template-columns: none;
+}
+
+/* ---- headline numbers: each one leads to its source */
+
+.today__stats {
+  display: grid;
+  flex: none;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.today__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 7px 12px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--card-shadow);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+
+.today__stat--link {
+  cursor: pointer;
+}
+
+.today__stat--link:hover {
+  background: var(--surface-hover);
+}
+
+.today__stat--link:active {
+  background: var(--surface-inset);
+}
+
+.today__stat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.today__stat-label {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: var(--font-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Says "this goes somewhere" without competing with the number: faint until the tile is hovered. */
+.today__stat-glyph {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--text-faint);
+  opacity: 0.6;
+}
+
+.today__stat--link:hover .today__stat-glyph {
+  opacity: 1;
+}
+
+.today__stat-value {
+  color: var(--text);
+  font-size: var(--font-display);
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+/* Clocked in: the healthy colour the pills use, and only then. "Out" stays neutral. */
+.today__stat--ok .today__stat-value {
+  color: var(--success);
+}
+
+.today__stat-detail {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- the day: meetings on an hour axis, now as a line */
+
+.today__chart {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 12px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--card-shadow);
+}
+
+.today__chart-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.today__allday {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.today__allday-chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+}
+
+.today__day {
+  --lane-height: 18px;
+  position: relative;
+  height: calc(var(--lanes) * (var(--lane-height) + 3px) + 6px);
+  /* Room for the hour labels, which hang below the axis: without it they spill out of the card. */
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.today__day-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.today__day-hour {
+  position: absolute;
+  bottom: -16px;
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+}
+
+/* The two ends align inward, or half of each label falls outside the card. */
+.today__day-hour--first {
+  transform: none;
+}
+
+.today__day-hour--last {
+  transform: translateX(-100%);
+}
+
+.today__day-event {
+  position: absolute;
+  top: calc(var(--lane) * (var(--lane-height) + 3px) + 3px);
+  height: var(--lane-height);
+  min-width: 3px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--chart-1);
+}
+
+/* Over: the same mark, faded to the inset ground, so the eye goes to what is left. */
+.today__day-event--past {
+  background: var(--border-strong);
+}
+
+.today__day-event--now {
+  box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 3px var(--chart-1);
+}
+
+.today__day-label {
+  display: block;
+  padding: 2px 6px;
+  overflow: hidden;
+  color: var(--white);
+  font-size: var(--font-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today__day-event--past .today__day-label {
+  color: var(--text);
+}
+
+.today__day-now {
+  position: absolute;
+  top: -2px;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--primary);
+}
+
+/* ---- the sprint: part to whole, one stacked bar per row */
+
+.today__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+}
+
+.today__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.today__swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.today__stack-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.today__stack-label {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: var(--font-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today__stack {
+  display: flex;
+  gap: 2px;
+  height: 16px;
+}
+
+.today__stack-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3px;
+  border-radius: 4px;
+}
+
+.today__stack-count {
+  color: var(--white);
+  font-size: var(--font-3xs);
+  font-weight: 600;
+}
+
+.today__stack-total {
+  color: var(--text);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- pull requests by age: one bar per pull request, from its opening to now */
+
+.today__ages {
+  display: grid;
+  grid-template-columns: minmax(120px, 30%) minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.today__age-label {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--font-sm);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.today__age-label:hover {
+  text-decoration: underline;
+}
+
+.today__age-track {
+  position: relative;
+  height: 16px;
+}
+
+.today__age-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.today__age-bar:hover {
+  filter: brightness(1.12);
+}
+
+/* Before a short bar, right-aligned against its start, in the text colour. */
+.today__age-days {
+  position: absolute;
+  top: 50%;
+  color: var(--text-dim);
+  font-size: var(--font-3xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transform: translate(calc(-100% - 5px), -50%);
+  pointer-events: none;
+}
+
+/* Inside a bar wide enough to hold it, on the fill. */
+.today__age-days--inside {
+  color: var(--white);
+  font-weight: 600;
+  transform: translate(6px, -50%);
+}
+
+.today__age-axis {
+  position: relative;
+  height: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.today__age-tick {
+  position: absolute;
+  top: 2px;
+  color: var(--text-faint);
+  font-size: var(--font-3xs);
+  white-space: nowrap;
 }

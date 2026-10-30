@@ -22,6 +22,7 @@ const REAL = JSON.stringify([
       { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' },
     ],
     title: 'PROJ 1674 user profile detail page',
+    createdAt: '2026-08-01T09:00:00Z',
     updatedAt: '2026-08-04T15:15:06Z',
     url: 'https://github.com/example-org/web-app/pull/580',
   },
@@ -37,6 +38,7 @@ describe('parsePullPayload', () => {
       review: 'review-required',
       isAuthor: true,
       isReviewer: false,
+      createdAt: '2026-08-01T09:00:00Z',
     });
     // One success and one in progress: pending wins, since nothing is settled yet.
     expect(pr?.checks).toBe('pending');
@@ -142,6 +144,7 @@ describe('ownPulls', () => {
       pending: 0,
       isAuthor: false,
       isReviewer: false,
+      createdAt: '',
       updatedAt: '',
       ...over,
     }) as never;

@@ -44,6 +44,8 @@ import { PullReviewService } from './review/review-service.js';
 import { runAgent } from './agent/run-agent.js';
 import { registerIpcHandlers } from './ipc.js';
 import { JiraMonitor } from './jira/jira-monitor.js';
+import { DigestService } from './today/digest-service.js';
+import { TipeeMonitor } from './today/tipee-monitor.js';
 import { TriageService } from './triage/triage-service.js';
 import { buildJql, searchIssues } from './jira/jira-service.js';
 import { SecretStore } from './store/secret-store.js';
@@ -68,10 +70,9 @@ import { restoreAgentSessions } from './terminal/agent-restore.js';
 import { ConversationTracker } from './terminal/conversation-tracker.js';
 import { prepareConversation, stopCodexPreparations, type PreparedConversation } from './terminal/codex-conversation.js';
 import { agentRecordsFrom } from '@shared/agent-sessions.js';
-import type { TerminalGroup } from '@shared/contracts.js';
+import type { AgentNotReopened, TerminalGroup } from '@shared/contracts.js';
 import type { VaultState } from '@shared/vault.js';
-import { VaultBroker } from './vault/vault-broker.js';
-import { VaultFiles } from './vault/vault-files.js';
+import { VaultFiles, removeExpiredFiles } from './vault/vault-files.js';
 import { VaultStore } from './vault/vault-store.js';
 
 /**
@@ -316,6 +317,18 @@ async function bootstrap(): Promise<void> {
     },
   );
 
+  const todayDigest = new DigestService({
+    command: () => settingsStore.get().claudeCommand,
+    onChange: (state) => dashboardWindow.send(IpcChannel.TodayDigestChanged, state),
+  });
+  await todayDigest.load();
+  const tipeeSecrets = new SecretStore(AppPaths.tipeePassword());
+  const tipeeMonitor = new TipeeMonitor(
+    () => settingsStore.get(),
+    tipeeSecrets,
+    (state) => dashboardWindow.send(IpcChannel.TipeeChanged, state),
+  );
+
   /*
    * The rules that act on their own.
    *
@@ -429,11 +442,11 @@ async function bootstrap(): Promise<void> {
    * The vault, loaded and swept before anything can read it.
    *
    * The sweep at start-up is the one that matters: a timer cannot fire while the app is closed, so
-   * a card whose hour passed overnight would otherwise be sitting there readable in the morning,
-   * which is the opposite of what its owner asked for.
+   * a generated file whose half hour passed overnight would otherwise still be on disk in the
+   * morning, which is the opposite of what its owner asked for.
    */
   const vaultStore = new VaultStore(AppPaths.vault());
-  await vaultStore.load();
+  await vaultStore.load(new Date());
   const vaultFiles = new VaultFiles({ vault: vaultStore, projects: () => projects });
   // Re-read on every call, so a folder changed in the settings applies without a restart.
   const localTickets = new LocalTicketStore(
@@ -459,25 +472,9 @@ async function bootstrap(): Promise<void> {
     openEditor: (request, target, size) =>
       target === 'window' ? panelEditor.popOut(request) : panelEditor.open(request, size),
   });
-  const startupDropped = await vaultStore.sweep(new Date());
-  await vaultFiles.sync(
-    startupDropped.flatMap((card) => (card.file === null ? [] : [card.file])),
-  );
-  let vaultBroker: VaultBroker | null = null;
+  await removeExpiredFiles(vaultStore, vaultFiles, new Date());
+  const vaultState = (): VaultState => vaultStore.state();
 
-  /** Adds the current-process audit trail without ever persisting it beside the credentials. */
-  const vaultState = (): VaultState => ({
-    ...vaultStore.state(),
-    activity: vaultBroker?.activity() ?? [],
-  });
-
-  /**
-   * Pushes the vault to the DASHBOARD only, never broadcast.
-   *
-   * The settings window has no business receiving a payload about secrets, even one that carries
-   * none: the rule that sends pty output to the dashboard rather than broadcasting it, applied to the
-   * one shape in this app where the cost of being wrong is not a wasted xterm.
-   */
   /*
    * The newer release, if any. Looked at a little after launch, so the first paint never waits on
    * the network, then every six hours for an app that is never closed. Dashboard only.
@@ -493,54 +490,32 @@ async function bootstrap(): Promise<void> {
   setTimeout(() => void lookForUpdate(), 15_000);
   setInterval(() => void lookForUpdate(), UPDATE_INTERVAL_MS);
 
+  /**
+   * Pushes the vault to the DASHBOARD only, never broadcast.
+   *
+   * The settings window has no business receiving a payload about secrets, even one that carries
+   * none: the rule that sends pty output to the dashboard rather than broadcasting it, applied to the
+   * one shape in this app where the cost of being wrong is not a wasted xterm.
+   */
   const pushVault = (): VaultState => {
     const state = vaultState();
     dashboardWindow.send(IpcChannel.VaultChanged, state);
     return state;
   };
 
-  vaultBroker = new VaultBroker({
-    vault: vaultStore,
-    projects: () => projects,
-    onActivity: pushVault,
-    confirm: async (request) => {
-      const options: Electron.MessageBoxOptions = {
-        type: 'warning',
-        buttons: ['Approve once', 'Deny'],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-        title: request.title,
-        message: request.message,
-        detail: request.detail,
-      };
-      const owner = dashboardWindow.browserWindow;
-      const { response } =
-        owner === null
-          ? await dialog.showMessageBox(options)
-          : await dialog.showMessageBox(owner, options);
-      return response === 0;
-    },
-  });
-  await vaultBroker.start();
-
   /** A minute, which is finer than the shortest lifetime the form offers. */
   const VAULT_SWEEP_MS = 60_000;
   const vaultTimer = setInterval(() => {
-    void vaultStore.sweep(new Date()).then(async (dropped) => {
-      // Only when something died: a quiet minute must not re-encrypt and rewrite the file 1440
+    void removeExpiredFiles(vaultStore, vaultFiles, new Date()).then((changed) => {
+      // Only when a file went: a quiet minute must not re-encrypt and rewrite the vault 1440
       // times a day, the rule `advanceRun` and `setNote` already follow.
-      if (dropped.length > 0) {
-        await vaultFiles.sync(
-          dropped.flatMap((card) => (card.file === null ? [] : [card.file])),
-        );
+      if (changed) {
         pushVault();
       }
     });
   }, VAULT_SWEEP_MS);
   app.on('will-quit', () => {
     clearInterval(vaultTimer);
-    void vaultBroker?.stop();
   });
 
   // Triage shares the Jira credentials and nothing else: it is pulled, never polled.
@@ -619,8 +594,7 @@ async function bootstrap(): Promise<void> {
     },
   },
   // The stored grid, so the very first layout the dashboard is handed already has the right shape.
-  settingsStore.get().terminalColumns,
-  (projectId) => vaultBroker?.environmentFor(projectId) ?? {});
+  settingsStore.get().terminalColumns);
   terminals = terminalManager;
 
   /**
@@ -703,7 +677,7 @@ async function bootstrap(): Promise<void> {
         model: settings.agentWorkModel,
         instructionFile: settings.agentProfile.instructionFile,
         startedAt: new Date().toISOString(),
-        ...(conversation === null ? {} : { conversation: conversation.conversation }),
+        ...(conversation === null ? { unresumable: true } : { conversation: conversation.conversation }),
       },
       note: prompt,
     });
@@ -813,13 +787,27 @@ async function bootstrap(): Promise<void> {
   const profiles = (): ShellProfile[] =>
     mergeProfiles(detectProfiles(), settingsStore.get().shellProfiles);
 
+  /** Filled by the restore below, before the window asks for its bootstrap. */
+  let agentsNotReopened: readonly AgentNotReopened[] = [];
+
   registerIpcHandlers({
     projects: () => projects,
+    agentsNotReopened: () => agentsNotReopened,
     // The dashboard only, like `GitPolled`: the settings window has no Git tab to put a notice in.
     notifyGit: (notice) => dashboardWindow.send(IpcChannel.GitNotice, notice),
     monitor: () => projectMonitor,
     pulls: () => pullMonitor,
     jira: () => jiraMonitor,
+    todayDigest: () => todayDigest,
+    tipee: () => tipeeMonitor,
+    saveTipeePassword: async (password) => {
+      const result = await tipeeSecrets.write(password);
+      if (result.ok) {
+        void tipeeMonitor.refreshNow();
+      }
+      return result;
+    },
+    hasTipeePassword: async () => (await tipeeSecrets.read()).length > 0,
     triage: () => triageService,
     vault: () => vaultStore,
     vaultFiles: () => vaultFiles,
@@ -1035,7 +1023,7 @@ async function bootstrap(): Promise<void> {
   if (settingsStore.get().restoreAgentSessions && previousAgents.length > 0) {
     const settings = settingsStore.get();
     const shells = mergeProfiles(detectProfiles(), settings.shellProfiles);
-    const reopened = restoreAgentSessions({
+    const { reopened, notReopened } = restoreAgentSessions({
       records: previousAgents,
       terminals: terminalManager,
       profile: settings.agentProfile,
@@ -1044,6 +1032,7 @@ async function bootstrap(): Promise<void> {
       projects: resolveProjects(settings.projects),
       size: terminalSize,
     });
+    agentsNotReopened = notReopened;
     console.log(`Reopened ${String(reopened)} of ${String(previousAgents.length)} agent session(s)`);
   }
   // Once, so a record dropped above (a folder gone, a conversation never started) leaves the file
@@ -1071,6 +1060,7 @@ async function bootstrap(): Promise<void> {
   pullMonitor.start();
   hasJiraToken = (await secrets.read()).length > 0;
   jiraMonitor.start();
+  tipeeMonitor.start();
 
   window.on('close', (event) => {
     // Dev servers and editors matter here. A shell tab dying with the app is expected; a build being
@@ -1118,6 +1108,7 @@ async function bootstrap(): Promise<void> {
     projectMonitor.stop();
     pullMonitor.stop();
     jiraMonitor.stop();
+    tipeeMonitor.stop();
     terminalManager.stopAll();
     editorWindows.closeAll();
     panelEditor.stop();

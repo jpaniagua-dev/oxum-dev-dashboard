@@ -59,9 +59,9 @@ export function safeRepoName(folder: string): string | null {
  * Which skill is named is the whole of the difference between the two handoffs. `ask` opens `ticket`,
  * the session that stops whenever the work needs a decision; `auto` opens `ticket-auto`, which runs to
  * an open pull request without stopping. The app deliberately does no more than name it: it cannot
- * open a pull request itself, `gh-write.ts` holding no `gh pr create`, and Mail and Teams were
- * measured and dropped in V3, so both of the last two steps belong to a session that has the skills
- * and the M365 connector. The cost is stated rather than hidden: the unattended run is not
+ * open a pull request itself, `gh-write.ts` holding no `gh pr create`, and it writes to neither Mail
+ * nor Teams (the Today tab only reads them), so both of the last two steps belong to a session that
+ * has the skills and the M365 connector. The cost is stated rather than hidden: the unattended run is not
  * agent-agnostic the way the rest of this app is, and a profile without those loses the last two
  * steps in silence.
  *

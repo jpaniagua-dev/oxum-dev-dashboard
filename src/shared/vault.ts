@@ -1,49 +1,15 @@
 /**
- * A place to keep a secret, and a way to use it without handing its value to an agent.
+ * A place to keep a project file's variables, secrets among them, and to write that file on demand.
  *
- * ⚠️ **What this protects, and what it does not.** It protects the value **at rest** (encrypted by
- * the OS, keyed to the Windows account), its **lifetime** (a card can die on its own), and the
- * **moment it moves** (nothing leaves without a click). A generated file keeps the value out of the
- * renderer and agent prompt, but it is plaintext to processes in its project. Agent capabilities
- * are the stricter option: they keep the value in main and return only an operation result. Manual
- * Copy, Reveal and Send remain escape hatches and do not protect the value after delivery.
- *
- * The optional agent interface is a loopback operation broker, not a secret-reading API. Project
- * terminals receive an ephemeral token, discover metadata, ask for one constrained HTTP operation
- * and wait for a native approval dialog. No endpoint returns the stored value.
+ * ⚠️ **What this protects, and what it does not.** It protects the values **at rest** (encrypted by
+ * the OS, keyed to the Windows account) and keeps them out of the renderer and of an agent's prompt.
+ * The file it generates is plaintext to every process of its project, agents included: what the
+ * vault limits is how long that file stays on disk, not who may read it while it is there.
  *
  * This module is the pure half: parsing, validation and the clock. The half that encrypts lives in
  * `main/vault/vault-store.ts` and imports Electron, which is exactly why the two are apart, the
  * same split `secret-store.ts` never got and pays for by having no test at all.
  */
-
-/**
- * One secret, **without its value**.
- *
- * The value is deliberately not a field here. This shape is what crosses to the renderer and what
- * the panel paints, and a type that could carry the secret is a type somebody eventually puts it
- * in. It travels apart, on one channel, in answer to one explicit gesture.
- */
-export interface VaultCard {
-  readonly id: string;
-  /** What the reader called it. Shown everywhere, so it must not be the secret. */
-  readonly name: string;
-  /** A note about what it opens. Free text, never secret, and optional. */
-  readonly hint: string;
-  readonly createdAt: string;
-  /**
-   * When it destroys itself, or `null` for a card that does not.
-   *
-   * Computed at creation from a duration, and stored as the instant rather than the duration: a
-   * duration would have to be added to `createdAt` at every read, and a card edited later would
-   * silently restart its own clock.
-   */
-  readonly expiresAt: string | null;
-  /** Optional dotenv file this variable is materialized into for a project. */
-  readonly file: VaultFileBinding | null;
-  /** A constrained operation an agent may ask the Dashboard to perform with this value. */
-  readonly capability: VaultHttpCapability | null;
-}
 
 /**
  * One generated file target.
@@ -58,51 +24,45 @@ export interface VaultFileBinding {
   readonly path: string;
 }
 
-export const VAULT_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
-export type VaultHttpMethod = (typeof VAULT_HTTP_METHODS)[number];
-export type VaultHttpAuth = 'bearer' | 'header';
-
 /**
- * An HTTP capability, without its credential.
+ * One file, **without the values of its secrets**.
  *
- * The origin, paths, methods and project scope are stored beside the value so the broker can decide
- * locally whether a request is the operation its owner authorised. There is deliberately no generic
- * URL and no shell command: either would let an agent turn a useful credential into an exfiltration
- * primitive.
+ * The values are deliberately not a field here. This shape is what crosses to the renderer and what
+ * the panel paints, and a type that could carry a secret is a type somebody eventually puts it in.
+ * A value travels apart, on one channel, in answer to one explicit gesture.
  */
-export interface VaultHttpCapability {
-  readonly kind: 'http';
-  /** HTTPS origin only, except loopback HTTP for local development services. */
-  readonly baseUrl: string;
-  readonly auth: VaultHttpAuth;
-  /** Used only for `header`; empty for bearer authentication. */
-  readonly headerName: string;
-  readonly methods: readonly VaultHttpMethod[];
-  readonly pathPrefixes: readonly string[];
-  /** Exact project ids. A capability with no projects is unusable and therefore invalid. */
-  readonly projectIds: readonly string[];
+export interface VaultFileCard {
+  readonly id: string;
+  readonly binding: VaultFileBinding;
+  readonly createdAt: string;
+  /** How long a generated file stays on disk, in minutes; `null` keeps it until it is removed. */
+  readonly lifetimeMinutes: number | null;
+  /** When the file was last generated, or `null` while none is on disk. */
+  readonly generatedAt: string | null;
+  /**
+   * When the generated file is removed, or `null`.
+   *
+   * Stored as the instant rather than recomputed from the lifetime, so the sweep that runs at
+   * start-up honours a file whose time ran out while the app was closed.
+   */
+  readonly expiresAt: string | null;
+  /** The secrets' names, in the order they are written to the file. */
+  readonly secrets: readonly string[];
+  /** Written into the file as it is. Not secret: it is shown in clear, in the panel and the file. */
+  readonly text: string;
 }
 
-export type VaultActivityOutcome = 'denied' | 'succeeded' | 'failed';
-
-/** One non-secret audit record produced by the local operation broker. */
-export interface VaultActivity {
-  readonly at: string;
-  readonly capabilityId: string;
-  readonly capabilityName: string;
-  readonly projectId: string;
-  readonly method: VaultHttpMethod;
-  readonly path: string;
-  readonly outcome: VaultActivityOutcome;
-  readonly status: number | null;
-  readonly message: string;
+/** One secret as the form sends it: `from` is its stored name, `null` for a new one. */
+export interface VaultSecretInput {
+  readonly name: string;
+  /** Empty on an existing secret means "keep the stored value": the form is never told it. */
+  readonly value: string;
+  readonly from: string | null;
 }
 
 /** What the renderer is handed. No values, ever, on this shape. */
 export interface VaultState {
-  readonly cards: readonly VaultCard[];
-  /** Current-process activity only. It is intentionally not persisted with the credentials. */
-  readonly activity: readonly VaultActivity[];
+  readonly cards: readonly VaultFileCard[];
   /**
    * Whether the OS can encrypt at all.
    *
@@ -121,14 +81,12 @@ export interface VaultState {
   readonly unreadable: boolean;
 }
 
-/** How long a name may be. A label on a card, not a sentence. */
+/** How long a variable name may be. */
 export const NAME_LIMIT = 40;
-/** How long a hint may be. One line under the name. */
-export const HINT_LIMIT = 80;
-export const VAULT_PATH_LIMIT = 120;
-export const VAULT_PATH_COUNT_LIMIT = 8;
-export const VAULT_PROJECT_COUNT_LIMIT = 32;
 export const VAULT_FILE_PATH_LIMIT = 240;
+/** Enough for a hand-written dotenv file, small enough that the panel never holds a dump. */
+export const VAULT_TEXT_LIMIT = 16 * 1024;
+export const DEFAULT_LIFETIME_MINUTES = 30;
 
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -199,13 +157,64 @@ export function sameVaultFile(
   );
 }
 
-/** The durations the form offers, in minutes. `null` is "does not expire". */
-export const EXPIRY_CHOICES: readonly (number | null)[] = [null, 5, 15, 30, 60, 240, 1440];
+/**
+ * The free text, line endings normalised, or `null` when it cannot be written as it is.
+ *
+ * Refused rather than cleaned: the text is written into the file verbatim, and a control character
+ * dropped on the way would be a file that differs from what was typed with nothing saying so.
+ */
+export function sanitizeVaultText(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const text = value.replace(/\r\n?/g, '\n');
+  if (text.length > VAULT_TEXT_LIMIT || /[\u0000-\u0008\u000b-\u001f\u007f]/.test(text)) {
+    return null;
+  }
+  return text;
+}
+
+const ASSIGNMENT = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/;
+
+/** The names the free text assigns, comments aside. */
+export function assignedNames(text: string): string[] {
+  const names: string[] = [];
+  for (const line of text.split('\n')) {
+    const name = ASSIGNMENT.exec(line)?.[1];
+    if (name !== undefined) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Why this card cannot be written as one file, or `null`.
+ *
+ * A name given twice, or given to a secret AND assigned in the text, would put two values for one
+ * variable in the file, and which one wins depends on the loader that reads it. Case is ignored:
+ * Windows environment names are case-insensitive.
+ */
+export function secretConflict(card: Pick<VaultFileCard, 'secrets' | 'text'>): string | null {
+  const seen = new Set<string>();
+  for (const name of card.secrets) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      return `${name} appears twice`;
+    }
+    seen.add(key);
+  }
+  const inText = assignedNames(card.text).find((name) => seen.has(name.toLowerCase()));
+  return inText === undefined ? null : `${inText} is a secret and is also set in the text`;
+}
+
+/** The lifetimes the form offers, in minutes. `null` keeps the file until it is removed. */
+export const EXPIRY_CHOICES: readonly (number | null)[] = [5, 15, 30, 60, 240, 1440, null];
 
 /** What each choice is called on screen. */
 export function describeExpiryChoice(minutes: number | null): string {
   if (minutes === null) {
-    return 'No expiry';
+    return 'Never';
   }
   if (minutes < 60) {
     return `${String(minutes)} minutes`;
@@ -216,170 +225,22 @@ export function describeExpiryChoice(minutes: number | null): string {
   return `${String(minutes / 60)} hours`;
 }
 
-function clean(value: unknown, limit: number): string {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  // Line breaks folded out: both of these are drawn on one line of a card, and a name holding a
-  // newline is a card whose height depends on what was pasted into it.
-  return value.replace(/\s+/g, ' ').trim().slice(0, limit).trim();
-}
-
-export function sanitizeName(value: unknown): string {
-  return clean(value, NAME_LIMIT);
-}
-
-export function sanitizeHint(value: unknown): string {
-  return clean(value, HINT_LIMIT);
-}
-
-const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-const FORBIDDEN_AUTH_HEADERS = new Set([
-  'connection',
-  'content-length',
-  'cookie',
-  'host',
-  'proxy-authorization',
-  'transfer-encoding',
-]);
-
-function stringList(value: unknown, limit: number): string[] | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > limit) {
-    return null;
-  }
-  const list: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== 'string') {
-      return null;
-    }
-    const item = entry.trim();
-    if (item.length === 0 || list.includes(item)) {
-      continue;
-    }
-    list.push(item);
-  }
-  return list.length === 0 ? null : list;
+/** A lifetime the form offers, or `undefined` for anything else. */
+export function sanitizeLifetime(value: unknown): number | null | undefined {
+  return EXPIRY_CHOICES.find((choice) => choice === value);
 }
 
 /**
- * Validates the public half of an agent capability at both persistence and IPC boundaries.
+ * The instant `minutes` after `from`, or `null`.
  *
- * `null` means the whole capability is unusable. Callers loading an old file keep the card but drop
- * its agent access; callers handling a save reject it instead. Losing an optional permission is the
- * safe direction to fail, while losing the credential itself would not be.
- */
-export function sanitizeHttpCapability(value: unknown): VaultHttpCapability | null {
-  if (typeof value !== 'object' || value === null) {
-    return null;
-  }
-  const row = value as Record<string, unknown>;
-  if (row['kind'] !== 'http') {
-    return null;
-  }
-
-  let url: URL;
-  try {
-    url = new URL(typeof row['baseUrl'] === 'string' ? row['baseUrl'].trim() : '');
-  } catch {
-    return null;
-  }
-  const loopback =
-    url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
-  if (
-    (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) ||
-    url.username.length > 0 ||
-    url.password.length > 0 ||
-    url.pathname !== '/' ||
-    url.search.length > 0 ||
-    url.hash.length > 0
-  ) {
-    return null;
-  }
-
-  const auth = row['auth'];
-  if (auth !== 'bearer' && auth !== 'header') {
-    return null;
-  }
-  const headerName =
-    auth === 'header' && typeof row['headerName'] === 'string' ? row['headerName'].trim() : '';
-  if (
-    auth === 'header' &&
-    (!HEADER_NAME.test(headerName) || FORBIDDEN_AUTH_HEADERS.has(headerName.toLowerCase()))
-  ) {
-    return null;
-  }
-
-  if (!Array.isArray(row['methods']) || row['methods'].length === 0) {
-    return null;
-  }
-  const methods: VaultHttpMethod[] = [];
-  for (const method of row['methods']) {
-    if (!VAULT_HTTP_METHODS.includes(method as VaultHttpMethod)) {
-      return null;
-    }
-    if (!methods.includes(method as VaultHttpMethod)) {
-      methods.push(method as VaultHttpMethod);
-    }
-  }
-
-  const rawPaths = stringList(row['pathPrefixes'], VAULT_PATH_COUNT_LIMIT);
-  if (rawPaths === null) {
-    return null;
-  }
-  const pathPrefixes: string[] = [];
-  for (const raw of rawPaths) {
-    if (
-      raw.length > VAULT_PATH_LIMIT ||
-      !raw.startsWith('/') ||
-      raw.includes('\\') ||
-      raw.includes('?') ||
-      raw.includes('#') ||
-      raw.includes('//')
-    ) {
-      return null;
-    }
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(raw);
-    } catch {
-      return null;
-    }
-    if (decoded.split('/').some((part) => part === '.' || part === '..')) {
-      return null;
-    }
-    const path = raw.length > 1 ? raw.replace(/\/+$/, '') : raw;
-    if (!pathPrefixes.includes(path)) {
-      pathPrefixes.push(path);
-    }
-  }
-
-  const rawProjects = stringList(row['projectIds'], VAULT_PROJECT_COUNT_LIMIT);
-  if (rawProjects === null || rawProjects.some((id) => id.length > 100)) {
-    return null;
-  }
-
-  return {
-    kind: 'http',
-    baseUrl: url.origin,
-    auth,
-    headerName,
-    methods,
-    pathPrefixes,
-    projectIds: rawProjects,
-  };
-}
-
-/**
- * The instant a card created now would expire, or `null`.
- *
- * Takes the creation instant rather than reading the clock, so the caller decides what "now" is and
+ * Takes the starting instant rather than reading the clock, so the caller decides what "now" is and
  * a test does not have to wait.
  */
-export function expiryFrom(createdAt: string, minutes: number | null): string | null {
+export function expiryFrom(from: string, minutes: number | null): string | null {
   if (minutes === null || !Number.isFinite(minutes) || minutes <= 0) {
     return null;
   }
-  const at = new Date(createdAt).getTime();
+  const at = new Date(from).getTime();
   if (Number.isNaN(at)) {
     return null;
   }
@@ -387,130 +248,218 @@ export function expiryFrom(createdAt: string, minutes: number | null): string | 
 }
 
 /**
- * Whether a card's time is up.
+ * Whether a card's generated file has outlived its lifetime.
  *
- * An unparseable `expiresAt` reads as **not expired**, which is the direction to be wrong in: the
- * other reading silently deletes a secret because a byte in a file was mangled, and there is no
- * getting it back.
+ * An unparseable `expiresAt` reads as **not expired**: the file then stays until it is removed by
+ * hand, where the other reading would delete a file because a byte in the vault was mangled.
  */
-export function isExpired(card: VaultCard, now: Date): boolean {
-  if (card.expiresAt === null) {
+export function fileExpired(card: VaultFileCard, now: Date): boolean {
+  if (card.generatedAt === null || card.expiresAt === null) {
     return false;
   }
   const at = new Date(card.expiresAt).getTime();
   return Number.isNaN(at) ? false : at <= now.getTime();
 }
 
-export interface Sweep {
-  readonly kept: readonly VaultCard[];
-  /** What just died, so the caller can say it happened rather than let cards vanish silently. */
-  readonly dropped: readonly VaultCard[];
+export function expiredFiles(cards: readonly VaultFileCard[], now: Date): VaultFileCard[] {
+  return cards.filter((card) => fileExpired(card, now));
 }
 
-/**
- * Splits the cards into what survives and what has expired.
- *
- * Both halves are returned because both are used: one is written back to the file, the other is
- * what the panel reports. Returning only the survivors would make a card disappear with nothing
- * saying why, and a secret that vanishes unannounced reads as a bug in the vault.
- */
-export function sweepExpired(cards: readonly VaultCard[], now: Date): Sweep {
-  const kept: VaultCard[] = [];
-  const dropped: VaultCard[] = [];
-  for (const card of cards) {
-    (isExpired(card, now) ? dropped : kept).push(card);
+/** The line under a card's path: whether its file is on disk, and for how long. */
+export function describeFileState(card: VaultFileCard, now: Date): string {
+  if (card.generatedAt === null) {
+    return 'Not generated';
   }
-  return { kept, dropped };
-}
-
-/** The line under a card: when it dies, or that it does not. */
-export function describeExpiry(card: VaultCard, now: Date): string {
-  if (card.expiresAt === null) {
-    return 'No expiry';
-  }
-  const at = new Date(card.expiresAt).getTime();
+  const at = card.expiresAt === null ? Number.NaN : new Date(card.expiresAt).getTime();
   if (Number.isNaN(at)) {
-    return 'No expiry';
+    return 'Generated, kept until removed';
   }
   const minutes = Math.ceil((at - now.getTime()) / 60_000);
   if (minutes <= 0) {
-    return 'Expiring now';
+    return 'Generated, removing now';
   }
   if (minutes < 60) {
-    return `Expires in ${String(minutes)} min`;
+    return `Generated, removed in ${String(minutes)} min`;
   }
   const hours = Math.round(minutes / 60);
-  return hours < 24
-    ? `Expires in ${String(hours)}h`
-    : `Expires in ${String(Math.round(hours / 24))}d`;
+  return `Generated, removed in ${String(hours)}h`;
 }
 
 /**
- * One stored entry: a card and the secret it holds.
+ * One stored file: its card and the values of its secrets.
  *
  * Only ever seen by the main process. It is the shape inside the encrypted blob, and the reason it
  * is declared here rather than beside the encryption is that the parsing is what needs testing and
  * the encryption is what cannot be tested.
  */
 export interface VaultEntry {
-  readonly card: VaultCard;
-  readonly value: string;
+  readonly card: VaultFileCard;
+  readonly values: Readonly<Record<string, string>>;
+}
+
+export interface ParsedVault {
+  readonly entries: VaultEntry[];
+  /** The blob was in the format of one card per variable, and should be written back as files. */
+  readonly migrated: boolean;
 }
 
 /**
  * Reads the decrypted blob, dropping what it cannot use.
  *
- * An entry is **dropped, never repaired**, the house rule, and it matters more here than usual: a
- * half-understood entry is a secret whose name or lifetime is a guess, and a card that says "no
- * expiry" because its `expiresAt` was mangled is a secret that outlives what its owner asked for.
- * One bad entry never takes the others with it.
- *
- * An entry with an empty value is dropped too. A card with nothing behind it offers a `Send` that
- * would type nothing into a terminal, which is the button that looks fine and does nothing.
+ * An entry is **dropped, never repaired**, and one bad entry never takes the others with it. Two
+ * exceptions, both in the direction of keeping secrets: a mangled lifetime falls back to the
+ * default rather than losing the file's values, and a mangled text is emptied rather than dropping
+ * the secrets beside it.
  */
-export function parseVault(payload: unknown): VaultEntry[] {
-  if (!Array.isArray(payload)) {
-    return [];
+export function parseVault(payload: unknown, now: Date): ParsedVault {
+  if (Array.isArray(payload)) {
+    return { entries: migrateVariables(payload, now), migrated: true };
   }
+  if (typeof payload !== 'object' || payload === null) {
+    return { entries: [], migrated: false };
+  }
+  const record = payload as Record<string, unknown>;
+  const files = record['version'] === 2 && Array.isArray(record['files']) ? record['files'] : [];
   const entries: VaultEntry[] = [];
-  const seen = new Set<string>();
-  for (const row of payload) {
+  for (const row of files) {
+    const entry = parseFileEntry(row);
+    // An id or a file that repeats would give two cards one identity, and every gesture here is
+    // "do this to the card with this id": the second would shadow the first.
+    if (
+      entry !== null &&
+      !entries.some(
+        (kept) =>
+          kept.card.id === entry.card.id || sameVaultFile(kept.card.binding, entry.card.binding),
+      )
+    ) {
+      entries.push(entry);
+    }
+  }
+  return { entries, migrated: false };
+}
+
+function parseFileEntry(row: unknown): VaultEntry | null {
+  if (typeof row !== 'object' || row === null) {
+    return null;
+  }
+  const record = row as Record<string, unknown>;
+  const id = typeof record['id'] === 'string' ? record['id'] : '';
+  const binding = sanitizeVaultFileBinding(record['binding']);
+  if (id.length === 0 || binding === null) {
+    return null;
+  }
+  const rawValues = record['values'];
+  const stored =
+    typeof rawValues === 'object' && rawValues !== null
+      ? (rawValues as Record<string, unknown>)
+      : {};
+  const secrets: string[] = [];
+  const values: Record<string, string> = {};
+  for (const raw of Array.isArray(record['secrets']) ? record['secrets'] : []) {
+    const name = sanitizeVaultVariableName(raw);
+    const value = stored[name];
+    if (
+      name.length === 0 ||
+      typeof value !== 'string' ||
+      value.length === 0 ||
+      secrets.some((kept) => kept.toLowerCase() === name.toLowerCase())
+    ) {
+      continue;
+    }
+    secrets.push(name);
+    values[name] = value;
+  }
+  const lifetime = sanitizeLifetime(record['lifetimeMinutes']);
+  const generatedAt = validInstant(record['generatedAt']);
+  return {
+    card: {
+      id,
+      binding,
+      createdAt: validInstant(record['createdAt']) ?? new Date(0).toISOString(),
+      lifetimeMinutes: lifetime === undefined ? DEFAULT_LIFETIME_MINUTES : lifetime,
+      generatedAt,
+      expiresAt:
+        generatedAt !== null && typeof record['expiresAt'] === 'string'
+          ? record['expiresAt']
+          : null,
+      secrets,
+      text: sanitizeVaultText(record['text']) ?? '',
+    },
+    values,
+  };
+}
+
+/**
+ * Turns the earlier format, one entry per variable, into one card per file.
+ *
+ * What does not survive, and why: a variable bound to no file (the cards are files now, and its
+ * owner chose to let those go), and one whose own expiry has passed (the sweep would have destroyed
+ * it). A note becomes a `# NAME: note` comment in the text, which is where the generated file
+ * already printed it. Every migrated file counts as generated now, so a file the earlier version
+ * left on disk is removed after the default lifetime rather than staying forever.
+ */
+function migrateVariables(rows: readonly unknown[], now: Date): VaultEntry[] {
+  const groups: { card: VaultFileCard; values: Record<string, string>; notes: string[] }[] = [];
+  const generatedAt = now.toISOString();
+  for (const row of rows) {
     if (typeof row !== 'object' || row === null) {
       continue;
     }
     const record = row as Record<string, unknown>;
     const id = typeof record['id'] === 'string' ? record['id'] : '';
     const value = typeof record['value'] === 'string' ? record['value'] : '';
-    const parsedFile = sanitizeVaultFileBinding(record['file']);
-    const variableName = sanitizeVaultVariableName(record['name']);
-    const file = parsedFile !== null && variableName.length > 0 ? parsedFile : null;
-    const name = file === null ? sanitizeName(record['name']) : variableName;
-    // An id that repeats would give two cards one identity, and every gesture here is "do this to
-    // the card with this id": the second would shadow the first and its secret would be unreachable.
-    if (id.length === 0 || value.length === 0 || name.length === 0 || seen.has(id)) {
+    const name = sanitizeVaultVariableName(record['name']);
+    const binding = sanitizeVaultFileBinding(record['file']);
+    const expiresAt = validInstant(record['expiresAt']);
+    if (
+      id.length === 0 ||
+      value.length === 0 ||
+      name.length === 0 ||
+      binding === null ||
+      (expiresAt !== null && new Date(expiresAt).getTime() <= now.getTime())
+    ) {
       continue;
     }
-    seen.add(id);
-    const createdAt = typeof record['createdAt'] === 'string' ? record['createdAt'] : '';
-    entries.push({
-      card: {
-        id,
-        name,
-        hint: sanitizeHint(record['hint']),
-        createdAt: Number.isNaN(new Date(createdAt).getTime())
-          ? new Date(0).toISOString()
-          : createdAt,
-        expiresAt: typeof record['expiresAt'] === 'string' ? record['expiresAt'] : null,
-        file,
-        capability: sanitizeHttpCapability(record['capability']),
-      },
-      value,
-    });
+    let group = groups.find((entry) => sameVaultFile(entry.card.binding, binding));
+    if (group === undefined) {
+      group = {
+        card: {
+          id,
+          binding,
+          createdAt: validInstant(record['createdAt']) ?? generatedAt,
+          lifetimeMinutes: DEFAULT_LIFETIME_MINUTES,
+          generatedAt,
+          expiresAt: expiryFrom(generatedAt, DEFAULT_LIFETIME_MINUTES),
+          secrets: [],
+          text: '',
+        },
+        values: {},
+        notes: [],
+      };
+      groups.push(group);
+    }
+    if (group.card.secrets.some((kept) => kept.toLowerCase() === name.toLowerCase())) {
+      continue;
+    }
+    group.card = { ...group.card, secrets: [...group.card.secrets, name] };
+    group.values[name] = value;
+    const note =
+      typeof record['hint'] === 'string' ? record['hint'].replace(/\s+/g, ' ').trim() : '';
+    if (note.length > 0) {
+      group.notes.push(`# ${name}: ${note}`);
+    }
   }
-  return entries;
+  return groups.map((group) => ({
+    card: { ...group.card, text: group.notes.join('\n') },
+    values: group.values,
+  }));
+}
+
+function validInstant(value: unknown): string | null {
+  return typeof value === 'string' && !Number.isNaN(new Date(value).getTime()) ? value : null;
 }
 
 /** The cards alone, which is all the renderer is ever given. */
-export function cardsOf(entries: readonly VaultEntry[]): readonly VaultCard[] {
+export function cardsOf(entries: readonly VaultEntry[]): readonly VaultFileCard[] {
   return entries.map((entry) => entry.card);
 }

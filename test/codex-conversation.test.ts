@@ -248,7 +248,7 @@ describe('saving and reopening Codex tabs', () => {
       projects: [],
       size: { cols: 80, rows: 24 },
     };
-    expect(restoreAgentSessions(init)).toBe(2);
+    expect(restoreAgentSessions(init)).toEqual({ reopened: 2, notReopened: [] });
     expect(restore.mock.calls.map(([call]) => call.title)).toEqual(['Task 1', 'Task 0']);
     expect(restore.mock.calls[0]?.[0]).toMatchObject({
       note: 'Keep note 1',
@@ -261,8 +261,31 @@ describe('saving and reopening Codex tabs', () => {
 
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     restore.mockClear();
-    expect(restoreAgentSessions({ ...init, profile: CLAUDE_CODE_PROFILE })).toBe(0);
+    expect(restoreAgentSessions({ ...init, profile: CLAUDE_CODE_PROFILE })).toEqual({
+      reopened: 0,
+      notReopened: [
+        { title: 'Task 1', reason: 'the configured agent has changed' },
+        { title: 'Task 0', reason: 'the configured agent has changed' },
+      ],
+    });
     expect(restore).not.toHaveBeenCalled();
+
+    const legacy = readAgentRecord({
+      title: 'Legacy agent',
+      cwd: folder,
+      agent: { label: 'Other CLI', unresumable: true },
+    });
+    if (legacy === null) throw new Error('Invalid test fixture');
+    expect(restoreAgentSessions({ ...init, records: [...loaded, legacy] })).toEqual({
+      reopened: 2,
+      notReopened: [
+        {
+          title: 'Legacy agent',
+          reason: 'Other CLI cannot reopen a conversation: the agent profile has no session or resume arguments',
+        },
+      ],
+    });
+    expect(restore).toHaveBeenCalledTimes(2);
   });
 });
 

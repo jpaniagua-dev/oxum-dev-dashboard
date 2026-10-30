@@ -50,6 +50,9 @@
               the date each tab was added. The ids are unchanged, `jira` included under its Tickets
               label: they are what the settings store as the tab to reopen on.
             -->
+                <button type="button" id="strip-tab-today" class="strip__tab" role="tab">
+                  Today
+                </button>
                 <button type="button" id="strip-tab-projects" class="strip__tab" role="tab">
                   Projects
                 </button>
@@ -74,9 +77,6 @@
                 <button type="button" id="strip-tab-vault" class="strip__tab" role="tab">
                   Vault
                 </button>
-                <button type="button" id="strip-tab-agents" class="strip__tab" role="tab">
-                  Agents
-                </button>
                 <button type="button" id="strip-tab-extensions" class="strip__tab" role="tab">
                   Extensions
                 </button>
@@ -94,6 +94,8 @@
             -->
                 <!-- Shown only when a newer release is out: it downloads the installer. -->
                 <button type="button" id="update-button" class="button button--primary" hidden></button>
+                <!-- Shown only when agent tabs of the previous run did not come back: the reasons are its tooltip. -->
+                <button type="button" id="agents-notice" class="pill pill--busy agents-notice" hidden></button>
                 <span id="app-version" class="strip__meta"></span>
                 <span id="last-refresh" class="strip__meta"></span>
                 <button type="button" id="refresh-button" class="button">Refresh</button>
@@ -221,25 +223,6 @@
           summaries and model output all come from outside.
         -->
             <!--
-          Agents: the sessions running a coding agent on the left, what that agent reads on the right.
-
-          Master-detail with the same three boxes as the pull request and Jira tabs, and reusing their
-          classes rather than inventing a fourth layout for the same shape. Every child is filled from
-          `agents-panel.ts` with `textContent`: these are file paths and descriptions read off disk.
-        -->
-            <div class="pulls" id="strip-panel-agents" role="tabpanel" hidden>
-              <div class="pulls__repos" id="agents-list"></div>
-              <div class="pulls__main">
-                <!--
-              No filter bar here, unlike the pull request and Jira tabs: what sat in it was three
-              facts about the selected agent, and facts belong with the rest of them in the detail
-              rather than in a row of chrome above it.
-            -->
-                <div class="pulls__list" id="agents-detail"></div>
-              </div>
-            </div>
-
-            <!--
           Rule cards in a grid and the Activity column beside them, no master-detail: a rule is a few
           fields and fits beside its neighbours, so a detail column for something readable in a card
           would be the Git tab's grammar applied where it buys nothing.
@@ -263,6 +246,9 @@
           Filled by `explorer-panel.ts`, which builds the three columns itself.
         -->
             <div class="pulls pulls--detail explorer" id="strip-panel-explorer" role="tabpanel" hidden></div>
+
+            <!-- Filled by `today-panel.ts`: one card per source switched on in the settings. -->
+            <div class="today" id="strip-panel-today" role="tabpanel" hidden></div>
 
             <div class="triage" id="strip-panel-triage" role="tabpanel" hidden>
               <div class="pulls__repos" id="triage-sprints"></div>
@@ -292,16 +278,15 @@
             </div>
 
             <!--
-          Laid out like a graph client, inside the strip: the repositories as tabs, a toolbar, then
-          three columns. The refs on the left, the graph in the centre (a diff takes its place when a
-          file is opened), and the detail of the selection on the right: the staging area and the
-          commit form for the working tree, the message and files of a commit otherwise.
+          Laid out like a graph client, inside the strip: a toolbar that opens on the repository
+          picker, then three columns. The refs on the left, the graph in the centre (a diff takes its
+          place when a file is opened), and the detail of the selection on the right: the staging
+          area and the commit form for the working tree, the message and files of a commit otherwise.
 
           Every child is filled by the `git-*.ts` modules with `textContent`: branch names, commit
           subjects and diff bodies are all text from outside the app.
         -->
             <div class="git" id="strip-panel-git" role="tabpanel" hidden>
-              <div class="git__repos" id="git-repos" role="tablist" aria-label="Repositories"></div>
               <div class="git__toolbar" id="git-toolbar"></div>
               <div class="git__refs" id="git-refs" aria-label="Branches, stashes and tags"></div>
               <div class="git__center" id="git-center"></div>

@@ -11,7 +11,7 @@ import {
 } from '@shared/agent-profile.js';
 import { restorable, type AgentSessionRecord } from '@shared/agent-sessions.js';
 import { holdsConversation } from '@shared/claude-sessions.js';
-import type { Project, ShellProfile, TerminalSize } from '@shared/contracts.js';
+import type { AgentNotReopened, Project, ShellProfile, TerminalSize } from '@shared/contracts.js';
 import { buildInteractiveCommand, buildPlanCommand } from '../triage/work-command.js';
 import { resolveShellCommand, type TerminalManager } from './terminal-manager.js';
 
@@ -57,7 +57,9 @@ function readHead(file: string): string {
 }
 
 /**
- * Reopens the agent tabs of the previous run, each on its conversation, and returns what came back.
+ * Reopens the agent tabs of the previous run, each on its conversation, and says what came back and
+ * what did not, with why: the second list is shown in the top bar, the console of an installed build
+ * being somewhere nobody looks.
  *
  * Run once, in the main process, before the dashboard window exists: the renderer then receives
  * these sessions in its bootstrap like any others, and does not open its default shell over them.
@@ -73,12 +75,15 @@ export function restoreAgentSessions(options: {
   defaultShell: ShellProfile | undefined;
   projects: readonly Project[];
   size: TerminalSize;
-}): number {
+}): { reopened: number; notReopened: AgentNotReopened[] } {
   const codex = isCodexProfile(options.profile);
+  const notReopened: AgentNotReopened[] = [];
   const records = options.records.filter((record) => {
-    const compatible = (record.agent.conversation.provider === 'codex') === codex;
-    if (!compatible)
-      console.warn(`Not reopening "${record.title}": the configured agent has changed`);
+    const conversation = record.agent.conversation;
+    const compatible = conversation === undefined || (conversation.provider === 'codex') === codex;
+    if (!compatible) {
+      notReopened.push({ title: record.title, reason: 'the configured agent has changed' });
+    }
     return compatible;
   });
   const { keep, dropped } = restorable(records, {
@@ -86,16 +91,19 @@ export function restoreAgentSessions(options: {
     conversationExists: (id) => claudeConversationExists(id, options.profile),
     canResume: resumeArguments(options.profile).length > 0,
   });
-  for (const { record, reason } of dropped) {
-    console.warn(`Not reopening "${record.title}": ${reason}`);
-  }
+  notReopened.push(
+    ...dropped.map(({ record, reason }) => ({
+      title: record.title,
+      reason,
+    })),
+  );
 
   let reopened = 0;
   for (const record of keep) {
     const shell =
       options.shells.find((entry) => entry.id === record.profileId) ?? options.defaultShell;
     if (shell === undefined) {
-      console.warn(`Not reopening "${record.title}": no shell profile to run it in`);
+      notReopened.push({ title: record.title, reason: 'no shell profile to run it in' });
       continue;
     }
     const { id, plan } = record.agent.conversation;
@@ -104,7 +112,10 @@ export function restoreAgentSessions(options: {
       ? buildPlanCommand(options.profile, record.agent.model, resume)
       : buildInteractiveCommand(options.profile, record.agent.model, resume);
     if (command.length === 0) {
-      console.warn(`Not reopening "${record.title}": the agent profile has no plan mode any more`);
+      notReopened.push({
+        title: record.title,
+        reason: 'it was opened in plan mode, and the agent profile has no plan mode any more',
+      });
       continue;
     }
     const resolved = resolveShellCommand(shell, command);
@@ -125,5 +136,8 @@ export function restoreAgentSessions(options: {
       reopened += 1;
     }
   }
-  return reopened;
+  for (const { title, reason } of notReopened) {
+    console.warn(`Not reopening "${title}": ${reason}`);
+  }
+  return { reopened, notReopened };
 }

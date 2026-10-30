@@ -1,8 +1,8 @@
 import { lstat, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type { Project } from '@shared/contracts.js';
-import type { VaultEntry, VaultFileBinding } from '@shared/vault.js';
-import { sameVaultFile, sanitizeVaultFileBinding } from '@shared/vault.js';
+import type { VaultEntry, VaultFileBinding, VaultFileCard } from '@shared/vault.js';
+import { sameVaultFile, sanitizeVaultFileBinding, secretConflict } from '@shared/vault.js';
 import { git } from '../git/run-git.js';
 
 const MANAGED_HEADER =
@@ -10,7 +10,7 @@ const MANAGED_HEADER =
 const EXISTING_FILE_LIMIT = 1024 * 1024;
 
 export interface VaultFileSource {
-  entriesForFile(binding: VaultFileBinding, now: Date): Promise<readonly VaultEntry[]>;
+  entryForFile(binding: VaultFileBinding): VaultEntry | undefined;
 }
 
 export interface VaultFilesOptions {
@@ -77,50 +77,47 @@ export class VaultFiles {
       return { ok: false, message: `${target.binding.path} is a symbolic link and was not touched.` };
     }
 
-    const entries = await this.options.vault.entriesForFile(target.binding, new Date());
-    if (entries.length === 0) {
-      return { ok: false, message: 'This file has no live variables to generate.' };
+    const entry = this.options.vault.entryForFile(target.binding);
+    if (entry === undefined || isEmpty(entry)) {
+      return { ok: false, message: 'This file has nothing to write.' };
     }
-    const duplicate = duplicateVariable(entries);
-    if (duplicate !== null) {
-      return { ok: false, message: `${duplicate} appears more than once in this file.` };
+    const conflict = secretConflict(entry.card);
+    if (conflict !== null) {
+      return { ok: false, message: `${conflict}.` };
     }
-    await writeManagedFile(target.absolutePath, renderDotenv(entries));
+    await writeManagedFile(target.absolutePath, renderDotenv(entry));
+    const count = entry.card.secrets.length;
     return {
       ok: true,
-      message: `Generated ${target.binding.path} with ${String(entries.length)} variable${entries.length === 1 ? '' : 's'}.`,
+      message: `Generated ${target.binding.path} with ${String(count)} secret${count === 1 ? '' : 's'}.`,
     };
   }
 
-  async remove(binding: VaultFileBinding): Promise<{ ok: boolean; message: string }> {
+  /**
+   * Deletes a file whose lifetime is over, if it is still ours.
+   *
+   * True when nothing of ours is left on disk, a file that is missing or no longer carries the
+   * marker included: there is nothing more to do about either. False only when the deletion failed,
+   * so the next sweep tries again.
+   */
+  async expire(binding: VaultFileBinding): Promise<boolean> {
     try {
-      return await this.removeChecked(binding);
+      const target = await this.target(binding);
+      if (!('message' in target) && (await managedState(target.absolutePath)) === 'managed') {
+        await unlink(target.absolutePath);
+      }
+      return true;
     } catch (error) {
-      console.error('[vault-files] removal failed', error);
-      return { ok: false, message: 'The generated Vault file could not be removed.' };
+      console.error('[vault-files] an expired file could not be removed', error);
+      return false;
     }
-  }
-
-  private async removeChecked(binding: VaultFileBinding): Promise<{ ok: boolean; message: string }> {
-    const target = await this.target(binding);
-    if ('message' in target) {
-      return target;
-    }
-    const existing = await managedState(target.absolutePath);
-    if (existing === 'missing') {
-      return { ok: true, message: `${target.binding.path} is already absent.` };
-    }
-    if (existing !== 'managed') {
-      return { ok: false, message: `${target.binding.path} is not managed by Oxum Vault.` };
-    }
-    await unlink(target.absolutePath);
-    return { ok: true, message: `Removed generated file ${target.binding.path}.` };
   }
 
   /**
-   * Removes expired/deleted values from files that were already generated.
+   * Brings files that were already generated in line with the vault: rewritten after an edit,
+   * deleted once their card is gone or empty.
    *
-   * Missing files stay missing: saving a variable never materializes a secret without a click.
+   * Missing files stay missing: saving a card never materializes a secret without a click.
    */
   async sync(bindings: readonly VaultFileBinding[]): Promise<void> {
     const unique: VaultFileBinding[] = [];
@@ -143,12 +140,18 @@ export class VaultFiles {
           target.project.path,
           target.binding.path,
         );
-        const entries = await this.options.vault.entriesForFile(target.binding, new Date());
-        if (tracked || !ignored || entries.length === 0 || duplicateVariable(entries) !== null) {
+        const entry = this.options.vault.entryForFile(target.binding);
+        if (
+          tracked ||
+          !ignored ||
+          entry === undefined ||
+          isEmpty(entry) ||
+          secretConflict(entry.card) !== null
+        ) {
           await unlink(target.absolutePath).catch(() => undefined);
           continue;
         }
-        await writeManagedFile(target.absolutePath, renderDotenv(entries));
+        await writeManagedFile(target.absolutePath, renderDotenv(entry));
       } catch (error) {
         console.error('[vault-files] managed file sync failed', error);
       }
@@ -254,27 +257,47 @@ async function writeManagedFile(path: string, content: string): Promise<void> {
   await writeFile(path, content, { encoding: 'utf8', flush: true });
 }
 
-function duplicateVariable(entries: readonly VaultEntry[]): string | null {
-  const names = new Set<string>();
-  for (const entry of entries) {
-    const key = entry.card.name.toLowerCase();
-    if (names.has(key)) {
-      return entry.card.name;
-    }
-    names.add(key);
-  }
-  return null;
+function isEmpty(entry: VaultEntry): boolean {
+  return entry.card.secrets.length === 0 && entry.card.text.trim().length === 0;
 }
 
-export function renderDotenv(entries: readonly VaultEntry[]): string {
+/** The marker, the free text as it was typed, then the secrets, quoted. */
+export function renderDotenv(entry: VaultEntry): string {
   const lines = [MANAGED_HEADER.trimEnd(), ''];
-  for (const entry of entries) {
-    if (entry.card.hint.length > 0) {
-      lines.push(`# ${entry.card.hint}`);
-    }
-    lines.push(`${entry.card.name}=${quoteDotenv(entry.value)}`, '');
+  const text = entry.card.text.trimEnd();
+  if (text.length > 0) {
+    lines.push(text, '');
   }
-  return `${lines.join('\n')}\n`;
+  for (const name of entry.card.secrets) {
+    lines.push(`${name}=${quoteDotenv(entry.values[name] ?? '')}`);
+  }
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+
+/**
+ * Deletes the files whose lifetime is over and records it, in one pass.
+ *
+ * Run at start-up, on the minute timer and before the panel reads the vault. The start-up pass is
+ * the one that matters: a timer cannot fire while the app is closed, so a file whose half hour
+ * passed overnight would otherwise be sitting there in the morning. True when something changed,
+ * so a quiet pass pushes nothing.
+ */
+export async function removeExpiredFiles(
+  vault: {
+    expired(now: Date): readonly VaultFileCard[];
+    markRemoved(id: string): Promise<void>;
+  },
+  files: Pick<VaultFiles, 'expire'>,
+  now: Date,
+): Promise<boolean> {
+  let changed = false;
+  for (const card of vault.expired(now)) {
+    if (await files.expire(card.binding)) {
+      await vault.markRemoved(card.id);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function quoteDotenv(value: string): string {

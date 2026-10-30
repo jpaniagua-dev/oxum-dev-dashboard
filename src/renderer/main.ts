@@ -1,4 +1,5 @@
 import type {
+  AgentNotReopened,
   TicketsLayout,
   UpdateNotice,
   AppSettings,
@@ -37,13 +38,12 @@ import type {
   ThemeState,
   WorktreeCommand,
 } from '@shared/contracts.js';
-import type { AgentContext } from '@shared/agent-context.js';
 import { PANE_COLUMNS_AUTO } from '@shared/contracts.js';
 import { branchNameFor } from '@shared/branch-name.js';
 import { jobRuns } from '@shared/job-run.js';
 import { isReviewCurrent } from '@shared/pull-review.js';
 import type { AutomationState } from '@shared/contracts.js';
-import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
+import type { VaultFileCard, VaultSecretInput, VaultState } from '@shared/vault.js';
 import { renderAutomationPanel, skillNames } from './ui/automation-panel.js';
 import {
   bindVaultHost,
@@ -65,10 +65,9 @@ import {
 import { showContextMenu } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
-import { agentSessions, renderAgentsPanel } from './ui/agents-panel.js';
 import { ExtensionsPanel } from './ui/extensions-panel.js';
 import { ExplorerPanel } from './ui/explorer-panel.js';
-import { clearChildren, hitsInteractive, requireElement } from './ui/dom.js';
+import { clearChildren, createElement, hitsInteractive, requireElement } from './ui/dom.js';
 import { canRerunSession } from '@shared/session-actions.js';
 import {
   buildChangeMenuItems,
@@ -108,6 +107,9 @@ import { TerminalPane } from './ui/terminal-pane.js';
 import { applyUiFontSize } from './ui/ui-font.js';
 import { appShortcut } from './ui/app-shortcuts.js';
 import { attachBoardPreviewResizer } from './ui/board-preview-resizer.js';
+import { renderTodayPanel } from './ui/today-panel.js';
+import { wantsDigest, type TodayDigestState } from '@shared/today.js';
+import type { TipeeState } from '@shared/tipee.js';
 
 /**
  * Application shell.
@@ -147,19 +149,6 @@ class App {
   private readonly rerunning = new Set<TerminalId>();
   /** The separator keeps its session-local width when cards are switched or the preview is hidden. */
   private boardPreviewResizer: { refresh: () => void } | null = null;
-  /** Which agent session the Agents tab is looking at. Null means "the newest one". */
-  private selectedAgent: TerminalId | null = null;
-  /**
-   * The context of the selected agent, or null while it is being read.
-   *
-   * Cached rather than re-read on every repaint: the panel is rebuilt whenever the session list
-   * changes, which is every poll, and this touches the disk. It is invalidated by a change of
-   * selection and nothing else, a file edited under a running session being rare enough that
-   * `Refresh` is the honest answer to it.
-   */
-  private agentContext: AgentContext | null = null;
-  /** Which session `agentContext` describes, so a stale answer can be dropped. */
-  private agentContextFor: TerminalId | null = null;
   /** Ticks while the board is up, so a card goes quiet on its own rather than at the next poll. */
   private boardTimer: number | null = null;
   private profiles: readonly ShellProfile[] = [];
@@ -238,6 +227,10 @@ class App {
   /** What the feedback watcher recorded about each unattended run. Empty until the first read. */
   private autoRuns: AutoRunRecord[] = [];
   private triagePanel: TriagePanel | null = null;
+  private todayDigest: TodayDigestState = { digest: null, running: false, startedAt: null, error: null };
+  private tipee: TipeeState = { configured: false, status: null, checkedAt: null, error: null };
+  /** Repaints the Today tab every second while a digest run is under way, for its clock. */
+  private todayClock: ReturnType<typeof setInterval> | null = null;
   private selectedJiraView: JiraViewId = 'mine';
   /*
    * Jira filter and sort.
@@ -350,6 +343,7 @@ class App {
     applyVersion(bootstrap.appVersion);
     void window.api.readUpdate().then(applyUpdate);
     window.api.onUpdateChanged(applyUpdate);
+    applyAgentsNotReopened(bootstrap.agentsNotReopened);
     // Before anything is measured: the strip resizer and the terminal's fit both read pixel sizes that
     // the text size decides, so applying it afterwards would fit them to a layout already gone.
     applyUiFontSize(bootstrap.settings.uiFontSize);
@@ -486,6 +480,8 @@ class App {
     this.pulls = bootstrap.pulls;
     this.pullScope = bootstrap.settings.pullScope;
     this.jira = bootstrap.jira;
+    this.todayDigest = bootstrap.todayDigest;
+    this.tipee = bootstrap.tipee;
     this.ticketsLayout = bootstrap.settings.ticketsLayout;
     // Read at startup whatever tab is shown: a folder of a few files, and the Tickets tab must not
     // open on a board missing half its cards until it is left and shown again.
@@ -495,7 +491,6 @@ class App {
     this.renderTable();
     this.renderPulls();
     this.renderJira();
-    this.renderAgents();
     // Painted so the tab is never blank, but only **read** when it is the one on screen: the reads
     // are per-repository and there is no monitor pushing them.
     this.renderGit();
@@ -527,6 +522,7 @@ class App {
       git: () => void this.loadGit(),
       extensions: () => void this.extensions?.load(),
       explorer: () => void this.explorer?.load(),
+      today: () => this.showToday(),
     });
 
     window.api.onRowsChanged((rows) => {
@@ -556,6 +552,7 @@ class App {
     window.api.onPullsChanged((repos) => {
       this.pulls = repos;
       this.renderPulls();
+      this.renderToday();
       // The table's `Checks` column is a join against this payload, so the pulls poll is now one of
       // the two things that can change what that column says. Before the column stopped being its own
       // `gh pr view` per project, this push only concerned the Pull requests tab.
@@ -574,6 +571,15 @@ class App {
     window.api.onJiraChanged((state) => {
       this.jira = state;
       this.renderJira();
+      this.renderToday();
+    });
+    window.api.onTodayDigestChanged((state) => {
+      this.todayDigest = state;
+      this.renderToday();
+    });
+    window.api.onTipeeChanged((state) => {
+      this.tipee = state;
+      this.renderToday();
     });
     // Pushed around a run: the button has to say "Analysing" the moment it starts, and the verdicts
     // have to land when it ends, which can be minutes later.
@@ -654,7 +660,6 @@ class App {
       }
       this.terminal?.setSessions(sessions);
       this.renderBoard();
-      this.renderAgents();
       // Closing the very last tab must not leave a dead surface: with no session there is no
       // strip, and the "+" that could open a new one lives in the strip. Same rule as the
       // bootstrap below — the terminal is this app's centre, so it is never left empty.
@@ -893,33 +898,28 @@ class App {
       projects: this.projects.map((project) => ({ id: project.id, label: project.label })),
     };
     const actions = {
-      onSave: (card: VaultCard, value: string) => {
-        void window.api.saveVaultCard(card, value).then((result) => {
+      onSave: (card: VaultFileCard, secrets: readonly VaultSecretInput[]) =>
+        window.api.saveVaultCard(card, secrets).then((result) => {
           this.stampMessage(result.message);
           void this.loadVault();
-        });
-      },
+          return result;
+        }),
       onDelete: (id: string) => {
         void window.api.deleteVaultCard(id).then((result) => {
           this.stampMessage(result.message);
           void this.loadVault();
         });
       },
-      onReveal: (id: string) => window.api.revealVaultCard(id),
-      onCopy: (id: string) => {
-        void window.api.copyVaultCard(id).then((result) => {
+      onReveal: (id: string, name: string) => window.api.revealVaultSecret(id, name),
+      onCopy: (id: string, name: string) => {
+        void window.api.copyVaultSecret(id, name).then((result) => {
           this.stampMessage(result.message);
         });
       },
-      onGenerateFile: (binding: VaultFileBinding) => {
-        void window.api.generateVaultFile(binding).then((result) => {
+      onGenerateFile: (id: string) => {
+        void window.api.generateVaultFile(id).then((result) => {
           this.stampMessage(result.message);
           void this.loadVault();
-        });
-      },
-      onRemoveFile: (binding: VaultFileBinding) => {
-        void window.api.removeVaultFile(binding).then((result) => {
-          this.stampMessage(result.message);
         });
       },
       onReset: () => {
@@ -936,34 +936,74 @@ class App {
     renderVaultPanel(host, view, actions);
   }
 
-  private renderAgents(): void {
-    const agents = agentSessions(this.sessions);
-    const active = agents.find((entry) => entry.id === this.selectedAgent) ?? agents[0];
-    if (active !== undefined && active.id !== this.agentContextFor) {
-      this.agentContextFor = active.id;
-      this.agentContext = null;
-      void window.api.readAgentContext(active.id).then((context) => {
-        // Checked on the way back: a click on another session while this was in flight would
-        // otherwise paint the wrong context under the right name.
-        if (this.agentContextFor === active.id) {
-          this.agentContext = context;
-          this.renderAgents();
-        }
+  /** Paints the Today tab and reads the Microsoft 365 digest if nothing was read today. */
+  private showToday(): void {
+    this.renderToday();
+    if (this.settings !== null && wantsDigest(this.settings.todayChannels)) {
+      void window.api.refreshTodayDigest(false).then((state) => {
+        this.todayDigest = state;
+        this.renderToday();
       });
     }
+  }
 
-    renderAgentsPanel(
-      { list: requireElement('agents-list'), detail: requireElement('agents-detail') },
-      this.sessions,
-      this.agentContext,
-      { selected: this.selectedAgent },
+  /** Everything the Today tab reads, at once: the digest is forced, the other sources re-polled. */
+  private async refreshToday(): Promise<void> {
+    const channels = this.settings?.todayChannels;
+    if (channels === undefined) {
+      return;
+    }
+    await Promise.all([
+      channels.pulls ? window.api.refreshPulls().then((repos) => (this.pulls = repos)) : null,
+      channels.tickets ? window.api.refreshJira().then((state) => (this.jira = state)) : null,
+      wantsDigest(channels)
+        ? window.api.refreshTodayDigest(true).then((state) => (this.todayDigest = state))
+        : null,
+      channels.tipee ? window.api.refreshTipee().then((state) => (this.tipee = state)) : null,
+    ]);
+    this.renderPulls();
+    this.renderJira();
+    this.renderToday();
+  }
+
+  private renderToday(): void {
+    if (this.settings === null) {
+      return;
+    }
+    // Only the clock needs a timer, and only while a run is under way and the tab is looked at.
+    const ticking = this.todayDigest.running && this.strip?.active === 'today';
+    if (ticking && this.todayClock === null) {
+      this.todayClock = setInterval(() => this.renderToday(), 1000);
+    } else if (!ticking && this.todayClock !== null) {
+      clearInterval(this.todayClock);
+      this.todayClock = null;
+    }
+    const tickets =
+      this.jira === null
+        ? null
+        : withLocalTickets(this.jira, (this.localTickets?.tickets ?? []).map(localAsIssue)).state;
+    renderTodayPanel(
+      requireElement('strip-panel-today'),
       {
-        onOpen: (terminalId) => {
-          this.selectedAgent = terminalId;
-          this.renderAgents();
-        },
+        channels: this.settings.todayChannels,
+        pulls: this.pulls,
+        tickets,
+        digest: this.todayDigest,
+        tipee: this.tipee,
+        tipeeUrl: this.settings.tipeeUrl,
+        now: Date.now(),
       },
-      { rows: this.rows, lastOutputAt: this.lastOutputAt },
+      {
+        onOpenPull: (projectId) => {
+          this.selectedRepo = projectId;
+          this.strip?.select('pulls');
+          this.renderPulls();
+        },
+        onOpenPulls: () => this.strip?.select('pulls'),
+        onOpenTickets: () => this.strip?.select('jira'),
+        onOpenUrl: (url) => void window.api.openExternal(url),
+        onOpenSettings: () => void window.api.openSettings(),
+      },
     );
   }
 
@@ -1806,7 +1846,6 @@ class App {
     }
     renderGitPanel(
       {
-        repos: requireElement('git-repos'),
         toolbar: requireElement('git-toolbar'),
         refs: requireElement('git-refs'),
         center: requireElement('git-center'),
@@ -1827,7 +1866,6 @@ class App {
   private gitPanelState(): GitPanelState {
     return {
       projects: this.projects,
-      tagColors: this.settings?.tagColors ?? {},
       selectedProject: this.gitProject,
       repo: this.gitRepo,
       selection: this.gitSelection ?? { kind: 'wip' },
@@ -1849,13 +1887,6 @@ class App {
         this.gitProject === null ? null : (this.gitRemoteTags.get(this.gitProject) ?? null),
       busy: this.gitBusy,
       generating: this.gitGenerating,
-      // Straight off the poll's rows, which already read every repository for the Projects tab.
-      changedByProject: Object.fromEntries(
-        this.rows.map((row) => [
-          row.project.id,
-          row.git?.error === null ? row.git.changed : undefined,
-        ]),
-      ),
       notice: this.gitNotice,
     };
   }
@@ -2953,9 +2984,6 @@ class App {
     }
     if (terminalId !== null) {
       await this.focusTerminal(terminalId);
-      // The tab is what the Agents tab lists, so the list has to learn about it now rather than at
-      // the next session broadcast.
-      this.renderAgents();
     }
   }
 
@@ -3174,6 +3202,10 @@ class App {
         });
         return;
       }
+      if (this.strip?.active === 'today') {
+        void this.refreshToday().then(() => this.stampRefresh());
+        return;
+      }
       if (this.strip?.active === 'jira') {
         void window.api.refreshJira().then((state) => {
           this.jira = state;
@@ -3290,6 +3322,7 @@ class App {
       const folderMoved = settings.localTicketsDir !== this.settings?.localTicketsDir;
       this.settings = settings;
       void this.reloadAfterSettings();
+      this.renderToday();
       // A folder changed in the settings window is a different set of tickets.
       if (folderMoved) {
         void this.loadLocalTickets();
@@ -3380,14 +3413,12 @@ class App {
         // Nothing is read for the Git tab while it is hidden, so showing it is the moment to read.
         // The stored column width goes back on here too: the splitter cannot measure a `display: none`
         // panel, so this is the first instant its value can actually be honoured.
-        // The context of an agent is read from the disk, so it is read when the tab is shown rather
-        // than kept warm behind it. Same reasoning as Git and Triage below.
         // The local tickets are files anybody may have edited since: shown is when to read them.
         if (tab === 'jira') {
           void this.loadLocalTickets();
         }
-        if (tab === 'agents') {
-          this.renderAgents();
+        if (tab === 'today') {
+          this.showToday();
         }
         // Two files on disk that change when an agent runs, so the tab being shown is exactly
         // when the answer can have changed and somebody is there to read it. No monitor, the
@@ -3666,6 +3697,30 @@ function applyUpdate(notice: UpdateNotice | null): void {
   button.onclick = () => void window.api.openExternal(notice.download);
 }
 
+/**
+ * The agent tabs of the previous run that did not come back, said in the top bar until clicked.
+ *
+ * The reasons used to reach the main process's console only, which an installed build never shows:
+ * a tab simply failed to return, and nothing on screen said why. A pill like the Git tab's notice,
+ * the label for the count and the tooltip for the reasons, one per line after the tab's title.
+ */
+function applyAgentsNotReopened(entries: readonly AgentNotReopened[]): void {
+  const notice = requireElement<HTMLButtonElement>('agents-notice');
+  notice.hidden = entries.length === 0;
+  if (entries.length === 0) {
+    return;
+  }
+  const count = entries.length;
+  notice.replaceChildren(
+    createElement('span', { className: 'pill__dot' }),
+    document.createTextNode(`${String(count)} agent tab${count === 1 ? '' : 's'} not reopened`),
+  );
+  notice.title = `${entries.map((entry) => `${entry.title}: ${entry.reason}`).join('\n')}\n\nClick to dismiss`;
+  notice.onclick = () => {
+    notice.hidden = true;
+  };
+}
+
 function applyVersion(version: string): void {
   const label = requireElement('app-version');
   label.textContent = `v${version}`;
@@ -3685,8 +3740,6 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.triageHeight;
     case 'worktrees':
       return settings.worktreesHeight;
-    case 'agents':
-      return settings.agentsHeight;
     case 'automations':
       return settings.automationsHeight;
     case 'vault':
@@ -3695,6 +3748,8 @@ function heightOf(settings: AppSettings, tab: StripTab): number {
       return settings.extensionsHeight;
     case 'explorer':
       return settings.explorerHeight;
+    case 'today':
+      return settings.todayHeight;
     case 'projects':
       return settings.projectsHeight;
   }
@@ -3710,11 +3765,11 @@ function heightKeyOf(
   | 'gitHeight'
   | 'triageHeight'
   | 'worktreesHeight'
-  | 'agentsHeight'
   | 'automationsHeight'
   | 'vaultHeight'
   | 'extensionsHeight'
-  | 'explorerHeight' {
+  | 'explorerHeight'
+  | 'todayHeight' {
   switch (tab) {
     case 'pulls':
       return 'pullsHeight';
@@ -3726,8 +3781,6 @@ function heightKeyOf(
       return 'triageHeight';
     case 'worktrees':
       return 'worktreesHeight';
-    case 'agents':
-      return 'agentsHeight';
     case 'automations':
       return 'automationsHeight';
     case 'vault':
@@ -3736,6 +3789,8 @@ function heightKeyOf(
       return 'extensionsHeight';
     case 'explorer':
       return 'explorerHeight';
+    case 'today':
+      return 'todayHeight';
     case 'projects':
       return 'projectsHeight';
   }

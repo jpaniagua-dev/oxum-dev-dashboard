@@ -14,6 +14,7 @@ export interface RestoredStripLoaders {
   readonly git: () => void;
   readonly extensions: () => void;
   readonly explorer: () => void;
+  readonly today: () => void;
 }
 
 /** Runs the on-demand read that `adopt` deliberately does not report as a user tab change. */
@@ -40,10 +41,12 @@ export function loadRestoredStrip(tab: StripTab, loaders: RestoredStripLoaders):
     case 'explorer':
       loaders.explorer();
       break;
+    case 'today':
+      loaders.today();
+      break;
     case 'projects':
     case 'pulls':
     case 'jira':
-    case 'agents':
       break;
   }
 }
@@ -64,11 +67,11 @@ export class StripTabs {
     git: requireElement<HTMLButtonElement>('strip-tab-git'),
     triage: requireElement<HTMLButtonElement>('strip-tab-triage'),
     worktrees: requireElement<HTMLButtonElement>('strip-tab-worktrees'),
-    agents: requireElement<HTMLButtonElement>('strip-tab-agents'),
     automations: requireElement<HTMLButtonElement>('strip-tab-automations'),
     vault: requireElement<HTMLButtonElement>('strip-tab-vault'),
     extensions: requireElement<HTMLButtonElement>('strip-tab-extensions'),
     explorer: requireElement<HTMLButtonElement>('strip-tab-explorer'),
+    today: requireElement<HTMLButtonElement>('strip-tab-today'),
   };
 
   private readonly panels: Record<StripTab, HTMLElement> = {
@@ -78,11 +81,11 @@ export class StripTabs {
     git: requireElement('strip-panel-git'),
     triage: requireElement('strip-panel-triage'),
     worktrees: requireElement('strip-panel-worktrees'),
-    agents: requireElement('strip-panel-agents'),
     automations: requireElement('strip-panel-automations'),
     vault: requireElement('strip-panel-vault'),
     extensions: requireElement('strip-panel-extensions'),
     explorer: requireElement('strip-panel-explorer'),
+    today: requireElement('strip-panel-today'),
   };
 
   constructor(private readonly actions: StripTabsActions) {

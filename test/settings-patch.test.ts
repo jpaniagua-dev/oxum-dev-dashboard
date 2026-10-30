@@ -127,7 +127,6 @@ describe('LOCAL_ONLY_KEYS', () => {
     // the settings window from reaching the dashboard. Both are silent, hence the list.
     expect([...LOCAL_ONLY_KEYS].sort()).toEqual([
       'activeStrip',
-      'agentsHeight',
       'automationsHeight',
       'boardGroups',
       'boardPreviewRatio',
@@ -144,6 +143,7 @@ describe('LOCAL_ONLY_KEYS', () => {
       // would re-adopt the layout in the middle of the click that changed it.
       'terminalColumns',
       'ticketsLayout',
+      'todayHeight',
       'triageHeight',
       'vaultHeight',
       'worktreesHeight',

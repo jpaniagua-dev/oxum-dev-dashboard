@@ -436,31 +436,16 @@ row. None of it can say what a session was opened FOR.
   **only when a shape is explicitly picked**, never at boot and never on a poll, because it undoes a
   grouping built by dragging tabs together; the way back is the pane menu's "Merge into a single
   pane".
-- **The Agents tab is agnostic in its left half and Claude-specific in its right.** What the app
-  RECORDED at the spawn (`SessionAgent`: profile label, model, instruction file, start time) is as
-  true of Codex as of Claude Code, because the app itself decided it. What is read off disk
-  afterwards is a bonus: the instruction chain works for any agent, being a filename looked up the
-  directory tree, and the memory cards are Claude Code's own storage and are **absent by design**
-  for anything else, said out loud rather than shown as an empty list.
+- **The Agents tab was removed on request (2026-10-22), unused.** It listed the agent sessions and
+  read, off disk, the instruction files and Claude Code memory each one starts with
+  (`agent-context.ts`, `claudeProjectKey`). What it relied on stays: `SessionAgent`, recorded at the
+  spawn, still feeds the board and the sessions restored at launch.
 - **`SessionAgent` is captured at the spawn and never re-read.** Both the model and the profile can
   be changed in the settings while a session runs, so a panel re-reading them would describe the
   NEXT handoff as though it were this one.
 - **An agent session is declared by its caller, never sniffed from the command line.** An action can
   run anything, and matching on the word `claude` would classify `git log --grep claude` as a coding
   agent. Two callers set it today: the ticket handoff and the feedback pass.
-- **`claudeProjectKey` is inferred from disk, not from a contract.** A Windows path becomes its own
-  name with every separator and the drive's colon turned into a dash; it matches every entry of a
-  real `~/.claude/projects` but nothing promises it survives a Claude Code release. A missing folder
-  is therefore "nothing to show", never an error, and the app must never write into that path. The
-  encoding is **lossy** and is never inverted: a folder whose name holds a dash encodes like a
-  nested one, which is pinned by a test.
-- **Memory is indexed by working directory, and the tab exists to make that visible.** Measured on
-  this machine: the workspace root held 70 cards, every repository folder held none. A session
-  started inside a repository therefore begins with no memory at all, which the panel says in the
-  warning colour because it is invisible everywhere else.
-- **Paths in that tab are read-only.** Opening one would need an IPC handing an arbitrary path to the
-  shell, which this app does not do and does not need to say what an agent reads. The Explorer opens
-  files, but only inside a configured project and through its own two gates: see that section.
 - **The activity panel groups sessions by how loudly they ask for you**, and `attention` is the
   HONEST version of Dorothy's "Needs Attention", not a copy. That panel lists agents waiting for an
   answer, which its host learns from Claude Code's hooks; here a session waiting for you and one
@@ -1198,10 +1183,26 @@ dev server belongs to its project row, while an agent carries a conversation tha
 - **A conversation never spoken to is not reopened.** Measured on 2026-10-13: an interactive
   session left idle writes no transcript, and `--resume` on it would open a tab on an error.
   `claudeConversationExists` looks for `<id>.jsonl` by FILE NAME across `~/.claude/projects`,
-  never through `claudeProjectKey`, whose encoding is inferred, and reads its first 256 KiB for a
+  never through a key derived from the folder path, whose encoding is only inferred, and reads its first 256 KiB for a
   message (`holdsConversation`): a file holding only the bookkeeping line counts as none. Another agent answers `null` and is
   reopened, left to say for itself whether it remembers. A missing folder or a profile without
-  `resumeArgs` drops the record too, with a log line.
+  `resumeArgs` drops the record too.
+- **A tab that does not come back says so, in the top bar** (2026-10-23, after an audit asked for on
+  "some agent tabs do not come back, Codex ones above all"). Every reason `restorable` and
+  `restoreAgentSessions` find (an agent that cannot resume, a folder gone, a conversation never
+  started, a shell profile or a plan mode gone) rides the bootstrap (`agentsNotReopened`) to a pill
+  beside the update button: the count as its label, one `title: reason` line per tab in its tooltip,
+  gone when clicked. They used to reach `console.warn` in the main process only, which an installed
+  build never shows: a tab simply did not return, and nothing said why.
+- **An agent its profile cannot name is recorded anyway, marked `unresumable`.** The three spawns
+  meant to come back (`Ctrl+N`, `Work on this`, a rule) set it when `prepareConversation` answers null;
+  the feedback pass and `/schedule` never do, being excluded on purpose. Without the marker such a
+  tab left no trace in `agent-sessions.json`, so the notice above could not have named it, and that
+  was the case of a Codex profile before local app-server preparation was added.
+- **Codex ids are never guessed from rollout folders or timestamps.** The local app-server path
+  above supplies the exact id before a tab opens. Older records without an id remain unresumable.
+  Changing between Codex and another agent also refuses the saved conversation and reports
+  `the configured agent has changed` through the same top-bar notice.
 - ⚠️ **The app strips a parent Claude Code session's markers from every pty**
   (`terminalEnvironment`). Started from inside a session (`npm run dev` in an agent tab), the app
   passed `CLAUDE_CODE_CHILD_SESSION` and its siblings to every terminal, and an agent started there
@@ -1214,82 +1215,109 @@ dev server belongs to its project row, while an agent carries a conversation tha
 ## Vault tab: secrets, and what it does not protect
 
 Added on 2026-09-26. Somewhere to keep an API key so it does not end up in a `.env` that gets
-committed or pasted into a chat.
+committed or pasted into a chat. Reshaped on 2026-10-22, on request: **one card per file**, and the
+agent broker removed.
 
-- ⚠️ **What it protects: the value at rest and from accidental chat disclosure. What it does NOT
-  protect: a generated file from processes in that project.** The file is plaintext by design, but
-  its path must be ignored by Git before the app writes it. The panel explains that boundary in the
-  compact `How it works` disclosure instead of repeating it as a permanent banner.
-- **The file is the unit of the Vault interface.** Each project/path is one box: its variables are
-  read and edited in place, and `+ Variable`, `Generate file` and `Remove file` live together in the
-  box footer. A global add opens a new prospective file box instead of a detached form at the top.
-- **Agents request operations, never values.** Project terminals receive a random, process-lifetime
-  token and the address of a loopback-only broker in `OXUM_VAULT_TOKEN` and `OXUM_VAULT_URL`;
-  `OXUM_VAULT_HELP` gives the discovery request. The token identifies the project;
-  `GET /v1/capabilities` exposes metadata only, and
-  `POST /v1/execute` performs one constrained HTTP request after a native approval dialog. There is
-  no get-secret route, CLI output or plaintext handoff file.
-- **An HTTP capability fixes the origin, methods, path prefixes and project.** The agent supplies a
-  relative path, scalar query parameters and an optional JSON body. It cannot supply an absolute
-  URL or request headers, redirects are refused, remote plain HTTP is refused, and only loopback
-  origins may use HTTP. Those are boundaries, not form hints: the shared parser and broker both
-  enforce them.
-- **Every operation asks once.** There is deliberately no remember/always-allow choice in the first
-  version. The native dialog names the project, card, method and complete target URL; Cancel is both
-  the default and escape action. Only after approval does main read the value and inject it as a
-  bearer token or configured header.
-- **Results are bounded and scrubbed.** The broker returns status, content type and at most 256 KiB
-  of body, never response headers. An exact occurrence of the credential in the response is
-  replaced before the agent sees it. Redirects are errors so a custom authentication header cannot
-  travel to a second origin.
-- **The audit is metadata and process-local.** The last thirty attempts shown in the panel contain
-  card name, project, method, path, outcome and status, never query values, request bodies, response
-  bodies or credentials. Restarting clears it; it is operational feedback, not a durable log.
+- ⚠️ **What it protects: the values at rest, and out of the renderer and the agent prompt. What it
+  does NOT protect: a generated file from processes in that project.** The file is plaintext by
+  design, agents can read it, and its path must be ignored by Git before the app writes it. The
+  panel explains that boundary in the compact `How it works` disclosure instead of repeating it as a
+  permanent banner.
+- **A card is a file.** In the form, in this order: the project, the path (`.env.local` by default),
+  the lifetime of the generated file (30 minutes by default), the secrets as `Name` / `Secret` rows,
+  then a **free text**. The text is for the lines that are not secret (a user name, an e-mail): the
+  vault ended up being a text file to edit, and a card per variable made every one of those a secret
+  to reveal. One card per project and path, refused otherwise: two cards writing one file would
+  each overwrite the other.
+- **The text is shown in clear, and stored with the secrets.** It sits in the same encrypted blob,
+  but it crosses to the renderer on `VaultState` like any metadata, because it is displayed and
+  edited as typed. The form says so beside it. It is written into the file verbatim, above the
+  secrets; `sanitizeVaultText` refuses control characters rather than dropping them, so the file
+  never differs from what was typed in silence.
+- **A name is set once per file.** `secretConflict` refuses a secret named twice (case ignored) or a
+  secret the text also assigns (`NAME=`, `export NAME=`): the file would hold two values for one
+  variable, and which one wins depends on the loader.
+- **The expiry removes the generated file, not the card.** The plaintext on disk is the exposure;
+  the encrypted blob is not. `Generate file` writes the file and starts its lifetime
+  (`generatedAt`, `expiresAt`); when it runs out the file goes, the values stay, and the next
+  generation is one click. Decided on 2026-10-22 against the earlier rule, where the card itself
+  destroyed its secret: at a 30-minute default, that rule would have meant retyping a whole file
+  every half hour.
+- **`Remove file` removes the card AND its generated file, in one gesture** (decided on 2026-10-22,
+  on request). The card is the file, so its owner reads "remove the file" as both. A first version
+  had it delete the file on disk only, keeping the card, beside a faint `×` that deleted the card:
+  in use the card stayed put, the result went to the header stamp at the other end of the window,
+  and the button read as one that does nothing. The `×` and the file-only channel went with it. The
+  price, accepted: no gesture erases the plaintext before its lifetime while keeping the values.
+- ⚠️ **The sweep runs at start-up, on a one-minute timer, AND before `VaultRead` answers**
+  (`removeExpiredFiles`). The start-up pass is the one that matters: a timer cannot fire while the
+  app is closed, and a laptop asleep for six hours runs no interval, so a file whose time passed
+  overnight would still be there in the morning. A file that is already missing, or no longer
+  carries the marker, counts as removed (there is nothing more to do about it); a deletion that
+  fails is retried by the next pass.
+- **A quiet sweep writes nothing**, the rule `advanceRun` and `setNote` already follow: otherwise the
+  vault is re-encrypted, rewritten and broadcast 1440 times a day.
+- **Values are editable now.** An existing secret's field starts empty with `Unchanged` in it: the
+  form is never told a value, so an empty field keeps the stored one, a typed one replaces it, and
+  a row renamed without retyping keeps its value through `from`, the name it was stored under. The
+  earlier rule (value and expiry frozen, rotation is delete and add) existed because the expiry was
+  the card's: a new secret under an old card would have inherited a lifetime chosen for another.
+  The lifetime is the file's now, so the reason is gone.
+- **The store owns the dates.** `save` ignores `generatedAt` and `expiresAt` from the payload: they
+  say what is on disk, and only generating or removing may change them. A card moved to another path
+  has nothing there yet, so it comes back as not generated, and the file it left is cleaned by a
+  `sync` of its old binding. A new lifetime on a generated card is counted from `generatedAt`.
+- **`sync` never creates a file.** After a save or a delete it rewrites or removes a file that is
+  already on disk, and leaves a missing one missing: saving a card never materializes a secret
+  without a click.
+- **The earlier format is migrated on load, once** (`parseVault`, then one `flush`): the variables
+  of one file become one card, a note becomes a `# NAME: note` line of the text (where the file
+  already printed it), and every migrated file counts as generated at the migration, so a file the
+  earlier version left on disk is removed after the default lifetime. Dropped, by decision: a
+  variable bound to no file, and one whose own expiry had passed. The `capability` field of the
+  broker is ignored.
 - **One encrypted blob, `vault.bin`, not a file per card.** `safeStorage` encrypts a string; N files
   would be N atomic writes to keep consistent, with a half-written vault as the failure mode, and
   the metadata would have to live either in a plaintext index (a name like `prod-db-root` is most of
   the secret's value) or inside each ciphertext, which makes listing mean decrypting everything.
+  The blob is `{ version: 2, files: [...] }`; an array is the earlier format.
 - **The pure half is `shared/vault.ts` and holds no secret**; `main/vault/vault-store.ts` is the
-  authority that may release one inside main. The main-process broker necessarily holds the value
-  while constructing its outbound request, but it never crosses to the renderer or agent.
+  authority that may release one inside main, to a copy, a reveal or a generated file.
 - ⚠️ **`VaultState` carries no value, and a test asserts it on the object rather than on the type.**
   A type stops a mistake at compile time and says nothing about an object built with a spread. The
-  leak would be invisible: the renderer simply would not draw the extra field.
+  leak would be invisible: the renderer simply would not draw the extra field. `test/vault-store.test.ts`
+  replaces `safeStorage` with a reversible encoding to test what surrounds the encryption.
 - **`VaultReveal` is the one channel that hands a secret to the renderer**, against the rule the
   Jira token sets, and the difference is whose credential it is. The Jira token is one the APP uses
-  on its owner's behalf, so the renderer never needs it; a vault card is one the OWNER uses, and a
+  on its owner's behalf, so the renderer never needs it; a vault secret is one the OWNER uses, and a
   vault whose values can never be read back is a write-only hole. It crosses once, on an `invoke`,
-  in answer to a click, and never in a list, a broadcast or the bootstrap.
-- **Copy and reveal are controls inside the Secret field.** Copying happens entirely in the main
+  in answer to a click, for one secret named by card and name, and never in a list, a broadcast or
+  the bootstrap.
+- **Copy and reveal are controls inside each secret's field.** Copying happens entirely in the main
   process, so the value never enters the window; the eye icon reveals it on a screen that gets
   shared and screenshotted. The reveal re-masks after 20 s and on `window.blur`, which also covers
-  the quit dialog. There is no `Send` action: agents use generated files or approved operations.
+  the quit dialog. The UI never types a credential into a terminal, where prompts and scrollback
+  could expose it.
 - **The mask is a constant twelve dots.** One sized from the value would say whether it is a
   six-digit PIN or a sixty-four character key, which is a third of the answer given away by a
   decoration. No last-four preview either.
-- **Direct terminal sending is not exposed by the Vault.** Agents instead use a generated dotenv file
-  or an approved broker operation; the UI never types a credential into a terminal, where prompts
-  and scrollback could expose it.
-- **Deleting is confirmed by a dialog in the main process.** It is intentionally harder than
-  editing because it removes the encrypted value and cannot be undone from the app.
-- ⚠️ **A card's value and expiry cannot be edited; its name, note and capability can.** A lifetime
-  runs from creation, so a new secret under an old card would either inherit the remaining life of
-  the one it replaced or silently restart the clock. Rotating a key is delete and add, said on
-  screen rather than discovered.
-- ⚠️ **The sweep runs at start-up, on a one-minute timer, AND inside `valueOf`.** None is redundant:
-  a timer cannot fire while the app is closed, so the start-up pass is what honours a card that died
-  overnight; and a laptop asleep for six hours runs no interval and does not catch up, so the lazy
-  check in `valueOf` is what stops a click handing out a secret whose time was up. The timer keeps
-  the display honest, the lazy check keeps the answer honest.
-- **A quiet sweep writes nothing**, the rule `advanceRun` and `setNote` already follow: otherwise the
-  vault is re-encrypted, rewritten and broadcast 1440 times a day.
-- ⚠️ **"Destroyed" means this app has no record and will never show or send it again.** It does not
+- **The panel keeps the caret across a repaint.** It is rebuilt whole, and it is rebuilt while a
+  form is open (a reveal re-masking on another card, a file expiring), so the focused field is
+  marked with `data-focus-key` and given its selection back. The form also stays open until the
+  main process answers a save, so a refusal leaves what was typed where it was.
+- **Removing is confirmed by a dialog in the main process.** It is intentionally harder than
+  editing because it removes the encrypted values and cannot be undone from the app. The generated
+  file goes through `sync`, which deletes only a file carrying the vault's marker.
+- **The agent broker was removed on 2026-10-22, unused.** It gave project terminals a token and a
+  loopback address so an agent could ask for one approved HTTP request with a secret injected. Its
+  owner never used it. The terminal manager's per-project environment hook (`environmentFor`) stays:
+  `terminalEnvironment` and two test files use it.
+- ⚠️ **"Destroyed" means this app has no record and will never show or write it again.** It does not
   mean the bytes are gone from the disk: `atomicWriteFile` renames a new file over the old, so the
   previous ciphertext can survive in unreferenced blocks, and an in-place overwrite would not fix
   that on an SSD either.
-- ⚠️ **Expiry is hygiene, not a boundary.** This app is its sole enforcer, and DPAPI will decrypt the
-  file for anything run by the same Windows account. "After an hour this key is unrecoverable" is
-  not what it provides.
+- ⚠️ **The lifetime is hygiene, not a boundary.** This app is its sole enforcer: a file copied
+  elsewhere stays, and DPAPI will decrypt the vault for anything run by the same Windows account.
 - **A blob that will not decrypt is KEPT, never replaced**, and every write is refused while it is
   there: it may be readable again on the account that wrote it. `Start a new vault` is the one way
   out, behind a confirmation, because a refusal with no exit is a dead feature.
@@ -1601,10 +1629,11 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
 
 ## Git tab
 
-Redesigned on 2026-10-15, on request, after a graph client: the repositories as tabs, a toolbar, then
-three columns, the refs on the left, the **commit graph** in the centre and the **detail of the
-selection** on the right (the staging area and the commit form for the working tree, the message and
-files of a commit or a stash otherwise). Decided with it, and not to be reopened by accident:
+Redesigned on 2026-10-15, on request, after a graph client: a toolbar that opens on the repository
+picker, then three columns, the refs on the left, the **commit graph** in the centre and the **detail
+of the selection** on the right (the staging area and the commit form for the working tree, the
+message and files of a commit or a stash otherwise). Decided with it, and not to be reopened by
+accident:
 
 - **It stays in the 460 px strip.** No full-window mode. Everything below is sized for that: about
   seventeen graph rows, the diff taking the graph's place rather than a column of its own.
@@ -1617,6 +1646,27 @@ files of a commit or a stash otherwise). Decided with it, and not to be reopened
   push**. `pull` stays `--ff-only`: a merge is now an explicit gesture, never something a pull does.
 
 The bullets that follow are the reasons and the traps, the new ones first.
+
+- **The repository is picked from a `<select>`, at the head of the toolbar** (2026-10-22, on request,
+  replacing the row of repository tabs). The tabs scrolled sideways once there were more
+  repositories than width, so the ones past the edge were out of sight, and the row cost a line of
+  the 460 px the graph is sized for. A native select for the reason the Jira assignee filter is one:
+  keyboard, screen readers and the dark theme (`color-scheme`) come with it, and the list is only as
+  long as the configuration. What the tabs carried, and where it went:
+  - **The entries are the names alone**, on request, for clarity: a first version followed each name
+    with its uncommitted count (`· 3 uncommitted`, `· clean`). "Where do I have work waiting" is the
+    Projects tab's question now; the selected repository's own changes are the WIP row and the
+    detail panel.
+  - **The tag dots are gone from this tab.** An `<option>` holds text only, and the dots answered
+    "which stack is this line" while scanning a column of repositories, a question a single picked
+    name does not ask.
+  - **The terminal icon is a toolbar verb** for the selected repository, before `⋯`.
+  - **The picker raises `gitEditing` while it has the focus**, like the text fields. The panel is
+    rebuilt on every git poll, and a select replaced while its list is open closes under the pointer.
+    Its `change` lowers the guard **before** `onSelectProject`, whose read the guard would otherwise
+    skip, leaving the new repository on `Reading…` until the next poll after a blur.
+  - **The toolbar is drawn while the repository is read** (the picker alone): it is the way out of a
+    slow read, and a toolbar that vanished on every switch would make the picker flicker away.
 
 - **The graph reads every branch, not HEAD.** `git log --topo-order -n400 --branches --remotes --tags
   HEAD --format=%H %P ...`: `--topo-order` keeps a child above its parents and a branch's commits
@@ -1857,22 +1907,12 @@ The bullets that follow are the reasons and the traps, the new ones first.
     condition is the one the amend tooltip already computes (`hasUpstream && ahead === 0`), and forcing
     is not something a one-click button in this tab offers.
   - No dialog in front of it, on request. The guard is the hook, not a question.
-- **Every repository tab is badged with its uncommitted file count**, not only the selected one. The
-  column (tabs since 11.0.0) badged the open repository alone, on the argument that reading the others would cost a git
-  call per row per paint — a read nobody makes: the project poll already runs
-  `git status --porcelain=v2` on every project for the Projects tab, so the number was on the other
-  side of the app the whole time, and answering "where do I have work waiting" meant clicking each
-  repository in turn or leaving the tab.
-  - **The selected tab answers from the on-demand read, the others from the poll.** The badge of
-    the open repository has to agree with the lists of files in the detail panel, and the poll can be a
-    whole interval out of date.
-  - **`GitState.changed` is counted, never `modified + staged + untracked`.** Those three are counted
-    per state and a file staged with further edits on top is deliberately counted twice among them, by
-    the very rule that keeps the two columns apart. The sum would badge one file as two, and the number
-    beside the open repository would disagree with the list under it. Tested on the `MM` case.
-  - **A project the poll has not answered for gets no badge**, not a dash. A dash means "nothing to
-    commit" in this column, and drawing one over an unread repository reports a clean tree for one that
-    may be full of work.
+- **No per-repository uncommitted count in this tab any more** (2026-10-22). The repository tabs
+  carried one, read off the project poll, which already runs `git status --porcelain=v2` on every
+  project; the picker shows names only (above). Should a count come back, three rules it learned:
+  the selected repository counts from the on-demand read, so it agrees with the detail panel's lists;
+  the others count `GitState.changed`, never `modified + staged + untracked`, which counts an `MM`
+  file twice (tested); and a repository the poll has not answered for gets no count, never "clean".
 - **Checkout stashes nothing and forces nothing.** A checkout blocked by local changes fails, and git
   itself says which files are in the way. An automatic stash would move work somewhere nobody asked
   for or looked at. It was a **button** until 11.0.0 so that changing the disk was never one stray
@@ -1939,13 +1979,12 @@ The bullets that follow are the reasons and the traps, the new ones first.
   All of them are pure, tested functions.
 - **`gitHeight` defaults to 460**, the largest of them all, and the redesign was made to fit it:
   this is the tab where you stop glancing and start working, and 250 px would show four graph rows.
-- **A repository tab's terminal icon is the tab's SIBLING, not its child**, and that is the entire reason
-  for the `git__repo-line` container. The tab is a real `<button>` (so reachable with Tab and responding
-  to Enter) and nesting a button inside a button is invalid HTML that browsers silently rearrange, the
-  very reason a PR row is a `div`. Here the row keeps its semantics and the icon is a control in its own
-  right. An intended consequence: opening a terminal does **not select** the repository, so it triggers
-  no git read of a repository nobody opened. It is not disabled by `state.busy`, like the same entry in
-  the repository menu: it runs no git command.
+- **The terminal icon opens a tab in the selected repository**, among the verbs, just before `⋯`. It
+  is not disabled by `state.busy`, like the same entry in the repository menu: it runs no git command.
+  When it hung beside each repository tab, it could open a terminal in a repository without selecting
+  it; that went with the tabs, the repository menu and the Projects tab covering the case.
+  `git__repo-line`, the container that kept that icon a sibling of its tab (a button inside a button
+  being invalid HTML), stays for the Pull requests column, which uses it for the same reason.
 - **Cherry-pick is on RIGHT CLICK on a commit, never a row button.** A cherry-pick changes **history**,
   so it must not be reachable at all without having been asked for. The graph is scrolled and clicked
   all day long to read commits. It is disabled on HEAD itself, which it would only replay onto itself. The menu is rebuilt on every open, like the repository one: the target branch is in the labels.
@@ -2962,27 +3001,91 @@ app has to run whichever agent its user has.
   terminal pane had reimplemented on its own. A dropdown anchored to a control is
   `showContextMenu(box.left, box.bottom + 4, items)`, not a new list.
 
-## Mail and Teams: why they are not here
+## Today tab: what is waiting, one card per source
 
-Asked for in V3, dropped after measurement rather than for lack of time:
+Added after 11.0.0, on request: one tab answering "what is waiting for me" across pull requests,
+tickets, calendar, mail, Teams and time tracking, each card switched on per machine
+(`todayChannels`, never part of a team configuration), because a home computer and a work one do
+not reach the same accounts. WhatsApp was asked for and left out: there is no API for a personal
+account, and the unofficial libraries break its terms and risk a ban of the number.
 
-- **Classic Outlook over COM can be unavailable** while Outlook is installed. When the new client is
-  active (`Outlook\Preferences\UseNewOutlook = 1` on the user side), launching `OUTLOOK.EXE` hands over
-  to the new Outlook and then exits **without registering its COM class**: activation fails after about
-  thirty seconds with `CO_E_SERVER_EXEC_FAILURE`. Reproduced twice.
-- **Microsoft Graph requires an app registration**, and therefore a tenant that allows one. Many
-  companies refuse it (`defaultUserRolePermissions.allowedToCreateApps = false`, no user consent
-  policy), and the trap is the Azure CLI token: its `scp` claim (`Application.ReadWrite.All`, and so on)
-  belongs to **the CLI application**, not to the user's own rights, which wrongly suggests one can be
-  created from the command line. Check this before writing code.
-- **The Teams activity bell has no read API**, even through Graph. The most that can be read is
-  `GET /me/chats` plus `viewpoint.lastMessageReadDateTime`, which already excludes channel mentions.
-
-If the app registration ever arrives: public client, `http://localhost` redirect, delegated `Mail.Read`
-plus `offline_access` (plus `Chat.Read`), `@azure/msal-node` in device code flow, token encrypted by the
-`SecretStore` that already exists, and a monitor modelled on `JiraMonitor`. The space in
-`.projects__header-actions` (formerly `.topbar__actions`, gone with the title bar) and the strip's
-pattern are left ready.
+- **Pull requests and tickets cost no request.** The cards read `this.pulls` and the merged Jira
+  state the other tabs already hold. A review request wins over authorship in `needOf`: GitHub drops
+  a reviewer from the requested list once they have reviewed, so `isReviewer` on somebody else's
+  pull request means the review is still owed.
+- **Mail, calendar and Teams go through Claude Code, not Microsoft Graph.** Graph needs an app
+  registration, which many tenants refuse (`allowedToCreateApps = false`, no user consent), and
+  classic Outlook over COM is gone when the new Outlook is active (`CO_E_SERVER_EXEC_FAILURE` after
+  thirty seconds). The claude.ai Microsoft 365 connector carries its own consented app, and it is
+  only reachable from inside Claude Code, so `DigestService` runs one headless `claude -p` that
+  makes five read calls, the routines reader's pattern. The cost is a dependency on a claude.ai
+  account with that connector, which the card states rather than hides.
+- ⚠️ **Every flag of `digestArgs` was measured against the real CLI, and the obvious ones are
+  wrong.** `--strict-mcp-config`, `--restricted` and `--tools` (even `--tools ToolSearch`) all
+  remove the claude.ai connectors: the tools are not found, and the run still exits 0.
+  `--allowedTools` alone restricts nothing for a user whose own settings say `defaultMode: auto`:
+  a tool outside the list was called. `--permission-mode dontAsk` is what makes the list binding,
+  and `--setting-sources project`, from an empty folder, keeps the user's hooks and mode out. The
+  writing tools of the connector and the shell are refused by name on top, as a second lock.
+- ⚠️ **The data is read from the `tool_result` events, never from the reply.** Given no tool, Haiku
+  was measured writing a call and a plausible result as plain text, a made-up user id included.
+  `readToolCalls` pairs each result with its `tool_use` by id; a run with no Microsoft 365 call at
+  all is reported as such, with the command line.
+- **Run on demand, not on a poll.** At the first look of the day (`refreshIfStale`, which also
+  remembers a failed attempt, or every tab switch would start a run) and on Refresh. A run is about
+  ten seconds and a cent; a poll would multiply that by the hours the app is open with nobody
+  looking. The answer is cached in `today-digest.json` and re-read through the same parser, so a
+  hand-edited file is held to the rules of a fresh answer.
+- **Teams says "waiting for your reply", never "unread".** The connector exposes no read state,
+  checked on the search and on a full message read (no `isRead`, no `viewpoint`), and the activity
+  bell has no read API at all. What it does give is who wrote last, so the card lists the
+  conversations where somebody else wrote after my last message, chosen on 2026-10-22 over "not
+  seen in this app", which would keep showing what was read in Teams itself. A reply of mine older
+  than the search window does not count, so within it the whole conversation is waiting. Mail does
+  carry `isRead`, but the search cannot filter on it: the unread are those among the newest, and
+  the card says when the search matched more.
+- **Calendar times are wall clock.** `start` and `end` come as a wall-clock string plus the
+  mailbox's zone; they are kept as written and compared as local time, never reinterpreted as UTC.
+  The search returns everything overlapping the day, so a whole-day event that ended at midnight
+  comes back too and is filtered out in `onDay`.
+- **A status dashboard, laid out on request after a reference design**: the day timeline first
+  (moved above the numbers on request), then headline numbers, the two pull request queues, a stacked sprint bar, unread mail and the Teams
+  conversations waiting for a reply, then the lists. Meters and conversation bars were tried and
+  removed on request: the reader wanted the messages, not their counts. The charts are
+  divs placed in percent, not a scaled SVG, which would stretch its labels. The categorical slots
+  are their own tokens, `--chart-1..3`, validated as a set in both themes (lightness band, chroma,
+  colour-blind separation, 3:1 on the raised surface); the git lanes were tried and their dark steps
+  are too light for a fill. Every value drawn is also written, on the chart or in the lists. A tile
+  says `?` for what could not be read and never 0, which would claim an inbox nobody checked. The
+  day timeline sits outside the chart grid: a card spanning every track keeps the empty `auto-fit`
+  tracks from collapsing, and the other charts then stop stretching. `--font-display` is the one
+  step above the ladder, for those figures only.
+- **Three lines, each a chart and its three numbers** (on request, 2026-10-22, replacing a layout
+  of four scrolling panels): the day with unread mail, Teams to answer and the clock; the sprint
+  with my tickets by stage; the pull requests by age with what needs me, mine waiting and mine
+  approved. A tile is a whole button leading to its source. The pull request chart is a bar per
+  pull request from `createdAt` to now, read for "what has waited longest", which the lists sorted
+  by update time hid; `createdAt` rides the `gh pr list` call the tab already makes. The ticket
+  numbers come from the sprint view and `isMine`, never from "my issues", so a ticket outside the
+  sprint does not count.
+- **The cards stand on a recessed ground** (`--surface-inset` behind, `--surface-raised` cards,
+  `--border-strong` edges, `--card-shadow`). On the strip's own surface a raised card was #1b1b1b
+  on #131313 in the dark theme and #fafafa on white in the light one, with a 1.3:1 border: no edge
+  could be seen, and the text of neighbouring cards read as one stacked column. `--card-shadow` is
+  one token per theme because a shadow alone vanishes on a dark ground; there it adds a top
+  hairline of light.
+- ⚠️ **The digest file carries a `version`** (`DIGEST_VERSION`), raised whenever a field the cards
+  read is added. A file of an older shape is refused, so the first look of the day reads again;
+  without it, a digest cached before the change shows its cards with the new field empty all day,
+  which is what happened to the message text.
+- **Teams messages lose the sender the search puts in front of some summaries** (`lineText`), and a
+  message with no text says `(attachment or card)` rather than drawing an empty line.
+- **Tipee is read, never written.** Its API is the private one its web app uses (form login with a
+  CSRF token, session cookies, `resources.show-status` and `workdays.show` filtered on the person's
+  own id, since an unfiltered list was seen returning colleagues). Clocking stays with the web app
+  and with any dedicated tool. The password is in its own `SecretStore` file like the Jira token,
+  the address is reduced to an https origin, and nothing is polled until the card is on and all
+  three are set.
 
 ## Notifications: saying it to somebody who is not looking
 
@@ -3064,6 +3167,13 @@ pattern are left ready.
   validation `error`; a missing `package.json`, or a missing script an action points at, is a `warning`.
   Those cases break one button, while git status, the terminal and `commit` all work. As an `error`, a
   single row of that kind blocked the "Save" button for the whole settings dialog.
+- **What blocks Save is `saveBlocker`, and it says so beside the button.** The window scoped to one
+  project ("Edit only this project") counts that project's errors only: the others are saved exactly
+  as already stored, so a missing folder elsewhere must not lock a window that does not show it. The
+  reason used to be a tooltip on a greyed button, which nobody hovers. The footer is drawn again once
+  the scope is applied, since the load drew it before. The scope is checked against the stored
+  configuration, not the live project list, which drops a disabled project and one whose folder is
+  gone: the window edits both.
 - **The renderer does not build a project configuration.** `buildProjectConfig` (IPC) builds it in the
   main process, so a project added from the table and a project added from the settings are identical:
   same id derivation, same label, same default actions. It used to be duplicated in both places, and
@@ -3358,17 +3468,18 @@ Added on 2026-09-04, the tab having had five columns and no way to know what any
 
 ### The tags on the OTHER tabs: dots, not chips
 
-Added on 2026-09-03. Three surfaces name a project outside the projects table, and all three now show
-its tags: the pull request tab's repository column, the Git tab's, and the project cell of every
-worktree row. Jira lists issues, so there is nothing to tag there. Triage is no longer in that list, and what it
+Added on 2026-09-03. Two surfaces name a project outside the projects table, and both show its tags:
+the pull request tab's repository column and the project cell of every worktree row. The Git tab
+showed them on its repository tabs until those became a `<select>` (2026-10-22), whose options hold
+text only. Jira lists issues, so there is nothing to tag there. Triage is no longer in that list, and what it
 shows is not this vocabulary: a ticket's domain and its `100% agent` flag are chips a run produced,
 closed and fixed, reaching the same palette **tokens** through their own modifiers. They borrow the
 drawing and share none of the plumbing, deliberately, `AppSettings.tagColors` being the user's, keyed
 by word, and the word `backend` existing in both.
 
-- **The chip does not travel; the dot does.** All three surfaces are fixed-width and read down their
-  length: 190px for the pull request and Git repositories, a 104px grid track for a
-  worktree's project. A labelled chip in any of them has to be paid for by widening the column the
+- **The chip does not travel; the dot does.** Both surfaces are fixed-width and read down their
+  length: 190px for the pull request repositories, a 104px grid track for a
+  worktree's project. A labelled chip in either of them has to be paid for by widening the column the
   strip is actually read in, and the question these rows ask is "which stack is this line", not "what
   is this tag called". So the word stays in the projects table, which is the permanent legend, and what
   travels is the half of a chip the eye was scanning anyway. `shared/project-tags.ts` already said the
@@ -3380,16 +3491,13 @@ by word, and the word `backend` existing in both.
   two variants (an editable chip with a remove button, a preview chip beside a colour select) because
   they are different drawings, not the same one at another size.
 - **Read-only there, and that is not laziness.** A tag is configuration in the projects table and
-  *context* on these rows, so both gestures stay where the tag is edited. It also settles a collision:
-  a right click on a Git repository line already opens that repository's menu (fetch, pull, push), and
-  a chip answering the same gesture on the same target would open one menu over the other.
+  *context* on these rows, so both gestures stay where the tag is edited.
 - **`RepoPulls` and `RepoWorktrees` are NOT widened with a `tags` field**, and the reason is freshness
   rather than tidiness. Those two payloads arrive from **polls**; a tag change arrives as a settings
   broadcast. A tag carried on them would appear in the projects table at once and in the pull request
   column at the next GitHub poll, which is up to a minute of two tabs disagreeing about one word.
   `TagPalette` is assembled in the renderer from `this.projects`, the list the main process built those
-  payloads from, so the lookup always hits and can never be stale. The Git tab needs only `tagColors`
-  in its state, `GitPanelState.projects` already carrying the words.
+  payloads from, so the lookup always hits and can never be stale.
 - **The dots come BEFORE the name**, so the coloured marks of a whole column start on one edge, which
   is what makes a column of them scannable at all. The cost is accepted and it is real: an untagged row
   starts at the left edge while a tagged one is indented, so the *names* no longer align perfectly. No
@@ -3630,7 +3738,7 @@ grammar; a new surface follows it rather than inventing a seventh way.
 - **Nothing changes weight on becoming active**: tabs, suggestion buttons and filter chips keep their
   weight, and an active tab keeps its look under the cursor.
 - **Two row heights**: 3px vertical padding for the dense lists (Git files, Explorer), 5px for every
-  other list. Rails are 190px (the Agents rail, a facts column, is the one exception).
+  other list. Rails are 190px.
 - **One column heading recipe**, the table's: `--font-2xs`, 600, 0.06em, uppercase, `--text-faint`.
   The settings window is the exception on purpose: its labels are sentences.
 - **One empty-state look** (`--text-faint`, `--font-sm`, line height 1.5) and one loading spelling,

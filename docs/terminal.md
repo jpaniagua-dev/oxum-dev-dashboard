@@ -67,6 +67,11 @@ conversation with `/new`, `/fork` or `/resume` inside Codex is not currently tra
 overrides instead of `--profile`). Previously opened Codex tabs whose
 ids the Dashboard never recorded cannot be recovered automatically by this upgrade.
 
+When an agent tab does not come back, the top bar says how many with a pill such as **2 agent tabs
+not reopened**; hover it for each tab's reason, click it to dismiss it. An agent whose profile
+cannot resume a conversation, Codex for instance, never comes back: Codex cannot be given a
+conversation id when it starts.
+
 ## Cards
 
 Watch and Server sessions have a rerun button on both their card and terminal tab. It stops the

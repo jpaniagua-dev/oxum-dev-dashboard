@@ -10,7 +10,9 @@ import type {
   PanelEditorState,
 } from './explorer.js';
 import type { LocalTicketDraft, LocalTicketResult, LocalTicketsState } from './local-tickets.js';
-import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
+import type { VaultFileCard, VaultSecretInput, VaultState } from './vault.js';
+import type { TodayChannels, TodayDigestState } from './today.js';
+import type { TipeeState } from './tipee.js';
 /**
  * Single source of truth for everything crossing the main <-> renderer boundary.
  *
@@ -30,7 +32,6 @@ import type { VaultCard, VaultFileBinding, VaultState } from './vault.js';
  * the set cannot be known at compile time. Ids are generated from the folder name and never change
  * when a project is renamed, which is what keeps a rename from orphaning its running terminal.
  */
-import type { AgentContext } from './agent-context.js';
 
 export type ProjectId = string;
 
@@ -752,6 +753,8 @@ export interface PullRequest {
    */
   readonly isAuthor: boolean;
   readonly isReviewer: boolean;
+  /** When it was opened, ISO. Empty when the payload did not carry it. */
+  readonly createdAt: string;
   readonly updatedAt: string;
   /**
    * Sha of the head commit, as the poll last saw it.
@@ -1187,6 +1190,13 @@ export interface SessionAgent {
    * belongs to something else (the feedback pass, a routine), which therefore never come back.
    */
   readonly conversation?: AgentConversation;
+  /**
+   * Set when this session was meant to come back after a restart and its agent profile could not
+   * name its conversation (no session or resume arguments, the case of a Codex profile). Recorded
+   * so the next launch can say the tab did not come back, and why. Absent on the runs excluded on
+   * purpose (the feedback pass, a routine), which nobody expects back.
+   */
+  readonly unresumable?: true;
 }
 
 /** A resumable conversation: its id, and whether it was opened in plan mode. */
@@ -1212,6 +1222,13 @@ export interface AgentOpenResult {
   readonly terminalId: TerminalId | null;
   /** Empty when it worked. The reason otherwise, ready to show. */
   readonly message: string;
+}
+
+/** An agent tab of the previous run that was not reopened at this launch, and why. */
+export interface AgentNotReopened {
+  readonly title: string;
+  /** Ready to show after the title. */
+  readonly reason: string;
 }
 
 /**
@@ -1434,11 +1451,11 @@ export type StripTab =
   | 'git'
   | 'triage'
   | 'worktrees'
-  | 'agents'
   | 'automations'
   | 'vault'
   | 'extensions'
-  | 'explorer';
+  | 'explorer'
+  | 'today';
 
 /**
  * Every tab, in display order, as a value.
@@ -1458,8 +1475,10 @@ export type StripTab =
  * tabs were added in until 2026-10-02, when it was rearranged on request to follow the work:
  * projects, pull requests, worktrees, tickets, triage, git, then the tools. A new tab still goes at
  * the END, because inserting one moves the others under a cursor that has learnt where they are.
+ * Today is the one exception, first on request: it is the summary the day starts from.
  */
 export const STRIP_TABS: readonly StripTab[] = [
+  'today',
   'projects',
   'pulls',
   'worktrees',
@@ -1468,7 +1487,6 @@ export const STRIP_TABS: readonly StripTab[] = [
   'git',
   'automations',
   'vault',
-  'agents',
   'extensions',
   'explorer',
 ];
@@ -1996,11 +2014,18 @@ export interface AppSettings {
   /** Profile the bare "new tab" click uses. */
   defaultShellProfileId: string;
   /** Height of the Agents strip, in pixels. */
-  agentsHeight: number;
   automationsHeight: number;
   vaultHeight: number;
   extensionsHeight: number;
   explorerHeight: number;
+  todayHeight: number;
+  /** Which cards the Today tab shows on this machine. Never part of a team configuration. */
+  todayChannels: TodayChannels;
+  /** Time tracking instance, `https://host`, or empty. The password is in its own encrypted file. */
+  tipeeUrl: string;
+  tipeeUser: string;
+  /** Seconds between time tracking reads. */
+  tipeePollSeconds: number;
   /**
    * Whether rules may act at all. **False by default.**
    *
@@ -2256,6 +2281,16 @@ export interface BootstrapState {
   readonly jiraConfig: JiraConfig;
   /** Pty backend the terminals run on, so xterm can be configured for it. `null` off Windows. */
   readonly terminalCompat: TerminalCompat | null;
+  /** The last Microsoft 365 digest, so the Today tab paints yesterday's answer before any run. */
+  readonly todayDigest: TodayDigestState;
+  readonly tipee: TipeeState;
+  /**
+   * The agent tabs of the previous run that this launch did not reopen, each with its reason.
+   *
+   * Carried to the screen because the reasons used to reach the main process's console only, which
+   * an installed build never shows: a tab simply failed to come back. Empty when all of them did.
+   */
+  readonly agentsNotReopened: readonly AgentNotReopened[];
 }
 
 /* ------------------------------------------------------------------ *
@@ -2513,8 +2548,6 @@ export const IpcChannel = {
    * Keys only, like every other Jira channel. The estimate is looked up in `triage.json` by the main
    * process rather than travelling, so it is always the current one.
    */
-  /** invoke: (terminalId) => AgentContext | null, what the agent of that session reads */
-  AgentContextRead: 'agent:context',
   /** invoke: () => AgentOpenResult, opens the configured coding agent in a tab of its own */
   AgentOpen: 'agent:open',
   TriageStartInJira: 'triage:start-in-jira',
@@ -2609,7 +2642,6 @@ export const IpcChannel = {
   VaultReveal: 'vault:reveal',
   VaultCopy: 'vault:copy',
   VaultGenerateFile: 'vault:generate-file',
-  VaultRemoveFile: 'vault:remove-file',
   VaultChanged: 'vault:changed',
   VaultReset: 'vault:reset',
   /** invoke: () => ExtensionsView, both agents read off disk */
@@ -2713,6 +2745,22 @@ export const IpcChannel = {
   SettingsDirty: 'settings:dirty',
   /** invoke: () => void, closes the window the call came from */
   WindowClose: 'window:close',
+  /** on: (state: TodayDigestState) => void, pushed when a digest run starts and ends */
+  TodayDigestChanged: 'today:digest-changed',
+  /** invoke: (force: boolean) => TodayDigestState, reads again; without force, only once a day */
+  TodayDigestRefresh: 'today:digest-refresh',
+  /** invoke: () => { ok, message }, one connector call to say whether it answers and as whom */
+  TodayDigestTest: 'today:digest-test',
+  /** on: (state: TipeeState) => void, pushed after each time tracking read */
+  TipeeChanged: 'tipee:changed',
+  /** invoke: () => TipeeState, reads again now */
+  TipeeRefresh: 'tipee:refresh',
+  /** invoke: (draft) => { ok, message }, signs in with what is typed on screen; empty password = the stored one */
+  TipeeTest: 'tipee:test',
+  /** invoke: (password: string) => { ok, message }, writes the password to its encrypted file */
+  TipeeSavePassword: 'tipee:save-password',
+  /** invoke: () => boolean, whether a password is stored. Never the password itself */
+  TipeeHasPassword: 'tipee:has-password',
 } as const;
 
 /**
@@ -2752,6 +2800,15 @@ export interface RendererApi {
   ): Promise<{ ok: boolean; message: string }>;
   /** Runs the agent once on a tiny prompt and reports what came back, command line included. */
   testAgent(profile: AgentProfile): Promise<{ ok: boolean; message: string }>;
+  refreshTodayDigest(force: boolean): Promise<TodayDigestState>;
+  onTodayDigestChanged(listener: (state: TodayDigestState) => void): () => void;
+  testTodayDigest(): Promise<{ ok: boolean; message: string }>;
+  refreshTipee(): Promise<TipeeState>;
+  onTipeeChanged(listener: (state: TipeeState) => void): () => void;
+  testTipee(draft: { url: string; user: string; password: string }): Promise<{ ok: boolean; message: string }>;
+  /** The password only travels towards the main process; an empty one clears it. */
+  saveTipeePassword(password: string): Promise<{ ok: boolean; message: string }>;
+  hasTipeePassword(): Promise<boolean>;
   /** The body a review would post, or posted. Empty when there is no review. */
   pullReviewBody(slug: string, number: number): Promise<string>;
   /** Moves a pull request between draft and ready for review. */
@@ -2808,14 +2865,6 @@ export interface RendererApi {
   deleteLocalTicket(key: string): Promise<LocalTicketResult>;
   /** Opens the ticket's file in the editor, or shows it in its folder. Answers why not, or ''. */
   openLocalTicket(key: string, reveal: boolean): Promise<string>;
-  /**
-   * The instruction files and memory the agent of one session reads.
-   *
-   * Read on demand rather than pushed with the session list: it touches the disk, it only matters
-   * while the Agents tab is open on that one session, and it cannot change without somebody editing
-   * a file. `null` when the terminal is unknown or runs no agent.
-   */
-  readAgentContext(terminalId: TerminalId): Promise<AgentContext | null>;
   /**
    * Opens the configured coding agent in a tab, in the workspace root.
    *
@@ -3017,24 +3066,25 @@ export interface RendererApi {
 
   /** The cards, never their values. */
   readVault(): Promise<VaultState>;
-  /** Adds or replaces a card. An empty value on an existing card keeps the stored one. */
-  saveVaultCard(card: VaultCard, value: string): Promise<VaultResult>;
-  /** Destroys a card. The main process asks for confirmation before anything is touched. */
+  /** Adds or replaces a file card. An empty value on an existing secret keeps the stored one. */
+  saveVaultCard(card: VaultFileCard, secrets: readonly VaultSecretInput[]): Promise<VaultResult>;
+  /**
+   * Destroys a file card and the file it generated. The main process asks for confirmation before
+   * anything is touched.
+   */
   deleteVaultCard(id: string): Promise<VaultResult>;
   /**
-   * The value of one card, for the reader's own eyes.
+   * The value of one secret, for the reader's own eyes.
    *
    * ⚠️ The one place a secret travels towards the renderer, against the rule the Jira token sets.
    * A deliberate exception: the owner asked to be able to see what is stored, on an explicit
    * gesture, on their own screen.
    */
-  revealVaultCard(id: string): Promise<string>;
+  revealVaultSecret(id: string, name: string): Promise<string>;
   /** Puts the value on the clipboard without it passing through the renderer. */
-  copyVaultCard(id: string): Promise<VaultResult>;
-  /** Materializes all live variables bound to one project dotenv file. */
-  generateVaultFile(binding: VaultFileBinding): Promise<VaultResult>;
-  /** Removes a generated file, but only when it carries the Oxum Vault marker. */
-  removeVaultFile(binding: VaultFileBinding): Promise<VaultResult>;
+  copyVaultSecret(id: string, name: string): Promise<VaultResult>;
+  /** Writes one card's file into its project, which starts the file's lifetime. */
+  generateVaultFile(id: string): Promise<VaultResult>;
   /** Throws away a vault this account cannot read, after a confirmation in the main process. */
   resetVault(): Promise<VaultState>;
   onVaultChanged(listener: (state: VaultState) => void): () => void;

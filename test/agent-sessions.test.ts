@@ -59,7 +59,7 @@ describe('which sessions are recorded', () => {
       ],
       [],
     );
-    expect(records.map((record) => record.agent.conversation.id)).toEqual([ID_A]);
+    expect(records.map((record) => record.agent.conversation?.id)).toEqual([ID_A]);
     expect(records[0]).toMatchObject({ title: 'Fiscal year', renamed: true, cwd: 'C:/work' });
   });
 
@@ -69,7 +69,7 @@ describe('which sessions are recorded', () => {
       session('shell-2', { agent: agent(ID_B) }),
     ];
     const ordered = agentRecordsFrom(sessions, [{ tabs: ['shell-2'], active: 'shell-2' }]);
-    expect(ordered.map((record) => record.agent.conversation.id)).toEqual([ID_B, ID_A]);
+    expect(ordered.map((record) => record.agent.conversation?.id)).toEqual([ID_B, ID_A]);
   });
 
   it('carries the note text, the project and the reserved action of a handoff tab', () => {
@@ -92,6 +92,20 @@ describe('which sessions are recorded', () => {
       agent: { conversation: { id: ID_A, plan: true } },
     });
   });
+
+  it('records an agent its profile could not name, so the next launch can say it did not come back', () => {
+    const records = agentRecordsFrom(
+      [
+        // A Codex profile: no session arguments, so no conversation, but the spawn wanted one.
+        session('shell-1', { agent: { ...agent(null), label: 'Codex', unresumable: true } }),
+        // The feedback pass or a routine: excluded on purpose, nobody expects it back.
+        session('shell-2', { agent: agent(null) }),
+      ],
+      [],
+    );
+    expect(records.map((record) => record.agent.label)).toEqual(['Codex']);
+    expect(records[0]?.agent.conversation).toBeUndefined();
+  });
 });
 
 describe('reading a record back', () => {
@@ -111,11 +125,22 @@ describe('reading a record back', () => {
     expect(readAgentRecord(row)).toBeNull();
   });
 
+  it('reads back an agent marked unresumable, and nothing else without a conversation', () => {
+    const marked = agentRecordsFrom(
+      [session('shell-1', { agent: { ...agent(null), label: 'Codex', unresumable: true } })],
+      [],
+    )[0];
+    const row = JSON.parse(JSON.stringify(marked)) as Record<string, unknown>;
+    expect(readAgentRecord(row)?.agent).toMatchObject({ label: 'Codex', unresumable: true });
+    row['agent'] = { ...(row['agent'] as object), unresumable: false };
+    expect(readAgentRecord(row)).toBeNull();
+  });
+
   it('refuses a record with no folder, and reads plan mode only from an explicit true', () => {
     expect(readAgentRecord({ ...stored(), cwd: '' })).toBeNull();
     const row = stored();
     row['agent'] = { ...(row['agent'] as object), conversation: { id: ID_A, plan: 'yes' } };
-    expect(readAgentRecord(row)?.agent.conversation.plan).toBe(false);
+    expect(readAgentRecord(row)?.agent.conversation?.plan).toBe(false);
     expect(readAgentRecord('nonsense')).toBeNull();
   });
 });
@@ -130,7 +155,8 @@ describe('which records are reopened', () => {
     conversationExists: () => true as boolean | null,
     canResume: true,
   };
-  const ids = (list: readonly AgentSessionRecord[]): string[] => list.map((record) => record.agent.conversation.id);
+  const ids = (list: readonly AgentSessionRecord[]): (string | undefined)[] =>
+    list.map((record) => record.agent.conversation?.id);
 
   it('drops a session whose folder is gone, and says why', () => {
     const { keep, dropped } = restorable(records, checks);
@@ -145,6 +171,25 @@ describe('which records are reopened', () => {
 
   it('reopens nothing for an agent that cannot resume', () => {
     expect(restorable(records, { ...checks, canResume: false }).keep).toEqual([]);
+  });
+
+  it('drops an agent its profile could not name, and says which agent and why', () => {
+    const codex = agentRecordsFrom(
+      [session('shell-3', { title: 'Review', agent: { ...agent(null), label: 'Codex', unresumable: true } })],
+      [],
+    );
+    const { keep, dropped } = restorable(codex, checks);
+    expect(keep).toEqual([]);
+    expect(dropped[0]?.record.title).toBe('Review');
+    expect(dropped[0]?.reason).toBe(
+      'Codex cannot reopen a conversation: the agent profile has no session or resume arguments',
+    );
+  });
+
+  it('says in plain words why a conversation never started is not reopened', () => {
+    expect(restorable(records, { ...checks, conversationExists: () => false }).dropped[0]?.reason).toBe(
+      'nothing was ever sent in it, so there is no conversation to resume',
+    );
   });
 });
 

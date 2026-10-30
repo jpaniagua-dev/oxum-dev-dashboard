@@ -1,5 +1,5 @@
 import { CONVERSATION_ID_PATTERN } from './agent-profile.js';
-import type { SessionAgent, TerminalGroup, TerminalSession } from './contracts.js';
+import type { AgentConversation, SessionAgent, TerminalGroup, TerminalSession } from './contracts.js';
 
 /**
  * The agent sessions to reopen after a restart.
@@ -10,8 +10,8 @@ import type { SessionAgent, TerminalGroup, TerminalSession } from './contracts.j
  * conversation that is the actual work.
  *
  * Pure, so the rules that decide what comes back are tested without a pty or a disk: which sessions
- * are recorded (a live agent with a conversation id), in which order (the tabs'), and which records
- * may be reopened (see `restorable`).
+ * are recorded (a live agent with a conversation id, or one marked `unresumable`), in which order
+ * (the tabs'), and which records may be reopened (see `restorable`).
  */
 
 /** One agent tab, as it is reopened. */
@@ -24,15 +24,22 @@ export interface AgentSessionRecord {
   /** The reserved action id of a handoff or rule tab, which keeps it exempt from `reconcile`. */
   readonly actionId: string | null;
   readonly profileId: string | null;
-  /** The agent as captured at the first spawn, conversation included. */
-  readonly agent: SessionAgent & {
-    readonly conversation: NonNullable<SessionAgent['conversation']>;
-  };
+  /**
+   * The agent as captured at the first spawn, conversation included. Without one only when it is
+   * marked `unresumable`: such a record is never reopened, it is kept to say so at the next launch.
+   */
+  readonly agent: SessionAgent;
   readonly note: string | null;
 }
 
+/** A record that can be reopened: its conversation is known. */
+export type ResumableRecord = AgentSessionRecord & {
+  readonly agent: SessionAgent & { readonly conversation: AgentConversation };
+};
+
 /**
- * The records for the sessions as they stand: every live agent with a conversation, in tab order.
+ * The records for the sessions as they stand: every live agent with a conversation, and every one
+ * marked `unresumable`, in tab order. An agent with neither is a run excluded on purpose.
  *
  * Live only, and that is what makes a closed tab and an agent ended with `/exit` leave the list on
  * their own: nothing has to be told to forget them. The tab order is the layout's, then any session
@@ -52,12 +59,12 @@ export function agentRecordsFrom(
   const records: AgentSessionRecord[] = [];
   for (const id of order) {
     const session = byId.get(id);
-    const conversation = session?.agent?.conversation;
+    const agent = session?.agent ?? null;
     if (
       session === undefined ||
       !session.running ||
-      session.agent === null ||
-      conversation === undefined
+      agent === null ||
+      (agent.conversation === undefined && agent.unresumable !== true)
     ) {
       continue;
     }
@@ -68,7 +75,7 @@ export function agentRecordsFrom(
       projectId: session.projectId,
       actionId: session.actionId,
       profileId: session.profileId,
-      agent: { ...session.agent, conversation },
+      agent,
       note: session.note?.text ?? null,
     });
   }
@@ -91,13 +98,27 @@ export function readAgentRecord(value: unknown): AgentSessionRecord | null {
     return null;
   }
   const raw = agent as Record<string, unknown>;
-  const conversation = raw['conversation'];
-  if (typeof conversation !== 'object' || conversation === null) {
+  const stored = raw['conversation'];
+  let conversation: AgentConversation | undefined;
+  if (typeof stored === 'object' && stored !== null) {
+    const id = (stored as Record<string, unknown>)['id'];
+    if (typeof id !== 'string' || !CONVERSATION_ID_PATTERN.test(id)) {
+      return null;
+    }
+    // `=== true`: plan mode keeps the permission prompts, so a value that merely failed to be
+    // `false` must not drop them on the way back.
+    conversation = {
+      id,
+      plan: (stored as Record<string, unknown>)['plan'] === true,
+      ...((stored as Record<string, unknown>)['provider'] === 'codex'
+        ? { provider: 'codex' as const }
+        : {}),
+    };
+  } else if (raw['unresumable'] !== true) {
     return null;
   }
-  const id = (conversation as Record<string, unknown>)['id'];
   const cwd = text(row['cwd']);
-  if (typeof id !== 'string' || !CONVERSATION_ID_PATTERN.test(id) || cwd.length === 0) {
+  if (cwd.length === 0) {
     return null;
   }
   const title = text(row['title']);
@@ -113,15 +134,7 @@ export function readAgentRecord(value: unknown): AgentSessionRecord | null {
       model: text(raw['model']),
       instructionFile: text(raw['instructionFile']),
       startedAt: text(raw['startedAt']),
-      // `=== true`: plan mode keeps the permission prompts, so a value that merely failed to be
-      // `false` must not drop them on the way back.
-      conversation: {
-        id,
-        plan: (conversation as Record<string, unknown>)['plan'] === true,
-        ...((conversation as Record<string, unknown>)['provider'] === 'codex'
-          ? { provider: 'codex' as const }
-          : {}),
-      },
+      ...(conversation === undefined ? { unresumable: true } : { conversation }),
     },
     note: optionalText(row['note']),
   };
@@ -143,25 +156,34 @@ export interface RestoreChecks {
   readonly canResume: boolean;
 }
 
-/** The records split into those to reopen and those to drop, each dropped one with its reason. */
+/**
+ * The records split into those to reopen and those to drop, each dropped one with its reason.
+ *
+ * The reasons are shown in the top bar at the next launch, so they are written for the person who
+ * opened the tab, after its title.
+ */
 export function restorable(
   records: readonly AgentSessionRecord[],
   checks: RestoreChecks,
-): { keep: AgentSessionRecord[]; dropped: { record: AgentSessionRecord; reason: string }[] } {
-  const keep: AgentSessionRecord[] = [];
+): { keep: ResumableRecord[]; dropped: { record: AgentSessionRecord; reason: string }[] } {
+  const keep: ResumableRecord[] = [];
   const dropped: { record: AgentSessionRecord; reason: string }[] = [];
   for (const record of records) {
-    const reason = !checks.canResume
-      ? 'the agent profile has no resume arguments'
-      : !checks.folderExists(record.cwd)
-        ? `${record.cwd} no longer exists`
-        : checks.conversationExists(record.agent.conversation.id) === false
-          ? 'the conversation was never started'
-          : null;
-    if (reason === null) {
-      keep.push(record);
+    const conversation = record.agent.conversation;
+    const reason =
+      conversation === undefined
+        ? `${record.agent.label || 'its agent'} cannot reopen a conversation: the agent profile has no session or resume arguments`
+        : !checks.canResume
+          ? 'the agent profile has no resume arguments'
+          : !checks.folderExists(record.cwd)
+            ? `${record.cwd} no longer exists`
+            : checks.conversationExists(conversation.id) === false
+              ? 'nothing was ever sent in it, so there is no conversation to resume'
+              : null;
+    if (conversation !== undefined && reason === null) {
+      keep.push({ ...record, agent: { ...record.agent, conversation } });
     } else {
-      dropped.push({ record, reason });
+      dropped.push({ record, reason: reason ?? '' });
     }
   }
   return { keep, dropped };

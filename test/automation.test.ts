@@ -56,6 +56,7 @@ function pull(number: number, over: Partial<PullRequest> = {}): PullRequest {
     pending: 0,
     isAuthor: true,
     isReviewer: false,
+    createdAt: '2026-09-24T08:00:00.000Z',
     updatedAt: '2026-09-25T08:00:00.000Z',
     headSha: 'a'.repeat(40),
     changedFiles: 3,

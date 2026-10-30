@@ -8,6 +8,8 @@ page of the tab you are using.
 - [Settings](settings.md): every page of the settings window, and what sits under Advanced.
 - [The terminal](terminal.md): tabs, panes, shells.
 - Tabs, in the order of the strip:
+  - [Today](tabs/today.md): what is waiting for you, one card per source: pull requests, tickets,
+    calendar, mail, Teams and time tracking.
   - [Projects](tabs/projects.md): the watched repositories, their server, files, branch and checks.
   - [Pull requests](tabs/pull-requests.md): the pull requests that involve you, and their review.
   - [Worktrees](tabs/worktrees.md): every worktree of every project, created and removed in place.
@@ -16,7 +18,6 @@ page of the tab you are using.
   - [Git](tabs/git.md): the commit graph of one repository, staging, commit, checkout, merge and undo.
   - [Rules](tabs/rules.md): automations that act on their own.
   - [Vault](tabs/vault.md): secrets kept out of `.env` files and chats.
-  - [Agents](tabs/agents.md): the coding agents running, and what each one reads.
   - [Extensions](tabs/extensions.md): hooks, skills, plugins, MCP servers and routines of Claude
     Code and Codex.
   - [Explorer](tabs/explorer.md): the files of each project, searched and edited in place or in a

@@ -4,6 +4,7 @@ import { sanitizeTagColors } from '@shared/project-tags.js';
 import { sanitizeColumns } from '@shared/terminal-groups.js';
 import { sanitizePreviewRatio } from '@shared/board-preview.js';
 import { sanitizeBoardGroups } from '@shared/board-groups.js';
+import { sanitizeTodayChannels } from '@shared/today.js';
 
 /**
  * Settings the dashboard writes about its own geometry.
@@ -18,11 +19,11 @@ export const LOCAL_ONLY_KEYS: ReadonlySet<string> = new Set([
   'gitHeight',
   'triageHeight',
   'worktreesHeight',
-  'agentsHeight',
   'automationsHeight',
   'vaultHeight',
   'extensionsHeight',
   'explorerHeight',
+  'todayHeight',
   'gitDetailWidth',
   'activeStrip',
   'pullScope',
@@ -63,12 +64,18 @@ export function asPatch(value: unknown): Partial<AppSettings> {
   if (typeof input.gitHeight === 'number') patch.gitHeight = input.gitHeight;
   if (typeof input.triageHeight === 'number') patch.triageHeight = input.triageHeight;
   if (typeof input.worktreesHeight === 'number') patch.worktreesHeight = input.worktreesHeight;
-  if (typeof input.agentsHeight === 'number') patch.agentsHeight = input.agentsHeight;
   if (typeof input.automationsHeight === 'number')
     patch.automationsHeight = input.automationsHeight;
   if (typeof input.vaultHeight === 'number') patch.vaultHeight = input.vaultHeight;
   if (typeof input.extensionsHeight === 'number') patch.extensionsHeight = input.extensionsHeight;
   if (typeof input.explorerHeight === 'number') patch.explorerHeight = input.explorerHeight;
+  if (typeof input.todayHeight === 'number') patch.todayHeight = input.todayHeight;
+  // Broadcast: written by the settings window, read by the dashboard and the main process.
+  if (typeof input.todayChannels === 'object' && input.todayChannels !== null) {
+    patch.todayChannels = sanitizeTodayChannels(input.todayChannels);
+  }
+  if (typeof input.tipeeUrl === 'string') patch.tipeeUrl = input.tipeeUrl;
+  if (typeof input.tipeeUser === 'string') patch.tipeeUser = input.tipeeUser.trim();
   // Broadcast, unlike the heights: both are written by the settings window and have to reach the
   // dashboard, which is the window whose runner reads them.
   if (typeof input.automationsEnabled === 'boolean')

@@ -27,7 +27,7 @@ const PARENT_SESSION_MARKERS = new Set([
 /**
  * Advertise the embedded xterm's truecolor support without overriding explicit color preferences.
  * FORCE_COLOR=1 means only 16 colors to clients such as Codex, which then discard RGB accents.
- * Project capabilities are merged first so their environment overrides follow the same policy.
+ * A project's extra environment is merged first so its overrides follow the same policy.
  */
 export function terminalEnvironment(
   inherited: NodeJS.ProcessEnv,

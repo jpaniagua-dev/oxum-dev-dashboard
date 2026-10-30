@@ -1,4 +1,3 @@
-import type { AgentContext } from '@shared/agent-context.js';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { AgentProfile } from '@shared/agent-profile.js';
 import type { AutomationRule } from '@shared/automation.js';
@@ -15,7 +14,9 @@ import type {
   LocalTicketResult,
   LocalTicketsState,
 } from '@shared/local-tickets.js';
-import type { VaultCard, VaultFileBinding, VaultState } from '@shared/vault.js';
+import type { VaultFileCard, VaultSecretInput, VaultState } from '@shared/vault.js';
+import type { TodayDigestState } from '@shared/today.js';
+import type { TipeeState } from '@shared/tipee.js';
 import {
   IpcChannel,
   type AgentOpenResult,
@@ -109,6 +110,34 @@ const api: RendererApi = {
 
   testAgent: (profile: AgentProfile): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke(IpcChannel.AgentTest, profile),
+
+  refreshTodayDigest: (force: boolean): Promise<TodayDigestState> =>
+    ipcRenderer.invoke(IpcChannel.TodayDigestRefresh, force),
+
+  onTodayDigestChanged: (listener: (state: TodayDigestState) => void): (() => void) => {
+    const handler = (_event: unknown, state: TodayDigestState): void => listener(state);
+    ipcRenderer.on(IpcChannel.TodayDigestChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.TodayDigestChanged, handler);
+  },
+
+  testTodayDigest: (): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.TodayDigestTest),
+
+  refreshTipee: (): Promise<TipeeState> => ipcRenderer.invoke(IpcChannel.TipeeRefresh),
+
+  onTipeeChanged: (listener: (state: TipeeState) => void): (() => void) => {
+    const handler = (_event: unknown, state: TipeeState): void => listener(state);
+    ipcRenderer.on(IpcChannel.TipeeChanged, handler);
+    return () => ipcRenderer.off(IpcChannel.TipeeChanged, handler);
+  },
+
+  testTipee: (draft: { url: string; user: string; password: string }): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.TipeeTest, draft),
+
+  saveTipeePassword: (password: string): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke(IpcChannel.TipeeSavePassword, password),
+
+  hasTipeePassword: (): Promise<boolean> => ipcRenderer.invoke(IpcChannel.TipeeHasPassword),
 
   pullReviewBody: (slug: string, number: number): Promise<string> =>
     ipcRenderer.invoke(IpcChannel.PullReviewBody, slug, number),
@@ -287,9 +316,6 @@ const api: RendererApi = {
     return () => ipcRenderer.off(IpcChannel.TriageChanged, handler);
   },
 
-  readAgentContext: (terminalId: TerminalId): Promise<AgentContext | null> =>
-    ipcRenderer.invoke(IpcChannel.AgentContextRead, terminalId),
-
   openAgentSession: (): Promise<AgentOpenResult> => ipcRenderer.invoke(IpcChannel.AgentOpen),
 
   jiraTransitions: (key: string): Promise<IssueTransition[]> =>
@@ -363,23 +389,23 @@ const api: RendererApi = {
 
   readVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultRead),
 
-  saveVaultCard: (card: VaultCard, value: string): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultSave, card, value),
+  saveVaultCard: (
+    card: VaultFileCard,
+    secrets: readonly VaultSecretInput[],
+  ): Promise<VaultResult> => ipcRenderer.invoke(IpcChannel.VaultSave, card, secrets),
 
   deleteVaultCard: (id: string): Promise<VaultResult> =>
     ipcRenderer.invoke(IpcChannel.VaultDelete, id),
 
-  revealVaultCard: (id: string): Promise<string> =>
-    ipcRenderer.invoke(IpcChannel.VaultReveal, id),
+  revealVaultSecret: (id: string, name: string): Promise<string> =>
+    ipcRenderer.invoke(IpcChannel.VaultReveal, id, name),
 
-  copyVaultCard: (id: string): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultCopy, id),
+  copyVaultSecret: (id: string, name: string): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultCopy, id, name),
 
-  generateVaultFile: (binding: VaultFileBinding): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultGenerateFile, binding),
+  generateVaultFile: (id: string): Promise<VaultResult> =>
+    ipcRenderer.invoke(IpcChannel.VaultGenerateFile, id),
 
-  removeVaultFile: (binding: VaultFileBinding): Promise<VaultResult> =>
-    ipcRenderer.invoke(IpcChannel.VaultRemoveFile, binding),
 
   resetVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultReset),
 

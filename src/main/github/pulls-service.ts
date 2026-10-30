@@ -30,6 +30,7 @@ const FIELDS = [
   'reviewDecision',
   'reviewRequests',
   'statusCheckRollup',
+  'createdAt',
   'updatedAt',
 ].join(',');
 
@@ -129,6 +130,7 @@ export function parsePullPayload(stdout: string, login: string): PullRequest[] {
       // An empty login (no `gh` auth) must not make everything "mine".
       isAuthor: login.length > 0 && authorLogin === login,
       isReviewer: login.length > 0 && reviewers.includes(login),
+      createdAt: typeof pr.createdAt === 'string' ? pr.createdAt : '',
       updatedAt: typeof pr.updatedAt === 'string' ? pr.updatedAt : '',
     });
   }
