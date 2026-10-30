@@ -29,6 +29,7 @@ async function start(): Promise<void> {
       jira: requireElement('settings-jira'),
       today: requireElement('settings-today'),
       footer: requireElement('settings-footer'),
+      toast: requireElement('settings-toast'),
     },
     {
       // The main process owns the close confirmation: only the window's own `close` handler can still

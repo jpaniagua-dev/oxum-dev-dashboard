@@ -3116,6 +3116,16 @@ account, and the unofficial libraries break its terms and risk a ban of the numb
   that cannot assert "this tick said nothing" is not a test of a feature whose whole job is to speak
   up on its own. Three moments say something, and only three: a pass starting, a pass finishing, and a
   merge. A poll that decided nothing says nothing.
+- **Save in the settings window answers with a toast, inside that window, and that is not a
+  notification.** The reader is looking at the window they just clicked in, so the rule above holds:
+  no OS toast. The footer sentence was not enough on its own, `changes saved` in `--text-faint` at the
+  far end of the footer from Save. The toast sits right above the button (`saveToast`): a success
+  leaves after 4 s, an error stays until dismissed or the next edit, since it is the one outcome that
+  asks for action. The footer keeps the state (`Not saved`) and the toast the reason, stripped of
+  Electron's `Error invoking remote method` wrapper (`saveErrorMessage`): the same sentence twice was
+  noise. A Tipee password that fails to save while the settings did is reported as an error too. The
+  live region is in the page from load and stays empty at rest, because a region inserted together
+  with its message is not reliably read out.
 
 ## Workflows column: is CI busy on this project
 

@@ -141,6 +141,7 @@ export interface SettingsFormHosts {
   readonly jira: HTMLElement;
   readonly today: HTMLElement;
   readonly footer: HTMLElement;
+  readonly toast: HTMLElement;
 }
 
 export interface SettingsFormActions {
@@ -253,6 +254,7 @@ export class SettingsForm {
   /** Why the last save failed, shown in the footer until the next change. */
   private saveError = '';
   private validateTimer: ReturnType<typeof setTimeout> | null = null;
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private teamStatus = '';
   /** Whether the review may submit to GitHub. Off until somebody says otherwise, once. */
   private reviewWrites = false;
@@ -2376,12 +2378,49 @@ export class SettingsForm {
     }
     save.addEventListener('click', () => {
       // Each of the writes broadcasts and can fail on its own; a failure is said, never swallowed.
-      void this.save().catch((error: unknown) => {
-        this.saveError = `Not saved: ${error instanceof Error ? error.message : String(error)}`;
-        this.renderFooter();
-      });
+      void this.save().then(
+        (failures) => this.showToast(saveToast(failures, this.projectScope !== null)),
+        (error: unknown) => {
+          // The footer keeps the state, the toast the reason: the same sentence twice was noise.
+          this.saveError = 'Not saved';
+          this.renderFooter();
+          this.showToast({ tone: 'error', text: `Not saved: ${saveErrorMessage(error)}` });
+        },
+      );
     });
     this.hosts.footer.append(save);
+  }
+
+  private showToast(toast: SaveToast): void {
+    this.hideToast();
+    const box = createElement('div', {
+      className: `settings-toast__box settings-toast__box--${toast.tone}`,
+    });
+    box.append(createElement('span', { className: 'settings-toast__text', text: toast.text }));
+    // An error stays until dismissed or the next edit: it is the one outcome that asks for action.
+    if (toast.tone === 'error') {
+      box.setAttribute('role', 'alert');
+      const dismiss = createElement('button', {
+        className: 'button button--quiet settings-toast__dismiss',
+        text: '×',
+        title: 'Dismiss',
+      });
+      dismiss.type = 'button';
+      dismiss.setAttribute('aria-label', 'Dismiss');
+      dismiss.addEventListener('click', () => this.hideToast());
+      box.append(dismiss);
+    } else {
+      this.toastTimer = setTimeout(() => this.hideToast(), SAVED_TOAST_MS);
+    }
+    this.hosts.toast.append(box);
+  }
+
+  private hideToast(): void {
+    if (this.toastTimer !== null) {
+      clearTimeout(this.toastTimer);
+      this.toastTimer = null;
+    }
+    clearChildren(this.hosts.toast);
   }
 
   /* --------------------------------------------------------------- actions */
@@ -2427,7 +2466,9 @@ export class SettingsForm {
     this.render();
   }
 
-  private async save(): Promise<void> {
+  /** Resolves with the secondary writes that failed while the settings themselves were stored. */
+  private async save(): Promise<string[]> {
+    const failures: string[] = [];
     // Recorded before the writes: each one broadcasts, and the handler must already recognise the
     // state it is about to be told about.
     this.baseline = this.signature();
@@ -2507,6 +2548,9 @@ export class SettingsForm {
       this.tipeeStatus = result.ok ? 'Password saved' : result.message;
       this.tipeeHasPassword = result.ok || this.tipeeHasPassword;
       this.tipeePassword = '';
+      if (!result.ok) {
+        failures.push(`the Tipee password: ${result.message}`);
+      }
     }
 
     // The token travels only when one was actually typed: an empty field means "keep the stored one".
@@ -2522,6 +2566,7 @@ export class SettingsForm {
     this.jiraToken = '';
     this.jiraStatus = jira.message;
     this.saved = true;
+    this.saveError = '';
     this.setDirty(false);
     // Re-rendered rather than just the footer: a font size the store clamped must show its corrected
     // value in the field, otherwise the form claims something the app is not doing.
@@ -2529,6 +2574,7 @@ export class SettingsForm {
     this.renderJira();
     this.renderFooter();
     this.renderRail();
+    return failures;
   }
 
   /**
@@ -2554,6 +2600,7 @@ export class SettingsForm {
     this.dirtyPages.add(this.activeSection);
     this.saved = false;
     this.saveError = '';
+    this.hideToast();
     this.setDirty(true);
     this.renderFooter();
     this.renderRail();
@@ -2779,4 +2826,26 @@ export function saveBlocker(
     return 'A model on the Agent page is not a model name';
   }
   return null;
+}
+
+const SAVED_TOAST_MS = 4000;
+
+/** How a Save went, as the toast shown above the button. */
+export interface SaveToast {
+  readonly tone: 'ok' | 'error';
+  readonly text: string;
+}
+
+/** The toast for a Save that stored the settings, given the secondary writes that failed. */
+export function saveToast(failures: readonly string[], scoped: boolean): SaveToast {
+  if (failures.length > 0) {
+    return { tone: 'error', text: `Saved, except ${failures.join('; ')}` };
+  }
+  return { tone: 'ok', text: scoped ? 'Project saved' : 'Settings saved' };
+}
+
+/** Why a write failed, without the wrapper Electron puts around an error thrown in the main process. */
+export function saveErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/^Error invoking remote method '[^']*': (?:Error: )?/, '');
 }

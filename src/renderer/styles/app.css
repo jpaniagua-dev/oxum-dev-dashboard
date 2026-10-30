@@ -2660,6 +2660,74 @@ body {
   color: var(--text-faint);
 }
 
+/*
+ * The outcome of Save, right above the button. A zero-size anchor at the top edge of the footer's cell,
+ * so the box sits clear of the footer whatever height the interface size gives it, and moves nothing.
+ */
+.settings-toast {
+  position: relative;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: end;
+  align-self: start;
+  width: 0;
+  height: 0;
+  margin-right: 28px;
+}
+
+.settings-toast__box {
+  position: absolute;
+  right: 0;
+  bottom: 10px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: min(460px, calc(100vw - 56px));
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: var(--font-sm);
+  animation: settings-toast-in 160ms ease-out;
+}
+
+/* Coloured text on a tint of the same colour, the healthy pill's recipe, made opaque to sit over the form. */
+.settings-toast__box--ok {
+  border-color: color-mix(in srgb, var(--success) 50%, transparent);
+  background: color-mix(in srgb, var(--success) 14%, var(--surface-raised));
+  color: var(--success);
+}
+
+.settings-toast__box--error {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, var(--surface-raised));
+  color: var(--danger);
+}
+
+.settings-toast__dismiss {
+  padding: 0 4px;
+  background: transparent;
+  color: inherit;
+  line-height: 1;
+}
+
+@keyframes settings-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-toast__box {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------------------ entry */
 
 /*

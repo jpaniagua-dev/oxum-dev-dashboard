@@ -107,6 +107,12 @@
       </main>
 
       <footer class="settings__footer" id="settings-footer"></footer>
+
+      <!--
+        The outcome of Save. In the page from the start and empty at rest: a live region inserted
+        together with its message is not reliably read out.
+      -->
+      <div class="settings-toast" id="settings-toast" aria-live="polite"></div>
     </div>
 
     <script type="module" src="./settings.ts"></script>
