@@ -3360,8 +3360,7 @@ body {
 }
 
 /*
- * A selected card opens the existing terminal view as a sidebar on the LEFT of the board, the cards
- * on the right.
+ * A selected card opens the existing terminal view as a fixed-width sidebar beside the board.
  *
  * Both children keep their original DOM nodes. In particular, no xterm is moved into a card: the
  * pane isolates one session inside its own permanent container and reduces its strip to the note
@@ -3369,12 +3368,12 @@ body {
  */
 .terminal--board-preview {
   display: grid;
-  grid-template-columns: var(--board-preview-width, 420px) var(--pane-splitter) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) var(--pane-splitter) var(--board-preview-width, 420px);
   grid-template-rows: minmax(0, 1fr);
 }
 
 .terminal--board-preview .terminal__surface {
-  grid-column: 1;
+  grid-column: 3;
   grid-row: 1;
   min-width: 0;
 }
@@ -3424,7 +3423,7 @@ body {
 }
 
 .terminal--board-preview .terminal__board {
-  grid-column: 3;
+  grid-column: 1;
   grid-row: 1;
   min-width: 0;
 }
