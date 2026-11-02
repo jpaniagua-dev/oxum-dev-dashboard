@@ -1080,7 +1080,7 @@ export class SettingsForm {
       [
         'ask',
         'Skill for Work on this',
-        "The slash command a ticket is handed to, such as /ticket. Empty sends the app's own prompt.",
+        "The slash command a ticket is handed to from the Triage and Tickets tabs, such as /ticket. Empty sends the app's own prompt.",
       ],
       [
         'auto',

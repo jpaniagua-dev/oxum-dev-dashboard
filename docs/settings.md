@@ -90,7 +90,8 @@ Advanced, in three groups:
 - **Handing over a ticket**: the **starting folder** of sessions, so they read the instructions
   several repositories share (empty starts in the repository), and the skills (**Skill for Work on
   this**, **Skill for unattended runs**, **Skill for review feedback**): a slash command such as
-  `/ticket` to hand work to instead of the app's own prompt.
+  `/ticket` to hand work to instead of the app's own prompt. **Skill for Work on this** serves the
+  Triage tab and the Tickets tab alike.
 
 ## Tickets
 

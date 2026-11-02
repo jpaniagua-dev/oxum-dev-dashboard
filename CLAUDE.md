@@ -1622,6 +1622,15 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   And a flat "Create a branch in X" list in the first menu would push the transitions off screen by
   ten projects. The last used project is at the top and says so; it is **session-local**, like a
   shortcut and not like a setting.
+- **"Work on this..." here IS the Triage handoff, not a second one.** It calls `openWorkProjectMenu`,
+  so the same `TriageWork` channel, the same `handoffAsk` skill, the same `workActionId` (one ticket
+  is one tab, whichever tab it was started from) and the same Jira writes after the focus. It sits at
+  the top of the menu, above the assignment and the branch it already does. On a local ticket it is
+  **greyed, not hidden**: the skill reads Jira, which does not know `LOC-n`. An untriaged ticket gets
+  the built-in prompt without the sentence pointing at `triage.json`, which would say nothing about it.
+- **The three copies (ID, title, `ID - Title`) close both menus**, above Delete in a local one, with
+  the copied text as the hint. Their wording and texts live in `ticket-menu.ts`, apart from
+  `jira-board.ts` because of the NUL character in `ASSIGNEE_NONE`, which the editing tools refuse.
 - **`context-menu.ts` has no side effect at import time.** Its dismissal listeners are attached on the
   first open: at module load, two DOM-less test files broke.
 - **No example placeholder in the settings.** A greyed example reads like a value that is already saved;

@@ -62,7 +62,7 @@ import {
   tagVocabulary,
   withTagColor,
 } from '@shared/project-tags.js';
-import { showContextMenu } from './ui/context-menu.js';
+import { showContextMenu, type MenuItem } from './ui/context-menu.js';
 import { PANE_COLUMN_CHOICES } from './ui/terminal-pane.js';
 import { TerminalBoard } from './ui/terminal-board.js';
 import { ExtensionsPanel } from './ui/extensions-panel.js';
@@ -87,6 +87,7 @@ import { attachGitSplitter } from './ui/git-split.js';
 import { mergeOptionsFor } from './ui/presenters.js';
 import { scrollToReveal } from './ui/virtual-window.js';
 import { boardUrl, renderJiraBoard, transitionTo, withLocalTickets } from './ui/jira-board.js';
+import { ticketCopies, workOnTicketItem } from './ui/ticket-menu.js';
 import {
   LOCAL_STAGES,
   localAsIssue,
@@ -1382,6 +1383,7 @@ class App {
         hint: `${branchNameFor(issue.key, issue.summary)}, in the chosen project`,
         run: () => this.openBranchProjectMenu(issue, x, y),
       },
+      { ...workOnTicketItem(issue), run: () => {} },
       ...LOCAL_STAGES.filter((stage) => stage !== issue.stage).map((stage) => ({
         label: `Move to "${localStatus(stage)}"`,
         run: () => void this.runLocalTicketWrite(() => window.api.moveLocalTicket(issue.key, stage)),
@@ -1392,6 +1394,7 @@ class App {
         run: () => void window.api.openLocalTicket(issue.key, false),
       },
       { label: 'Show in folder', run: () => void window.api.openLocalTicket(issue.key, true) },
+      ...this.copyItems(issue),
       {
         label: 'Delete...',
         run: () => void this.runLocalTicketWrite(() => window.api.deleteLocalTicket(issue.key)),
@@ -1412,44 +1415,56 @@ class App {
       return;
     }
     const transitions = await window.api.jiraTransitions(issue.key);
-    const items = [
+    const moves: MenuItem[] =
+      transitions.length === 0
+        ? [
+            {
+              // Says why rather than showing a menu that looks broken: no transitions usually means
+              // the connection failed, not that the issue is frozen.
+              label: 'No transition available',
+              disabled: true,
+              run: () => {},
+            },
+          ]
+        : transitions.map((transition) => ({
+            label: `Move to "${transition.label}"`,
+            run: () =>
+              void this.runJiraWrite(() => window.api.transitionJira(issue.key, transition.id)),
+          }));
+    showContextMenu(x, y, [
+      /*
+       * The gestures that start a ticket come first, the most complete one at the top: the skill
+       * creates the branch, and the Jira writes that follow assign the issue and move it.
+       */
+      { ...workOnTicketItem(issue), run: () => this.openWorkProjectMenu([issue.key], x, y, 'ask') },
       {
         label: issue.isMine ? 'Already assigned to you' : 'Assign this issue to me',
         disabled: issue.isMine,
         run: () => void this.runJiraWrite(() => window.api.assignJiraToMe(issue.key)),
       },
-      /*
-       * The branch, second in the list and above the transitions.
-       *
-       * Position is not decoration here: "assign it to me, create its branch" is the pair of gestures
-       * that start a ticket, and they are the two things done from this menu in the same minute. The
-       * transitions below are the ones done later, one at a time.
-       */
       {
         label: 'Create a branch...',
         hint: `${branchNameFor(issue.key, issue.summary)}, in the chosen project`,
         run: () => this.openBranchProjectMenu(issue, x, y),
       },
-      ...transitions.map((transition) => ({
-        label: `Move to "${transition.label}"`,
-        run: () =>
-          void this.runJiraWrite(() => window.api.transitionJira(issue.key, transition.id)),
-      })),
+      ...moves,
       {
         label: 'Open in the browser',
         run: () => void window.api.openExternal(issue.url),
       },
-    ];
-    if (transitions.length === 0) {
-      items.splice(1, 0, {
-        // Says why rather than showing a menu that looks broken: no transitions usually means the
-        // connection failed, not that the issue is frozen.
-        label: 'No transition available',
-        disabled: true,
-        run: () => {},
-      });
-    }
-    showContextMenu(x, y, items);
+      ...this.copyItems(issue),
+    ]);
+  }
+
+  private copyItems(issue: JiraIssue): MenuItem[] {
+    return ticketCopies(issue).map((copy) => ({
+      label: copy.label,
+      hint: copy.text,
+      run: () => {
+        void window.api.writeClipboard(copy.text);
+        this.stampMessage(copy.message);
+      },
+    }));
   }
 
   /**

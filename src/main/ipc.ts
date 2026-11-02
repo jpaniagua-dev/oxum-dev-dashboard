@@ -1277,7 +1277,10 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         {
           // Plan mode is the asking handoff started differently, so it names the same skill.
           skill: mode === 'auto' ? settings.handoffAuto : settings.handoffAsk,
-          notes: deps.triageFile,
+          // The Tickets tab hands over tickets the triage never read: no notes to point at.
+          notes: keys.every((key) => deps.triage().ticketFor(key) !== undefined)
+            ? deps.triageFile
+            : '',
         },
         conversation?.args,
       );

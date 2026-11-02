@@ -89,6 +89,12 @@ describe('handoffPrompt, without a skill', () => {
     expect(handoffPrompt(['PROJ-1'], 'web', 'ask', { skill: '', notes: 'C:/$(x)/t.json' })).not.toContain('notes');
   });
 
+  it('points at no notes for a ticket the triage never read', () => {
+    const ask = handoffPrompt(['PROJ-7'], 'web-app', 'ask', { skill: '', notes: '' });
+    expect(ask).toMatch(/^Work on ticket PROJ-7 in the web-app repository\. Create a branch/);
+    expect(ask).not.toContain('triage');
+  });
+
   it('accepts a skill name and nothing else', () => {
     expect(safeSkill('ticket')).toBe('/ticket');
     expect(safeSkill('/plugin:ticket-auto')).toBe('/plugin:ticket-auto');
