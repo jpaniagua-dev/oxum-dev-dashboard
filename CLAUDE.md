@@ -2604,6 +2604,16 @@ The bullets that follow are the reasons and the traps, the new ones first.
   shell alias, which only exists once `~/.bashrc` has been read; `claude.exe` is a real executable on
   `PATH`, so `resolveDefaultProfile` is enough and the tab starts in whatever shell the user actually
   works in.
+- ⚠️ **Git Bash turns a leading slash command into a Windows path, so each agent spawn excludes
+  it.** MSYS converts an argument that looks like a POSIX path when bash starts a native program:
+  `claude "/ticket PROJ-123 ..."` reached the agent as `C:/Program Files/Git/ticket PROJ-123 ...`,
+  a sentence the model had to guess at, not a command. The four spawns whose prompt starts with a
+  slash command (`Work on this`, a rule's `skill`, the feedback pass, `/schedule`) pass
+  `slashCommandEnvironment`, which sets `MSYS2_ARG_CONV_EXCL` to that one prefix through the spawn's
+  own `env` and extends a list already set. Not `MSYS_NO_PATHCONV`: the agent inherits the
+  environment, and turning every conversion off would break the `/c/...` paths its own commands hand
+  to native programs. Pinned by a real-pty test through Git Bash, which also shows the conversion
+  happening without it.
 - **The batch button is pushed to the far end with `margin-left: auto`.** Not an `order` value: the
   sub-tabs are what the bar is for, and a control that launches a run of agents has no business
   sitting against `Ready` where a mis-aimed click would land on it.

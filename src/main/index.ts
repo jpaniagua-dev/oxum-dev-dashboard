@@ -59,6 +59,7 @@ import { WindowStateStore } from './store/window-state.js';
 import { basename } from 'node:path';
 import { detectProfiles, mergeProfiles, resolveDefaultProfile } from './terminal/shell-profiles.js';
 import { TerminalManager, resolveShellCommand } from './terminal/terminal-manager.js';
+import { slashCommandEnvironment } from './terminal/terminal-environment.js';
 import { ThemeController } from './theme.js';
 import { DashboardWindow, loadRendererPage, preloadPath } from './window.js';
 import { quotePrompt } from '@shared/automation.js';
@@ -650,10 +651,8 @@ async function bootstrap(): Promise<void> {
       console.warn(`Could not prepare the agent session: ${String(error)}`);
       return false;
     }
-    const resolved = resolveShellCommand(
-      profile,
-      `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, conversation?.args)} "${quotePrompt(prompt)}"`,
-    );
+    const command = `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, conversation?.args)} "${quotePrompt(prompt)}"`;
+    const resolved = resolveShellCommand(profile, command);
     const id = terminalManager.runProjectCommand({
       project,
       // Keyed on the rule's own prompt so two rules never share a tab, and reserved so a settings
@@ -672,6 +671,7 @@ async function bootstrap(): Promise<void> {
       size: terminalSize,
       profileId: profile.id,
       cwd,
+      env: slashCommandEnvironment(command, process.env),
       agent: {
         label: settings.agentProfile.label,
         model: settings.agentWorkModel,
@@ -727,6 +727,7 @@ async function bootstrap(): Promise<void> {
       size: terminalSize,
       profileId: profile.id,
       cwd: input.cwd,
+      env: slashCommandEnvironment(input.command, process.env),
       // A feedback pass is a coding agent like the ticket handoff, and the Agents tab lists it for
       // the same reason: it is a session that reads instructions and writes code.
       agent: {

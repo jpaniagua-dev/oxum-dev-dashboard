@@ -15,6 +15,8 @@ import {
 } from '../src/shared/contracts.js';
 import { GIT_PTY_FILE } from '../src/main/git/run-git.js';
 import { stripAnsi } from '../src/main/projects/output-parser.js';
+import { slashCommandEnvironment } from '../src/main/terminal/terminal-environment.js';
+import { existsSync } from 'node:fs';
 
 function session(overrides: Partial<TerminalSession> = {}): TerminalSession {
   return {
@@ -247,6 +249,48 @@ describe.runIf(onWindows)('terminal color environment reaches the real pty', () 
       }
     },
   );
+});
+
+const GIT_BASH = 'C:/Program Files/Git/bin/bash.exe';
+
+describe.runIf(onWindows && existsSync(GIT_BASH))('a slash command crosses Git Bash intact', () => {
+  it.each([
+    { label: 'converted without the exclusion', env: undefined, expected: /ARGV=[A-Z]:\/.*\/ticket PROJ-123/ },
+    {
+      label: 'left alone with it',
+      env: slashCommandEnvironment('claude "/ticket PROJ-123"', {}),
+      expected: /ARGV=\/ticket PROJ-123 in the web-app repository/,
+    },
+  ])('$label', async ({ env, expected }) => {
+    const manager = new TerminalManager(
+      {
+        onOutput: () => {},
+        onParsed: () => {},
+        onProjectStartExit: () => {},
+        onSessionsChanged: () => {},
+        onLayoutChanged: () => {},
+      },
+      0,
+    );
+    // Unquoted and found on PATH, like `claude` in a real handoff: a command line opening on a quote
+    // does not survive node-pty's argument quoting into bash, which is not what is being tested here.
+    const id = manager.runProjectCommand({
+      project: serverProject('').project,
+      actionId: 'slash-probe',
+      title: 'Slash probe',
+      file: GIT_BASH,
+      args: ['-c', `node -e "console.log('ARGV=' + process.argv[1])" "/ticket PROJ-123 in the web-app repository"`],
+      size: { cols: 200, rows: 24 },
+      ...(env === undefined ? {} : { env }),
+    });
+    try {
+      expect(id).not.toBeNull();
+      await expect.poll(() => stripAnsi(manager.buffer(id as string)), { timeout: 10_000 }).toMatch(/ARGV=/);
+      expect(stripAnsi(manager.buffer(id as string))).toMatch(expected);
+    } finally {
+      if (id !== null) manager.close(id);
+    }
+  });
 });
 
 function serverProject(command: string): { project: Project; action: ProjectAction } {

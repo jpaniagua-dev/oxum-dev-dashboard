@@ -25,6 +25,25 @@ const PARENT_SESSION_MARKERS = new Set([
 ]);
 
 /**
+ * Keeps Git Bash from rewriting the slash command an agent's prompt starts with into a Windows path.
+ *
+ * MSYS converts an argument that looks like a POSIX path when bash hands it to a native program, so
+ * `claude "/ticket PROJ-123 in the web-app repository"` reached the agent as
+ * `C:/Program Files/Git/ticket PROJ-123 ...`: a sentence the model had to guess at, not a command.
+ * Only that one prefix is excluded, so a real path such as `/c/Users` is still converted for every
+ * command the agent later runs with this environment, and an exclusion list already set is extended
+ * rather than replaced. Nothing outside Git Bash reads the variable.
+ */
+export function slashCommandEnvironment(command: string, inherited: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const prefix = /"(\/[A-Za-z0-9][A-Za-z0-9:_.-]*)/.exec(command)?.[1];
+  if (prefix === undefined) {
+    return {};
+  }
+  const existing = inherited.MSYS2_ARG_CONV_EXCL;
+  return { MSYS2_ARG_CONV_EXCL: existing ? `${existing};${prefix}` : prefix };
+}
+
+/**
  * Advertise the embedded xterm's truecolor support without overriding explicit color preferences.
  * FORCE_COLOR=1 means only 16 colors to clients such as Codex, which then discard RGB accents.
  * A project's extra environment is merged first so its overrides follow the same policy.

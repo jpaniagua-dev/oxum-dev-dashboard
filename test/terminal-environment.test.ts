@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { terminalEnvironment } from '../src/main/terminal/terminal-environment.js';
+import { slashCommandEnvironment, terminalEnvironment } from '../src/main/terminal/terminal-environment.js';
 
 describe('terminalEnvironment', () => {
   it('advertises truecolor rather than limiting RGB-capable clients to 16 colors', () => {
@@ -86,5 +86,33 @@ describe('terminalEnvironment', () => {
     const env = terminalEnvironment({ FORCE_COLOR: '0', Force_Color: '1' }, { FORCE_COLOR: '3' });
     expect(env.FORCE_COLOR).toBe('3');
     expect(env).not.toHaveProperty('Force_Color');
+  });
+});
+
+describe('slashCommandEnvironment', () => {
+  it('excludes the slash command a quoted prompt starts with', () => {
+    expect(
+      slashCommandEnvironment('claude --dangerously-skip-permissions "/ticket PROJ-123 in the web-app repository"', {}),
+    ).toEqual({ MSYS2_ARG_CONV_EXCL: '/ticket' });
+  });
+
+  it("keeps a plugin skill's colon in the prefix", () => {
+    expect(slashCommandEnvironment('claude "/example-plugin:review PROJ-1"', {})).toEqual({
+      MSYS2_ARG_CONV_EXCL: '/example-plugin:review',
+    });
+  });
+
+  it('extends an exclusion list already set instead of replacing it', () => {
+    expect(slashCommandEnvironment('claude "/pr-feedback 42"', { MSYS2_ARG_CONV_EXCL: '/opt' })).toEqual({
+      MSYS2_ARG_CONV_EXCL: '/opt;/pr-feedback',
+    });
+  });
+
+  it('adds nothing when the prompt is a sentence', () => {
+    expect(slashCommandEnvironment('claude "Work on ticket PROJ-123 in the web-app repository."', {})).toEqual({});
+  });
+
+  it('does not mistake a quoted program path for a slash command', () => {
+    expect(slashCommandEnvironment('"C:/Tools/claude.exe" "Explain the build"', {})).toEqual({});
   });
 });

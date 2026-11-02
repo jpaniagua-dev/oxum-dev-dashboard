@@ -330,6 +330,13 @@ export class TerminalManager {
      * treat that as "did not finish" however the exit code reads: a killed process can still exit 0.
      */
     onExit?: ((exitCode: number, stopped: boolean) => void) | undefined;
+    /**
+     * Variables for this spawn alone, laid over the project's own.
+     *
+     * For the agent handoffs, whose prompt starts with a slash command Git Bash would otherwise
+     * rewrite (`slashCommandEnvironment`). Every other command runs in the environment it always had.
+     */
+    env?: NodeJS.ProcessEnv;
   }): TerminalId | null {
     const existing = this.findActionSession(options.project.id, options.actionId);
     if (existing !== undefined) {
@@ -356,6 +363,7 @@ export class TerminalManager {
       agent: options.agent ?? null,
       note: options.note ?? null,
       onExit: options.onExit ?? null,
+      env: options.env,
     });
   }
 
@@ -437,6 +445,8 @@ export class TerminalManager {
     size: TerminalSize;
     profileId: string | null;
     agent: SessionAgent;
+    /** See `runProjectCommand`. */
+    env?: NodeJS.ProcessEnv;
   }): TerminalId | null {
     return this.spawn({
       title: options.title,
@@ -452,6 +462,7 @@ export class TerminalManager {
       projectKind: null,
       renamed: false,
       agent: options.agent,
+      env: options.env,
     });
   }
 
@@ -797,6 +808,8 @@ export class TerminalManager {
     note?: string | null;
     /** See `runProjectCommand`. Null for every spawn that chains nothing. */
     onExit?: ((exitCode: number, stopped: boolean) => void) | null;
+    /** See `runProjectCommand`. */
+    env?: NodeJS.ProcessEnv | undefined;
   }): TerminalId | null {
     this.counter += 1;
     const id = `${options.kind}-${this.counter}`;
@@ -807,7 +820,7 @@ export class TerminalManager {
         cwd: options.cwd,
         cols: options.size.cols,
         rows: options.size.rows,
-        env: terminalEnvironment(process.env, this.environmentFor(options.projectId)),
+        env: terminalEnvironment(process.env, { ...this.environmentFor(options.projectId), ...options.env }),
       });
     } catch (error) {
       // A profile pointing at a missing executable must surface in the tab rather than crash the

@@ -126,6 +126,7 @@ import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
 import { resolveShellCommand, type TerminalManager } from './terminal/terminal-manager.js';
+import { slashCommandEnvironment } from './terminal/terminal-environment.js';
 import type { ThemeController } from './theme.js';
 import { noteFromTicket } from '@shared/session-note.js';
 import type { AutomationRule } from '@shared/automation.js';
@@ -1292,6 +1293,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         size: deps.terminalSize(),
         profileId: profile.id,
         cwd,
+        env: slashCommandEnvironment(command, process.env),
         // Captured from the settings as they stand at the spawn, never re-read later: both the model
         // and the profile can change while this session runs, and reporting the new one would
         // describe the NEXT handoff rather than this one.
@@ -1858,7 +1860,8 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     const executable = /\s/.test(settings.claudeCommand) ? `"${settings.claudeCommand}"` : settings.claudeCommand;
     const prompt =
       routineName === null ? '/schedule' : `/schedule change the routine named ${shellSafeText(routineName)}`;
-    const resolved = resolveShellCommand(shell, `${executable} "${prompt}"`);
+    const command = `${executable} "${prompt}"`;
+    const resolved = resolveShellCommand(shell, command);
     const terminalId = deps.terminals.openAgent({
       title: routineName === null ? 'New routine' : `Routine: ${routineName}`,
       file: resolved.file,
@@ -1866,6 +1869,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
       cwd: resolveWorkspaceRoot(settings.workspaceRoot, runFolder(settings.projectsRoot)),
       size: deps.terminalSize(),
       profileId: shell.id,
+      env: slashCommandEnvironment(command, process.env),
       agent: {
         label: 'Claude Code',
         model: '',
