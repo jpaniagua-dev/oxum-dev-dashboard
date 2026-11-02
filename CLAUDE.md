@@ -148,7 +148,8 @@ exceptions:
 - **The terminal pane has two sibling surfaces, and a card may show them side by side.**
   `.terminal__surface` is the grid and `.terminal__board` the session canvas. Board mode hides the
   grid until a card is selected; that click keeps the board in place and shows the selected live
-  terminal in a resizable right sidebar. That sidebar keeps a reduced strip holding the session's
+  terminal in a resizable sidebar on the **left**, the cards on the right (swapped on 2026-11-02, on
+  request: the terminal is what is read, and it sits where the eye starts). That sidebar keeps a reduced strip holding the session's
   title at the left (double-click renames it with the tab's own editor, the sidebar having no tab
   strip to say which session it shows) and the note button, whose box hangs top right over the
   terminal exactly as in a grid pane, sharing

@@ -144,7 +144,7 @@ class App {
   private extensions: ExtensionsPanel | null = null;
   /** The Explorer tab, which keeps its own folder per project and its own search. */
   private explorer: ExplorerPanel | null = null;
-  /** Session shown in the board's right terminal sidebar, or null before a card is selected. */
+  /** Session shown in the board's left terminal sidebar, or null before a card is selected. */
   private boardPreviewId: TerminalId | null = null;
   /** Sessions already in the stop/wait/start cycle, so a double click cannot launch two restarts. */
   private readonly rerunning = new Set<TerminalId>();
@@ -771,7 +771,7 @@ class App {
   }
 
   /**
-   * Keeps the card canvas visible while isolating the selected live terminal in the right sidebar.
+   * Keeps the card canvas visible while isolating the selected live terminal in the left sidebar.
    *
    * The terminal pane performs the isolation with grid placement and `hidden`; the xterm itself is
    * never moved or re-opened, so its scrollback and renderer survive switching between cards.

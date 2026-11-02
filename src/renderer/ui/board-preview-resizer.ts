@@ -3,7 +3,7 @@ import { BOARD_PREVIEW_RATIO, sanitizePreviewRatio } from '@shared/board-preview
 /** Narrowest width at which an interactive terminal remains useful. */
 const MIN_TERMINAL_WIDTH = 280;
 /**
- * Space always kept for the Cards canvas on the left: one 240px card and its margin.
+ * Space always kept for the Cards canvas on the right: one 240px card and its margin.
  *
  * It was 360px while the sidebar was a fixed 420px. With the terminal taking most of the pane, the
  * canvas only has to show which card is open, and 360px would have held the share well below 80% on
@@ -30,10 +30,10 @@ export function previewWidthFor(ratio: number, available: number): number {
   return clampBoardPreviewWidth(sanitizePreviewRatio(ratio) * available, available);
 }
 
-/** Resolves the right sidebar width from a vertical separator following the pointer. */
+/** Resolves the left sidebar width from a vertical separator following the pointer. */
 export function resolveBoardPreviewWidth(geometry: BoardPreviewGeometry): number {
   return clampBoardPreviewWidth(
-    geometry.paneRight - geometry.pointerX,
+    geometry.pointerX - geometry.paneLeft,
     geometry.paneRight - geometry.paneLeft,
   );
 }
@@ -122,10 +122,10 @@ export function attachBoardPreviewResizer(options: {
 
   options.handle.addEventListener('keydown', (event) => {
     const step = event.shiftKey ? 60 : 20;
-    // The arrow follows the separator: left grows the right-hand terminal, right shrinks it.
-    if (event.key === 'ArrowLeft') {
+    // The arrow follows the separator: right grows the left-hand terminal, left shrinks it.
+    if (event.key === 'ArrowRight') {
       apply(width + step, false);
-    } else if (event.key === 'ArrowRight') {
+    } else if (event.key === 'ArrowLeft') {
       apply(width - step, false);
     } else {
       return;

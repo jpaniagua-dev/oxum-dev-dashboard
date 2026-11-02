@@ -9,23 +9,23 @@ import {
 describe('resolveBoardPreviewWidth', () => {
   const pane = { paneLeft: 100, paneRight: 1100 };
 
-  it('makes the right terminal wider as the separator moves left', () => {
-    const narrow = resolveBoardPreviewWidth({ ...pane, pointerX: 750 });
-    const wide = resolveBoardPreviewWidth({ ...pane, pointerX: 500 });
+  it('makes the left terminal wider as the separator moves right', () => {
+    const narrow = resolveBoardPreviewWidth({ ...pane, pointerX: 450 });
+    const wide = resolveBoardPreviewWidth({ ...pane, pointerX: 700 });
 
     expect(narrow).toBe(350);
     expect(wide).toBe(600);
     expect(wide).toBeGreaterThan(narrow);
   });
 
-  it('measures from the right pane edge instead of the window', () => {
-    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 700 })).toBe(400);
+  it('measures from the left pane edge instead of the window', () => {
+    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 500 })).toBe(400);
   });
 
   it('keeps both the terminal and the Cards canvas usable', () => {
-    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 5000 })).toBe(280);
+    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 0 })).toBe(280);
     // One 240px card and its margin stay for the canvas.
-    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 0 })).toBe(740);
+    expect(resolveBoardPreviewWidth({ ...pane, pointerX: 5000 })).toBe(740);
   });
 });
 
