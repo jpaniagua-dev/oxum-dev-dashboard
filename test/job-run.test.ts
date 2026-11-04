@@ -60,6 +60,25 @@ describe('triageJob', () => {
     expect(job?.progress).toBe('12 tickets');
   });
 
+  it('names the one ticket when a ticket is analysed alone, and gives no count', () => {
+    const job = triageJob({
+      ...IDLE_TRIAGE,
+      running: 42,
+      progress: {
+        sprintId: 42,
+        key: 'PROJ-7',
+        phase: 'reading',
+        detail: 'Reading schema.graphql',
+        steps: 3,
+        startedAt: '2026-09-25T08:00:00.000Z',
+        tickets: 1,
+      },
+    });
+    expect(job?.title).toBe('Ticket analysis');
+    expect(job?.subject).toBe('PROJ-7 · Sprint 12');
+    expect(job?.progress).toBeNull();
+  });
+
   it('falls back to the id when the sprint is not in the list', () => {
     // Real: the analysis outlives a sprint list refreshed from Jira, and a card headed `undefined`
     // is worse than one headed by a number.

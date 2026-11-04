@@ -1,4 +1,5 @@
-import type { JiraIssue } from '@shared/contracts.js';
+import type { JiraIssue, TriagedTicket } from '@shared/contracts.js';
+import { VERDICT_LABEL } from './triage-labels.js';
 
 /*
  * The pure part of a ticket's right-click menu in the Tickets tab: what the entries say and copy.
@@ -38,19 +39,87 @@ export function ticketCopies(issue: Pick<JiraIssue, 'key' | 'summary'>): readonl
   ];
 }
 
-/** "Work on this...", greyed on a local ticket. */
-export function workOnTicketItem(issue: Pick<JiraIssue, 'key' | 'source'>): TicketWorkItem {
+/** Which handoff a "Work on this" entry starts: the asking one, or the same one in plan mode. */
+export type TicketWorkMode = 'ask' | 'plan';
+
+/**
+ * "Work on this..." or "Work on this in plan mode...", greyed on a local ticket.
+ *
+ * @param planReady Whether the agent profile has plan mode arguments; without them the main process
+ *   refuses the plan handoff, so the entry says so before the project is picked.
+ */
+export function workOnTicketItem(
+  issue: Pick<JiraIssue, 'key' | 'source'>,
+  mode: TicketWorkMode = 'ask',
+  planReady = true,
+): TicketWorkItem {
+  const label = mode === 'plan' ? 'Work on this in plan mode...' : 'Work on this...';
   // Greyed rather than hidden: the skill it hands over to reads Jira, which has never heard of a
   // local key, and an entry that vanishes on some rows reads as a bug.
-  return issue.source === 'local'
-    ? {
-        label: 'Work on this...',
-        hint: 'Local tickets cannot be handed to an agent: its skill reads Jira',
-        disabled: true,
-      }
-    : {
-        label: 'Work on this...',
-        hint: `Starts the agent on ${issue.key} in the project you pick`,
-        disabled: false,
-      };
+  if (issue.source === 'local') {
+    return {
+      label,
+      hint: 'Local tickets cannot be handed to an agent: its skill reads Jira',
+      disabled: true,
+    };
+  }
+  if (mode === 'plan' && !planReady) {
+    return {
+      label,
+      hint: 'No plan mode set: Settings, Agent, Advanced, Plan mode arguments',
+      disabled: true,
+    };
+  }
+  const how = mode === 'plan' ? ' in plan mode' : '';
+  return {
+    label,
+    hint: `Starts the agent${how} on ${issue.key} in the project you pick`,
+    disabled: false,
+  };
+}
+
+/**
+ * "Analyse this ticket": the Triage tab's analysis, on this ticket alone.
+ *
+ * A ticket in progress is allowed, unlike in a sprint run: here it is asked for by name. A finished one
+ * is not, its row would be dropped from the Triage tab at the next refresh.
+ */
+export function analyseTicketItem(
+  issue: Pick<JiraIssue, 'key' | 'source' | 'stage'>,
+  running: boolean,
+): TicketWorkItem {
+  const label = 'Analyse this ticket';
+  if (issue.source === 'local') {
+    return {
+      label,
+      hint: 'Local tickets cannot be analysed: the analysis reads Jira',
+      disabled: true,
+    };
+  }
+  if (issue.stage === 'done') {
+    return {
+      label,
+      hint: `${issue.key} is done: there is nothing left to analyse`,
+      disabled: true,
+    };
+  }
+  if (running) {
+    return { label, hint: 'An analysis is already running', disabled: true };
+  }
+  return {
+    label,
+    hint: `Runs the Triage analysis on ${issue.key} alone; the verdict lands in the Triage tab, under its sprint`,
+    disabled: false,
+  };
+}
+
+/** The strip's line once a ticket is analysed: `PROJ-123: Ready to build, 2 points`. */
+export function verdictMessage(
+  ticket: Pick<TriagedTicket, 'key' | 'verdict' | 'estimate'>,
+): string {
+  const points =
+    ticket.estimate === null
+      ? ''
+      : `, ${ticket.estimate} ${ticket.estimate === 1 ? 'point' : 'points'}`;
+  return `${ticket.key}: ${VERDICT_LABEL[ticket.verdict]}${points}`;
 }

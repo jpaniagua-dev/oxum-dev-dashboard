@@ -511,31 +511,78 @@ export async function readSprintIssues(
 
   const issues: SprintIssue[] = [];
   for (const value of asArray(asRecord(answer.body)['issues'])) {
-    const issue = asRecord(value);
-    const key = issue['key'];
-    if (typeof key !== 'string') {
-      continue;
+    const issue = toSprintIssue(value);
+    if (issue !== null) {
+      issues.push(issue);
     }
-    const fields = asRecord(issue['fields']);
-    const status = asRecord(fields['status']);
-    const assignee = asRecord(fields['assignee']);
-    issues.push({
-      key,
-      summary: typeof fields['summary'] === 'string' ? fields['summary'] : '',
-      status: typeof status['name'] === 'string' ? status['name'] : '',
-      // Same rule as `parseIssues`: the **category** is what says where a ticket stands, because a
-      // status name is per-project and renamed at will. Free here, the `status` field already carries
-      // it, and it is what lets a run skip what somebody is already working on.
-      stage: asStage(asRecord(status['statusCategory'])['key']),
-      assignee: typeof assignee['displayName'] === 'string' ? assignee['displayName'] : '',
-      // The account id and not the email: Jira Cloud hides `emailAddress` under the site's privacy
-      // settings, and a scope that quietly matched nobody would look exactly like a sprint with no
-      // ticket of yours in it. Same reasoning that makes every write take an `accountId`.
-      accountId: typeof assignee['accountId'] === 'string' ? assignee['accountId'] : '',
-      description: flattenDocument(fields['description']),
-    });
   }
   return { issues, error: null };
+}
+
+/** One issue of an Agile API answer, as the analysis reads it, or `null` without a key. */
+export function toSprintIssue(value: unknown): SprintIssue | null {
+  const issue = asRecord(value);
+  const key = issue['key'];
+  if (typeof key !== 'string') {
+    return null;
+  }
+  const fields = asRecord(issue['fields']);
+  const status = asRecord(fields['status']);
+  const assignee = asRecord(fields['assignee']);
+  return {
+    key,
+    summary: typeof fields['summary'] === 'string' ? fields['summary'] : '',
+    status: typeof status['name'] === 'string' ? status['name'] : '',
+    // Same rule as `parseIssues`: the **category** is what says where a ticket stands, because a
+    // status name is per-project and renamed at will. Free here, the `status` field already carries
+    // it, and it is what lets a run skip what somebody is already working on.
+    stage: asStage(asRecord(status['statusCategory'])['key']),
+    assignee: typeof assignee['displayName'] === 'string' ? assignee['displayName'] : '',
+    // The account id and not the email: Jira Cloud hides `emailAddress` under the site's privacy
+    // settings, and a scope that quietly matched nobody would look exactly like a sprint with no
+    // ticket of yours in it. Same reasoning that makes every write take an `accountId`.
+    accountId: typeof assignee['accountId'] === 'string' ? assignee['accountId'] : '',
+    description: flattenDocument(fields['description']),
+  };
+}
+
+/** One ticket and the open sprint it sits in, for an analysis of that ticket alone. */
+export interface TriageIssue {
+  readonly issue: SprintIssue | null;
+  /** The ticket's current open sprint, or `null` when it is in none (the backlog). */
+  readonly sprint: { readonly id: number; readonly name: string } | null;
+}
+
+/**
+ * Reads one ticket with its description and its sprint, for an analysis of that ticket alone.
+ *
+ * The Agile API's issue resource and not `/rest/api/3/issue`: it hands back `sprint` by name, where
+ * the platform API only has the site-specific `customfield_xxxxx` that `listSprints` avoids for the
+ * same reason. `sprint` is the open one; a ticket whose sprints are all closed has none.
+ */
+export async function readIssueForTriage(
+  credentials: JiraCredentials,
+  key: string,
+): Promise<TriageIssue & { error: string | null }> {
+  const answer = await call(
+    credentials,
+    `/rest/agile/1.0/issue/${encodeURIComponent(key)}?fields=summary,status,assignee,description,sprint`,
+  );
+  if (answer.status === 'error') {
+    return { issue: null, sprint: null, error: answer.message };
+  }
+  return { ...readTriageIssue(answer.body), error: null };
+}
+
+/** Reads the Agile API's answer for one issue: the ticket, and its open sprint if it has one. */
+export function readTriageIssue(body: unknown): TriageIssue {
+  const sprint = asRecord(asRecord(asRecord(body)['fields'])['sprint']);
+  const id = sprint['id'];
+  const name = sprint['name'];
+  return {
+    issue: toSprintIssue(body),
+    sprint: typeof id === 'number' && typeof name === 'string' ? { id, name } : null,
+  };
 }
 
 export interface SprintIssue {

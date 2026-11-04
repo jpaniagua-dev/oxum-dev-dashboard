@@ -6,9 +6,11 @@ import type {
   TriageProgress,
   TriageResult,
   TriageState,
+  TriageTicketRun,
 } from '@shared/contracts.js';
 import {
   listSprints,
+  readIssueForTriage,
   readSprintIssues,
   searchIssues,
   type JiraCredentials,
@@ -18,6 +20,7 @@ import { runAgent } from '../agent/run-agent.js';
 import { parseTriage } from './triage-parse.js';
 import { readProgress } from '../agent/agent-progress.js';
 import { buildTriagePrompt, trimDescription } from './triage-prompt.js';
+import { mergeTicketVerdict } from './triage-merge.js';
 import { selectIssues } from './triage-select.js';
 import { TriageStore } from './triage-store.js';
 import { runFolder } from '../projects/run-folder.js';
@@ -237,6 +240,109 @@ export class TriageService {
       this.progress = null;
     }
     return this.push();
+  }
+
+  /**
+   * Analyses one ticket alone and merges its verdict into its sprint's stored result.
+   *
+   * The Tickets tab's entry point: the same run, prompt and model as a sprint analysis, and the same
+   * one-at-a-time rule, since both share one process and one file. Two differences, both deliberate:
+   *
+   * - **A ticket in progress is analysed.** The sprint rule skips it because nobody asked about it;
+   *   here somebody did, by name.
+   * - **A failure leaves the store and the tab's error alone.** One ticket failing says nothing about
+   *   the sprint analysis on screen, and a banner over it would. The reason travels in the answer.
+   *
+   * Every refusal is an answer too, never the silence a sprint run gets when one is already going:
+   * the click came from a tab that cannot see the Triage tab's state.
+   */
+  async analyseTicket(key: string): Promise<TriageTicketRun> {
+    const refuse = (error: string): TriageTicketRun => ({
+      state: this.state(),
+      ticket: null,
+      error,
+    });
+    if (this.running !== null) {
+      return refuse('An analysis is already running');
+    }
+    const credentials = await this.credentials();
+    if (credentials === null) {
+      return refuse('Jira is not configured');
+    }
+
+    const read = await readIssueForTriage(credentials, key);
+    if (read.error !== null) {
+      return refuse(read.error);
+    }
+    const { issue } = read;
+    if (issue === null) {
+      return refuse(`Jira returned nothing for ${key}`);
+    }
+    if (read.sprint === null) {
+      return refuse(`${issue.key} is in no open sprint`);
+    }
+    if (issue.stage === 'done') {
+      return refuse(`${issue.key} is done: there is nothing left to analyse`);
+    }
+    // A verdict stored under a sprint the Triage tab does not list would be on disk and nowhere else.
+    const sprint = (await this.sprintList()).find((candidate) => candidate.id === read.sprint?.id);
+    if (sprint === undefined) {
+      return refuse(
+        `${issue.key} is in ${read.sprint.name}, which is not on the Triage tab's boards`,
+      );
+    }
+    // `sprintList` may have fetched, and a sprint run may have started during that await.
+    if (this.running !== null) {
+      return refuse('An analysis is already running');
+    }
+
+    this.running = sprint.id;
+    this.progress = {
+      sprintId: sprint.id,
+      key: issue.key,
+      phase: 'starting',
+      detail: `Starting ${this.settings().agentProfile.label}`,
+      steps: 0,
+      startedAt: new Date().toISOString(),
+      tickets: 1,
+    };
+    this.push();
+
+    try {
+      const asked = [{ ...issue, description: trimDescription(issue.description) }];
+      const answer = await runAgent({
+        profile: this.settings().agentProfile,
+        cwd: runFolder(this.settings().projectsRoot),
+        prompt: buildTriagePrompt(sprint.name, asked),
+        model: this.settings().agentAnalysisModel,
+        label: 'The analysis',
+        onEvent: (event) => {
+          const step = readProgress(event);
+          if (step === null || step.phase === 'done') {
+            return;
+          }
+          this.advance({ phase: step.phase, detail: step.detail, counts: step.counts });
+        },
+      });
+      if (!answer.ok) {
+        return this.settleTicket(null, answer.error ?? 'The analysis failed');
+      }
+      const ticket = parseTriage({ answer: answer.answer, asked, analysedAt: now() })[0] ?? null;
+      if (ticket === null) {
+        return this.settleTicket(null, 'The analysis returned no verdict');
+      }
+      // Read after the run, not before: a row dismissed meanwhile must stay dismissed.
+      await this.store.save(mergeTicketVerdict(this.store.get(sprint.id), sprint, ticket));
+      return this.settleTicket(ticket, null);
+    } catch (failure) {
+      return this.settleTicket(null, failure instanceof Error ? failure.message : String(failure));
+    }
+  }
+
+  private settleTicket(ticket: TriagedTicket | null, error: string | null): TriageTicketRun {
+    this.running = null;
+    this.progress = null;
+    return { state: this.push(), ticket, error };
   }
 
   private async run(sprint: Sprint, mode: TriageMode): Promise<TriageResult> {

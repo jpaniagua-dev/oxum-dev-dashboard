@@ -56,11 +56,25 @@ export function triageJob(state: TriageState): JobRun | null {
     return null;
   }
   const sprint = state.sprints.find((entry) => entry.id === progress.sprintId);
+  const sprintName = sprint?.name ?? `Sprint ${String(progress.sprintId)}`;
+  // A ticket analysed alone, from the Tickets tab: the card names it, and has no count to give.
+  if (progress.key !== undefined) {
+    return {
+      id: TRIAGE_JOB_ID,
+      kind: 'triage',
+      title: 'Ticket analysis',
+      subject: `${progress.key} · ${sprintName}`,
+      detail: progress.detail,
+      progress: null,
+      steps: progress.steps,
+      startedAt: progress.startedAt,
+    };
+  }
   return {
     id: TRIAGE_JOB_ID,
     kind: 'triage',
     title: 'Sprint analysis',
-    subject: sprint?.name ?? `Sprint ${String(progress.sprintId)}`,
+    subject: sprintName,
     detail: progress.detail,
     progress: progress.tickets > 0 ? `${String(progress.tickets)} tickets` : null,
     steps: progress.steps,

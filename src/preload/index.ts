@@ -47,6 +47,7 @@ import {
   type TriageHandoff,
   type TriageMode,
   type TriageState,
+  type TriageTicketRun,
   type OpenShellRequest,
   type ProjectCandidate,
   type ProjectConfig,
@@ -307,6 +308,9 @@ const api: RendererApi = {
   analyseSprint: (sprintId: number, mode: TriageMode): Promise<TriageState> =>
     ipcRenderer.invoke(IpcChannel.TriageAnalyse, sprintId, mode),
 
+  analyseTicket: (issueKey: string): Promise<TriageTicketRun> =>
+    ipcRenderer.invoke(IpcChannel.TriageAnalyseTicket, issueKey),
+
   dismissTriageTicket: (sprintId: number, issueKey: string): Promise<TriageState> =>
     ipcRenderer.invoke(IpcChannel.TriageDismiss, sprintId, issueKey),
 
@@ -385,7 +389,7 @@ const api: RendererApi = {
     ipcRenderer.invoke(IpcChannel.AutomationsForget, ruleId, targetId),
 
   clearAutomationLog: (): Promise<AutomationState> =>
-    ipcRenderer.invoke(IpcChannel.AutomationsClearLog),
+    ipcRenderer.invoke(IpcChannel.AutomationsClearLog),
 
   readVault: (): Promise<VaultState> => ipcRenderer.invoke(IpcChannel.VaultRead),
 

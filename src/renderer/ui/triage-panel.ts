@@ -15,6 +15,7 @@ import { describeElapsed } from '@shared/job-run.js';
 import { autonomyBlock, canRunUnattended, describeAutonomyBlock } from '@shared/triage-autonomy.js';
 import { clearChildren, createElement, createIcon, createIconButton } from './dom.js';
 import { RUN_ICON, RUN_NEW_ICON } from './icons.js';
+import { VERDICT_LABEL } from './triage-labels.js';
 
 
 /**
@@ -79,20 +80,6 @@ export interface TriagePanelActions {
    */
   onRunAutonomously: (keys: readonly string[], x: number, y: number) => void;
 }
-
-/**
- * What each verdict is called on screen, and in which order the groups appear.
- *
- * Ordered by what the reader can act on: what is buildable now comes first, what needs a word from
- * them second, and what nobody can move today last. A list sorted by ticket key would bury the one
- * group the tab exists to surface.
- */
-const VERDICT_LABEL: Record<TriageVerdict, string> = {
-  ready: 'Ready to build',
-  'needs-decision': 'Waiting on a decision',
-  unclear: 'Specification too thin',
-  blocked: 'Blocked',
-};
 
 /**
  * What each verdict is called on its sub-tab.
@@ -432,7 +419,7 @@ export class TriagePanel {
     this.hosts.bar.append(
       createElement('span', {
         className: 'triage__meta',
-        text: describeAge(result.analysedAt),
+        text: describeSprintAge(result),
       }),
     );
     const coverage = describeCoverage(result.skipped);
@@ -872,9 +859,32 @@ export class TriagePanel {
  * Elapsed is minutes and seconds rather than a friendly phrase, because here the reader is watching
  * a clock and "a moment ago" answers nothing. Exported for testing.
  */
+/**
+ * How old a sprint's analysis is, said of the sprint.
+ *
+ * A sprint whose only rows come from tickets analysed alone, from the Tickets tab, was never read as a
+ * whole: "Never analysed" above a list of verdicts would contradict the list, and an age would claim a
+ * read that did not happen. Each of those rows dates itself.
+ */
+export function describeSprintAge(
+  result: Pick<TriageResult, 'analysedAt' | 'tickets'>,
+  now: Date = new Date(),
+): string {
+  if (result.analysedAt.length === 0 && result.tickets.length > 0) {
+    return 'Sprint not analysed as a whole';
+  }
+  return describeAge(result.analysedAt, now);
+}
+
 export function describeRun(progress: TriageProgress, now: Date): string {
   const elapsed = describeElapsed(progress.startedAt, now);
-  const tickets = progress.tickets > 0 ? `${progress.tickets} tickets, ` : '';
+  // A run on one ticket names it: "1 tickets" would hide which row is about to change.
+  const tickets =
+    progress.key !== undefined
+      ? `${progress.key} alone, `
+      : progress.tickets > 0
+        ? `${progress.tickets} tickets, `
+        : '';
   const steps = progress.steps > 0 ? `${progress.steps} steps, ` : '';
   return `${tickets}${steps}${elapsed}`;
 }

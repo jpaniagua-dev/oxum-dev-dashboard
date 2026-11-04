@@ -18,6 +18,9 @@ estimate in story points. The third column explains the verdict: why, the questi
 what answering it triggers.
 
 - Two run buttons: the whole sprint, or only the tickets not analysed yet.
+- A single ticket can be analysed from the Tickets tab (right-click, **Analyse this ticket**). Its
+  verdict joins its sprint's list here, in place of its previous one, and the rest of the list is left
+  as it was.
 - The last result stays until the next run, and a failed run keeps it.
 - Tickets already done are left out.
 

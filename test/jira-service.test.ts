@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildJql, hitTheCap, parseIssues, parseTransitions } from '../src/main/jira/jira-service.js';
+import {
+  buildJql,
+  hitTheCap,
+  parseIssues,
+  parseTransitions,
+  readTriageIssue,
+} from '../src/main/jira/jira-service.js';
 import {
   ASSIGNEE_NONE,
   assigneesOf,
@@ -148,6 +154,43 @@ describe('buildJql', () => {
 
   it('cannot be broken out of by a quote in a project key', () => {
     expect(buildJql(['PR"OJ']).sprint).toContain('"PROJ"');
+  });
+});
+
+describe('readTriageIssue', () => {
+  const body = {
+    key: 'PROJ-7',
+    fields: {
+      summary: 'Fix the login timeout',
+      status: { name: 'In progress', statusCategory: { key: 'indeterminate' } },
+      assignee: { displayName: 'Alex Doe', accountId: 'acc-1' },
+      description: 'The session expires after a minute.',
+      sprint: { id: 42, name: 'Sprint 12', state: 'active' },
+    },
+  };
+
+  it('reads the ticket as the analysis does, and the open sprint it sits in', () => {
+    expect(readTriageIssue(body)).toEqual({
+      issue: {
+        key: 'PROJ-7',
+        summary: 'Fix the login timeout',
+        status: 'In progress',
+        stage: 'in-progress',
+        assignee: 'Alex Doe',
+        accountId: 'acc-1',
+        description: 'The session expires after a minute.',
+      },
+      sprint: { id: 42, name: 'Sprint 12' },
+    });
+  });
+
+  it('has no sprint for a ticket in the backlog', () => {
+    const backlog = { ...body, fields: { ...body.fields, sprint: null } };
+    expect(readTriageIssue(backlog).sprint).toBeNull();
+  });
+
+  it('has no issue when the answer carries no key', () => {
+    expect(readTriageIssue({ fields: body.fields }).issue).toBeNull();
   });
 });
 

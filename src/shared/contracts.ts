@@ -660,11 +660,12 @@ export const AUTONOMY_MAX_POINTS = 3;
 export const DESCRIPTION_TRUNCATED_MARK = '[description truncated]';
 
 /**
- * Which of the two handoffs a set of tickets is being sent through.
+ * Which of the three handoffs a set of tickets is being sent through.
  *
  * `ask` is the original gesture: an interactive session on the ticket, which stops and asks whenever
- * the work needs a decision. `auto` runs the whole thing to an open pull request without stopping,
- * and it is offered only for tickets `canRunUnattended` cleared.
+ * the work needs a decision. `plan` is the same session started in the agent's plan mode, with the
+ * same skill. `auto` runs the whole thing to an open pull request without stopping, and it is offered
+ * only for tickets `canRunUnattended` cleared.
  *
  * On the channel rather than derived in the main process from the stored verdict, deliberately. The
  * guardrails are evaluated where the button is drawn, and re-deriving them behind the click would be
@@ -1732,6 +1733,16 @@ export interface TriageProgress {
   readonly startedAt: string;
   /** How many tickets the sprint holds, known as soon as Jira answers. */
   readonly tickets: number;
+  /** The one ticket being read, when the run was asked for a ticket rather than a sprint. */
+  readonly key?: string;
+}
+
+/** What analysing one ticket alone returns: the state, and the verdict or why there is none. */
+export interface TriageTicketRun {
+  readonly state: TriageState;
+  readonly ticket: TriagedTicket | null;
+  /** Why no verdict was produced; the stored analysis is untouched in that case. */
+  readonly error: string | null;
 }
 
 export interface TriageState {
@@ -2591,6 +2602,13 @@ export const IpcChannel = {
    */
   TriageAnalyse: 'triage:analyse',
   /**
+   * invoke: (issueKey) => TriageTicketRun
+   *
+   * Analyses one ticket alone, from the Tickets tab, and merges its verdict into its sprint's stored
+   * result. Same run, prompt and model as a sprint analysis, and the same one-at-a-time rule.
+   */
+  TriageAnalyseTicket: 'triage:analyse-ticket',
+  /**
    * invoke: (sprintId, issueKey) => TriageState
    *
    * Drops one ticket from a stored analysis. Local to `triage.json` and to nothing else: the ticket
@@ -2841,6 +2859,8 @@ export interface RendererApi {
    * given, so the button and the run have to agree about it by construction.
    */
   analyseSprint(sprintId: number, mode: TriageMode): Promise<TriageState>;
+  /** Analyses one ticket alone and merges its verdict into its sprint. Writes nothing to Jira. */
+  analyseTicket(issueKey: string): Promise<TriageTicketRun>;
   /** Drops one row from a stored analysis. Touches `triage.json` and nothing in Jira. */
   dismissTriageTicket(sprintId: number, issueKey: string): Promise<TriageState>;
   onTriageChanged(listener: (state: TriageState) => void): () => void;

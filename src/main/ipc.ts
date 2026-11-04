@@ -37,6 +37,7 @@ import {
   type AutoRunRecord,
   type TriageHandoff,
   type TriageState,
+  type TriageTicketRun,
   type ProjectValidation,
   type PullReviewState,
   type PullReviewTarget,
@@ -626,6 +627,18 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         return deps.triage().state();
       }
       return deps.triage().analyse(id, mode === 'new' ? 'new' : 'full');
+    },
+  );
+
+  // One ticket from the Tickets tab. The key goes into a Jira URL, hence the pattern before anything.
+  ipcMain.handle(
+    IpcChannel.TriageAnalyseTicket,
+    async (_event, issueKey: unknown): Promise<TriageTicketRun> => {
+      const key = typeof issueKey === 'string' ? issueKey.trim().toUpperCase() : '';
+      if (!ISSUE_KEY_PATTERN.test(key)) {
+        return { state: deps.triage().state(), ticket: null, error: 'Not a ticket key' };
+      }
+      return deps.triage().analyseTicket(key);
     },
   );
 

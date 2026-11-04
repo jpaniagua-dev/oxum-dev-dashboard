@@ -1648,6 +1648,12 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   the top of the menu, above the assignment and the branch it already does. On a local ticket it is
   **greyed, not hidden**: the skill reads Jira, which does not know `LOC-n`. An untriaged ticket gets
   the built-in prompt without the sentence pointing at `triage.json`, which would say nothing about it.
+- **"Work on this in plan mode..." and "Analyse this ticket" follow it** (Julio's request,
+  2026-11-04), built by `agentItems` in both menus so a local ticket carries the same three lines,
+  greyed. Plan mode is the Triage tab's `'plan'` handoff, greyed when `agentProfile.planArgs` is empty
+  because `TriageWork` would refuse it after the project is picked. "Run autonomously" is deliberately
+  absent: its guardrails (`canRunUnattended`) are evaluated where the Triage tab draws the button, and
+  the main process does not re-check them.
 - **The three copies (ID, title, `ID - Title`) close both menus**, above Delete in a local one, with
   the copied text as the hint. Their wording and texts live in `ticket-menu.ts`, apart from
   `jira-board.ts` because of the NUL character in `ASSIGNEE_NONE`, which the editing tools refuse.
@@ -2388,6 +2394,25 @@ The bullets that follow are the reasons and the traps, the new ones first.
   restate; letting it rewrite a summary would put text on screen that does not match the ticket.
 - **One analysis at a time**, and every `Analyse` button is disabled while it runs: they share a
   single process and a single file.
+- **One ticket can be analysed alone, from the Tickets tab** (`analyseTicket`, channel
+  `TriageAnalyseTicket`, decided with Julio on 2026-11-04). The same run, prompt and model; the
+  ticket and its open sprint are read in one call to the Agile API's issue resource
+  (`readIssueForTriage`), which names the sprint where the platform API only has a site-specific
+  customfield. The rules that differ from a sprint run, each on purpose:
+  - **A ticket in progress is analysed.** The sprint rule above skips it because nobody asked; here
+    somebody asked by name. A done ticket is refused: its row would be dropped at the next refresh.
+  - **The verdict is merged, never a result rewritten** (`mergeTicketVerdict`): the row with the same
+    key is replaced where it stood, a new key goes last, and the sprint's `analysedAt`, `skipped` and
+    `error` are kept, because one ticket did not read the sprint. A sprint never read as a whole keeps
+    `analysedAt: ''`, and its bar says "Sprint not analysed as a whole" (`describeSprintAge`).
+  - **The stored result is read after the run, not before**, so a row dismissed meanwhile stays gone.
+  - **A failure touches neither `triage.json` nor the tab's `error`.** One ticket failing says nothing
+    about the sprint analysis on screen; the reason goes back to the Tickets tab's strip.
+  - **Every refusal is answered**, unlike a sprint run started while another runs: the click comes from
+    a tab that cannot see this one's state. That includes a sprint missing from `sprintList()`, refused
+    rather than stored, since the Triage tab would never display it.
+  - `running` holds the sprint id and `progress.key` the ticket, so that sprint's buttons grey out and
+    the job card reads `Ticket analysis`.
 - **`/browse/<KEY>` comes from `boardUrl`, shared with the Jira tab.** Two builders of the same URL
   would drift, and that form is the only one Jira Cloud resolves for every project style.
 - **Four verdicts and a domain, where there used to be five verdicts.** `unclear` and `blocked` earn

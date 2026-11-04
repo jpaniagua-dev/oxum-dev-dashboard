@@ -87,7 +87,12 @@ import { attachGitSplitter } from './ui/git-split.js';
 import { mergeOptionsFor } from './ui/presenters.js';
 import { scrollToReveal } from './ui/virtual-window.js';
 import { boardUrl, renderJiraBoard, transitionTo, withLocalTickets } from './ui/jira-board.js';
-import { ticketCopies, workOnTicketItem } from './ui/ticket-menu.js';
+import {
+  analyseTicketItem,
+  ticketCopies,
+  verdictMessage,
+  workOnTicketItem,
+} from './ui/ticket-menu.js';
 import {
   LOCAL_STAGES,
   localAsIssue,
@@ -1383,7 +1388,7 @@ class App {
         hint: `${branchNameFor(issue.key, issue.summary)}, in the chosen project`,
         run: () => this.openBranchProjectMenu(issue, x, y),
       },
-      { ...workOnTicketItem(issue), run: () => {} },
+      ...this.agentItems(issue, x, y),
       ...LOCAL_STAGES.filter((stage) => stage !== issue.stage).map((stage) => ({
         label: `Move to "${localStatus(stage)}"`,
         run: () => void this.runLocalTicketWrite(() => window.api.moveLocalTicket(issue.key, stage)),
@@ -1436,7 +1441,7 @@ class App {
        * The gestures that start a ticket come first, the most complete one at the top: the skill
        * creates the branch, and the Jira writes that follow assign the issue and move it.
        */
-      { ...workOnTicketItem(issue), run: () => this.openWorkProjectMenu([issue.key], x, y, 'ask') },
+      ...this.agentItems(issue, x, y),
       {
         label: issue.isMine ? 'Already assigned to you' : 'Assign this issue to me',
         disabled: issue.isMine,
@@ -1454,6 +1459,43 @@ class App {
       },
       ...this.copyItems(issue),
     ]);
+  }
+
+  /**
+   * Work on this, the same in plan mode, and the analysis alone: the Triage tab's own handoffs and run.
+   *
+   * Greyed on a local ticket by the helpers, never hidden, so both menus carry the same three lines.
+   */
+  private agentItems(issue: JiraIssue, x: number, y: number): MenuItem[] {
+    const planReady = (this.settings?.agentProfile.planArgs.trim().length ?? 0) > 0;
+    const running = this.triage !== null && this.triage.running !== null;
+    return [
+      {
+        ...workOnTicketItem(issue, 'ask'),
+        run: () => this.openWorkProjectMenu([issue.key], x, y, 'ask'),
+      },
+      {
+        ...workOnTicketItem(issue, 'plan', planReady),
+        run: () => this.openWorkProjectMenu([issue.key], x, y, 'plan'),
+      },
+      { ...analyseTicketItem(issue, running), run: () => void this.analyseTicket(issue.key) },
+    ];
+  }
+
+  /**
+   * Analyses one ticket and stays on the Tickets tab: the strip says it started, then gives the
+   * verdict; the whole answer is in the Triage tab, under the ticket's sprint.
+   */
+  private async analyseTicket(key: string): Promise<void> {
+    this.stampMessage(`Analysing ${key}…`);
+    const run = await window.api.analyseTicket(key);
+    this.triage = run.state;
+    this.renderTriage();
+    if (run.ticket !== null) {
+      this.stampMessage(verdictMessage(run.ticket));
+    } else {
+      this.stampMessage(`${key} not analysed: ${run.error ?? 'no verdict came back'}`);
+    }
   }
 
   private copyItems(issue: JiraIssue): MenuItem[] {

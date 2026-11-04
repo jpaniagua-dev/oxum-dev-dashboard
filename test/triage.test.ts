@@ -6,7 +6,9 @@ import {
   workActionId,
   type IssueStage,
   type TriagedTicket,
+  type TriageResult,
 } from '../src/shared/contracts.js';
+import { mergeTicketVerdict } from '../src/main/triage/triage-merge.js';
 import { autonomyBlock, canRunUnattended } from '../src/shared/triage-autonomy.js';
 import { applyLiveToTickets, readResult } from '../src/main/triage/triage-store.js';
 import { describe, expect, it } from 'vitest';
@@ -23,6 +25,7 @@ import {
   describeCoverage,
   describeEmptyResult,
   describeRun,
+  describeSprintAge,
   describeTicketAge,
   describeWork,
   firstFilledVerdict,
@@ -638,6 +641,102 @@ describe('describeRun', () => {
     const progress = { sprintId: 1, phase: 'fetching' as const, detail: '', steps: 0, startedAt, tickets: 0 };
 
     expect(describeRun(progress, new Date('2026-08-16T12:00:03Z'))).toBe('0:03');
+  });
+
+  it('names the ticket of a run on one ticket alone', () => {
+    const progress = {
+      sprintId: 1,
+      key: 'PROJ-7',
+      phase: 'reading' as const,
+      detail: '',
+      steps: 2,
+      startedAt,
+      tickets: 1,
+    };
+
+    expect(describeRun(progress, new Date('2026-08-16T12:00:09Z'))).toBe(
+      'PROJ-7 alone, 2 steps, 0:09',
+    );
+  });
+});
+
+describe('describeSprintAge', () => {
+  const now = new Date('2026-09-18T08:30:00.000Z');
+
+  it('dates a sprint that was read as a whole', () => {
+    expect(describeSprintAge({ analysedAt: RUN_AT, tickets: [ticketWith('ready')] }, now)).toBe(
+      'Analysed 30 min ago',
+    );
+  });
+
+  it('does not claim a read for a sprint whose rows were all analysed alone', () => {
+    expect(describeSprintAge({ analysedAt: '', tickets: [ticketWith('ready')] }, now)).toBe(
+      'Sprint not analysed as a whole',
+    );
+    expect(describeSprintAge({ analysedAt: '', tickets: [] }, now)).toBe('Never analysed');
+  });
+});
+
+describe('mergeTicketVerdict', () => {
+  const sprint = { id: 42, name: 'Sprint 12' };
+  const later = '2026-09-19T10:00:00.000Z';
+  const previous: TriageResult = {
+    sprintId: 42,
+    sprintName: 'Sprint 12',
+    analysedAt: RUN_AT,
+    tickets: [
+      ticketWith('blocked', { key: 'PROJ-1' }),
+      ticketWith('unclear', { key: 'PROJ-2' }),
+      ticketWith('ready', { key: 'PROJ-3' }),
+    ],
+    error: 'The previous run timed out',
+    skipped: { done: 2, inProgress: 1, alreadyAnalysed: 0 },
+  };
+
+  it('replaces the row of a re-analysed ticket where it stood, and leaves the others alone', () => {
+    const fresh = ticketWith('ready', { key: 'PROJ-2', analysedAt: later });
+    const merged = mergeTicketVerdict(previous, sprint, fresh);
+
+    expect(merged.tickets.map((row) => row.key)).toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3']);
+    expect(merged.tickets[1]).toBe(fresh);
+    expect(merged.tickets[0]).toBe(previous.tickets[0]);
+    expect(merged.tickets[2]?.analysedAt).toBe(RUN_AT);
+  });
+
+  it('matches the key whatever its case', () => {
+    const fresh = ticketWith('ready', { key: 'proj-2', analysedAt: later });
+    expect(mergeTicketVerdict(previous, sprint, fresh).tickets).toHaveLength(3);
+  });
+
+  it('appends a ticket the sprint analysis never had', () => {
+    const fresh = ticketWith('needs-decision', { key: 'PROJ-9', analysedAt: later });
+    const merged = mergeTicketVerdict(previous, sprint, fresh);
+
+    expect(merged.tickets.map((row) => row.key)).toEqual(['PROJ-1', 'PROJ-2', 'PROJ-3', 'PROJ-9']);
+  });
+
+  it('keeps what the sprint says about itself: one ticket did not read the sprint', () => {
+    const merged = mergeTicketVerdict(
+      previous,
+      sprint,
+      ticketWith('ready', { key: 'PROJ-9', analysedAt: later }),
+    );
+
+    expect(merged.analysedAt).toBe(RUN_AT);
+    expect(merged.skipped).toEqual(previous.skipped);
+    expect(merged.error).toBe(previous.error);
+  });
+
+  it('starts a result with no sprint read when the sprint was never analysed', () => {
+    const fresh = ticketWith('ready', { key: 'PROJ-9', analysedAt: later });
+    expect(mergeTicketVerdict(undefined, sprint, fresh)).toEqual({
+      sprintId: 42,
+      sprintName: 'Sprint 12',
+      analysedAt: '',
+      tickets: [fresh],
+      error: null,
+      skipped: { done: 0, inProgress: 0, alreadyAnalysed: 0 },
+    });
   });
 });
 
