@@ -1,8 +1,8 @@
 # The terminal
 
 The terminal fills everything below the strip. Drag the separator to resize the strip, or fold it
-away (the chevron beside `+ Project`, `Alt+Shift+A`, or a double-click on the tab row) to keep only
-terminals. Clicking a tab unfolds it.
+away (the chevron beside `+ Project`, `Alt+Shift+A`, a click on the open tab, or a double-click on
+the tab row) to keep only terminals. Clicking a tab unfolds it.
 
 New terminal sessions advertise truecolor support, so tools such as Codex can display their full
 theme palette. Explicit `FORCE_COLOR` and `NO_COLOR` environment preferences are preserved.

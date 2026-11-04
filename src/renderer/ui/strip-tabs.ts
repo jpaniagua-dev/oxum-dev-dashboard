@@ -4,6 +4,8 @@ import { requireElement } from './dom.js';
 export interface StripTabsActions {
   /** The tab changed: apply its remembered height and persist the choice. */
   onChange: (tab: StripTab) => void;
+  /** The active tab was clicked again: fold the strip, or unfold it. */
+  onReselect: (tab: StripTab) => void;
 }
 
 export interface RestoredStripLoaders {
@@ -90,8 +92,18 @@ export class StripTabs {
 
   constructor(private readonly actions: StripTabsActions) {
     for (const tab of STRIP_TABS) {
-      this.buttons[tab].addEventListener('click', () => this.select(tab));
+      this.buttons[tab].addEventListener('click', () => this.click(tab));
     }
+  }
+
+  // Only a click toggles the fold: `select` is also called by code that wants a tab shown, and
+  // folding the strip on it would hide the very tab it was asked to show.
+  private click(tab: StripTab): void {
+    if (tab === this.current) {
+      this.actions.onReselect(tab);
+      return;
+    }
+    this.select(tab);
   }
 
   get active(): StripTab {

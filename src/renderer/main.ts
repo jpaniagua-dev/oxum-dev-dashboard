@@ -3476,6 +3476,8 @@ class App {
         // The terminal's geometry changed with the strip's: without this its pty keeps the old size.
         this.terminal?.refit();
       },
+      // The open tab clicked again folds the strip, and unfolds it once folded.
+      onReselect: () => this.applyStripCollapsed(!this.stripCollapsed),
     });
     this.strip.adopt(settings.activeStrip);
 

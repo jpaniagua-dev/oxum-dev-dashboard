@@ -777,7 +777,10 @@ row. None of it can say what a session was opened FOR.
 - **The strip folds down to its tab row** (`stripCollapsed`, a button and `Alt+Shift+A`), to work in the
   terminal without losing sight of anything. **The tab row itself never folds**: a control that hides
   itself leaves no way back. An accepted and intended corollary: clicking a tab while folded unfolds,
-  because that is the natural gesture for "show me that". Folding must **clear** the inline height set by
+  because that is the natural gesture for "show me that". **Clicking the open tab folds the strip**, and
+  unfolds it once folded, on Julio's request (2026-11-04), the gesture of an editor's side bar. Only a
+  click does it (`StripTabs.click` → `onReselect`): `select` is also called by code that wants a tab
+  shown, and folding there would hide the tab it was asked to show. Folding must **clear** the inline height set by
   `attachPaneResizer` (a class does not beat an inline style), unfolding sets it again through the
   resizer so it goes through the same clamping, and the splitter is hidden in between: dragging it would
   write a height across the fold.
