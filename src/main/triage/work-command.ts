@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { CLAUDE_CODE_PROFILE, conversationArgs, splitCommand, type AgentProfile } from '@shared/agent-profile.js';
+import {
+  CLAUDE_CODE_PROFILE,
+  conversationArgs,
+  sessionNameArgs,
+  splitCommand,
+  type AgentProfile,
+} from '@shared/agent-profile.js';
 import type { TriageHandoff } from '@shared/contracts.js';
 import { modelFlag } from '@shared/agent-model.js';
 
@@ -196,6 +202,21 @@ export function buildInteractiveCommand(
     model.trim().length === 0 ? '' : modelFlag(model).trim(),
   );
   return `${command} ${conversation}`.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The conversation arguments followed by the session's name, for the builders' `conversation`.
+ *
+ * Only for a title that says something (a ticket, a rule, a tab renamed by hand): a name passed
+ * stops the agent titling the session from its first prompt, so a generic one would give every
+ * session the same title in the agent's own lists.
+ */
+export function launchArgs(
+  conversation: string | undefined,
+  profile: AgentProfile,
+  title: string,
+): string {
+  return `${conversation ?? ''} ${sessionNameArgs(profile, title)}`.trim();
 }
 
 /**

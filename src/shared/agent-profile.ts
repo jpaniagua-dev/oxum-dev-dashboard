@@ -107,6 +107,11 @@ export interface AgentProfile {
    * this profile comes back after a restart. Codex has a built-in `resume {session}` fallback.
    */
   readonly resumeArgs: string;
+  /**
+   * Arguments that give an interactive session a display name, with `{name}` where the quoted name
+   * goes. Empty when the agent takes none; Codex is named through its app-server instead.
+   */
+  readonly nameArgs: string;
 }
 
 /**
@@ -143,6 +148,9 @@ export const CLAUDE_CODE_PROFILE: AgentProfile = {
   // is passed, so one id carries a session across any number of restarts.
   sessionArgs: '--session-id {session}',
   resumeArgs: '--resume {session}',
+  // Verified against a real session: also accepted beside `--resume`, where it replaces the
+  // title. The name is what Remote Control shows, ahead of `/rename`.
+  nameArgs: '--name {name}',
 };
 
 /**
@@ -292,12 +300,13 @@ export function readProfile(
     planArgs: readSameProgramArgs(raw, fallback, 'planArgs'),
     sessionArgs: readSameProgramArgs(raw, fallback, 'sessionArgs'),
     resumeArgs: readSameProgramArgs(raw, fallback, 'resumeArgs'),
+    nameArgs: readSameProgramArgs(raw, fallback, 'nameArgs'),
   };
 }
 
 /**
- * Arguments a profile may lack because it was stored before they existed: the plan mode ones and
- * the two that carry a conversation id.
+ * Arguments a profile may lack because it was stored before they existed: the plan mode ones, the
+ * two that carry a conversation id, and the session name.
  *
  * The fallback's only when the profile runs the same program: Claude Code's flags handed to a Codex
  * profile would be an unknown option on every session. Another program starts with none, which
@@ -306,7 +315,7 @@ export function readProfile(
 function readSameProgramArgs(
   raw: Record<string, unknown>,
   fallback: AgentProfile,
-  key: 'planArgs' | 'sessionArgs' | 'resumeArgs',
+  key: 'planArgs' | 'sessionArgs' | 'resumeArgs' | 'nameArgs',
 ): string {
   const stored = raw[key];
   if (typeof stored === 'string') {
@@ -344,4 +353,39 @@ export function conversationArgs(template: string, id: string): string {
     return '';
   }
   return template.replace('{session}', id).replace(/\s+/g, ' ').trim();
+}
+
+/** The longest session name passed on: past it, the session lists cut the title anyway. */
+export const SESSION_NAME_MAX = 120;
+
+/**
+ * A tab title reduced to what is safe inside double quotes in bash, cmd and PowerShell.
+ *
+ * The title can be a Jira summary a colleague wrote, so it is whitelisted rather than escaped:
+ * escaping differs between the three shells, and a character none of them reads is safe in all.
+ */
+export function safeSessionName(title: string): string {
+  return (
+    title
+      .replace(/[^\p{L}\p{M}\p{N} ._,:#()+/'·-]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      // A leading dash would read as an option of the agent's own.
+      .replace(/^[\s-]+/, '')
+      .slice(0, SESSION_NAME_MAX)
+      .trim()
+  );
+}
+
+/**
+ * A `nameArgs` template with the quoted name filled in, or `''` when there is nothing to pass.
+ *
+ * Never for Codex, whatever its template says: a profile switched to Codex from Claude Code's keeps
+ * `--name`, an option Codex does not have, and Codex is named through its app-server anyway.
+ */
+export function sessionNameArgs(profile: AgentProfile, title: string): string {
+  const name = safeSessionName(title);
+  if (isCodexProfile(profile) || profile.nameArgs.trim().length === 0 || name.length === 0) {
+    return '';
+  }
+  return profile.nameArgs.replace('{name}', `"${name}"`).trim();
 }

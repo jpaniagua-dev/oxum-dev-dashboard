@@ -82,7 +82,10 @@ Advanced, in three groups:
   mode**; for Claude Code, `{model} --permission-mode plan --allow-dangerously-skip-permissions`, and
   empty means the agent has no plan mode. **New conversation id option** and **Resume option**
   (`--session-id {session}` and `--resume {session}` for Claude Code) are what reopen agents at
-  launch; empty means this agent's sessions do not come back. **Extra folder option** lets the review read your
+  launch; empty means this agent's sessions do not come back. **Session name option** (`--name {name}`
+  for Claude Code) names a session after its tab: a ticket or rule tab when it starts, a tab you
+  renamed when it reopens. Remote Control shows that name on claude.ai and in the Claude app; empty
+  leaves the name to the agent. **Extra folder option** lets the review read your
   standards beside the repository. **How the prompt is sent** and **Answer format** say how the
   background command is fed and read. Press Test after any change.
 - **Other programs**: the **Claude Code program** and the **Codex program** the Extensions tab runs. A

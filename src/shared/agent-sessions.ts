@@ -32,6 +32,14 @@ export interface AgentSessionRecord {
   readonly note: string | null;
 }
 
+/**
+ * Whether a reopened tab hands its title to the agent as the session's name: a ticket or rule tab,
+ * or one renamed by hand. An agent opened with no subject keeps the title the agent gives it.
+ */
+export function namesItsSession(record: Pick<AgentSessionRecord, 'renamed' | 'actionId'>): boolean {
+  return record.renamed || record.actionId !== null;
+}
+
 /** A record that can be reopened: its conversation is known. */
 export type ResumableRecord = AgentSessionRecord & {
   readonly agent: SessionAgent & { readonly conversation: AgentConversation };

@@ -9,10 +9,10 @@ import {
   resumeArguments,
   type AgentProfile,
 } from '@shared/agent-profile.js';
-import { restorable, type AgentSessionRecord } from '@shared/agent-sessions.js';
+import { namesItsSession, restorable, type AgentSessionRecord } from '@shared/agent-sessions.js';
 import { holdsConversation } from '@shared/claude-sessions.js';
 import type { AgentNotReopened, Project, ShellProfile, TerminalSize } from '@shared/contracts.js';
-import { buildInteractiveCommand, buildPlanCommand } from '../triage/work-command.js';
+import { buildInteractiveCommand, buildPlanCommand, launchArgs } from '../triage/work-command.js';
 import { resolveShellCommand, type TerminalManager } from './terminal-manager.js';
 
 /**
@@ -107,7 +107,11 @@ export function restoreAgentSessions(options: {
       continue;
     }
     const { id, plan } = record.agent.conversation;
-    const resume = conversationArgs(resumeArguments(options.profile), id);
+    const conversation = conversationArgs(resumeArguments(options.profile), id);
+    // Passed again on every launch: that is how a tab renamed here renames the session too.
+    const resume = namesItsSession(record)
+      ? launchArgs(conversation, options.profile, record.title)
+      : conversation;
     const command = plan
       ? buildPlanCommand(options.profile, record.agent.model, resume)
       : buildInteractiveCommand(options.profile, record.agent.model, resume);

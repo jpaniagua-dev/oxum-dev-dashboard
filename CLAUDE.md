@@ -1173,6 +1173,23 @@ dev server belongs to its project row, while an agent carries a conversation tha
 - **Plan mode resumes in plan mode.** `conversation.plan` sends a resumed session through
   `planArgs`; resumed through the ordinary command it would skip the prompts the plan was opened to
   keep. Read back with `=== true` for the same reason.
+- **A tab's title becomes its session's name, only when it says something** (Julio's request,
+  2026-11-09, so the Remote Control list on claude.ai reads like the tabs). Claude Code takes
+  `nameArgs` (`--name {name}`), verified to replace the title beside `--resume` too, and Remote
+  Control shows it ahead of `/rename`. Passed for a ticket or rule tab at the spawn, and at every
+  reopen for one of those or a tab renamed by hand (`namesItsSession`); never for a bare `Ctrl+N`
+  tab: a name stops Claude Code titling the session from its first prompt, and the profile label on
+  every session makes them all alike. A `Ctrl+N` Codex thread is no longer named for that reason.
+- ⚠️ **A running Claude Code session is renamed at the next launch, never by typing `/rename` into
+  its pty.** There is no outside channel, and typed text lands on whatever draft sits in the prompt
+  box and goes to the model with it, the refusal the Explorer's goto already makes. A renamed
+  Codex tab calls `thread/name/set` through the same short app-server exchange (`renameThread`);
+  Codex's own tests show it works on a thread another process holds, or none.
+- **The name is whitelisted, not escaped** (`safeSessionName`): a ticket summary is a colleague's
+  text and lands in a double-quoted argument read by bash, cmd or PowerShell, whose escapes differ.
+  Letters, digits, spaces and `._,:#()+/'·-`, no leading dash, 120 characters. `sessionNameArgs`
+  refuses a Codex profile, which keeps Claude Code's `--name` when switched from it and has no such
+  option.
 - **One derivation, not a hook per event.** `agentRecordsFrom` recomputes the list from the session
   and layout pushes (live agents with a conversation, in tab order) and `AgentSessionStore` writes it
   to `agent-sessions.json` only when it changed. A closed tab and an agent ended with `/exit` leave

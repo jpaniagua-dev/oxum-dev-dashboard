@@ -1,16 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { describe, expect, it, vi } from 'vitest';
+import { restoreAgentSessions } from '../src/main/terminal/agent-restore.js';
+import type { TerminalManager } from '../src/main/terminal/terminal-manager.js';
 import {
   agentRecordsFrom,
+  namesItsSession,
   readAgentRecord,
   restorable,
   type AgentSessionRecord,
 } from '../src/shared/agent-sessions.js';
-import { CLAUDE_CODE_PROFILE, conversationArgs, readProfile } from '../src/shared/agent-profile.js';
+import {
+  CLAUDE_CODE_PROFILE,
+  conversationArgs,
+  readProfile,
+  safeSessionName,
+  SESSION_NAME_MAX,
+  sessionNameArgs,
+} from '../src/shared/agent-profile.js';
 import type { SessionAgent, TerminalSession } from '../src/shared/contracts.js';
 import {
   buildInteractiveCommand,
   buildPlanCommand,
   buildWorkCommand,
+  launchArgs,
   newConversation,
 } from '../src/main/triage/work-command.js';
 
@@ -229,8 +241,102 @@ describe('the conversation on the command line', () => {
     const stored = { ...CLAUDE_CODE_PROFILE } as Record<string, unknown>;
     delete stored['sessionArgs'];
     delete stored['resumeArgs'];
+    delete stored['nameArgs'];
     expect(readProfile(stored).resumeArgs).toBe(CLAUDE_CODE_PROFILE.resumeArgs);
     expect(readProfile(stored).sessionArgs).toBe(CLAUDE_CODE_PROFILE.sessionArgs);
+    expect(readProfile(stored).nameArgs).toBe('--name {name}');
     expect(readProfile({ ...stored, interactive: 'codex {model}' }).resumeArgs).toBe('');
+    expect(readProfile({ ...stored, interactive: 'codex {model}' }).nameArgs).toBe('');
+  });
+});
+
+describe('the session name on the command line', () => {
+  it('keeps letters, accents and the title separator, and drops what a shell reads', () => {
+    expect(safeSessionName('web-app · PROJ-123')).toBe('web-app · PROJ-123');
+    expect(safeSessionName('Réponse à Léa')).toBe('Réponse à Léa');
+    expect(safeSessionName('PROJ-1 & PROJ-2 "quoted" $(rm) `x` %PATH% !a! ^b; c|d<e>f\\g')).toBe(
+      'PROJ-1 PROJ-2 quoted (rm) x PATH a b c d e f g',
+    );
+    expect(safeSessionName('  --version  ')).toBe('version');
+    expect(safeSessionName('a\nb\tc')).toBe('a b c');
+    expect(safeSessionName('x'.repeat(SESSION_NAME_MAX + 20))).toHaveLength(SESSION_NAME_MAX);
+  });
+
+  it('quotes the name into the template, and passes nothing when there is none', () => {
+    expect(sessionNameArgs(CLAUDE_CODE_PROFILE, 'web-app · PROJ-123')).toBe(
+      '--name "web-app · PROJ-123"',
+    );
+    expect(sessionNameArgs(CLAUDE_CODE_PROFILE, ' $ ')).toBe('');
+    expect(sessionNameArgs({ ...CLAUDE_CODE_PROFILE, nameArgs: '' }, 'Demo')).toBe('');
+  });
+
+  it('never names a Codex session on its command line, even with a template left from Claude Code', () => {
+    expect(sessionNameArgs({ ...CLAUDE_CODE_PROFILE, interactive: 'codex {model}' }, 'Demo')).toBe(
+      '',
+    );
+  });
+
+  it('follows the conversation arguments in every builder', () => {
+    const args = launchArgs(`--session-id ${ID_A}`, CLAUDE_CODE_PROFILE, 'web-app · PROJ-1');
+    expect(args).toBe(`--session-id ${ID_A} --name "web-app · PROJ-1"`);
+    expect(
+      buildWorkCommand(
+        ['PROJ-1'],
+        'web-app',
+        '',
+        CLAUDE_CODE_PROFILE,
+        'plan',
+        { skill: '/ticket', notes: '' },
+        args,
+      ),
+    ).toBe(
+      `claude --permission-mode plan --allow-dangerously-skip-permissions ${args} "/ticket PROJ-1 in the web-app repository"`,
+    );
+    expect(launchArgs(undefined, CLAUDE_CODE_PROFILE, '')).toBe('');
+  });
+
+  it('names a reopened session after a ticket or rule tab, or a tab renamed by hand, only', () => {
+    expect(namesItsSession({ renamed: true, actionId: null })).toBe(true);
+    expect(namesItsSession({ renamed: false, actionId: '__oxum:work:PROJ-1' })).toBe(true);
+    expect(namesItsSession({ renamed: false, actionId: null })).toBe(false);
+  });
+
+  it('passes the name again on the resume, so a tab renamed here renames its session', () => {
+    // Another program than `claude`, so the restore asks nothing of this machine's Claude storage.
+    const profile = { ...CLAUDE_CODE_PROFILE, interactive: 'agent {model}', planArgs: '' };
+    const records = agentRecordsFrom(
+      [
+        session('shell-1', {
+          title: 'Fiscal year dropdown',
+          renamed: true,
+          agent: agent(ID_A),
+          cwd: tmpdir(),
+        }),
+        session('shell-2', { title: 'Claude Code', agent: agent(ID_B), cwd: tmpdir() }),
+      ],
+      [],
+    );
+    const restoreAgent = vi.fn<TerminalManager['restoreAgent']>(() => 'restored');
+    const shell = {
+      id: 'git-bash',
+      label: 'Git Bash',
+      file: 'bash.exe',
+      args: [],
+      cwd: 'C:/work',
+      detected: true,
+    };
+    restoreAgentSessions({
+      records,
+      terminals: { restoreAgent },
+      profile,
+      shells: [shell],
+      defaultShell: shell,
+      projects: [],
+      size: { cols: 80, rows: 24 },
+    });
+    const lines = restoreAgent.mock.calls.map(([call]) => call.args.join(' '));
+    expect(lines[0]).toContain(`--resume ${ID_A} --name "Fiscal year dropdown"`);
+    expect(lines[1]).toContain(`--resume ${ID_B}`);
+    expect(lines[1]).not.toContain('--name');
   });
 });

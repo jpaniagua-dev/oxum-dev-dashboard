@@ -6,6 +6,7 @@ import {
   codexConfigArgs,
   createCodexThread,
   prepareConversation,
+  renameThread,
   stopCodexPreparations,
   type CodexThreadOptions,
 } from '../src/main/terminal/codex-conversation.js';
@@ -148,6 +149,26 @@ describe('local Codex protocol', () => {
     ]);
     expect(calls[2]?.params).toEqual({ cwd: folder, ephemeral: false });
     expect(calls[3]?.params).toEqual({ threadId: id, name: 'Demo agent' });
+  });
+
+  it('renames an existing thread without starting one, and skips a blank name or a foreign id', async () => {
+    const id = '0d4f1c3e-8a2b-4c6d-9e1f-2a3b4c5d6e7f';
+    await renameThread(options('rename', '  Fiscal year dropdown '), id);
+    const calls = (await readFile(join(folder, 'rename.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { method: string; params: unknown });
+    expect(calls.map((call) => call.method)).toEqual([
+      'initialize',
+      'initialized',
+      'thread/name/set',
+    ]);
+    expect(calls[2]?.params).toEqual({ threadId: id, name: 'Fiscal year dropdown' });
+
+    await renameThread(options('blank', '   '), id);
+    await renameThread(options('foreign', 'Name'), '$(not-an-id)');
+    await expect(readFile(join(folder, 'blank.jsonl'), 'utf8')).rejects.toThrow();
+    await expect(readFile(join(folder, 'foreign.jsonl'), 'utf8')).rejects.toThrow();
   });
 
   it('keeps simultaneous agents in the same directory associated with their own ids', async () => {

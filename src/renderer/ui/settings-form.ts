@@ -171,7 +171,8 @@ function sameProfile(left: AgentProfile, right: AgentProfile): boolean {
     left.answerFormat === right.answerFormat &&
     left.planArgs === right.planArgs &&
     left.sessionArgs === right.sessionArgs &&
-    left.resumeArgs === right.resumeArgs
+    left.resumeArgs === right.resumeArgs &&
+    left.nameArgs === right.nameArgs
   );
 }
 
@@ -927,6 +928,7 @@ export class SettingsForm {
         | 'planArgs'
         | 'sessionArgs'
         | 'resumeArgs'
+        | 'nameArgs'
         | 'modelFlag'
         | 'extraDirFlag',
       label: string,
@@ -984,6 +986,12 @@ export class SettingsForm {
         'Resume option',
         'none: sessions are not reopened',
         'Reopens a conversation by its id at launch, with {session} where the id goes. Empty if this agent cannot resume one.',
+      ),
+      profileField(
+        'nameArgs',
+        'Session name option',
+        'none: sessions keep the name the agent gives them',
+        'Names a session after its tab, with {name} where the quoted name goes: a ticket or rule tab when it starts, a tab you renamed when it reopens at launch. Empty if this agent takes no name. Codex is named without it.',
       ),
       profileField(
         'modelFlag',

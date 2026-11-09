@@ -110,7 +110,10 @@ try {
       if (!message.result) continue;
       if (message.id === 0) {
         send(undefined, 'initialized', {});
-        send(1, 'thread/start', { cwd: job.cwd, ephemeral: false, ...(job.model ? { model: job.model } : {}) });
+        if (job.threadId) {
+          threadId = job.threadId;
+          send(2, 'thread/name/set', { threadId, name: job.title });
+        } else send(1, 'thread/start', { cwd: job.cwd, ephemeral: false, ...(job.model ? { model: job.model } : {}) });
       } else if (message.id === 1) {
         threadId = message.result.thread?.id;
         if (typeof threadId !== 'string' || !job.idPattern.test(threadId)) {
@@ -154,7 +157,38 @@ export interface CodexThreadOptions {
 
 /** One extra process at a time, including when a fresh Codex home still needs initialization. */
 export function createCodexThread(options: CodexThreadOptions): Promise<string> {
-  const task = creationQueue.then(() => runCodexThread(options));
+  return queued(options, '');
+}
+
+/** Names an existing thread: Codex stores the name whether or not another process has it open. */
+export async function renameThread(options: CodexThreadOptions, threadId: string): Promise<void> {
+  if (!CONVERSATION_ID_PATTERN.test(threadId) || options.title.trim().length === 0) {
+    return;
+  }
+  await queued({ ...options, title: options.title.trim() }, threadId);
+}
+
+/** Renames the Codex thread behind a tab, through the configured Codex command. */
+export async function renameCodexThread(
+  profile: AgentProfile,
+  threadId: string,
+  title: string,
+  cwd: string,
+): Promise<void> {
+  if (!isCodexProfile(profile)) {
+    return;
+  }
+  const program = splitCommand(profile.interactive)[0] ?? '';
+  const target = await resolveCommand(program);
+  if (target === null) throw new Error(`${program} was not found. Set its path in Settings`);
+  await renameThread(
+    { target, configArgs: codexConfigArgs(profile), cwd, model: '', title },
+    threadId,
+  );
+}
+
+function queued(options: CodexThreadOptions, threadId: string): Promise<string> {
+  const task = creationQueue.then(() => runCodexThread(options, threadId));
   creationQueue = task.then(
     () => undefined,
     () => undefined,
@@ -162,7 +196,7 @@ export function createCodexThread(options: CodexThreadOptions): Promise<string> 
   return task;
 }
 
-async function runCodexThread(options: CodexThreadOptions): Promise<string> {
+async function runCodexThread(options: CodexThreadOptions, threadId: string): Promise<string> {
   if (stopped) throw new Error('Codex session creation was cancelled');
   const args = [...options.configArgs, 'app-server', '--listen', 'stdio://'];
   const line = options.target.viaCmd ? cmdLine(options.target.file, args) : null;
@@ -180,6 +214,7 @@ async function runCodexThread(options: CodexThreadOptions): Promise<string> {
       verbatim: options.target.viaCmd,
       timeoutMs: options.timeoutMs ?? 30_000,
       idPattern: CONVERSATION_ID_PATTERN,
+      threadId,
     },
   });
   const request = {

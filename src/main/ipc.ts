@@ -121,8 +121,17 @@ import { findFreePort, withPort } from './projects/free-port.js';
 import type { PullReviewService } from './review/review-service.js';
 import type { AutoRunRecords } from './autorun/auto-run-store.js';
 import type { TriageService } from './triage/triage-service.js';
-import { buildInteractiveCommand, buildWorkCommand, resolveWorkspaceRoot } from './triage/work-command.js';
-import { prepareConversation, type PreparedConversation } from './terminal/codex-conversation.js';
+import {
+  buildInteractiveCommand,
+  buildWorkCommand,
+  launchArgs,
+  resolveWorkspaceRoot,
+} from './triage/work-command.js';
+import {
+  prepareConversation,
+  renameCodexThread,
+  type PreparedConversation,
+} from './terminal/codex-conversation.js';
 import { LOCAL_ONLY_KEYS, asPatch } from './store/settings-patch.js';
 import type { SettingsStore } from './store/settings-store.js';
 import { resolveBashProfile, resolveDefaultProfile } from './terminal/shell-profiles.js';
@@ -161,7 +170,7 @@ import {
   type ExplorerOpenResult,
   type PanelEditorState,
 } from '@shared/explorer.js';
-import type { EditorStart, TerminalSize } from '@shared/contracts.js';
+import type { EditorStart, TerminalSession, TerminalSize } from '@shared/contracts.js';
 import type { LocalTicketStore } from './tickets/local-ticket-store.js';
 import type { DigestService } from './today/digest-service.js';
 import type { TipeeMonitor } from './today/tipee-monitor.js';
@@ -1273,6 +1282,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           },
         };
       }
+      const title = `${project.label} · ${keys.length === 1 ? keys[0] : `${keys.length} tickets`}`;
       // A conversation the app names, so this session can be reopened on it after a restart.
       let conversation: PreparedConversation | null;
       try {
@@ -1295,7 +1305,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
             ? deps.triageFile
             : '',
         },
-        conversation?.args,
+        launchArgs(conversation?.args, settings.agentProfile, title),
       );
       const resolved = resolveShellCommand(profile, command);
 
@@ -1303,7 +1313,7 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
         project,
         // One tab per set of tickets: a handoff already running must never swallow a new one.
         actionId: workActionId(keys),
-        title: `${project.label} · ${keys.length === 1 ? keys[0] : `${keys.length} tickets`}`,
+        title,
         file: resolved.file,
         args: resolved.args,
         size: deps.terminalSize(),
@@ -1533,8 +1543,14 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     const cwd = resolveWorkspaceRoot(settings.workspaceRoot, runFolder(settings.projectsRoot));
     let conversation: PreparedConversation | null;
     try {
-      conversation = await prepareConversation(settings.agentProfile, false, cwd,
-        settings.agentWorkModel, settings.agentProfile.label);
+      // No name: the profile's label on every thread would make them all look alike in Codex.
+      conversation = await prepareConversation(
+        settings.agentProfile,
+        false,
+        cwd,
+        settings.agentWorkModel,
+        '',
+      );
     } catch (error) {
       return { terminalId: null, message: `Could not prepare the agent session: ${String(error)}` };
     }
@@ -1717,7 +1733,28 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
     IpcChannel.TerminalRename,
     async (_event, terminalId: unknown, title: unknown): Promise<void> => {
       if (typeof terminalId === 'string' && typeof title === 'string') {
+        const find = (): TerminalSession | undefined =>
+          deps.terminals.sessions().find((entry) => entry.id === terminalId);
+        const before = find()?.title;
         deps.terminals.rename(terminalId, title);
+        const session = find();
+        const conversation = session?.agent?.conversation;
+        // A Codex thread takes its new name now. Claude Code has no way to be told from outside,
+        // so its session takes the name at the next launch, through `--name` on the resume.
+        if (
+          session !== undefined &&
+          session.title !== before &&
+          conversation?.provider === 'codex'
+        ) {
+          renameCodexThread(
+            deps.settings.get().agentProfile,
+            conversation.id,
+            session.title,
+            session.cwd,
+          ).catch((error: unknown) =>
+            console.warn(`Could not rename the Codex thread: ${String(error)}`),
+          );
+        }
       }
     },
   );

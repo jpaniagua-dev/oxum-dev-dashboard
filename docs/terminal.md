@@ -54,6 +54,13 @@ the next launch on their conversation, with their title and note. Nothing runs b
 waits for your next message. Shells and dev servers do not come back. Claude Code sessions without
 a saved message are skipped. Turn it off in Settings, Terminal, **Reopen my agents at launch**.
 
+**Session names.** An agent opened from a ticket or a rule, and a tab you renamed, give the tab's
+title to the session itself: Claude Code shows it in `/resume`, and Remote Control on claude.ai and
+in the Claude app. A tab opened with `Ctrl+N` and never renamed keeps the title Claude Code gives
+it from your first message. A running Claude Code session cannot be renamed from outside, so
+renaming its tab renames the session at the next launch; type `/rename` in the tab to do it at
+once. Renaming a Codex tab renames its Codex thread straight away.
+
 **Codex** sessions opened by the Dashboard are also restored. Set the agent's interactive command
 to `codex {model}` (or the path to `codex.exe` / `codex.cmd`); no session-id or name flag is needed.
 The Dashboard creates a saved conversation through Codex's local app-server, then opens it with
@@ -69,8 +76,7 @@ ids the Dashboard never recorded cannot be recovered automatically by this upgra
 
 When an agent tab does not come back, the top bar says how many with a pill such as **2 agent tabs
 not reopened**; hover it for each tab's reason, click it to dismiss it. An agent whose profile
-cannot resume a conversation, Codex for instance, never comes back: Codex cannot be given a
-conversation id when it starts.
+cannot resume a conversation never comes back.
 
 ## Cards
 

@@ -65,7 +65,7 @@ import { DashboardWindow, loadRendererPage, preloadPath } from './window.js';
 import { quotePrompt } from '@shared/automation.js';
 import { AutomationRunner, forgetRule, forgetTarget } from './automation/automation-runner.js';
 import { AutomationStore } from './automation/automation-store.js';
-import { buildInteractiveCommand } from './triage/work-command.js';
+import { buildInteractiveCommand, launchArgs } from './triage/work-command.js';
 import { AgentSessionStore } from './terminal/agent-session-store.js';
 import { restoreAgentSessions } from './terminal/agent-restore.js';
 import { ConversationTracker } from './terminal/conversation-tracker.js';
@@ -651,7 +651,8 @@ async function bootstrap(): Promise<void> {
       console.warn(`Could not prepare the agent session: ${String(error)}`);
       return false;
     }
-    const command = `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, conversation?.args)} "${quotePrompt(prompt)}"`;
+    const args = launchArgs(conversation?.args, settings.agentProfile, automationTabTitle(title));
+    const command = `${buildInteractiveCommand(settings.agentProfile, settings.agentWorkModel, args)} "${quotePrompt(prompt)}"`;
     const resolved = resolveShellCommand(profile, command);
     const id = terminalManager.runProjectCommand({
       project,
