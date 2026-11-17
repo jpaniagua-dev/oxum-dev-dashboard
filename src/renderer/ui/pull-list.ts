@@ -89,7 +89,7 @@ export function scopedPulls(repo: RepoPulls, scope: PullScope): PullRequest[] {
  * Renders the repository column, the two scope sub-tabs, and the pull requests of the selection.
  *
  * A master-detail rather than one flat list: the counter per repository is itself the glance-level
- * answer ("three of mine are waiting on web-app"), and the detail stays readable in a strip
+ * answer ("three open on web-app"), and the detail stays readable in a strip
  * that is only a few hundred pixels tall.
  */
 export function renderPullList(
@@ -147,11 +147,12 @@ export function renderPullList(
       row.append(createElement('span', { className: 'pulls__repo-count', text: '—' }));
       row.title = 'This repository has no GitHub remote';
     } else {
-      // The count follows the selected scope, or the badge would contradict the list next to it.
+      // Every open PR whatever the sub-tab: the column says how busy each repository is, and the
+      // sub-tabs already split the selected one into mine and all.
       row.append(
         createElement('span', {
           className: 'pulls__repo-count',
-          text: String(scopedPulls(repo, scope).length),
+          text: String(repo.pulls.length),
         }),
       );
       row.title = `${repo.slug}\n${repo.pulls.length} open PR(s), ${mine.length} involving you`;

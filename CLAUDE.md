@@ -815,8 +815,11 @@ row. None of it can say what a session was opened FOR.
   differ, so a single list would have to choose which one to show in the repository column, and that
   count is the at-a-glance answer the tab exists to give. Both counts therefore sit **on the sub-tabs**,
   because "0 mine / 3 total" answers "is this repository quiet, or am I just not in it?" without
-  changing view. The column's count follows the active sub-view, otherwise the badge contradicts the
-  list next to it. `pullScope` is persisted (so it is in `asPatch` **and** `LOCAL_ONLY_KEYS`, see the
+  changing view. The column's count is **every open PR, whatever the sub-view** (on Julio's request,
+  2026-11-17): it followed the active sub-view until then, so the column could not say how busy a
+  repository was while `Mine` was open. Accepted corollary: under `Mine`, the badge can be higher
+  than the list beside it, which the sub-tab counts and the empty-list sentence ("out of 3 open")
+  already explain. `pullScope` is persisted (so it is in `asPatch` **and** `LOCAL_ONLY_KEYS`, see the
   note on `settings-patch.ts`).
 - **`.subtab` was shared by the Git tab and the PR tab**, and keeps its generic name now that only the
   PR tab uses it (the Git tab's views became a graph in 11.0.0). It was `.git__view`, renamed: a class
