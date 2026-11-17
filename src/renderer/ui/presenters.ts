@@ -227,7 +227,7 @@ export function presentInvolvement(pull: PullRequest): Pill | null {
  * `readChecksState(worktree.path, ...)`: that function runs `gh pr view` in a folder and reads the
  * pull request of whatever branch is checked out there, which is exactly the question, and a worktree
  * is exactly a folder with its own branch. It is refused on cost. `gh --version` alone measures 79 ms
- * on this machine (see the performance section of `CLAUDE.md`), a `gh pr view` is that plus a network
+ * on this machine (see the performance section of `AGENTS.md`), a `gh pr view` is that plus a network
  * round trip, and this would be one per worktree on every poll. Meanwhile `gh pr list` already runs
  * once per followed repository and already returns `headRefName` and `statusCheckRollup` for every
  * open pull request, so the answer is in a payload the app has in hand. The join costs a `find`.

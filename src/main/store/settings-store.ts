@@ -100,7 +100,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   boardGroups: [],
   uiFontSize: UI_FONT_SIZE.default,
   // Empty means the default folder. Resolved in the main process, never here: this module must not
-  // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in CLAUDE.md.
+  // import `AppPaths`, which imports Electron. See the `DEFAULT_PROJECTS_ROOT` trap in AGENTS.md.
   shellProfiles: [],
   projectsRoot: DEFAULT_PROJECTS_ROOT,
   // The workspace above the repositories, so a `Work on this` session starts with the conventions and

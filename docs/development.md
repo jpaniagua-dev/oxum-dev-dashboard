@@ -21,7 +21,7 @@ Pushing a `v*` tag equal to the `package.json` version runs the release workflow
 typecheck, the zip and the installer, then a GitHub release. Only the latest release is kept, so the
 `releases/latest` page always shows it. The installer's name carries its version; the zip's does not,
 so `releases/latest/download/oxum-dev-dashboard-win-x64.zip` stays permanent. The versioning rule is
-in `CLAUDE.md`.
+in `AGENTS.md`.
 
 The installer's own hooks (the Start menu uninstall shortcut and the offer to delete the app data) are
 in `resources/installer.nsh`.
@@ -51,6 +51,7 @@ temporary folder. Fixtures use made-up names, the repository being public.
 
 ## Rules for contributors
 
-`CLAUDE.md` (and its copy `AGENTS.md`) holds the invariants and the reasons behind each design
-choice. Read the section of the area you change before changing it, and update it with the change.
-The user documentation in `docs/` is updated in the same commit as the feature it describes.
+`AGENTS.md` holds the invariants and the reasons behind each design choice, and `CLAUDE.md` only
+imports it for Claude Code. Read the section of the area you change before changing it, and update
+it with the change. The user documentation in `docs/` is updated in the same commit as the feature
+it describes.

@@ -16,7 +16,7 @@ const TRACK_INTERVAL_MS = 10_000;
  *
  * Reads `~/.claude/sessions/*.json`, a handful of small files, every ten seconds: file reads and no
  * spawn, so nothing here can block the main loop the way a process creation does (see the
- * performance section of CLAUDE.md). The pid of each tab's process is learnt once and followed after,
+ * performance section of AGENTS.md). The pid of each tab's process is learnt once and followed after,
  * the rules being `followConversations`'. A folder that does not exist (another agent, or a Claude
  * Code that keeps no registry) is no information, and the ids the app handed in stand.
  */

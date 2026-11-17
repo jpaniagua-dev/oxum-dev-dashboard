@@ -23,7 +23,7 @@ import {
 /**
  * Reads what both coding agents have installed, from their own files.
  *
- * Files and not the CLIs, for the reason the Performance section of CLAUDE.md gives first: a read
+ * Files and not the CLIs, for the reason the Performance section of AGENTS.md gives first: a read
  * here is a dozen small files, while `claude mcp list` health-checks every server and takes seconds.
  * The CLIs are kept for the writes, where they are the authority on their own formats.
  *

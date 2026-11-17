@@ -44,9 +44,9 @@ export {
  *   [ refs ][ graph, or the diff in its place      ][ detail: staging + commit, or a commit ]
  *
  * This module draws the toolbar on top and hands the three columns to their own modules. Every
- * write keeps the gesture the earlier tab gave it, for the reasons recorded there and in CLAUDE.md:
+ * write keeps the gesture the earlier tab gave it, for the reasons recorded there and in AGENTS.md:
  * checkout is deliberate (now a double-click), history-changing writes are behind a right-click,
- * discarding is confirmed by the main process. What the redesign added is listed in CLAUDE.md under
+ * discarding is confirmed by the main process. What the redesign added is listed in AGENTS.md under
  * the Git tab: the graph, the refs panel, Undo, the merge by drag.
  */
 

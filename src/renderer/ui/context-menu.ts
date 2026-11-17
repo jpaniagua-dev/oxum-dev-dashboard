@@ -17,7 +17,7 @@ let open: HTMLElement | null = null;
  * click reaching `document`, so a menu opened from a left-click handler was shut by the very click that
  * opened it, in the same tick, before a frame was painted. Nothing on screen, nothing in the console, a
  * button that looks dead. It killed both Triage buttons in one version and the Worktrees tab's two menu
- * openers in another, each time leaving a note in `CLAUDE.md` telling the next author to remember
+ * openers in another, each time leaving a note in `AGENTS.md` telling the next author to remember
  * `stopPropagation` at the call site. A note that has failed twice is not a mechanism.
  *
  * **A flag set by `showContextMenu` itself, and not the identity of the opening event**, which was the

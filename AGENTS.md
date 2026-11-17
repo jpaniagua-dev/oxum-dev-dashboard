@@ -438,31 +438,16 @@ row. None of it can say what a session was opened FOR.
   **only when a shape is explicitly picked**, never at boot and never on a poll, because it undoes a
   grouping built by dragging tabs together; the way back is the pane menu's "Merge into a single
   pane".
-- **The Agents tab is agnostic in its left half and Claude-specific in its right.** What the app
-  RECORDED at the spawn (`SessionAgent`: profile label, model, instruction file, start time) is as
-  true of Codex as of Claude Code, because the app itself decided it. What is read off disk
-  afterwards is a bonus: the instruction chain works for any agent, being a filename looked up the
-  directory tree, and the memory cards are Claude Code's own storage and are **absent by design**
-  for anything else, said out loud rather than shown as an empty list.
+- **The Agents tab was removed on request (2026-10-22), unused.** It listed the agent sessions and
+  read, off disk, the instruction files and Claude Code memory each one starts with
+  (`agent-context.ts`, `claudeProjectKey`). What it relied on stays: `SessionAgent`, recorded at the
+  spawn, still feeds the board and the sessions restored at launch.
 - **`SessionAgent` is captured at the spawn and never re-read.** Both the model and the profile can
   be changed in the settings while a session runs, so a panel re-reading them would describe the
   NEXT handoff as though it were this one.
 - **An agent session is declared by its caller, never sniffed from the command line.** An action can
   run anything, and matching on the word `claude` would classify `git log --grep claude` as a coding
   agent. Two callers set it today: the ticket handoff and the feedback pass.
-- **`claudeProjectKey` is inferred from disk, not from a contract.** A Windows path becomes its own
-  name with every separator and the drive's colon turned into a dash; it matches every entry of a
-  real `~/.claude/projects` but nothing promises it survives a Claude Code release. A missing folder
-  is therefore "nothing to show", never an error, and the app must never write into that path. The
-  encoding is **lossy** and is never inverted: a folder whose name holds a dash encodes like a
-  nested one, which is pinned by a test.
-- **Memory is indexed by working directory, and the tab exists to make that visible.** Measured on
-  this machine: the workspace root held 70 cards, every repository folder held none. A session
-  started inside a repository therefore begins with no memory at all, which the panel says in the
-  warning colour because it is invisible everywhere else.
-- **Paths in that tab are read-only.** Opening one would need an IPC handing an arbitrary path to the
-  shell, which this app does not do and does not need to say what an agent reads. The Explorer opens
-  files, but only inside a configured project and through its own two gates: see that section.
 - **The activity panel groups sessions by how loudly they ask for you**, and `attention` is the
   HONEST version of Dorothy's "Needs Attention", not a copy. That panel lists agents waiting for an
   answer, which its host learns from Claude Code's hooks; here a session waiting for you and one
@@ -1223,7 +1208,7 @@ dev server belongs to its project row, while an agent carries a conversation tha
 - **A conversation never spoken to is not reopened.** Measured on 2026-10-13: an interactive
   session left idle writes no transcript, and `--resume` on it would open a tab on an error.
   `claudeConversationExists` looks for `<id>.jsonl` by FILE NAME across `~/.claude/projects`,
-  never through `claudeProjectKey`, whose encoding is inferred, and reads its first 256 KiB for a
+  never through a key derived from the folder path, whose encoding is only inferred, and reads its first 256 KiB for a
   message (`holdsConversation`): a file holding only the bookkeeping line counts as none. Another agent answers `null` and is
   reopened, left to say for itself whether it remembers. A missing folder or a profile without
   `resumeArgs` drops the record too.
@@ -2976,9 +2961,14 @@ app has to run whichever agent its user has.
   Read once, rewritten under the new name on the next save. `workspaceRoot` cannot go through
   `asString`, because an explicitly empty value is a real answer there meaning "start in the
   repository", and only an **absent** key may take the default.
-- **`CLAUDE.md` keeps its name.** It is this repository's instructions file, read by the agent its
-  owner happens to use, and renaming it would touch ninety invariants for a symbolic gain. What
-  stopped naming an agent is the **application**, not the file that configures one.
+- **`AGENTS.md` is this repository's instructions file, and `CLAUDE.md` only imports it** (on
+  Julio's request, 2026-11-17). Codex reads `AGENTS.md` and Claude Code reads `CLAUDE.md`, so both
+  names have to exist. They used to be two full copies, and the copy missed three changes (the
+  Agents tab's removal, the Today tab, `saveBlocker`) before anyone noticed. There is now one text,
+  this one, and `CLAUDE.md` holds `@AGENTS.md`, Claude Code's import syntax, which loads it at the
+  start of a session. Edit this file: a rule written into `CLAUDE.md` would reach one agent out of
+  two. This replaces "`CLAUDE.md` keeps its name", which refused a rename for a symbolic gain;
+  nothing is renamed here, Claude Code still finds its file where it looks.
 
 
 - **Four settings and not one, and the reason is not configurability for its own sake.** These are
@@ -3085,27 +3075,91 @@ app has to run whichever agent its user has.
   terminal pane had reimplemented on its own. A dropdown anchored to a control is
   `showContextMenu(box.left, box.bottom + 4, items)`, not a new list.
 
-## Mail and Teams: why they are not here
+## Today tab: what is waiting, one card per source
 
-Asked for in V3, dropped after measurement rather than for lack of time:
+Added after 11.0.0, on request: one tab answering "what is waiting for me" across pull requests,
+tickets, calendar, mail, Teams and time tracking, each card switched on per machine
+(`todayChannels`, never part of a team configuration), because a home computer and a work one do
+not reach the same accounts. WhatsApp was asked for and left out: there is no API for a personal
+account, and the unofficial libraries break its terms and risk a ban of the number.
 
-- **Classic Outlook over COM can be unavailable** while Outlook is installed. When the new client is
-  active (`Outlook\Preferences\UseNewOutlook = 1` on the user side), launching `OUTLOOK.EXE` hands over
-  to the new Outlook and then exits **without registering its COM class**: activation fails after about
-  thirty seconds with `CO_E_SERVER_EXEC_FAILURE`. Reproduced twice.
-- **Microsoft Graph requires an app registration**, and therefore a tenant that allows one. Many
-  companies refuse it (`defaultUserRolePermissions.allowedToCreateApps = false`, no user consent
-  policy), and the trap is the Azure CLI token: its `scp` claim (`Application.ReadWrite.All`, and so on)
-  belongs to **the CLI application**, not to the user's own rights, which wrongly suggests one can be
-  created from the command line. Check this before writing code.
-- **The Teams activity bell has no read API**, even through Graph. The most that can be read is
-  `GET /me/chats` plus `viewpoint.lastMessageReadDateTime`, which already excludes channel mentions.
-
-If the app registration ever arrives: public client, `http://localhost` redirect, delegated `Mail.Read`
-plus `offline_access` (plus `Chat.Read`), `@azure/msal-node` in device code flow, token encrypted by the
-`SecretStore` that already exists, and a monitor modelled on `JiraMonitor`. The space in
-`.projects__header-actions` (formerly `.topbar__actions`, gone with the title bar) and the strip's
-pattern are left ready.
+- **Pull requests and tickets cost no request.** The cards read `this.pulls` and the merged Jira
+  state the other tabs already hold. A review request wins over authorship in `needOf`: GitHub drops
+  a reviewer from the requested list once they have reviewed, so `isReviewer` on somebody else's
+  pull request means the review is still owed.
+- **Mail, calendar and Teams go through Claude Code, not Microsoft Graph.** Graph needs an app
+  registration, which many tenants refuse (`allowedToCreateApps = false`, no user consent), and
+  classic Outlook over COM is gone when the new Outlook is active (`CO_E_SERVER_EXEC_FAILURE` after
+  thirty seconds). The claude.ai Microsoft 365 connector carries its own consented app, and it is
+  only reachable from inside Claude Code, so `DigestService` runs one headless `claude -p` that
+  makes five read calls, the routines reader's pattern. The cost is a dependency on a claude.ai
+  account with that connector, which the card states rather than hides.
+- ⚠️ **Every flag of `digestArgs` was measured against the real CLI, and the obvious ones are
+  wrong.** `--strict-mcp-config`, `--restricted` and `--tools` (even `--tools ToolSearch`) all
+  remove the claude.ai connectors: the tools are not found, and the run still exits 0.
+  `--allowedTools` alone restricts nothing for a user whose own settings say `defaultMode: auto`:
+  a tool outside the list was called. `--permission-mode dontAsk` is what makes the list binding,
+  and `--setting-sources project`, from an empty folder, keeps the user's hooks and mode out. The
+  writing tools of the connector and the shell are refused by name on top, as a second lock.
+- ⚠️ **The data is read from the `tool_result` events, never from the reply.** Given no tool, Haiku
+  was measured writing a call and a plausible result as plain text, a made-up user id included.
+  `readToolCalls` pairs each result with its `tool_use` by id; a run with no Microsoft 365 call at
+  all is reported as such, with the command line.
+- **Run on demand, not on a poll.** At the first look of the day (`refreshIfStale`, which also
+  remembers a failed attempt, or every tab switch would start a run) and on Refresh. A run is about
+  ten seconds and a cent; a poll would multiply that by the hours the app is open with nobody
+  looking. The answer is cached in `today-digest.json` and re-read through the same parser, so a
+  hand-edited file is held to the rules of a fresh answer.
+- **Teams says "waiting for your reply", never "unread".** The connector exposes no read state,
+  checked on the search and on a full message read (no `isRead`, no `viewpoint`), and the activity
+  bell has no read API at all. What it does give is who wrote last, so the card lists the
+  conversations where somebody else wrote after my last message, chosen on 2026-10-22 over "not
+  seen in this app", which would keep showing what was read in Teams itself. A reply of mine older
+  than the search window does not count, so within it the whole conversation is waiting. Mail does
+  carry `isRead`, but the search cannot filter on it: the unread are those among the newest, and
+  the card says when the search matched more.
+- **Calendar times are wall clock.** `start` and `end` come as a wall-clock string plus the
+  mailbox's zone; they are kept as written and compared as local time, never reinterpreted as UTC.
+  The search returns everything overlapping the day, so a whole-day event that ended at midnight
+  comes back too and is filtered out in `onDay`.
+- **A status dashboard, laid out on request after a reference design**: the day timeline first
+  (moved above the numbers on request), then headline numbers, the two pull request queues, a stacked sprint bar, unread mail and the Teams
+  conversations waiting for a reply, then the lists. Meters and conversation bars were tried and
+  removed on request: the reader wanted the messages, not their counts. The charts are
+  divs placed in percent, not a scaled SVG, which would stretch its labels. The categorical slots
+  are their own tokens, `--chart-1..3`, validated as a set in both themes (lightness band, chroma,
+  colour-blind separation, 3:1 on the raised surface); the git lanes were tried and their dark steps
+  are too light for a fill. Every value drawn is also written, on the chart or in the lists. A tile
+  says `?` for what could not be read and never 0, which would claim an inbox nobody checked. The
+  day timeline sits outside the chart grid: a card spanning every track keeps the empty `auto-fit`
+  tracks from collapsing, and the other charts then stop stretching. `--font-display` is the one
+  step above the ladder, for those figures only.
+- **Three lines, each a chart and its three numbers** (on request, 2026-10-22, replacing a layout
+  of four scrolling panels): the day with unread mail, Teams to answer and the clock; the sprint
+  with my tickets by stage; the pull requests by age with what needs me, mine waiting and mine
+  approved. A tile is a whole button leading to its source. The pull request chart is a bar per
+  pull request from `createdAt` to now, read for "what has waited longest", which the lists sorted
+  by update time hid; `createdAt` rides the `gh pr list` call the tab already makes. The ticket
+  numbers come from the sprint view and `isMine`, never from "my issues", so a ticket outside the
+  sprint does not count.
+- **The cards stand on a recessed ground** (`--surface-inset` behind, `--surface-raised` cards,
+  `--border-strong` edges, `--card-shadow`). On the strip's own surface a raised card was #1b1b1b
+  on #131313 in the dark theme and #fafafa on white in the light one, with a 1.3:1 border: no edge
+  could be seen, and the text of neighbouring cards read as one stacked column. `--card-shadow` is
+  one token per theme because a shadow alone vanishes on a dark ground; there it adds a top
+  hairline of light.
+- ⚠️ **The digest file carries a `version`** (`DIGEST_VERSION`), raised whenever a field the cards
+  read is added. A file of an older shape is refused, so the first look of the day reads again;
+  without it, a digest cached before the change shows its cards with the new field empty all day,
+  which is what happened to the message text.
+- **Teams messages lose the sender the search puts in front of some summaries** (`lineText`), and a
+  message with no text says `(attachment or card)` rather than drawing an empty line.
+- **Tipee is read, never written.** Its API is the private one its web app uses (form login with a
+  CSRF token, session cookies, `resources.show-status` and `workdays.show` filtered on the person's
+  own id, since an unfiltered list was seen returning colleagues). Clocking stays with the web app
+  and with any dedicated tool. The password is in its own `SecretStore` file like the Jira token,
+  the address is reduced to an https origin, and nothing is polled until the card is on and all
+  three are set.
 
 ## Notifications: saying it to somebody who is not looking
 
@@ -3197,6 +3251,13 @@ pattern are left ready.
   validation `error`; a missing `package.json`, or a missing script an action points at, is a `warning`.
   Those cases break one button, while git status, the terminal and `commit` all work. As an `error`, a
   single row of that kind blocked the "Save" button for the whole settings dialog.
+- **What blocks Save is `saveBlocker`, and it says so beside the button.** The window scoped to one
+  project ("Edit only this project") counts that project's errors only: the others are saved exactly
+  as already stored, so a missing folder elsewhere must not lock a window that does not show it. The
+  reason used to be a tooltip on a greyed button, which nobody hovers. The footer is drawn again once
+  the scope is applied, since the load drew it before. The scope is checked against the stored
+  configuration, not the live project list, which drops a disabled project and one whose folder is
+  gone: the window edits both.
 - **The renderer does not build a project configuration.** `buildProjectConfig` (IPC) builds it in the
   main process, so a project added from the table and a project added from the settings are identical:
   same id derivation, same label, same default actions. It used to be duplicated in both places, and
@@ -3761,7 +3822,7 @@ grammar; a new surface follows it rather than inventing a seventh way.
 - **Nothing changes weight on becoming active**: tabs, suggestion buttons and filter chips keep their
   weight, and an active tab keeps its look under the cursor.
 - **Two row heights**: 3px vertical padding for the dense lists (Git files, Explorer), 5px for every
-  other list. Rails are 190px (the Agents rail, a facts column, is the one exception).
+  other list. Rails are 190px.
 - **One column heading recipe**, the table's: `--font-2xs`, 600, 0.06em, uppercase, `--text-faint`.
   The settings window is the exception on purpose: its labels are sentences.
 - **One empty-state look** (`--text-faint`, `--font-sm`, line height 1.5) and one loading spelling,

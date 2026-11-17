@@ -126,7 +126,7 @@ async function bootstrap(): Promise<void> {
    *
    * Detecting repositories automatically instead was the obvious replacement and is refused on a
    * measured ground: every project costs a `git` process on every poll, and creating a process is
-   * expensive here (see the performance section of `CLAUDE.md`). A first launch that silently adopted
+   * expensive here (see the performance section of `AGENTS.md`). A first launch that silently adopted
    * twenty-five repositories would hand the user a freeze nobody chose. `Detect repositories` offers
    * exactly that list, on demand, and then the choice belongs to whoever will live with it.
    *

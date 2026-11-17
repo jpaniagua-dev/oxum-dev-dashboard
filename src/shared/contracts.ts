@@ -2596,7 +2596,7 @@ export const IpcChannel = {
    * when a new one lands, which is the point of storing it at all.
    *
    * A run reads the whole sprint, minus what is already in progress. It took a scope until 5.8.1;
-   * see the note in `CLAUDE.md` for why that went. `mode` is not that scope coming back: `new` does
+   * see the note in `AGENTS.md` for why that went. `mode` is not that scope coming back: `new` does
    * not narrow what the tab is about, it skips the tickets whose verdict is already on disk and adds
    * its own to them, so the list after the run is a superset of the list before it.
    */
