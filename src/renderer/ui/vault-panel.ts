@@ -15,8 +15,8 @@ import {
 import { clearChildren, createElement, createIconButton } from './dom.js';
 
 /**
- * The vault: one card per project file, its secrets encrypted and its text in clear, written into
- * the project on demand and removed again when its lifetime is over.
+ * The vault: one card per project file, its content encrypted at rest and edited as typed, written
+ * into the project on demand and removed again when its lifetime is over.
  *
  * A generated file keeps a value out of the agent prompt, not away from processes in that project;
  * that boundary is explained on demand by the compact `How it works` disclosure. Copy and the
@@ -56,13 +56,17 @@ const COPY_ICON = 'M5.5 5.5h7v7h-7zM3.5 10.5h-1v-8h8v1';
 const EDIT_ICON = 'M2 4h5m2 0h5M7 2v4M2 10h2m2 0h8M4 8v4';
 const CLOSE_ICON = 'M4 4l8 8M12 4l-8 8';
 
+/**
+ * A secret a card already holds. The form no longer adds any, but it still lists the stored ones:
+ * the store drops every secret a save leaves out, so hiding them would erase them.
+ */
 interface SecretRow {
   /** Stable for the life of the form, so a repaint puts the caret back in the same field. */
   readonly key: string;
   name: string;
   value: string;
-  /** The stored name of an existing secret, `null` for a row added in this form. */
-  readonly from: string | null;
+  /** The name the secret is stored under, which keeps its value when the field is left empty. */
+  readonly from: string;
 }
 
 interface Draft {
@@ -169,7 +173,7 @@ function buildVaultHelp(view: VaultPanelState): HTMLElement {
   steps.className = 'vault__help-steps';
   for (const text of [
     'A card is one file: its project, its path such as .env.local, and how long a generated file stays on disk.',
-    'Secrets are stored encrypted and masked here. The text holds plain lines such as EMAIL=me@example.com, stored with them but shown in clear.',
+    'What you type is the content of the file, stored encrypted in the vault and shown here as typed.',
     'Generate file writes it into the project, only to a path ignored by Git. It is plaintext to the processes of that project, agents included, until its time is up; then it is removed and the vault keeps the values.',
   ]) {
     steps.append(createElement('li', { text }));
@@ -233,7 +237,7 @@ function buildCard(
   const tools = createElement('div', { className: 'vault__card-actions' });
   const edit = createIconButton(EDIT_ICON, {
     label: `Edit ${card.binding.path}`,
-    title: 'Edit this file: its place, its lifetime, its secrets and its text.',
+    title: 'Edit this file: its place, its lifetime and its content.',
     className: 'icon-button--row',
   });
   edit.disabled = draft !== null;
@@ -263,10 +267,11 @@ function buildCard(
 
   const footer = createElement('footer', { className: 'vault__file-footer' });
   const count = card.secrets.length;
+  // Empty rather than absent on a card with no secret: it keeps the buttons on the right.
   footer.append(
     createElement('span', {
       className: 'vault__file-count',
-      text: `${String(count)} ${count === 1 ? 'secret' : 'secrets'}`,
+      text: count === 0 ? '' : `${String(count)} ${count === 1 ? 'secret' : 'secrets'}`,
     }),
   );
   const fileActions = createElement('div', { className: 'vault__file-actions' });
@@ -347,7 +352,7 @@ function buildSecretControl(id: string, name: string, actions: VaultActions): HT
 }
 
 /* ------------------------------------------------------------------ *
- * The editor: where the file goes, its secrets, then its text
+ * The editor: where the file goes, then its content
  * ------------------------------------------------------------------ */
 
 function buildEditor(open: Draft, view: VaultPanelState, actions: VaultActions): HTMLElement {
@@ -407,44 +412,28 @@ function buildEditor(open: Draft, view: VaultPanelState, actions: VaultActions):
   target.append(project, path, lifetime);
   box.append(target);
 
-  const rows = createElement('div', { className: 'vault__rows' });
-  for (const row of open.rows) {
-    rows.append(buildRowEditor(open, row));
+  if (open.rows.length > 0) {
+    const rows = createElement('div', { className: 'vault__rows' });
+    for (const row of open.rows) {
+      rows.append(buildRowEditor(open, row));
+    }
+    box.append(rows);
   }
-  box.append(rows);
-  const add = createElement('button', {
-    className: 'button button--quiet vault__add-secret',
-    text: '+ Secret',
-  });
-  add.type = 'button';
-  add.addEventListener('click', () => {
-    const row = newRow();
-    open.rows.push(row);
-    pendingFocus = `${row.key}:name`;
-    repaint();
-  });
-  box.append(add);
 
   const text = document.createElement('textarea');
   text.className = 'vault__text-input';
   text.value = open.text;
-  text.rows = 4;
+  text.rows = 6;
   text.maxLength = VAULT_TEXT_LIMIT;
   text.spellcheck = false;
-  text.placeholder = 'EMAIL=me@example.com';
-  text.setAttribute('aria-label', 'Text written into the file as it is');
+  text.placeholder = 'API_KEY=value';
+  text.setAttribute('aria-label', 'Content of the file');
   text.dataset['focusKey'] = 'text';
   text.addEventListener('input', () => {
     open.text = text.value;
     open.error = '';
   });
-  box.append(
-    text,
-    createElement('span', {
-      className: 'vault__hint',
-      text: 'Written into the file as it is, above the secrets. Stored with them, but shown in clear: keep secrets in the rows above.',
-    }),
-  );
+  box.append(text);
 
   if (open.error.length > 0) {
     box.append(createElement('p', { className: 'vault__form-error', text: open.error }));
@@ -483,9 +472,9 @@ function buildRowEditor(open: Draft, row: SecretRow): HTMLElement {
   secret.type = 'password';
   secret.className = 'vault__value';
   secret.autocomplete = 'off';
-  // The form is never told a stored value, so an existing secret starts empty and stays as it is.
-  secret.placeholder = row.from === null ? 'Secret' : 'Unchanged';
-  secret.setAttribute('aria-label', row.from === null ? 'Secret' : `New value for ${row.from}`);
+  // The form is never told a stored value, so the field starts empty and an empty field keeps it.
+  secret.placeholder = 'Unchanged';
+  secret.setAttribute('aria-label', `New value for ${row.from}`);
   secret.value = row.value;
   secret.dataset['focusKey'] = `${row.key}:value`;
   secret.addEventListener('input', () => {
@@ -542,17 +531,9 @@ function submit(open: Draft, actions: VaultActions): void {
   }
   const secrets: VaultSecretInput[] = [];
   for (const row of open.rows) {
-    // A row added and left blank is not a secret anybody asked for.
-    if (row.from === null && row.name.trim().length === 0 && row.value.length === 0) {
-      continue;
-    }
     const name = sanitizeVaultVariableName(row.name);
     if (name.length === 0) {
       fail('A secret name uses letters, digits and underscores, and does not start with a digit.');
-      return;
-    }
-    if (row.from === null && row.value.length === 0) {
-      fail(`${name} needs a value.`);
       return;
     }
     secrets.push({ name, value: row.value, from: row.from });
@@ -569,7 +550,7 @@ function submit(open: Draft, actions: VaultActions): void {
     return;
   }
   if (names.length === 0 && text.trim().length === 0) {
-    fail('Add a secret or some text.');
+    fail('Write the content of the file.');
     return;
   }
 
@@ -601,9 +582,9 @@ function submit(open: Draft, actions: VaultActions): void {
   });
 }
 
-function newRow(name = '', from: string | null = null): SecretRow {
+function storedRow(name: string): SecretRow {
   rowCounter += 1;
-  return { key: `row-${String(rowCounter)}`, name, value: '', from };
+  return { key: `row-${String(rowCounter)}`, name, value: '', from: name };
 }
 
 function newDraft(view: VaultPanelState): Draft {
@@ -612,7 +593,7 @@ function newDraft(view: VaultPanelState): Draft {
     projectId: view.targetProjectId ?? view.projects[0]?.id ?? '',
     path: '.env.local',
     minutes: DEFAULT_LIFETIME_MINUTES,
-    rows: [newRow()],
+    rows: [],
     text: '',
     error: '',
     saving: false,
@@ -625,7 +606,7 @@ function draftFor(card: VaultFileCard): Draft {
     projectId: card.binding.projectId,
     path: card.binding.path,
     minutes: card.lifetimeMinutes,
-    rows: card.secrets.map((name) => newRow(name, name)),
+    rows: card.secrets.map((name) => storedRow(name)),
     text: card.text,
     error: '',
     saving: false,

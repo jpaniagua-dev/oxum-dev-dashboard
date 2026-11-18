@@ -99,7 +99,7 @@ describe('VaultStore.save', () => {
     ).toBe('.env.local already has a card in that project');
     expect(
       (await vault.save(card({ id: 'f3', binding: { ...BINDING, path: '.env' } }), [])).message,
-    ).toBe('Add a secret or some text');
+    ).toBe('Write the content of the file');
   });
 
   it('owns the dates: a payload cannot claim a file is on disk', async () => {

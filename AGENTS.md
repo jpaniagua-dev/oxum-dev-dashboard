@@ -1248,17 +1248,22 @@ agent broker removed.
   design, agents can read it, and its path must be ignored by Git before the app writes it. The
   panel explains that boundary in the compact `How it works` disclosure instead of repeating it as a
   permanent banner.
-- **A card is a file.** In the form, in this order: the project, the path (`.env.local` by default),
-  the lifetime of the generated file (30 minutes by default), the secrets as `Name` / `Secret` rows,
-  then a **free text**. The text is for the lines that are not secret (a user name, an e-mail): the
-  vault ended up being a text file to edit, and a card per variable made every one of those a secret
-  to reveal. One card per project and path, refused otherwise: two cards writing one file would
-  each overwrite the other.
-- **The text is shown in clear, and stored with the secrets.** It sits in the same encrypted blob,
-  but it crosses to the renderer on `VaultState` like any metadata, because it is displayed and
-  edited as typed. The form says so beside it. It is written into the file verbatim, above the
-  secrets; `sanitizeVaultText` refuses control characters rather than dropping them, so the file
-  never differs from what was typed in silence.
+- **A card is a file, and its content is one text area** (simplified on Julio's request,
+  2026-11-17). In the form, in this order: the project, the path (`.env.local` by default), the
+  lifetime of the generated file (30 minutes by default), then the text. The `Name` / `Secret` rows,
+  their `+ Secret` button and the hint under the text are gone: the vault had become a text file to
+  edit, and a row per variable turned creating one into a form to fill. One card per project and
+  path, refused otherwise: two cards writing one file would each overwrite the other.
+- **Secrets a card already holds keep their rows in the editor**, and nowhere else does a row
+  appear. `save` drops every secret the payload leaves out, so a form that stopped listing them
+  would erase them on the first edit. A stored secret can still be retyped or removed there, and the
+  card still masks it behind copy and reveal.
+- **The text is shown in clear, and stored encrypted.** It sits in the same encrypted blob as the
+  secrets, but it crosses to the renderer on `VaultState` like any metadata, because it is displayed
+  and edited as typed. ⚠️ Since the rows went, that is where keys are typed: they are on screen
+  whenever the card is, with no mask and no timed reveal. It is written into the file verbatim,
+  above the secrets; `sanitizeVaultText` refuses control characters rather than dropping them, so
+  the file never differs from what was typed in silence.
 - **A name is set once per file.** `secretConflict` refuses a secret named twice (case ignored) or a
   secret the text also assigns (`NAME=`, `export NAME=`): the file would hold two values for one
   variable, and which one wins depends on the loader.

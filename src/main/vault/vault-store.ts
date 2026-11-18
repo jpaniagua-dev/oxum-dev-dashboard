@@ -148,7 +148,7 @@ export class VaultStore {
       return { ok: false, message: conflict };
     }
     if (names.length === 0 && card.text.trim().length === 0) {
-      return { ok: false, message: 'Add a secret or some text' };
+      return { ok: false, message: 'Write the content of the file' };
     }
     if (
       this.entries.some(

@@ -1809,12 +1809,6 @@ body {
   gap: 6px;
 }
 
-.vault__add-secret {
-  align-self: flex-start;
-  padding: 2px 7px;
-  font-size: var(--font-xs);
-}
-
 /* Written into the file verbatim, so it is shown in the face a file is read in. */
 .vault__text-input {
   box-sizing: border-box;
@@ -1829,11 +1823,6 @@ body {
   font-size: var(--font-sm);
   line-height: 1.45;
   resize: vertical;
-}
-
-.vault__hint {
-  color: var(--text-faint);
-  font-size: var(--font-2xs);
 }
 
 .vault__files {
