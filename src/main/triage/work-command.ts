@@ -205,6 +205,22 @@ export function buildInteractiveCommand(
 }
 
 /**
+ * A handed-over ticket's tab title: `web-app - PROJ-123: Migrate to Angular 22`.
+ *
+ * It is also the session's name in the agent's own lists, through `launchArgs`, which whitelists it:
+ * the summary is a colleague's text. A batch has no single summary to show, so it names its count;
+ * a ticket whose summary the app has not read keeps the project and the key.
+ */
+export function workTabTitle(project: string, keys: readonly string[], summary: string): string {
+  if (keys.length !== 1) {
+    return `${project} - ${String(keys.length)} tickets`;
+  }
+  const key = keys[0] ?? '';
+  const title = summary.replace(/\s+/g, ' ').trim();
+  return title.length === 0 ? `${project} - ${key}` : `${project} - ${key}: ${title}`;
+}
+
+/**
  * The conversation arguments followed by the session's name, for the builders' `conversation`.
  *
  * Only for a title that says something (a ticket, a rule, a tab renamed by hand): a name passed

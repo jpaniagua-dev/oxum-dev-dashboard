@@ -7,8 +7,9 @@ import {
   resolveWorkspaceRoot,
   safeSkill,
   safeRepoName,
+  workTabTitle,
 } from '../src/main/triage/work-command.js';
-import { CLAUDE_CODE_PROFILE, readProfile } from '../src/shared/agent-profile.js';
+import { CLAUDE_CODE_PROFILE, readProfile, safeSessionName } from '../src/shared/agent-profile.js';
 
 /** The handoff as it ran before it became a setting: the `/ticket` skill. */
 const SKILL = { skill: '/ticket', notes: '' };
@@ -119,6 +120,36 @@ describe('safeRepoName', () => {
   it('reports nothing left rather than an empty name', () => {
     expect(safeRepoName('   ')).toBeNull();
     expect(safeRepoName('$`"')).toBeNull();
+  });
+});
+
+describe('workTabTitle', () => {
+  it('names the project, the key and the summary of one ticket', () => {
+    expect(workTabTitle('web-app', ['PROJ-123'], 'Migrate to Angular 22')).toBe(
+      'web-app - PROJ-123: Migrate to Angular 22',
+    );
+  });
+
+  it('folds the line breaks and spaces a summary can hold', () => {
+    expect(workTabTitle('web-app', ['PROJ-123'], '  Fix the\n  dropdown  ')).toBe(
+      'web-app - PROJ-123: Fix the dropdown',
+    );
+  });
+
+  it('keeps the project and the key when the summary is unknown', () => {
+    expect(workTabTitle('web-app', ['PROJ-123'], '')).toBe('web-app - PROJ-123');
+    expect(workTabTitle('web-app', ['PROJ-123'], '   ')).toBe('web-app - PROJ-123');
+  });
+
+  it('counts a batch, which has no single summary', () => {
+    expect(workTabTitle('web-app', ['PROJ-1', 'PROJ-2'], 'ignored')).toBe('web-app - 2 tickets');
+  });
+
+  it('survives the session name whitelist with its separators intact', () => {
+    // The title is also passed as `--name`, and the summary is a colleague's text.
+    expect(safeSessionName(workTabTitle('web-app', ['PROJ-123'], 'Use "$HOME" in `paths`'))).toBe(
+      'web-app - PROJ-123: Use HOME in paths',
+    );
   });
 });
 

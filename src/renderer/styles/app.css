@@ -3786,7 +3786,13 @@ body {
   box-shadow: inset -2px 0 0 0 var(--primary);
 }
 
+/* Capped because a handed-over ticket's tab carries its summary, which can run to a whole line;
+   the tooltip holds the full title. */
 .terminal__tab-label {
+  max-width: 56ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: none;
   background: transparent;
   color: inherit;

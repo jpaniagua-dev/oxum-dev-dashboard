@@ -18,8 +18,8 @@ or **copy** its ID, its title, or both (`PROJ-123 - Fix the login timeout`). The
 ones the workflow allows from the current status, read when the menu opens. Writes go straight to
 Jira.
 
-**Work on this...** asks for the project, then starts the agent on the ticket in a terminal tab,
-exactly as the Triage tab does: the same skill (Settings → Agent → **Skill for Work on this**, such
+**Work on this...** asks for the project, then starts the agent on the ticket in a terminal tab
+titled after both (`web-app - PROJ-123: Migrate to Angular 22`), exactly as the Triage tab does: the same skill (Settings → Agent → **Skill for Work on this**, such
 as `/ticket`), the same tab for the same ticket, and the same Jira writes afterwards (active sprint,
 assigned to you, in progress). **Work on this in plan mode...** does the same, the session starting in
 the agent's plan mode; it is greyed when Settings → Agent → Advanced has no **Plan mode arguments**.

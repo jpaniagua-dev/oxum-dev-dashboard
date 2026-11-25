@@ -126,6 +126,7 @@ import {
   buildWorkCommand,
   launchArgs,
   resolveWorkspaceRoot,
+  workTabTitle,
 } from './triage/work-command.js';
 import {
   prepareConversation,
@@ -1282,12 +1283,22 @@ export function registerIpcHandlers(deps: IpcDependencies): void {
           },
         };
       }
-      const title = `${project.label} · ${keys.length === 1 ? keys[0] : `${keys.length} tickets`}`;
+      // The summary is read here, from the board the app last polled and then from the analysis, so
+      // the channel keeps carrying keys and nothing else.
+      const only = keys.length === 1 ? keys[0] : undefined;
+      const summary =
+        only === undefined
+          ? ''
+          : (deps.jira().state().views.flatMap((view) => view.issues).find((issue) => issue.key === only)
+              ?.summary ??
+            deps.triage().ticketFor(only)?.summary ??
+            '');
+      const title = workTabTitle(project.label, keys, summary);
       // A conversation the app names, so this session can be reopened on it after a restart.
       let conversation: PreparedConversation | null;
       try {
         conversation = await prepareConversation(settings.agentProfile, mode === 'plan', cwd,
-          settings.agentWorkModel, `${project.label} · ${keys.join(', ')}`);
+          settings.agentWorkModel, title);
       } catch (error) {
         return { terminalId: null, result: { ok: false, message: `Could not prepare the agent session: ${String(error)}` } };
       }

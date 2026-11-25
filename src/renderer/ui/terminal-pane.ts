@@ -1720,8 +1720,10 @@ export class TerminalPane {
       const label = createElement('button', {
         className: 'terminal__tab-label',
         text: session.title,
-        // The working directory is the one thing you always want to know about a shell tab.
+        // The working directory is the one thing you always want to know about a shell tab. The
+        // title comes first because the label cuts a long one short.
         title:
+          `${session.title}\n\n` +
           (session.note === null ? '' : `${session.note.text}\n\n`) +
           `${session.cwd}\n(double-click to rename, drag to reorder or change pane)`,
       });

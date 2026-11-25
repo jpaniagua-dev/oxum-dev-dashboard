@@ -1664,6 +1664,14 @@ out, `editor-process.ts` what both share), `renderer/ui/explorer-panel.ts` the t
   because `TriageWork` would refuse it after the project is picked. "Run autonomously" is deliberately
   absent: its guardrails (`canRunUnattended`) are evaluated where the Triage tab draws the button, and
   the main process does not re-check them.
+- **A handed-over ticket's tab reads `project - KEY: summary`** (Julio's request, 2026-11-25), built
+  by `workTabTitle`; a batch reads `project - N tickets`. The summary is read in the main process,
+  from the last Jira poll then from `triage.json`, so `TriageWork` still carries keys only; a ticket
+  found in neither keeps `project - KEY`. The title is also the session's name (`--name`, the Codex
+  thread), through `safeSessionName`, the summary being a colleague's text. `.terminal__tab-label`
+  is capped at `56ch` with an ellipsis for it, and every tab's tooltip now starts with its full title.
+  The Jira fields the session fills in (story points, parent, labels) are the configured skill's
+  business, not this app's: the conventions are a team's, and the app only names the skill.
 - **The three copies (ID, title, `ID - Title`) close both menus**, above Delete in a local one, with
   the copied text as the hint. Their wording and texts live in `ticket-menu.ts`, apart from
   `jira-board.ts` because of the NUL character in `ASSIGNEE_NONE`, which the editing tools refuse.
