@@ -89,7 +89,9 @@ export class SettingsWindow {
     window.setMenuBarVisibility(false);
     forwardConsole(window, 'settings');
     window.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url);
+      if (/^https?:\/\//i.test(url)) {
+        void shell.openExternal(url);
+      }
       return { action: 'deny' };
     });
 

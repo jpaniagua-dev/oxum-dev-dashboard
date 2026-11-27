@@ -624,7 +624,7 @@ row. None of it can say what a session was opened FOR.
   in `ensure()` and not from `fitVisible` like the WebGL addon: it registers a link provider and reads
   nothing about the geometry, so a background tab is a fine place to be born. The handler is **ours**
   rather than the addon's default, which calls `window.open`. That would work by accident, `window.ts`
-  turning every window-open request into a `shell.openExternal`, and it would be the only place in the
+  turning a web window-open request into a `shell.openExternal`, and it would be the only place in the
   app where a URL reaches the browser without passing the main process's `http(s)` check, and a pty
   prints whatever a program sends it, `file://` and `vscode://` included, so the check is the point. It goes
   through `onOpenLink`, a callback like every other side effect of this pane, and calls
@@ -632,6 +632,15 @@ row. None of it can say what a session was opened FOR.
   selection under the link that was just followed. The addon is pinned to the `0.12.x` line, which uses
   only `registerLinkProvider`: verified against the published code, because the `0.13.0-beta` line is
   the one that tracks xterm 6 and a beta has no place in a dependency list here.
+- **OSC 8 hyperlinks go through the same handler, set as the `Terminal`'s `linkHandler`.** They are
+  not the addon's: xterm detects them itself, and Claude Code prints its links that way. Without a
+  `linkHandler`, xterm's default asks `confirm()`, then calls `window.open()` **with no URL** and sets
+  the address on the new window afterwards, so `setWindowOpenHandler` only saw `about:blank` and
+  Windows answered that no app opens an `about` link (Julio's report, 2026-11-27, reproduced in the
+  dev build over CDP before the fix). `allowNonHttpProtocols` stays off, so xterm drops a `file://`
+  or `vscode://` OSC 8 link before underlining it. The window-open handlers of `window.ts` and
+  `settings-window.ts` now follow `http(s)` only, like the editor's, so a stray `about:blank` never
+  reaches Windows again.
 - **Git Bash is launched with `-i`**, otherwise aliases do not exist in the tab.
 - **Profiles are probed on disk** before being offered: a menu entry that fails on click is worse than
   no entry.

@@ -47,9 +47,12 @@ export class DashboardWindow {
     window.setMenuBarVisibility(false);
     forwardConsole(window, 'renderer');
 
-    // Any link opens in the real browser rather than hijacking the dashboard.
+    // Any web link opens in the real browser rather than hijacking the dashboard. Anything else,
+    // `about:blank` included, would only reach Windows as a protocol no app handles.
     window.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url);
+      if (/^https?:\/\//i.test(url)) {
+        void shell.openExternal(url);
+      }
       return { action: 'deny' };
     });
 

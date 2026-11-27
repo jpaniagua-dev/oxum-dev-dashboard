@@ -164,6 +164,18 @@ export function createTerminalView(options: TerminalViewOptions): TerminalView {
      */
     rescaleOverlappingGlyphs: true,
     /*
+     * OSC 8 hyperlinks, which Claude Code prints, take the same road as the plain URLs below. Without
+     * a handler xterm asks `confirm()`, then calls `window.open()` with no URL and sets the address
+     * afterwards: the main process only sees `about:blank`, and Windows has no app for `about:`. The
+     * links xterm keeps here are `http(s)` only, `allowNonHttpProtocols` being left off.
+     */
+    linkHandler: {
+      activate: (event, uri) => {
+        event.preventDefault();
+        options.onOpenLink(uri);
+      },
+    },
+    /*
      * No `convertEol`. It makes a bare `\n` also return the carriage, which is a fix for programs
      * whose output is piped straight in, and this output comes from a pty, where the line endings
      * are already whatever the program meant them to be. Left on, a lone line feed emitted to move
@@ -182,7 +194,7 @@ export function createTerminalView(options: TerminalViewOptions): TerminalView {
    * nothing about the geometry, so a background tab is a perfectly good place to be born.
    *
    * The handler is the caller's rather than the addon's default, which calls `window.open`. That would
-   * work by accident, `window.ts` turning every window-open request into a `shell.openExternal`, and it
+   * work by accident, `window.ts` turning a web window-open request into a `shell.openExternal`, and it
    * would be the only place in the app where a URL reaches the browser without passing the main
    * process's `http(s)` check. A pty prints whatever a program sends it, `file://` and `vscode://`
    * included, so the check is the point.
